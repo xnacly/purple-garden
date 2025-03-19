@@ -26,6 +26,9 @@ char *String_to(String *str);
 // String_from converts s to a String
 String String_from(char *s);
 
+// String_slice returns a slice of str from start to end (causes allocation)
+String String_slice(String *str, size_t start, size_t end);
+
 typedef enum {
   // (
   T_DELIMITOR_LEFT,
@@ -53,5 +56,10 @@ typedef struct {
     double num;
   };
 } Token;
+
+// Token_destroy deallocates a Token, if allocated
+void Token_destroy(Token *token);
+// Token_debug will print a debug representation of token to stdout
+void Token_debug(Token *token);
 
 #endif

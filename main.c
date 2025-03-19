@@ -1,17 +1,21 @@
 #include "common.h"
 #include "lexer.h"
-#include <stdio.h>
 #include <stdlib.h>
 
+#define $(a) STRING(#a)
+
+static const String input = $(("hello world"
+                               "I'm like hey whatsuphello"i 3.1415 ident));
+
 int main(void) {
-  String s = STRING("((()))");
-  Lexer l = Lexer_new(s);
+  Lexer l = Lexer_new(input);
   while (true) {
     Token t = Lexer_next(&l);
     if (t.type == T_EOF) {
       break;
     }
-    puts(String_to(&TOKEN_TYPE_MAP[t.type]));
+    Token_debug(&t);
+    Token_destroy(&t);
   }
 
   return EXIT_SUCCESS;

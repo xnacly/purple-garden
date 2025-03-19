@@ -1,5 +1,6 @@
-FLAGS := -std=c11 \
-        -O2 \
+FLAGS := -std=c23 \
+        -g3 \
+        -O3 \
         -Wall \
         -Wextra \
         -Werror \
@@ -18,7 +19,6 @@ FLAGS := -std=c11 \
         -Waggregate-return \
         -Wcast-qual \
         -Wswitch-default \
-        -Wswitch-enum \
         -Wunreachable-code \
         -Wno-discarded-qualifiers \
         -Wno-aggregate-return
