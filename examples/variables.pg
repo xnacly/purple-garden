@@ -1,0 +1,12 @@
+; vim: filetype=lisp
+(let string "hi")
+(let number 12)
+(let list ("index0" -1 3.1415))
+
+(let language #{
+  name "purple garden"
+  age 1
+})
+(let language_age 
+  (get language "age"))
+(println (+ "is " language_age " old"))

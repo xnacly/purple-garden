@@ -1,0 +1,15 @@
+; vim: filetype=lisp
+
+(lambda
+  (arg1 arg2 arg3) ; arguments
+  (+ arg1 arg2 arg3) ; body, last element is returned
+)
+
+; assign name
+(let square 
+  (lambda (x) (*x x)))
+; call by name
+(square 3.1415)
+
+; call inline
+((lambda (x) (*x x)) 12)

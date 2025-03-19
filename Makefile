@@ -1,4 +1,4 @@
-FLAGS := -std=c23 \
+FLAGS := -std=c11 \
         -O2 \
         -Wall \
         -Wextra \

@@ -11,7 +11,8 @@ int main(void) {
     if (t.type == T_EOF) {
       break;
     }
-    puts(TOKEN_TYPE_MAP[t.type]);
+    puts(String_to(&TOKEN_TYPE_MAP[t.type]));
   }
+
   return EXIT_SUCCESS;
 }

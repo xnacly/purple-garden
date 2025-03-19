@@ -1,0 +1,9 @@
+; vim: filetype=lisp
+
+; arithmetics
+(+ 1 1) ;; this also works for strings
+(+ "hello " "world") ;; this also works for strings
+(- 1 1)
+(* 1 1)
+(/ 1 1)
+(% 1 1)
