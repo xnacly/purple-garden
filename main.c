@@ -5,11 +5,34 @@
 
 String read_file_to_string(char *path) {
   if (path == NULL) {
-    goto cleanup;
+    return STRING_EMPTY;
   }
 
-cleanup:
-  return STRING_EMPTY;
+  FILE *file = fopen(path, "rb");
+  if (!file) {
+    return STRING_EMPTY;
+  }
+
+  fseek(file, 0, SEEK_END);
+  long length = ftell(file);
+  rewind(file);
+
+  if (length < 0) {
+    fclose(file);
+    return STRING_EMPTY;
+  }
+
+  char *buffer = malloc(length + 1);
+  if (!buffer) {
+    fclose(file);
+    return STRING_EMPTY;
+  }
+
+  fread(buffer, 1, length, file);
+  buffer[length] = '\0';
+
+  fclose(file);
+  return (String){.len = length, .p = buffer};
 }
 
 int main(int argc, char **args) {
@@ -30,6 +53,8 @@ int main(int argc, char **args) {
     Token_debug(&t);
     Token_destroy(&t);
   }
+
+  free(input.p);
 
   return EXIT_SUCCESS;
 }

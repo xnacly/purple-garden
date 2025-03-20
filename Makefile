@@ -1,4 +1,4 @@
-FLAGS := -std=c11 \
+FLAGS := -std=c2x \
         -g3 \
         -O3 \
         -Wall \

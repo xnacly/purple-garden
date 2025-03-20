@@ -6,6 +6,13 @@
 
 #define SINGLE_TOK(t) ((Token){.type = t})
 
+String TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
+                           [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
+                           [T_STRING] = STRING("T_STRING"),
+                           [T_NUMBER] = STRING("T_NUMBER"),
+                           [T_IDENT] = STRING("T_IDENT"),
+                           [T_EOF] = STRING("T_EOF")};
+
 void Token_destroy(Token *token) {
   if (token == NULL)
     return;

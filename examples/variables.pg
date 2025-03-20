@@ -1,7 +1,7 @@
-; vim: filetype=lisp
-(let string "hi")
+; vim: filetype=racket
+(let str "hi")
 (let number 12)
-(let list ("index0" -1 3.1415))
+(let array ("index0" -1 3.1415))
 
 (let language #{
   name "purple garden"
