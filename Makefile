@@ -1,4 +1,4 @@
-FLAGS := -std=c23 \
+FLAGS := -std=c11 \
         -g3 \
         -O3 \
         -Wall \
@@ -27,7 +27,7 @@ FILES := $(shell find . -name "*.c")
 .PHONY: run build
 
 run: build
-	./purple_garden
+	./purple_garden ./test.pg
 
 build:
 	$(CC) $(FLAGS) $(FILES) -o purple_garden

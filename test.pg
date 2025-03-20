@@ -1,0 +1,3 @@
+; vim: filetype=lisp 
+(let list 
+  ("hello world" "I'm like hey whatsuphello" 3.1415))

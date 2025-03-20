@@ -1,13 +1,26 @@
 #include "common.h"
 #include "lexer.h"
+#include <stdio.h>
 #include <stdlib.h>
 
-#define $(a) STRING(#a)
+String read_file_to_string(char *path) {
+  if (path == NULL) {
+    goto cleanup;
+  }
 
-static const String input = $(("hello world"
-                               "I'm like hey whatsuphello"i 3.1415 ident));
+cleanup:
+  return STRING_EMPTY;
+}
 
-int main(void) {
+int main(int argc, char **args) {
+  if (argc < 2) {
+    fprintf(stderr, "Wanted a filename as an argument");
+    return EXIT_FAILURE;
+  }
+
+  char *filename = args[1];
+  String input = read_file_to_string(filename);
+
   Lexer l = Lexer_new(input);
   while (true) {
     Token t = Lexer_next(&l);

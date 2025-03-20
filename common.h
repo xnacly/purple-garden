@@ -15,6 +15,7 @@ typedef struct {
 } String;
 
 #define STRING(str) ((String){.len = sizeof(str), .p = str})
+#define STRING_EMPTY ((String){.len = 0, .p = NULL})
 
 // String_get enables accessing a character at a position of a string with
 // bounds checking

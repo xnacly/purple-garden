@@ -117,6 +117,11 @@ Token Lexer_next(Lexer *l) {
   }
   char cc = cur(l);
   switch (cc) {
+  case ';':
+    for (cc = cur(l); cc > 0 && cc != '\n'; l->pos++, cc = cur(l))
+      ;
+    advance(l);
+    return Lexer_next(l);
   case '"':
     return string(l);
   case '(':
