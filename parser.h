@@ -18,9 +18,12 @@ enum NodeType {
 
 typedef struct Node {
   NodeType type;
+  // stores all possible values of a node
   union {
-    String *string;
+    // used for both string literals and identifier names
+    String string;
     double number;
+    boolean boolean;
     // params of a lambda, length encoded in Node.param_length
     Node *params;
     // either children of a list or body of lambda, length encoded in

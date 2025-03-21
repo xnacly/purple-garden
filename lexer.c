@@ -8,6 +8,7 @@
 
 String TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
                            [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
+                           [T_BOOLEAN] = STRING("T_BOOLEAN"),
                            [T_STRING] = STRING("T_STRING"),
                            [T_NUMBER] = STRING("T_NUMBER"),
                            [T_IDENT] = STRING("T_IDENT"),
@@ -31,11 +32,14 @@ void Token_debug(Token *token) {
   printf("[%s]", String_to(&TOKEN_TYPE_MAP[token->type]));
   switch (token->type) {
   case T_NUMBER:
-    printf("(%f)", token->num);
+    printf("(%f)", token->number);
     break;
   case T_STRING:
   case T_IDENT:
     printf("('%s')", String_to(&token->string));
+    break;
+  case T_BOOLEAN:
+    printf("(%s)", token->boolean ? "true" : "false");
     break;
   default:
     break;
@@ -83,7 +87,7 @@ static Token num(Lexer *l) {
   skip_whitespace(l);
   return (Token){
       .type = T_NUMBER,
-      .num = d,
+      .number = d,
   };
 }
 
@@ -112,10 +116,24 @@ static Token ident(Lexer *l) {
     ;
   String s = String_slice(&l->input, start, l->pos);
   skip_whitespace(l);
-  return (Token){
-      .type = T_IDENT,
-      .string = s,
-  };
+  if (String_eq(&s, &STRING("true"))) {
+    free(s.p);
+    return (Token){
+        .type = T_BOOLEAN,
+        .boolean = true,
+    };
+  } else if (String_eq(&s, &STRING("false"))) {
+    free(s.p);
+    return (Token){
+        .type = T_BOOLEAN,
+        .boolean = false,
+    };
+  } else {
+    return (Token){
+        .type = T_IDENT,
+        .string = s,
+    };
+  }
 }
 
 Token Lexer_next(Lexer *l) {
@@ -137,6 +155,7 @@ Token Lexer_next(Lexer *l) {
   case ')':
     advance(l);
     return SINGLE_TOK(T_DELIMITOR_RIGHT);
+    // EOF case
   case -1:
     advance(l);
     return SINGLE_TOK(T_EOF);

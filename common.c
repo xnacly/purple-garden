@@ -24,7 +24,17 @@ String String_slice(String *str, size_t start, size_t end) {
   strncpy(s, str->p + start, size);
   s[size] = '\0';
   return (String){
-      .len = size,
+      .len = size + 1,
       .p = s,
   };
+}
+
+boolean String_eq(String *a, String *b) {
+  ASSERT(a != NULL, "String_eq#a is NULL");
+  ASSERT(b != NULL, "String_eq#b is NULL");
+  if (a->len != b->len) {
+    return false;
+  }
+
+  return 0 == memcmp(a->p, b->p, a->len);
 }

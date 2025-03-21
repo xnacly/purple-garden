@@ -11,6 +11,8 @@ typedef enum {
   T_DELIMITOR_RIGHT,
   // anything between ""
   T_STRING,
+  // true or false
+  T_BOOLEAN,
   // floating point numbers
   T_NUMBER,
   // any identifier
@@ -29,6 +31,8 @@ typedef struct {
     String string;
     // filled when .type=T_NUMBER
     double number;
+    // filled when .type=T_BOOLEAN
+    boolean boolean;
   };
 } Token;
 

@@ -27,7 +27,7 @@ FILES := $(shell find . -name "*.c")
 .PHONY: run build
 
 run: build
-	./purple_garden ./test.pg
+	./purple_garden ./examples/variables.pg
 
 build:
 	$(CC) $(FLAGS) $(FILES) -o purple_garden
