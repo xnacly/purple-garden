@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define ASSERT(EXP, context)                                                   \
   if (!(EXP)) {                                                                \

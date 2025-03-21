@@ -2,19 +2,19 @@
 #define PARSER_H
 
 #include "lexer.h"
+#include "list.h"
 
 typedef struct {
-  Token *input;
+  List input;
   size_t pos;
-  size_t len;
 } Parser;
 
-enum NodeType {
+typedef enum {
   N_ATOM,
   N_IDENT,
   N_LIST,
   N_LAMBDA,
-};
+} NodeType;
 
 typedef struct Node {
   NodeType type;
@@ -25,13 +25,18 @@ typedef struct Node {
     double number;
     boolean boolean;
     // params of a lambda, length encoded in Node.param_length
-    Node *params;
+    struct Node *params;
     // either children of a list or body of lambda, length encoded in
     // Node.children_length
-    Node *children;
+    struct Node *children;
   };
   size_t children_length;
   size_t param_length;
 } Node;
+
+Parser Parser_new(List token);
+// Parser parse the token stream to parse via the Parser into the AST (parse or
+// something i dont know)
+Node Parser_parse(Parser *p);
 
 #endif
