@@ -2,11 +2,10 @@
 #define PARSER_H
 
 #include "lexer.h"
-#include "list.h"
 
 typedef struct {
-  List input;
-  size_t pos;
+  Lexer *lexer;
+  Token cur;
 } Parser;
 
 typedef enum {
@@ -14,29 +13,33 @@ typedef enum {
   N_IDENT,
   N_LIST,
   N_LAMBDA,
+  N_UNKOWN,
 } NodeType;
 
+// stores all possible values of a node
 typedef struct Node {
   NodeType type;
-  // stores all possible values of a node
+  // N_ATOM values are stored in the Token struct - this reduces copies
+  Token token;
   union {
-    // used for both string literals and identifier names
-    String string;
-    double number;
-    boolean boolean;
     // params of a lambda, length encoded in Node.param_length
     struct Node *params;
     // either children of a list or body of lambda, length encoded in
     // Node.children_length
     struct Node *children;
   };
+  // only populated for N_LAMBDA and N_LIST; stores the amount of nodes in the
+  // lambdas body or the amount of children in a list
   size_t children_length;
+  // only populated for N_LAMBDA; stores the lambda parameter count
   size_t param_length;
 } Node;
 
-Parser Parser_new(List token);
-// Parser parse the token stream to parse via the Parser into the AST (parse or
-// something i dont know)
-Node Parser_parse(Parser *p);
+Parser Parser_new(Lexer *lexer);
+// Returns the root of a file as a Node of type N_LIST, contains all nodes in
+// said file as children
+Node Parser_run(Parser *p);
+// Deallates a node and all its children by calling itself on each one
+void Node_destroy(Node *n);
 
 #endif

@@ -83,7 +83,7 @@ static Token num(Lexer *l) {
     ;
   String s = String_slice(&l->input, start, l->pos);
   double d = strtod(String_to(&s), NULL);
-  free(String_to(&s));
+  free(s.p);
   skip_whitespace(l);
   return (Token){
       .type = T_NUMBER,

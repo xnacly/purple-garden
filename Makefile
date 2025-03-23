@@ -24,10 +24,11 @@ FLAGS := -std=c2x \
         -Wno-aggregate-return
 
 FILES := $(shell find . -name "*.c")
+PG := ./examples/hello-world.pg
 .PHONY: run build
 
 run: build
-	./purple_garden ./examples/variables.pg
+	./purple_garden $(PG)
 
 build:
 	$(CC) $(FLAGS) $(FILES) -o purple_garden
