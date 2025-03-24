@@ -2,6 +2,16 @@
 #include "common.h"
 #include "lexer.h"
 
+#define NODE_CAP_GROW 2
+
+#define SINGLE_NODE(p, TYPE)                                                   \
+  Token t = p->cur;                                                            \
+  advance(p);                                                                  \
+  return (Node){                                                               \
+      .type = TYPE,                                                            \
+      .token = t,                                                              \
+  };
+
 Parser Parser_new(Lexer *lexer) {
   return (Parser){
       .lexer = lexer,
@@ -26,46 +36,52 @@ static void consume(Parser *p, TokenType tt) {
   advance(p);
 }
 
-static Node list(Parser *p) {
-  consume(p, T_DELIMITOR_LEFT);
-  consume(p, T_DELIMITOR_RIGHT);
-  return (Node){};
-}
-
-static Node atom(Parser *p) {
-  switch (p->cur.type) {
-  case T_STRING:
-  case T_BOOLEAN:
-  case T_NUMBER:
-  case T_IDENT:
-    break;
-  default:
-    ASSERT(0, "Wanted T_STRING, T_BOOLEAN, T_NUMBER, T_IDENT, did not get it")
+// attempts to efficiently grow n->children, since lists are the main
+// datastructure of purple garden - should be called before each new children
+// added to n->children
+static void Node_add_child(Node *n, Node child) {
+  if (n->children_length + 1 >= n->_children_cap) {
+    size_t new_size = n->_children_cap == 0 ? NODE_CAP_GROW
+                                            : n->_children_cap * NODE_CAP_GROW;
+    n->children = realloc(n->children, new_size * sizeof(Node));
+    n->_children_cap = new_size;
   }
-  Token t = p->cur;
-  advance(p);
-  return (Node){
-      .type = N_ATOM,
-      .token = t,
-  };
+  n->children[n->children_length++] = child;
 }
 
 static Node parse(Parser *p) {
   switch (p->cur.type) {
-  case T_DELIMITOR_LEFT:
-    return list(p);
+  case T_DELIMITOR_LEFT: {
+    Node n = (Node){.type = N_LIST, ._children_cap = 0, .children_length = 0};
+    consume(p, T_DELIMITOR_LEFT);
+    while (!at_end(p) && p->cur.type != T_DELIMITOR_RIGHT) {
+      Node children = parse(p);
+      Node_add_child(&n, children);
+    }
+    consume(p, T_DELIMITOR_RIGHT);
+    return n;
+  }
   case T_STRING:
   case T_BOOLEAN:
-  case T_NUMBER:
-  case T_IDENT:
-    return atom(p);
+  case T_NUMBER: {
+    SINGLE_NODE(p, N_ATOM)
+  }
+  case T_IDENT: {
+    SINGLE_NODE(p, N_IDENT)
+  }
+  case T_PLUS:
+  case T_MINUS:
+  case T_ASTERISKS:
+  case T_SLASH: {
+    SINGLE_NODE(p, N_OP)
+  }
   default:
+    ASSERT(0, "Unimplemented token")
   case T_EOF:
     return (Node){
         .type = N_UNKOWN,
     };
   }
-  advance(p);
 }
 
 void Node_destroy(Node *n) {
@@ -80,22 +96,47 @@ void Node_destroy(Node *n) {
   Token_destroy(&n->token);
 }
 
-Node Parser_run(Parser *p) {
-  Node root = (Node){.type = N_LIST, .children_length = 0};
-  while (!at_end(p)) {
-    Node n = parse(p);
-    if (n.type != N_UNKOWN) {
-      // TODO: Do reallactions with a factor of *2, not for each node - this
-      // will be slow due to allocations in hot paths - abstract it into
-      // functions called static node_list and static node_list_grow; also check
-      // if allocation was successful
-      root.children =
-          realloc(root.children,
-                  (root.children_length == 0 ? 1 : root.children_length + 1) *
-                      sizeof(Node));
-      root.children[root.children_length++] = n;
+static void Node_debug(Node *n) {
+  String NODE_TYPE_MAP[] = {
+      // strings, numbers, booleans
+      [N_ATOM] = STRING("N_ATOM"),
+      //
+      [N_IDENT] = STRING("N_IDENT"),
+      // main data structure
+      [N_LIST] = STRING("N_LIST"),
+      // anonymous function
+      [N_LAMBDA] = STRING("N_LAMBDA"),
+      // operator, like +-*/%
+      [N_OP] = STRING("N_OP"),
+      // error and end case
+      [N_UNKOWN] = STRING("N_UNKOWN"),
+  };
+  printf("%s", String_to(&NODE_TYPE_MAP[n->type]));
+  if (n->children_length) {
+    putc('(', stdout);
+  }
+  for (size_t i = 0; i < n->children_length; i++) {
+    Node_debug(&n->children[i]);
+    if (i + 1 < n->children_length) {
+      printf(", ");
     }
   }
+  if (n->children_length) {
+    putc(')', stdout);
+  }
+}
+
+Node Parser_run(Parser *p) {
+  Node root = (Node){.type = N_LIST, .children_length = 0, ._children_cap = 0};
+  while (!at_end(p)) {
+    Node n = parse(p);
+    if (n.type == N_UNKOWN) {
+      break;
+    }
+    Node_add_child(&root, n);
+  }
+
+  Node_debug(&root);
 
   return root;
 }

@@ -9,10 +9,17 @@ typedef struct {
 } Parser;
 
 typedef enum {
+  // strings, numbers, booleans
   N_ATOM,
+  //
   N_IDENT,
+  // main data structure
   N_LIST,
+  // anonymous function
   N_LAMBDA,
+  // operator, like +-*/%
+  N_OP,
+  // error and end case
   N_UNKOWN,
 } NodeType;
 
@@ -33,6 +40,8 @@ typedef struct Node {
   size_t children_length;
   // only populated for N_LAMBDA; stores the lambda parameter count
   size_t param_length;
+  // private field for efficient allocation of children
+  size_t _children_cap;
 } Node;
 
 Parser Parser_new(Lexer *lexer);

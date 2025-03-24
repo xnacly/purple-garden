@@ -17,6 +17,14 @@ typedef enum {
   T_NUMBER,
   // any identifier
   T_IDENT,
+  //
+  T_PLUS,
+  //
+  T_MINUS,
+  //
+  T_ASTERISKS,
+  //
+  T_SLASH,
   // end marker
   T_EOF
 } TokenType;

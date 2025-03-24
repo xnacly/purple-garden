@@ -8,10 +8,14 @@
 
 String TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
                            [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
-                           [T_BOOLEAN] = STRING("T_BOOLEAN"),
                            [T_STRING] = STRING("T_STRING"),
+                           [T_BOOLEAN] = STRING("T_BOOLEAN"),
                            [T_NUMBER] = STRING("T_NUMBER"),
                            [T_IDENT] = STRING("T_IDENT"),
+                           [T_PLUS] = STRING("T_PLUS"),
+                           [T_MINUS] = STRING("T_MINUS"),
+                           [T_ASTERISKS] = STRING("T_ASTERISKS"),
+                           [T_SLASH] = STRING("T_SLASH"),
                            [T_EOF] = STRING("T_EOF")};
 
 void Token_destroy(Token *token) {
@@ -147,6 +151,18 @@ Token Lexer_next(Lexer *l) {
       ;
     advance(l);
     return Lexer_next(l);
+  case '+':
+    advance(l);
+    return SINGLE_TOK(T_PLUS);
+  case '-':
+    advance(l);
+    return SINGLE_TOK(T_MINUS);
+  case '*':
+    advance(l);
+    return SINGLE_TOK(T_ASTERISKS);
+  case '/':
+    advance(l);
+    return SINGLE_TOK(T_SLASH);
   case '"':
     return string(l);
   case '(':
