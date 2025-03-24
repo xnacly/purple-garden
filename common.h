@@ -1,6 +1,12 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include <stdint.h>
+
+#ifndef DEBUG
+#define DEBUG 1
+#endif
+
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,10 +19,6 @@
             __FILE__, __LINE__);                                               \
     exit(EXIT_FAILURE);                                                        \
   }
-
-typedef short boolean;
-#define true (1)
-#define false (0)
 
 // String is a simple wrapper around C char arrays, providing constant time
 // length access
@@ -44,6 +46,6 @@ String String_from(char *s);
 String String_slice(String *str, size_t start, size_t end);
 
 // String_eq returns true if a and b are equal
-boolean String_eq(String *a, String *b);
+bool String_eq(String *a, String *b);
 
 #endif

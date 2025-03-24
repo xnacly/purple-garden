@@ -1,4 +1,4 @@
-FLAGS := -std=c2x \
+FLAGS := -std=c23 \
         -g3 \
         -O3 \
         -Wall \
@@ -21,7 +21,8 @@ FLAGS := -std=c2x \
         -Wswitch-default \
         -Wunreachable-code \
         -Wno-discarded-qualifiers \
-        -Wno-aggregate-return
+		-Wno-unused-parameter\
+		-Wno-aggregate-return
 
 FILES := $(shell find . -name "*.c")
 PG := ./examples/hello-world.pg

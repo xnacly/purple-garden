@@ -57,12 +57,12 @@ Lexer Lexer_new(String input) {
   };
 }
 
-static boolean at_end(Lexer *l) { return l->pos >= l->input.len; }
+static bool at_end(Lexer *l) { return l->pos >= l->input.len; }
 static char cur(Lexer *l) { return String_get(&l->input, l->pos); }
-static boolean is_whitespace(char cc) {
+static bool is_whitespace(char cc) {
   return cc == ' ' || cc == '\n' || cc == '\t';
 }
-static boolean is_ident(char cc) {
+static bool is_ident(char cc) {
   return (cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') || cc == '_' ||
          cc == '-';
 }

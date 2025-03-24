@@ -40,7 +40,7 @@ typedef struct {
     // filled when .type=T_NUMBER
     double number;
     // filled when .type=T_BOOLEAN
-    boolean boolean;
+    bool boolean;
   };
 } Token;
 

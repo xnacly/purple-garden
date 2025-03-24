@@ -29,7 +29,7 @@ String String_slice(String *str, size_t start, size_t end) {
   };
 }
 
-boolean String_eq(String *a, String *b) {
+bool String_eq(String *a, String *b) {
   ASSERT(a != NULL, "String_eq#a is NULL");
   ASSERT(b != NULL, "String_eq#b is NULL");
   if (a->len != b->len) {

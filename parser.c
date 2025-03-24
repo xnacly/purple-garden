@@ -19,7 +19,7 @@ Parser Parser_new(Lexer *lexer) {
   };
 }
 
-static boolean at_end(Parser *p) { return p->cur.type == T_EOF; }
+static bool at_end(Parser *p) { return p->cur.type == T_EOF; }
 static void advance(Parser *p) {
   if (!at_end(p)) {
     p->cur = Lexer_next(p->lexer);
@@ -96,6 +96,7 @@ void Node_destroy(Node *n) {
   Token_destroy(&n->token);
 }
 
+#if DEBUG
 static void Node_debug(Node *n, size_t depth) {
   String NODE_TYPE_MAP[] = {
       // strings, numbers, booleans
@@ -145,6 +146,7 @@ static void Node_debug(Node *n, size_t depth) {
     putc(')', stdout);
   }
 }
+#endif
 
 Node Parser_run(Parser *p) {
   Node root = (Node){.type = N_LIST, .children_length = 0, ._children_cap = 0};
@@ -156,8 +158,10 @@ Node Parser_run(Parser *p) {
     Node_add_child(&root, n);
   }
 
+#if DEBUG
   Node_debug(&root, 0);
   puts("");
+#endif
 
   return root;
 }
