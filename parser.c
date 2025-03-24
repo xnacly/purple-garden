@@ -96,7 +96,7 @@ void Node_destroy(Node *n) {
   Token_destroy(&n->token);
 }
 
-static void Node_debug(Node *n) {
+static void Node_debug(Node *n, size_t depth) {
   String NODE_TYPE_MAP[] = {
       // strings, numbers, booleans
       [N_ATOM] = STRING("N_ATOM"),
@@ -111,17 +111,37 @@ static void Node_debug(Node *n) {
       // error and end case
       [N_UNKOWN] = STRING("N_UNKOWN"),
   };
+  for (size_t i = 0; i < depth; i++) {
+    putc(' ', stdout);
+  }
   printf("%s", String_to(&NODE_TYPE_MAP[n->type]));
+  switch (n->type) {
+  case N_ATOM:
+  case N_IDENT:
+  case N_LAMBDA:
+  case N_OP:
+    Token_debug(&n->token);
+    break;
+  case N_LIST:
+  case N_UNKOWN:
+  default:
+    break;
+  }
   if (n->children_length) {
     putc('(', stdout);
+    putc('\n', stdout);
   }
   for (size_t i = 0; i < n->children_length; i++) {
-    Node_debug(&n->children[i]);
+    Node_debug(&n->children[i], depth + 1);
     if (i + 1 < n->children_length) {
-      printf(", ");
+      putc(',', stdout);
     }
+    putc('\n', stdout);
   }
   if (n->children_length) {
+    for (size_t i = 0; i < depth; i++) {
+      putc(' ', stdout);
+    }
     putc(')', stdout);
   }
 }
@@ -136,7 +156,8 @@ Node Parser_run(Parser *p) {
     Node_add_child(&root, n);
   }
 
-  Node_debug(&root);
+  Node_debug(&root, 0);
+  puts("");
 
   return root;
 }

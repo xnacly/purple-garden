@@ -48,7 +48,6 @@ void Token_debug(Token *token) {
   default:
     break;
   }
-  putc('\n', stdout);
 }
 
 Lexer Lexer_new(String input) {
