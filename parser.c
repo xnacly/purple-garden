@@ -140,3 +140,5 @@ Node Parser_run(Parser *p) {
 
   return root;
 }
+
+#undef SINGLE_NODE
