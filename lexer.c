@@ -63,7 +63,8 @@ static boolean is_whitespace(char cc) {
   return cc == ' ' || cc == '\n' || cc == '\t';
 }
 static boolean is_ident(char cc) {
-  return (cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') || cc == '_';
+  return (cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') || cc == '_' ||
+         cc == '-';
 }
 
 static void advance(Lexer *l) {
