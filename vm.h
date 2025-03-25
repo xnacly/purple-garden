@@ -16,6 +16,8 @@ typedef enum {
   // LOAD a Value from the const table to r0
   OP_LOAD,
   // STORE a Value from r0 into an arbitrary register
+  //
+  // THINK: should this remove the value at r0?
   OP_STORE,
 
   // TODO: CALL a function by jumping to its location in the bytecode and

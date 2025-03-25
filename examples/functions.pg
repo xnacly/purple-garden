@@ -13,3 +13,7 @@
 
 ; call inline
 ((lambda (x) (*x x)) 12)
+
+(let greeting
+    (lambda (greetee) (+ "hello world to: " greetee)))
+(println (greeting "user"))

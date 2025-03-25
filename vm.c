@@ -6,11 +6,13 @@ static String OP_MAP[] = {
     [OP_STORE] = STRING("OP_STORE"),
 };
 
+#define DIS(op, arg) printf("%s(%zu)\n", OP_MAP[(op)].p, (arg));
+
 void Vm_run(Vm *vm) {
   while (vm->_pc < vm->bytecode_len) {
     VM_OP op = vm->bytecode[vm->_pc];
     size_t arg = vm->bytecode[vm->_pc + 1];
-    printf("%s(%zu)\n", OP_MAP[op].p, arg);
+    DIS(op, arg)
     switch (op) {
     case OP_LOAD:
       vm->_registers[0] = vm->globals[arg];

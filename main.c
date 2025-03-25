@@ -16,9 +16,8 @@ int main(int argc, char **args) {
   Lexer l = Lexer_new(input);
   Parser p = Parser_new(&l);
   Node ast = Parser_run(&p);
-  Vm vm = cc(ast);
+  Vm vm = cc(&ast);
   Vm_run(&vm);
-  printf("%s\n", vm._registers[25].string.p);
   Node_destroy(&ast);
   Vm_destroy(vm);
   free(input.p);
