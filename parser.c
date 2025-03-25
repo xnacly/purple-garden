@@ -22,6 +22,10 @@ Parser Parser_new(Lexer *lexer) {
 static bool at_end(Parser *p) { return p->cur.type == T_EOF; }
 static void advance(Parser *p) {
   if (!at_end(p)) {
+#if DEBUG
+    Token_debug(&p->cur);
+    puts("");
+#endif
     p->cur = Lexer_next(p->lexer);
   }
 }
