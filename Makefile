@@ -1,4 +1,4 @@
-FLAGS := -std=c23 \
+FLAGS := -std=c2x \
         -g3 \
         -O3 \
         -Wall \
@@ -25,7 +25,7 @@ FLAGS := -std=c23 \
 		-Wno-aggregate-return
 
 FILES := $(shell find . -name "*.c")
-PG := ./examples/hello-world.pg
+PG := ./examples/hello-world.garden
 .PHONY: run build
 
 run: build
