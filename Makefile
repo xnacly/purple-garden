@@ -24,6 +24,7 @@ FLAGS := -std=c2x \
 		-Wno-unused-parameter\
 		-Wno-aggregate-return
 
+COMMIT := $(shell git rev-parse --short HEAD)
 FILES := $(shell find . -name "*.c")
 PG := ./examples/hello-world.garden
 .PHONY: run build
@@ -32,4 +33,4 @@ run: build
 	./purple_garden $(PG)
 
 build:
-	$(CC) $(FLAGS) $(FILES) -o purple_garden
+	$(CC) $(FLAGS) -DCOMMIT='"$(COMMIT)"' $(FILES) -o purple_garden

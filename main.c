@@ -8,8 +8,11 @@
 #include "parser.h"
 #include "vm.h"
 
+#define CTX "pre"
 #define VERSION "alpha"
-#define TAG "first"
+#ifndef COMMIT
+#define COMMIT "(no commit)"
+#endif
 
 typedef struct {
   // use block allocator before starting a garden, instead of gc; int because
@@ -65,7 +68,7 @@ Args Args_parse(int argc, char **argv) {
 int main(int argc, char **argv) {
   Args a = Args_parse(argc, argv);
   if (a.version) {
-    fprintf(stderr, "purple_garden: %s-%s\n", VERSION, TAG);
+    fprintf(stderr, "purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
     return EXIT_SUCCESS;
   }
   if (a.filename == NULL) {
