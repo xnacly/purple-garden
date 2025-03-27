@@ -4,10 +4,6 @@
 #include "parser.h"
 #include <stdlib.h>
 
-#if DEBUG
-extern String OP_MAP[];
-#endif
-
 #define DIS(op, arg)                                                           \
   printf("VM[%06zu(%06zu)] %s(%zu)\n", vm->_pc, vm->_pc + 1, OP_MAP[(op)].p,   \
          (arg));
@@ -49,6 +45,11 @@ typedef enum {
   // via B_INVOKE
 } ValueType;
 
+#if DEBUG
+extern String OP_MAP[];
+extern String VALUE_MAP[];
+#endif
+
 // Value represents a value known to the runtime
 typedef struct {
   ValueType type;
@@ -72,5 +73,6 @@ typedef struct {
 
 void Vm_run(Vm *vm);
 void Vm_destroy(Vm vm);
+bool Vm_Value_cmp(Value a, Value b);
 
 #endif

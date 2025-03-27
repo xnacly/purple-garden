@@ -81,6 +81,10 @@ int main(int argc, char **argv) {
   Lexer l = Lexer_new(input);
   Parser p = Parser_new(&l);
   Node ast = Parser_run(&p);
+#if DEBUG
+  Node_debug(&ast, 0);
+  puts("");
+#endif
   Vm vm = cc(&ast);
   Vm_run(&vm);
   Node_destroy(&ast);

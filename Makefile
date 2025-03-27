@@ -21,7 +21,8 @@ FLAGS := -std=c2x \
         -Wswitch-default \
         -Wunreachable-code \
         -Wno-discarded-qualifiers \
-		-Wno-unused-parameter\
+		-Wno-unused-parameter \
+		-Wno-unused-function \
 		-Wno-aggregate-return
 
 COMMIT := $(shell git rev-parse --short HEAD)

@@ -50,5 +50,6 @@ Parser Parser_new(Lexer *lexer);
 Node Parser_run(Parser *p);
 // Deallates a node and all its children by calling itself on each one
 void Node_destroy(Node *n);
+void Node_debug(Node *n, size_t depth);
 
 #endif

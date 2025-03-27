@@ -7,44 +7,60 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-Vm setup(String str, byte *expected, size_t expected_size) {
-  Lexer l = Lexer_new(str);
-  Parser p = Parser_new(&l);
-  Node ast = Parser_run(&p);
-  Vm vm = cc(&ast);
-  Node_destroy(&ast);
-  return vm;
-}
-
 typedef struct {
   String input;
   size_t expected_size;
   byte *expected;
+  Value expected_r0;
 } Case;
 
 #define BC(...)                                                                \
   (byte[]) { __VA_ARGS__ }
-#define CASE(in, ex)                                                           \
+#define CASE(in, ex, r0)                                                       \
   {                                                                            \
     .input = STRING(in), .expected = ex,                                       \
-    .expected_size = sizeof(ex) / sizeof(byte)                                 \
+    .expected_size = sizeof(ex) / sizeof(byte), .expected_r0 = (Value)r0,      \
   }
 
-static Case cases[] = {
-    CASE("3.1415", BC(OP_LOAD, 0)),
-    CASE("true false", BC(OP_LOAD, 0, OP_LOAD, 1)),
-    CASE("\"string\"", BC(OP_LOAD, 0)),
-    CASE("ident", BC(OP_LOAD, 0, OP_VAR, 0)),
-};
-
 int main() {
+  Case cases[] = {
+      {
+          .input = ((String){.len = sizeof("3.1415"), .p = "3.1415"}),
+          .expected = (byte[]){OP_LOAD, 0},
+          .expected_size = sizeof((byte[]){OP_LOAD, 0}) / sizeof(byte),
+          .expected_r0 = (Value){.type = V_NUM, .number = 3.1415},
+      },
+      {
+          .input = ((String){.len = sizeof("\"string\""), .p = "\"string\""}),
+          .expected = (byte[]){OP_LOAD, 0},
+          .expected_size = sizeof((byte[]){OP_LOAD, 0}) / sizeof(byte),
+          .expected_r0 = (Value){.type = V_STRING, .string = STRING("string")},
+      },
+      CASE("true false", BC(OP_LOAD, 0, OP_LOAD, 1), (Value){.type = V_FALSE}),
+      {
+          .input = ((String){.len = sizeof("ident"), .p = "ident"}),
+          .expected = (byte[]){OP_LOAD, 0, OP_VAR, 0},
+          .expected_size =
+              sizeof((byte[]){OP_LOAD, 0, OP_VAR, 0}) / sizeof(byte),
+          .expected_r0 = (Value){.type = V_STRING, .string = STRING("ident")},
+      },
+  };
   size_t passed = 0;
   size_t failed = 0;
   size_t len = sizeof(cases) / sizeof(Case);
   for (size_t i = 0; i < len; i++) {
     Case c = cases[i];
+    puts("================= CASE =================");
     printf("[Case %zu/%zu] '%s' \n", i + 1, len, c.input.p);
-    Vm raw = setup(c.input, c.expected, c.expected_size);
+    Lexer l = Lexer_new(c.input);
+    Parser p = Parser_new(&l);
+    Node ast = Parser_run(&p);
+#if DEBUG
+    puts("----------------- AST ------------------");
+    Node_debug(&ast, 0);
+    puts("");
+#endif
+    Vm raw = cc(&ast);
     Vm *vm = &raw;
 
     bool error = false;
@@ -76,7 +92,21 @@ int main() {
         }
       }
     }
+#if DEBUG
+    puts("----------------- CODE -----------------");
+#endif
     Vm_run(vm);
+    if (!Vm_Value_cmp(vm->_registers[0], c.expected_r0)) {
+#if DEBUG
+      printf("\n\tbad value at r0: want=%s got=%s\n",
+             VALUE_MAP[c.expected_r0.type].p,
+             VALUE_MAP[vm->_registers[0].type].p);
+#else
+      printf("\n\tbad value at r0: want=%d got=%d\n", c.expected_r0.type,
+             vm->_registers[0].type);
+#endif
+    }
+    Node_destroy(&ast);
 
     if (error) {
       failed++;
