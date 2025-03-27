@@ -46,8 +46,10 @@ typedef struct {
 
 // Token_destroy deallocates a Token, if allocated
 void Token_destroy(Token *token);
+#if DEBUG
 // Token_debug will print a debug representation of token to stdout
 void Token_debug(Token *token);
+#endif
 
 typedef struct {
   String input;

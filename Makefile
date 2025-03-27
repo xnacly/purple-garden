@@ -25,12 +25,21 @@ FLAGS := -std=c2x \
 		-Wno-aggregate-return
 
 COMMIT := $(shell git rev-parse --short HEAD)
-FILES := $(shell find . -name "*.c")
+FILES := $(shell find . -maxdepth 1 -name "*.c" ! -name "main.c")
+TEST_FILES := $(shell find ./tests -name "*.c")
 PG := ./examples/hello-world.garden
-.PHONY: run build
+
+.PHONY: run build test clean
 
 run: build
 	./purple_garden $(PG)
 
+test:
+	$(CC) $(FLAGS) $(TEST_FILES) $(FILES) -DDEBUG=1 -o ./tests/test
+	./tests/test
+
 build:
-	$(CC) $(FLAGS) -DCOMMIT='"$(COMMIT)"' $(FILES) -o purple_garden
+	$(CC) $(FLAGS) -DCOMMIT='"$(COMMIT)"' $(FILES) ./main.c -o purple_garden
+
+clean:
+	rm -f purple_garden test/cc_test

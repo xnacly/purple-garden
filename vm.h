@@ -4,6 +4,14 @@
 #include "parser.h"
 #include <stdlib.h>
 
+#if DEBUG
+extern String OP_MAP[];
+#endif
+
+#define DIS(op, arg)                                                           \
+  printf("VM[%06zu(%06zu)] %s(%zu)\n", vm->_pc, vm->_pc + 1, OP_MAP[(op)].p,   \
+         (arg));
+
 // A frame represents a Scope, a new scope is created upon entering a lambda -
 // since lambdas are pure there is no way to interact with the previous frame
 // inside of a lambda, the pointer is kept to allow the runtime to restore the
@@ -13,20 +21,20 @@ typedef struct {
 } Frame;
 
 typedef enum {
+  // LOAD rANY
+  //
   // LOAD a Value from the const table to r0
   OP_LOAD,
+  // STORE rANY
+  //
   // STORE a Value from r0 into an arbitrary register
   //
-  // THINK: should this remove the value at r0?
+  // TODO: (IDEA) should this remove the value at r0?
   OP_STORE,
-
-  // TODO: CALL a function by jumping to its location in the bytecode and
-  // entering a
-  // new frame
-  // CALL,
-
-  // EXIT a child frame and enter the previous frame
-  // RETURN,
+  // OP_VAR rANY
+  //
+  // Copy value from Frame assigned to variable name stored in rANY
+  OP_VAR,
 } VM_OP;
 
 typedef enum {

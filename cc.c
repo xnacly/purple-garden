@@ -1,9 +1,9 @@
 #include "cc.h"
 #include "common.h"
+#include "lexer.h"
 #include "vm.h"
 #include <stdlib.h>
 
-#define TODO(msg) ASSERT(0, msg)
 #define BC(CODE, ARG)                                                          \
   {                                                                            \
     /*TODO: treat bytecode as an arraylist to minimize allocations */          \
@@ -18,13 +18,16 @@
 static Value token_to_value(Token t) {
   switch (t.type) {
   case T_STRING:
+  case T_IDENT:
     return (Value){.type = V_STRING, .string = t.string};
   case T_BOOLEAN:
     return (Value){.type = t.boolean ? V_TRUE : V_FALSE};
   case T_NUMBER:
     return (Value){.type = V_NUM, .number = t.number};
   default:
+#if DEBUG
     Token_debug(&t);
+#endif
     ASSERT(0, "token_to_value: Unsupported Token.type")
     return (Value){.type = V_NULL};
   }
@@ -49,12 +52,18 @@ static void compile(Vm *vm, Node *n) {
   // BC(OP_STORE, 25)
 
   switch (n->type) {
-  case N_ATOM:
+  case N_ATOM: {
     size_t index = pool_new(vm, token_to_value(n->token));
     BC(OP_LOAD, index)
     break;
-  case N_IDENT:
-    TODO("N_IDENT is not implemented");
+  }
+  case N_IDENT: {
+    size_t index = pool_new(vm, token_to_value(n->token));
+    BC(OP_LOAD, index);
+    BC(OP_VAR, 0);
+    // TODO: move the result to a new register or not?
+    break;
+  }
   case N_LIST:
     TODO("N_LIST is not implemented");
   case N_LAMBDA:

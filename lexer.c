@@ -32,6 +32,7 @@ void Token_destroy(Token *token) {
   }
 }
 
+#if DEBUG
 void Token_debug(Token *token) {
   printf("[%s]", String_to(&TOKEN_TYPE_MAP[token->type]));
   switch (token->type) {
@@ -49,6 +50,7 @@ void Token_debug(Token *token) {
     break;
   }
 }
+#endif
 
 Lexer Lexer_new(String input) {
   return (Lexer){

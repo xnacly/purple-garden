@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #ifndef DEBUG
-#define DEBUG 1
+#define DEBUG 0
 #endif
 
 #include <stddef.h>
@@ -19,6 +19,8 @@
             __FILE__, __LINE__);                                               \
     exit(EXIT_FAILURE);                                                        \
   }
+
+#define TODO(msg) ASSERT(0, "TODO: " msg)
 
 // String is a simple wrapper around C char arrays, providing constant time
 // length access

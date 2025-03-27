@@ -1,14 +1,13 @@
 #include "vm.h"
 #include "common.h"
 
-static String OP_MAP[] = {
+#if DEBUG
+String OP_MAP[] = {
     [OP_LOAD] = STRING("OP_LOAD"),
     [OP_STORE] = STRING("OP_STORE"),
+    [OP_VAR] = STRING("OP_VAR"),
 };
-
-#define DIS(op, arg)                                                           \
-  printf("VM[%06zu(%06zu)] %s(%zu)\n", vm->_pc, vm->_pc + 1, OP_MAP[(op)].p,   \
-         (arg));
+#endif
 
 void Vm_run(Vm *vm) {
   while (vm->_pc < vm->bytecode_len) {
@@ -24,6 +23,9 @@ void Vm_run(Vm *vm) {
     case OP_STORE:
       vm->_registers[arg] = vm->_registers[0];
       break;
+    case OP_VAR:
+      TODO("OP_VAR is not implemented yet, because Frame is not implemented "
+           "AND because HASHMAPS arent implemented")
     default:
       ASSERT(false, "Unimplemented instruction")
     }
