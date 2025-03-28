@@ -3,8 +3,8 @@
 > purple_garden is a minimal lisp I am attempting to make as fast possible.
 
 ```racket
-(let greeting
-    (lambda (greetee) (+ "hello world to: " greetee)))
+(fn greeting (greetee) 
+    (+ "hello world to: " greetee))
 (println (greeting "user"))
 ; prints `hello world to: user`
 ```

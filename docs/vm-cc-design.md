@@ -43,13 +43,13 @@ likely will change.
 ## Match
 
 ```racket
-(match k
+(match true
     (true) "true"
     (false) "false")
 ```
 
 ```asm
-    VAR 0   ; load value from variable with name at globals 0 into r0 'k'
+    LOAD 0  ; load constant value 'true' into r0
     STORE 1 ; move to r1
 
 ; branch (true) "true"
@@ -65,25 +65,29 @@ likely will change.
     LOAD 4  ; load "false" from globals into r0
 ```
 
-## Lambdas
+## Functions
 
 ```racket
-((lambda (num) (* num num)) 5)
+(fn square (num) (* num num))
+(square 5)
 ```
 
 ```asm
-; lambda def
-    VAR 1   ; load value for 'num' into r0
-    STORE 1 ; move value to r1
-    VAR 1   ; load second value
-    MUL 1   ; multiply r0 and r1
-    RETURN  ; ends lambda scope, return value in r0
+; globals
+; [5, num, square]
 
-; lambda call
+; @square 
+    VAR 2   ; load Value for 'num' into r0
+    STORE 1 ; move Value to r1
+    VAR 2   ; load second Value
+    MUL 1   ; multiply r0 and r1
+    RETURN  ; ends function scope, return Value in r0
+
+; function call
     LOAD 0  ; load 5 from constants
     STORE 1 ; move to r1
     LOAD 1  ; r0 contains variable name 'num'
     SET 1   ; set variable name in r0 to value in r1
-    CALL 0  ; jump to lambda def, requires a table in the compiler to keep track
-            ; of function definitions, how will i implement functions as values?
+    CALL 2  ; store bytecode index of @square defintion in a function table in
+            ; the Vm struct and jump to it
 ```

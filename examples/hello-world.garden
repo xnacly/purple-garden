@@ -1,4 +1,4 @@
 ; vim: filetype=racket
 
-; println is a predefined function responsible for writing to stdout
+; println is a predefined function responsible for writing to stdout (called a builtin)
 (println "Hello World")

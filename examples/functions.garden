@@ -1,19 +1,11 @@
 ; vim: filetype=racket
 
-(lambda
-  (arg1 arg2 arg3) ; arguments
+(fn
+  add3               ; name
+  (arg1 arg2 arg3)   ; arguments
   (+ arg1 arg2 arg3) ; body, last element is returned
 )
+(add3 (3.1415 3.1415 3.1415))
 
-; assign name
-(let square 
-  (lambda (x) (*x x)))
-; call by name
-(square 3.1415)
-
-; call inline
-((lambda (x) (*x x)) 12)
-
-(let greeting
-    (lambda (greetee) (+ "hello world to: " greetee)))
+(fn greeting (greetee) (+ "hello world to: " greetee))
 (println (greeting "user"))
