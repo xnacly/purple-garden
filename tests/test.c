@@ -16,34 +16,31 @@ typedef struct {
 
 #define BC(...)                                                                \
   (byte[]) { __VA_ARGS__ }
+#define VAL(...)                                                               \
+  (Value) { __VA_ARGS__ }
 #define CASE(in, ex, r0)                                                       \
   {                                                                            \
-    .input = STRING(in), .expected = ex,                                       \
-    .expected_size = sizeof(ex) / sizeof(byte), .expected_r0 = (Value)r0,      \
+      .input = STRING(in),                                                     \
+      .expected = ex,                                                          \
+      .expected_size = sizeof(ex) / sizeof(byte),                              \
+      .expected_r0 = r0,                                                       \
   }
 
 int main() {
   Case cases[] = {
-      {
-          .input = ((String){.len = sizeof("3.1415"), .p = "3.1415"}),
-          .expected = (byte[]){OP_LOAD, 0},
-          .expected_size = sizeof((byte[]){OP_LOAD, 0}) / sizeof(byte),
-          .expected_r0 = (Value){.type = V_NUM, .number = 3.1415},
-      },
-      {
-          .input = ((String){.len = sizeof("\"string\""), .p = "\"string\""}),
-          .expected = (byte[]){OP_LOAD, 0},
-          .expected_size = sizeof((byte[]){OP_LOAD, 0}) / sizeof(byte),
-          .expected_r0 = (Value){.type = V_STRING, .string = STRING("string")},
-      },
-      CASE("true false", BC(OP_LOAD, 0, OP_LOAD, 1), (Value){.type = V_FALSE}),
-      {
-          .input = ((String){.len = sizeof("ident"), .p = "ident"}),
-          .expected = (byte[]){OP_LOAD, 0, OP_VAR, 0},
-          .expected_size =
-              sizeof((byte[]){OP_LOAD, 0, OP_VAR, 0}) / sizeof(byte),
-          .expected_r0 = (Value){.type = V_STRING, .string = STRING("ident")},
-      },
+      // atoms:
+      CASE("3.1415", BC(OP_LOAD, 0), VAL(.type = V_NUM, .number = 3.1415)),
+      CASE("\"string\"", BC(OP_LOAD, 0),
+           VAL(.type = V_STRING, .string = STRING("string"))),
+      CASE("true false", BC(OP_LOAD, 0, OP_LOAD, 1), VAL(.type = V_FALSE)),
+
+      // INFO: infinity comparison case:
+      // https://github.com/xNaCly/purple-garden/issues/1
+      // CASE("1.7976931348623157e+309", BC(OP_LOAD, 0),
+      //      VAL(.type = V_NUM, .number = 1.7976931348623157E+309)),
+
+      CASE("ident", BC(OP_LOAD, 0, OP_VAR, 0),
+           VAL(.type = V_STRING, .string = STRING("ident"))),
   };
   size_t passed = 0;
   size_t failed = 0;
@@ -105,6 +102,7 @@ int main() {
       printf("\n\tbad value at r0: want=%d got=%d\n", c.expected_r0.type,
              vm->_registers[0].type);
 #endif
+      error = true;
     }
     Node_destroy(&ast);
 
