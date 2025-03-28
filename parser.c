@@ -55,18 +55,8 @@ static void Node_add_child(Node *n, Node child) {
   n->children[n->children_length++] = child;
 }
 
-static Node parse(Parser *p) {
+static Node list_elements(Parser *p) {
   switch (p->cur.type) {
-  case T_DELIMITOR_LEFT: {
-    Node n = (Node){.type = N_LIST, ._children_cap = 0, .children_length = 0};
-    consume(p, T_DELIMITOR_LEFT);
-    while (!at_end(p) && p->cur.type != T_DELIMITOR_RIGHT) {
-      Node children = parse(p);
-      Node_add_child(&n, children);
-    }
-    consume(p, T_DELIMITOR_RIGHT);
-    return n;
-  }
   case T_STRING:
   case T_BOOLEAN:
   case T_NUMBER: {
@@ -82,7 +72,35 @@ static Node parse(Parser *p) {
     SINGLE_NODE(p, N_OP)
   }
   default:
-    ASSERT(0, "Unimplemented token")
+    return (Node){
+        .type = N_UNKOWN,
+    };
+  }
+}
+
+static Node parse(Parser *p) {
+  switch (p->cur.type) {
+  case T_DELIMITOR_LEFT: {
+    Node n = (Node){.type = N_LIST, ._children_cap = 0, .children_length = 0};
+    consume(p, T_DELIMITOR_LEFT);
+    while (!at_end(p) && p->cur.type != T_DELIMITOR_RIGHT) {
+      Node children =
+          p->cur.type == T_DELIMITOR_LEFT ? parse(p) : list_elements(p);
+      Node_add_child(&n, children);
+    }
+    consume(p, T_DELIMITOR_RIGHT);
+    return n;
+  }
+  case T_STRING:
+  case T_BOOLEAN:
+  case T_NUMBER: {
+    SINGLE_NODE(p, N_ATOM)
+  }
+  case T_IDENT: {
+    SINGLE_NODE(p, N_IDENT)
+  }
+  default:
+    ASSERT(0, "Unexpected token at this point")
   case T_EOF:
     return (Node){
         .type = N_UNKOWN,
@@ -111,8 +129,8 @@ void Node_debug(Node *n, size_t depth) {
       [N_IDENT] = STRING("N_IDENT"),
       // main data structure
       [N_LIST] = STRING("N_LIST"),
-      // anonymous function
-      [N_LAMBDA] = STRING("N_LAMBDA"),
+      // function definition
+      [N_FUNCTION] = STRING("N_LAMBDA"),
       // operator, like +-*/%
       [N_OP] = STRING("N_OP"),
       // error and end case
@@ -125,7 +143,7 @@ void Node_debug(Node *n, size_t depth) {
   switch (n->type) {
   case N_ATOM:
   case N_IDENT:
-  case N_LAMBDA:
+  case N_FUNCTION:
   case N_OP:
     Token_debug(&n->token);
     break;

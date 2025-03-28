@@ -5,7 +5,7 @@
 String OP_MAP[] = {
     [OP_LOAD] = STRING("OP_LOAD"),
     [OP_STORE] = STRING("OP_STORE"),
-    [OP_VAR] = STRING("OP_VAR"),
+    [OP_ADD] = STRING("OP_ADD"),
 };
 
 String VALUE_MAP[] = {
@@ -15,13 +15,21 @@ String VALUE_MAP[] = {
 };
 #endif
 
+#define VM_ASSERT(expr, msg)                                                   \
+  if (!(expr)) {                                                               \
+    fprintf(stderr,                                                            \
+            "[VM] ASSERT(" #expr "): `" msg "` failed at %s, line %d\n",       \
+            __FILE__, __LINE__);                                               \
+    goto vm_end;                                                               \
+  }
+
 void Vm_run(Vm *vm) {
   while (vm->_pc < vm->bytecode_len) {
     VM_OP op = vm->bytecode[vm->_pc];
     size_t arg = vm->bytecode[vm->_pc + 1];
-#if DEBUG
-    DIS(op, arg)
-#endif
+    // #if DEBUG
+    //     DIS(op, arg)
+    // #endif
     switch (op) {
     case OP_LOAD:
       vm->_registers[0] = vm->globals[arg];
@@ -29,14 +37,24 @@ void Vm_run(Vm *vm) {
     case OP_STORE:
       vm->_registers[arg] = vm->_registers[0];
       break;
-    case OP_VAR:
-      TODO("OP_VAR is not implemented yet, because Frame is not implemented "
-           "AND because HASHMAPS arent implemented")
+    case OP_ADD:
+      Value *a = &vm->_registers[0];
+      Value *b = &vm->_registers[arg];
+      VM_ASSERT(a->type != V_NUM || b->type != V_NUM,
+                "Bad types for OP_ADD, cant add anything other than ")
+      vm->_registers[0] = (Value){.type = V_NUM,
+                                  .number = vm->_registers[0].number +
+                                            vm->_registers[arg].number};
+      break;
+    // case OP_VAR:
+    //   TODO("OP_VAR is not implemented yet, because Frame is not implemented "
+    //        "AND because HASHMAPS arent implemented")
     default:
       ASSERT(false, "Unimplemented instruction")
     }
     vm->_pc += 2;
   }
+vm_end:
 }
 
 void Vm_destroy(Vm vm) {

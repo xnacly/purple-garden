@@ -150,8 +150,8 @@ Token Lexer_next(Lexer *l) {
   char cc = cur(l);
   switch (cc) {
   case ';':
-    for (cc = cur(l); cc > 0 && cc != '\n'; l->pos++, cc = cur(l))
-      ;
+    for (cc = cur(l); cc > 0 && cc != '\n'; l->pos++, cc = cur(l)) {
+    }
     advance(l);
     return Lexer_next(l);
   case '+':
@@ -179,7 +179,7 @@ Token Lexer_next(Lexer *l) {
     advance(l);
     return SINGLE_TOK(T_EOF);
   default:
-    if ((cc >= '0' && cc <= '9')) {
+    if ((cc >= '0' && cc <= '9') || cc == '.') {
       return num(l);
     } else if (is_ident(cc)) {
       return ident(l);

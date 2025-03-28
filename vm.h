@@ -24,13 +24,17 @@ typedef enum {
   // STORE rANY
   //
   // STORE a Value from r0 into an arbitrary register
-  //
-  // TODO: (IDEA) should this remove the value at r0?
   OP_STORE,
-  // OP_VAR rANY
+  // OP_VAR globalANY
   //
-  // Copy value from Frame assigned to variable name stored in rANY
-  OP_VAR,
+  // Copy value from Frame assigned to variable name stored in global pool at
+  // globalANY
+  // OP_VAR,
+
+  // OP_ADD rANY
+  //
+  // add Value at rANY to r0, store result in r0
+  OP_ADD
 } VM_OP;
 
 typedef enum {
@@ -63,10 +67,14 @@ typedef unsigned short byte;
 
 typedef struct {
   size_t global_len;
+  size_t global_cap;
   // globals represents the global pool created by the bytecode compiler
   Value *globals;
+
   size_t bytecode_len;
+  size_t bytecode_cap;
   byte *bytecode;
+
   size_t _pc;
   Value _registers[64];
 } Vm;

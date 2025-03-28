@@ -1,5 +1,6 @@
 #include <getopt.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "cc.h"
 #include "common.h"
@@ -12,6 +13,10 @@
 #define VERSION "alpha"
 #ifndef COMMIT
 #define COMMIT "(no commit)"
+#endif
+
+#ifndef BENCH
+#define BENCH 0
 #endif
 
 typedef struct {
@@ -65,7 +70,22 @@ Args Args_parse(int argc, char **argv) {
   return a;
 }
 
+#if BENCH
+#define BENCH_PUTS(msg)                                                        \
+  {                                                                            \
+    size_t cur = clock();                                                      \
+    printf("[BENCH] (T-%.4fms): " msg "\n",                                    \
+           ((clock() - start) / (double)CLOCKS_PER_SEC) * 1000);               \
+    start = cur;                                                               \
+  }
+#else
+#define BENCH_PUTS(msg)
+#endif
+
 int main(int argc, char **argv) {
+#if BENCH
+  size_t start = clock();
+#endif
   Args a = Args_parse(argc, argv);
   if (a.version) {
     fprintf(stderr, "purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
@@ -75,21 +95,35 @@ int main(int argc, char **argv) {
     usage();
     ASSERT(a.filename != NULL,
            "Wanted a filename as an argument, not enough arguments")
-  }
+  };
+  BENCH_PUTS("parsed arguments");
+
   String input = IO_read_file_to_string(a.filename);
+  BENCH_PUTS("read file to String");
 
   Lexer l = Lexer_new(input);
   Parser p = Parser_new(&l);
   Node ast = Parser_run(&p);
+  BENCH_PUTS("parsed input");
+
 #if DEBUG
   Node_debug(&ast, 0);
   puts("");
 #endif
+
   Vm vm = cc(&ast);
+  BENCH_PUTS("compiled input");
+#if BENCH
+  printf("[BENCH] (bc=%zu|globals=%zu)\n", vm.bytecode_len, vm.global_len);
+#endif
+
   Vm_run(&vm);
+  BENCH_PUTS("ran vm");
+
   Node_destroy(&ast);
   Vm_destroy(vm);
   free(input.p);
+  BENCH_PUTS("destroyed Nodes, vm and input");
 
   return EXIT_SUCCESS;
 }

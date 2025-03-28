@@ -15,8 +15,8 @@ typedef enum {
   N_IDENT,
   // main data structure
   N_LIST,
-  // anonymous function
-  N_LAMBDA,
+  // function definition
+  N_FUNCTION,
   // operator, like +-*/%
   N_OP,
   // error and end case
@@ -26,7 +26,8 @@ typedef enum {
 // stores all possible values of a node
 typedef struct Node {
   NodeType type;
-  // N_ATOM values are stored in the Token struct - this reduces copies
+  // N_ATOM values and the N_FUNCTION name are stored in the Token struct - this
+  // reduces copies
   Token token;
   union {
     // params of a lambda, length encoded in Node.param_length

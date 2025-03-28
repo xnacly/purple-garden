@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #ifndef DEBUG
-#define DEBUG 0
+#define DEBUG 1
 #endif
 
 #include <stddef.h>

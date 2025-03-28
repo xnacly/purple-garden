@@ -30,6 +30,7 @@ int main() {
   Case cases[] = {
       // atoms:
       CASE("3.1415", BC(OP_LOAD, 0), VAL(.type = V_NUM, .number = 3.1415)),
+      CASE(".1415", BC(OP_LOAD, 0), VAL(.type = V_NUM, .number = 1.1415)),
       CASE("\"string\"", BC(OP_LOAD, 0),
            VAL(.type = V_STRING, .string = STRING("string"))),
       CASE("true false", BC(OP_LOAD, 0, OP_LOAD, 1), VAL(.type = V_FALSE)),
@@ -39,8 +40,12 @@ int main() {
       // CASE("1.7976931348623157e+309", BC(OP_LOAD, 0),
       //      VAL(.type = V_NUM, .number = 1.7976931348623157E+309)),
 
-      CASE("ident", BC(OP_LOAD, 0, OP_VAR, 0),
-           VAL(.type = V_STRING, .string = STRING("ident"))),
+      // CASE("ident", BC(OP_LOAD, 0, OP_VAR, 0),
+      //      VAL(.type = V_STRING, .string = STRING("ident"))),
+
+      // op:
+      CASE("(+ 1 1)", BC(OP_LOAD, 0, OP_STORE, 1, OP_ADD, 1),
+           VAL(.type = V_NUM, .number = 2)),
   };
   size_t passed = 0;
   size_t failed = 0;
