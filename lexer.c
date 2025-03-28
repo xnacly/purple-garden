@@ -84,7 +84,8 @@ static void skip_whitespace(Lexer *l) {
 
 static Token num(Lexer *l) {
   size_t start = l->pos;
-  for (char cc = cur(l); cc > 0 && ((cc >= '0' && cc <= '9') || cc == '.');
+  for (char cc = cur(l); cc > 0 && ((cc >= '0' && cc <= '9') || cc == '.' ||
+                                    cc == 'e' || cc == '+' || cc == '-');
        l->pos++, cc = cur(l))
     ;
   String s = String_slice(&l->input, start, l->pos);
