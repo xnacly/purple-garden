@@ -1,8 +1,10 @@
 #include "parser.h"
 #include "common.h"
 #include "lexer.h"
+#include <stdlib.h>
 
-#define NODE_CAP_GROW 2
+#define NODE_CAP_GROW 1.75
+#define NODE_INITIAL_CHILD_SIZE 8
 
 #define SINGLE_NODE(p, TYPE)                                                   \
   Token t = p->cur;                                                            \
@@ -19,9 +21,8 @@ Parser Parser_new(Lexer *lexer) {
   };
 }
 
-static bool at_end(Parser *p) { return p->cur.type == T_EOF; }
 static void advance(Parser *p) {
-  if (!at_end(p)) {
+  if (p->cur.type != T_EOF) {
     /*
       #if DEBUG
          Token_debug(&p->cur);
@@ -47,7 +48,7 @@ static void consume(Parser *p, TokenType tt) {
 // added to n->children
 static void Node_add_child(Node *n, Node child) {
   if (n->children_length + 1 >= n->_children_cap) {
-    size_t new_size = n->_children_cap == 0 ? NODE_CAP_GROW
+    size_t new_size = n->_children_cap == 0 ? NODE_INITIAL_CHILD_SIZE
                                             : n->_children_cap * NODE_CAP_GROW;
     n->children = realloc(n->children, new_size * sizeof(Node));
     n->_children_cap = new_size;
@@ -83,10 +84,9 @@ static Node parse(Parser *p) {
   case T_DELIMITOR_LEFT: {
     Node n = (Node){.type = N_LIST, ._children_cap = 0, .children_length = 0};
     consume(p, T_DELIMITOR_LEFT);
-    while (!at_end(p) && p->cur.type != T_DELIMITOR_RIGHT) {
-      Node children =
-          p->cur.type == T_DELIMITOR_LEFT ? parse(p) : list_elements(p);
-      Node_add_child(&n, children);
+    while (p->cur.type != T_EOF && p->cur.type != T_DELIMITOR_RIGHT) {
+      Node_add_child(&n, p->cur.type == T_DELIMITOR_LEFT ? parse(p)
+                                                         : list_elements(p));
     }
     consume(p, T_DELIMITOR_RIGHT);
     return n;
@@ -173,8 +173,11 @@ void Node_debug(Node *n, size_t depth) {
 #endif
 
 Node Parser_run(Parser *p) {
-  Node root = (Node){.type = N_LIST, .children_length = 0, ._children_cap = 0};
-  while (!at_end(p)) {
+  Node root = (Node){.type = N_LIST, .children_length = 0};
+  root._children_cap = NODE_INITIAL_CHILD_SIZE * NODE_INITIAL_CHILD_SIZE;
+  root.children = malloc(root._children_cap * sizeof(Node));
+
+  while (p->cur.type != T_EOF) {
     Node n = parse(p);
     if (n.type == N_UNKOWN) {
       break;
