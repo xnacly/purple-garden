@@ -16,10 +16,7 @@ String IO_read_file_to_string(char *path) {
   // s.st_mode & S_IFREG because somehow this does not compile?
   ASSERT(s.st_mode & 0100000, "Path is not a file")
 
-  fseek(file, 0, SEEK_END);
-  long length = ftell(file);
-  rewind(file);
-
+  long length = s.st_size;
   if (length < 0) {
     fclose(file);
     return STRING_EMPTY;
