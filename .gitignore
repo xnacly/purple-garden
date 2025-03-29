@@ -1,4 +1,6 @@
 # binaries
 purple_garden
+purple_garden_debug
 tests/test
 bench
+test.*
