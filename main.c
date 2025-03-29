@@ -1,5 +1,6 @@
 #include <getopt.h>
 #include <stdlib.h>
+#include <sys/mman.h>
 #include <time.h>
 
 #include "cc.h"
@@ -122,7 +123,7 @@ int main(int argc, char **argv) {
 
   Node_destroy(&ast);
   Vm_destroy(vm);
-  free(input.p);
+  munmap(input.p, input.len);
   BENCH_PUTS("destroyed Nodes, vm and input");
 
   return EXIT_SUCCESS;
