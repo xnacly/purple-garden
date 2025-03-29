@@ -31,7 +31,7 @@ PG := ./examples/hello-world.garden
 .PHONY: run build test clean bench
 
 run:
-	$(CC) $(FLAGS) -g3 -fsanitize=address,undefined -DCOMMIT='"$(COMMIT)"' $(FILES) ./main.c -o purple_garden_debug
+	$(CC) $(FLAGS) -g3 -fsanitize=address,undefined -DDEBUG=1 $(FILES) ./main.c -o purple_garden_debug
 	./purple_garden_debug $(PG)
 
 release:
@@ -42,7 +42,7 @@ bench:
 	./bench $(PG)
 
 test:
-	$(CC) $(FLAGS) $(TEST_FILES) $(FILES) -DDEBUG=1 -o ./tests/test
+	$(CC) $(FLAGS) -g3 -fsanitize=address,undefined -DDEBUG=1 $(TEST_FILES) $(FILES) -DDEBUG=1 -o ./tests/test
 	./tests/test
 
 clean:

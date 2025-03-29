@@ -43,7 +43,7 @@ int main() {
       // CASE("ident", BC(OP_LOAD, 0, OP_VAR, 0),
       //      VAL(.type = V_STRING, .string = STRING("ident"))),
 
-      // op:
+      // ops:
       CASE("(+ 1 1)", BC(OP_LOAD, 0, OP_STORE, 1, OP_ADD, 1),
            VAL(.type = V_NUM, .number = 2)),
   };

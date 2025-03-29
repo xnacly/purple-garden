@@ -23,12 +23,10 @@ Parser Parser_new(Lexer *lexer) {
 
 static void advance(Parser *p) {
   if (p->cur.type != T_EOF) {
-    /*
-      #if DEBUG
-         Token_debug(&p->cur);
-         puts("");
-     #endif
-    */
+#if DEBUG
+    Token_debug(&p->cur);
+    puts("");
+#endif
     p->cur = Lexer_next(p->lexer);
   }
 }
@@ -114,7 +112,7 @@ void Node_destroy(Node *n) {
   for (size_t i = 0; i < n->children_length; i++) {
     Node_destroy(&n->children[i]);
   }
-  if (n->children_length > 0) {
+  if (n->_children_cap > 0) {
     free(n->children);
   }
   Token_destroy(&n->token);

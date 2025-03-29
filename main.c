@@ -100,14 +100,23 @@ int main(int argc, char **argv) {
   BENCH_PUTS("parsed arguments");
 
   String input = IO_read_file_to_string(a.filename);
+#if DEBUG
+  puts("================== IN ==================");
+  printf(input.p);
+#endif
   BENCH_PUTS("read file to String");
 
   Lexer l = Lexer_new(input);
+
+#if DEBUG
+  puts("================= TOKS =================");
+#endif
   Parser p = Parser_new(&l);
   Node ast = Parser_run(&p);
   BENCH_PUTS("parsed input");
 
 #if DEBUG
+  puts("================= TREE =================");
   Node_debug(&ast, 0);
   puts("");
 #endif
@@ -118,7 +127,7 @@ int main(int argc, char **argv) {
   printf("[BENCH] (bc=%zu|globals=%zu)\n", vm.bytecode_len, vm.global_len);
 #endif
 
-  Vm_run(&vm);
+  int runtime_code = Vm_run(&vm);
   BENCH_PUTS("ran vm");
 
   Node_destroy(&ast);
@@ -126,5 +135,5 @@ int main(int argc, char **argv) {
   munmap(input.p, input.len);
   BENCH_PUTS("destroyed Nodes, vm and input");
 
-  return EXIT_SUCCESS;
+  return runtime_code == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

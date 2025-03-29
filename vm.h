@@ -4,6 +4,8 @@
 #include "parser.h"
 #include <stdlib.h>
 
+#define REGISTERS 128
+
 #define DIS(op, arg)                                                           \
   printf("VM[%06zu(%06zu)] %s(%zu)\n", vm->_pc, vm->_pc + 1, OP_MAP[(op)].p,   \
          (arg));
@@ -34,7 +36,19 @@ typedef enum {
   // OP_ADD rANY
   //
   // add Value at rANY to r0, store result in r0
-  OP_ADD
+  OP_ADD,
+  // OP_SUB rANY
+  //
+  // subtract Value at rANY from r0, store result in r0
+  OP_SUB,
+  // OP_MUL rANY
+  //
+  // multiply Value at rANY with r0, store result in r0
+  OP_MUL,
+  // OP_DIV rANY
+  //
+  // divide Value at rANY with r0, store result in r0
+  OP_DIV
 } VM_OP;
 
 typedef enum {
@@ -44,9 +58,6 @@ typedef enum {
   V_TRUE,
   V_FALSE,
   V_LIST,
-  // TODO: V_OBJECT,
-  // TODO: V_LAMBDA, this should probably just be a jump to a different bc index
-  // via B_INVOKE
 } ValueType;
 
 #if DEBUG
@@ -76,11 +87,14 @@ typedef struct {
   byte *bytecode;
 
   size_t _pc;
-  Value _registers[64];
+  Value _registers[REGISTERS + 1];
 } Vm;
 
-void Vm_run(Vm *vm);
+int Vm_run(Vm *vm);
 void Vm_destroy(Vm vm);
 bool Vm_Value_cmp(Value a, Value b);
+#if DEBUG
+void Vm_Value_debug(Value *v);
+#endif
 
 #endif

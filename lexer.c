@@ -144,6 +144,7 @@ static Token ident(Lexer *l) {
 }
 
 Token Lexer_next(Lexer *l) {
+  skip_whitespace(l);
   if (at_end(l)) {
     return SINGLE_TOK(T_EOF);
   }
