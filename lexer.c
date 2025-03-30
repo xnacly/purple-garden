@@ -98,8 +98,13 @@ static Token string(Lexer *l) {
   // skip "
   advance(l);
   size_t start = l->pos;
-  for (char cc = cur(l); cc > 0 && cc != '"'; l->pos++, cc = cur(l))
-    ;
+  for (char cc = cur(l); cc > 0 && cc != '"'; l->pos++, cc = cur(l)) {
+    // next character is escaped
+    if (cc == '\\') {
+      // manual advance to skip \ and next char
+      l->pos += 2;
+    }
+  }
   if (cur(l) != '"') {
     fprintf(stderr, "lex: Unterminated string");
     return SINGLE_TOK(T_EOF);
