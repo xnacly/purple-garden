@@ -11,6 +11,7 @@ String TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
                            [T_STRING] = STRING("T_STRING"),
                            [T_BOOLEAN] = STRING("T_BOOLEAN"),
                            [T_NUMBER] = STRING("T_NUMBER"),
+                           [T_AT] = STRING("T_AT"),
                            [T_IDENT] = STRING("T_IDENT"),
                            [T_PLUS] = STRING("T_PLUS"),
                            [T_MINUS] = STRING("T_MINUS"),
@@ -154,6 +155,9 @@ Token Lexer_next(Lexer *l) {
     }
     advance(l);
     return Lexer_next(l);
+  case '@':
+    advance(l);
+    return SINGLE_TOK(T_AT);
   case '+':
     advance(l);
     return SINGLE_TOK(T_PLUS);

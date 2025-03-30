@@ -15,6 +15,8 @@ typedef enum {
   T_BOOLEAN,
   // floating point numbers
   T_NUMBER,
+  // @
+  T_AT,
   // any identifier
   T_IDENT,
   //

@@ -1,0 +1,48 @@
+; vim: filetype=racket
+
+; WARN: THIS IS A CONCEPT, neither final nor working
+
+; json.garden is a simple json tokenizer and maybe parser in the future, lets see
+(@let input "{\"key\": \"value\"}")
+
+; define sets constants, similar to enums in other languages
+(@define
+  OBJECT_LEFT
+  OBJECT_RIGHT
+  ARRAY_LEFT
+  ARRAY_RIGHT
+  COLON
+  COMMA
+)
+
+(@let lexer #{ 
+  in input 
+  pos 0 
+})
+
+(@function next (lexer)
+  ; object.key is the object value access syntax
+  (@let c (@get lexer.in lexer.pos))
+
+  ; (get) returns a mutable pointer to lexer.pos
+  (@set lexer.pos (+ lexer.pos 1))
+
+  (@match c 
+    (#\{ OBJECT_LEFT)
+    (#\} OBJECT_RIGHT)
+    (#\[ ARRAY_LEFT)
+    (#\] ARRAY_RIGHT)
+    (#\: COLON)
+    (#\, COMMA)
+    ; TODO: check each char
+    (#\t true)
+    (#\f false)
+    (#\n null)
+    ; TODO: process strings
+    (#\" "A string")
+    ; TODO: process numbers and convert their values
+    (#\0..#\9 0)
+    (_
+      (@panic (@format "unknown character: {}" c)))
+  )
+)

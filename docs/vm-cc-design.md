@@ -91,3 +91,6 @@ likely will change.
     CALL 2  ; store bytecode index of @square defintion in a function table in
             ; the Vm struct and jump to it
 ```
+
+## Patterns
+## Objects

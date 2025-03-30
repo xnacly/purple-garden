@@ -48,6 +48,8 @@ static Value token_to_value(Token t) {
 }
 
 static size_t pool_new(Vm *vm, Value v) {
+  // TODO: number interning via custom HashMap for Values, store each global
+  // only once - less allocations and less logic
   if (vm->global_len + 1 >= vm->global_cap) {
     size_t new_size = vm->global_cap == 0 ? INITIAL_GLOBAL_SIZE
                                           : vm->global_cap * GROW_FACTOR;
@@ -135,9 +137,7 @@ static void compile(Vm *vm, Ctx *ctx, Node *n) {
           TODO(
               "compile#N_LIST for Node.children_length > 3 is not implemented");
         }
-
         break;
-      case N_UNKOWN:
       default:
         TODO("compile#N_LIST is not implemented");
         break;
@@ -145,9 +145,8 @@ static void compile(Vm *vm, Ctx *ctx, Node *n) {
     }
     break;
   }
-  case N_UNKOWN:
   default:
-    TODO("N_UNKOWN is no a known Node to compile, sorry");
+    ASSERT(0, "N_UNKOWN is no a known Node to compile, sorry");
     break;
   }
 }

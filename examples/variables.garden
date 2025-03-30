@@ -1,8 +1,10 @@
 ; vim: filetype=racket
-(let str "hi")
-(let number 12)
-(let array ("index0" 3.1415))
-(let booleans (true false))
+(@let str "hi")
+(@let number 12)
+(@let array ("index0" 3.1415))
+(@let booleans (true false))
+
+(@println str number array booleans)
 
 ;; (let language #{
 ;;   name "purple garden"

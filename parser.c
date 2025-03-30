@@ -72,7 +72,10 @@ static Node list_elements(Parser *p) {
   case T_SLASH: {
     SINGLE_NODE(p, N_OP)
   }
+  case T_AT:
+    TODO("support for builtins here, preferablly functions written in c");
   default:
+    ASSERT(0, "Unexpected token at this point")
     return (Node){
         .type = N_UNKOWN,
     };
@@ -99,12 +102,12 @@ static Node parse(Parser *p) {
   case T_IDENT: {
     SINGLE_NODE(p, N_IDENT)
   }
-  default:
-    ASSERT(0, "Unexpected token at this point")
   case T_EOF:
     return (Node){
         .type = N_UNKOWN,
     };
+  default:
+    ASSERT(0, "Unexpected token at this point")
   }
 }
 
