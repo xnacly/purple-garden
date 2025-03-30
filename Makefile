@@ -31,7 +31,7 @@ PG := ./examples/hello-world.garden
 .PHONY: run build test clean bench
 
 run:
-	$(CC) $(FLAGS) -g3 -fsanitize=address,undefined -DDEBUG=1 $(FILES) ./main.c -o purple_garden_debug
+	$(CC) -g3 $(FLAGS) -fsanitize=address,undefined -DDEBUG=1 $(FILES) ./main.c -o purple_garden_debug
 	./purple_garden_debug $(PG)
 
 release:

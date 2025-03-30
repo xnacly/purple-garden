@@ -18,30 +18,20 @@ String TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
                            [T_SLASH] = STRING("T_SLASH"),
                            [T_EOF] = STRING("T_EOF")};
 
-void Token_destroy(Token *token) {
-  if (token == NULL)
-    return;
-
-  switch (token->type) {
-  case T_IDENT:
-  case T_STRING:
-    free(token->string.p);
-    break;
-  default:
-    return;
-  }
-}
-
 #if DEBUG
 void Token_debug(Token *token) {
-  printf("[%s]", String_to(&TOKEN_TYPE_MAP[token->type]));
+  putc('[', stdout);
+  String_debug(&TOKEN_TYPE_MAP[token->type]);
+  putc(']', stdout);
   switch (token->type) {
   case T_NUMBER:
     printf("(%f)", token->number);
     break;
   case T_STRING:
   case T_IDENT:
-    printf("('%s')", String_to(&token->string));
+    putc('[', stdout);
+    String_debug(&token->string);
+    putc(']', stdout);
     break;
   case T_BOOLEAN:
     printf("(%s)", token->boolean ? "true" : "false");
@@ -89,8 +79,14 @@ static Token num(Lexer *l) {
        l->pos++, cc = cur(l))
     ;
   String s = String_slice(&l->input, start, l->pos);
-  double d = strtod(String_to(&s), NULL);
-  free(s.p);
+  char buf[s.len + 1];
+  memcpy(buf, s.p, s.len);
+  buf[s.len] = '\0';
+  char *endptr;
+  double d = strtod(buf, &endptr);
+
+  ASSERT(endptr != buf, "lex: Failed to parse number")
+
   skip_whitespace(l);
   return (Token){
       .type = T_NUMBER,
@@ -105,7 +101,7 @@ static Token string(Lexer *l) {
   for (char cc = cur(l); cc > 0 && cc != '"'; l->pos++, cc = cur(l))
     ;
   if (cur(l) != '"') {
-    fprintf(stderr, "Unterminated string");
+    fprintf(stderr, "lex: Unterminated string");
     return SINGLE_TOK(T_EOF);
   }
   String s = String_slice(&l->input, start, l->pos);
@@ -124,13 +120,11 @@ static Token ident(Lexer *l) {
   String s = String_slice(&l->input, start, l->pos);
   skip_whitespace(l);
   if (String_eq(&s, &STRING("true"))) {
-    free(s.p);
     return (Token){
         .type = T_BOOLEAN,
         .boolean = true,
     };
   } else if (String_eq(&s, &STRING("false"))) {
-    free(s.p);
     return (Token){
         .type = T_BOOLEAN,
         .boolean = false,
@@ -185,7 +179,10 @@ Token Lexer_next(Lexer *l) {
     } else if (is_ident(cc)) {
       return ident(l);
     }
-    fprintf(stderr, "Unkown token '%c' at %s\n", cur(l), l->input.p + l->pos);
+    printf("lex: Unkown token '%c' at ", cur(l));
+    String rest = String_slice(&l->input, l->pos, l->input.len);
+    String_debug(&rest);
+    putc('\n', stdout);
     advance(l);
     return SINGLE_TOK(T_EOF);
   }

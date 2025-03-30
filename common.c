@@ -9,7 +9,13 @@ char String_get(String *str, size_t index) {
   return (unsigned int)str->p[index];
 }
 
-char *String_to(String *str) { return str->p; }
+char *String_to(String *str) {
+  size_t len = str->len;
+  char *s = malloc((len + 1) * sizeof(char *));
+  memcpy(s, str->p, len);
+  s[len + 1] = '\0';
+  return s;
+}
 
 String String_from(char *s) {
   return (String){
@@ -19,22 +25,24 @@ String String_from(char *s) {
 }
 
 String String_slice(String *str, size_t start, size_t end) {
-  size_t size = end - start;
-  char *s = malloc(size + 1);
-  strncpy(s, str->p + start, size);
-  s[size] = '\0';
+  ASSERT(end >= start,
+         "String_slice: Invalid slice range: end must be >= start");
+  ASSERT(end <= str->len, "String_slice: Slice range exceeds string length");
+
   return (String){
-      .len = size + 1,
-      .p = s,
+      .p = str->p + start,
+      .len = end - start,
   };
 }
 
 bool String_eq(String *a, String *b) {
-  ASSERT(a != NULL, "String_eq#a is NULL");
-  ASSERT(b != NULL, "String_eq#b is NULL");
+  ASSERT(a != NULL, "String_eq: a is NULL");
+  ASSERT(b != NULL, "String_eq: b is NULL");
   if (a->len != b->len) {
     return false;
   }
 
   return 0 == memcmp(a->p, b->p, a->len);
 }
+
+void String_debug(String *str) { printf("%.*s", (int)str->len, str->p); }

@@ -122,6 +122,7 @@ int main(int argc, char **argv) {
 #endif
 
   Vm vm = cc(&ast);
+  Node_destroy(&ast);
   BENCH_PUTS("compiled input");
 #if BENCH
   printf("[BENCH] (bc=%zu|globals=%zu)\n", vm.bytecode_len, vm.global_len);
@@ -130,7 +131,6 @@ int main(int argc, char **argv) {
   int runtime_code = Vm_run(&vm);
   BENCH_PUTS("ran vm");
 
-  Node_destroy(&ast);
   Vm_destroy(vm);
   munmap(input.p, input.len);
   BENCH_PUTS("destroyed Nodes, vm and input");

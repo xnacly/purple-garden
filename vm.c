@@ -28,14 +28,16 @@ void Vm_Value_debug(Value *v) {
   if (v == NULL) {
     v->type = V_NULL;
   }
-  printf("%s", VALUE_MAP[v->type].p);
+  String_debug(&VALUE_MAP[v->type]);
   switch (v->type) {
   case V_NULL:
   case V_TRUE:
   case V_FALSE:
     break;
   case V_STRING:
-    printf("(`%s`)", v->string.p);
+    printf("(`");
+    String_debug(&v->string);
+    printf("`)");
     break;
   case V_NUM:
     printf("(%f)", v->number);

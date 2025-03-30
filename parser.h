@@ -49,7 +49,7 @@ Parser Parser_new(Lexer *lexer);
 // Returns the root of a file as a Node of type N_LIST, contains all nodes in
 // said file as children
 Node Parser_run(Parser *p);
-// Deallates a node and all its children by calling itself on each one
+// Deallocates a node and all its children by calling itself on each one
 void Node_destroy(Node *n);
 void Node_debug(Node *n, size_t depth);
 
