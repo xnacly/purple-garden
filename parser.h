@@ -17,6 +17,8 @@ typedef enum {
   N_LIST,
   // function definition
   N_FUNCTION,
+  // builtins, like println
+  N_BUILTIN,
   // operator, like +-*/%
   N_OP,
   // error and end case
@@ -29,13 +31,11 @@ typedef struct Node {
   // N_ATOM values and the N_FUNCTION name are stored in the Token struct - this
   // reduces copies
   Token token;
-  union {
-    // params of a lambda, length encoded in Node.param_length
-    struct Node *params;
-    // either children of a list or body of lambda, length encoded in
-    // Node.children_length
-    struct Node *children;
-  };
+  // params of a lambda, length encoded in Node.param_length
+  struct Node *params;
+  // either children of a list or body of lambda, length encoded in
+  // Node.children_length
+  struct Node *children;
   // only populated for N_LAMBDA and N_LIST; stores the amount of nodes in the
   // lambdas body or the amount of children in a list
   size_t children_length;

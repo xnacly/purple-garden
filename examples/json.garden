@@ -15,7 +15,7 @@
   COMMA
 )
 
-(@let lexer #{ 
+(@let lexer @{ 
   in input 
   pos 0 
 })

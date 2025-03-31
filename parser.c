@@ -72,8 +72,14 @@ static Node list_elements(Parser *p) {
   case T_SLASH: {
     SINGLE_NODE(p, N_OP)
   }
-  case T_AT:
-    TODO("support for builtins here, preferablly functions written in c");
+  case T_AT: {
+    advance(p);
+    if (p->cur.type == T_IDENT) {
+      SINGLE_NODE(p, N_BUILTIN)
+    } else {
+      TODO("support for other builtins, like objects, here");
+    }
+  }
   default:
     ASSERT(0, "Unexpected token at this point")
     return (Node){
@@ -133,6 +139,8 @@ void Node_debug(Node *n, size_t depth) {
       [N_LIST] = STRING("N_LIST"),
       // function definition
       [N_FUNCTION] = STRING("N_LAMBDA"),
+      // builtin call
+      [N_BUILTIN] = STRING("N_BUILTIN"),
       // operator, like +-*/%
       [N_OP] = STRING("N_OP"),
       // error and end case
@@ -147,10 +155,9 @@ void Node_debug(Node *n, size_t depth) {
   case N_IDENT:
   case N_FUNCTION:
   case N_OP:
+  case N_BUILTIN:
     Token_debug(&n->token);
     break;
-  case N_LIST:
-  case N_UNKOWN:
   default:
     break;
   }
