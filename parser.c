@@ -59,7 +59,8 @@ static void Node_add_child(Node *n, Node child) {
 static Node list_elements(Parser *p) {
   switch (p->cur.type) {
   case T_STRING:
-  case T_BOOLEAN:
+  case T_TRUE:
+  case T_FALSE:
   case T_NUMBER: {
     SINGLE_NODE(p, N_ATOM)
   }
@@ -101,7 +102,8 @@ static Node parse(Parser *p) {
     return n;
   }
   case T_STRING:
-  case T_BOOLEAN:
+  case T_TRUE:
+  case T_FALSE:
   case T_NUMBER: {
     SINGLE_NODE(p, N_ATOM)
   }

@@ -9,7 +9,8 @@
 String TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
                            [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
                            [T_STRING] = STRING("T_STRING"),
-                           [T_BOOLEAN] = STRING("T_BOOLEAN"),
+                           [T_TRUE] = STRING("T_TRUE"),
+                           [T_FALSE] = STRING("T_FALSE"),
                            [T_NUMBER] = STRING("T_NUMBER"),
                            [T_AT] = STRING("T_AT"),
                            [T_IDENT] = STRING("T_IDENT"),
@@ -34,9 +35,8 @@ void Token_debug(Token *token) {
     String_debug(&token->string);
     putc(']', stdout);
     break;
-  case T_BOOLEAN:
-    printf("(%s)", token->boolean ? "true" : "false");
-    break;
+  case T_TRUE:
+  case T_FALSE:
   default:
     break;
   }
@@ -125,15 +125,15 @@ static Token ident(Lexer *l) {
     ;
   String s = String_slice(&l->input, start, l->pos);
   skip_whitespace(l);
-  if (String_eq(&s, &STRING("true"))) {
+  if (s.len == 4 &&
+      (s.p[0] == 't' && s.p[1] == 'r' && s.p[2] == 'u' && s.p[3] == 'e')) {
     return (Token){
-        .type = T_BOOLEAN,
-        .boolean = true,
+        .type = T_TRUE,
     };
-  } else if (String_eq(&s, &STRING("false"))) {
+  } else if (s.len == 5 && (s.p[0] == 'f' && s.p[1] == 'a' && s.p[2] == 'l' &&
+                            s.p[3] == 's' && s.p[4] == 'e')) {
     return (Token){
-        .type = T_BOOLEAN,
-        .boolean = false,
+        .type = T_FALSE,
     };
   } else {
     return (Token){

@@ -1,5 +1,6 @@
 #include <stdlib.h>
 
+#include "builtins.h"
 #include "cc.h"
 #include "common.h"
 #include "lexer.h"
@@ -34,8 +35,10 @@ static Value token_to_value(Token t) {
   case T_STRING:
   case T_IDENT:
     return (Value){.type = V_STRING, .string = t.string};
-  case T_BOOLEAN:
-    return (Value){.type = t.boolean ? V_TRUE : V_FALSE};
+  case T_TRUE:
+    return (Value){.type = V_TRUE};
+  case T_FALSE:
+    return (Value){.type = V_FALSE};
   case T_NUMBER:
     return (Value){.type = V_NUM, .number = t.number};
   default:
@@ -43,7 +46,9 @@ static Value token_to_value(Token t) {
     Token_debug(&t);
 #endif
     ASSERT(0, "token_to_value: Unsupported Token.type")
-    return (Value){.type = V_NULL};
+    return (Value){
+        .type = V_OPTION,
+    };
   }
 }
 
@@ -94,9 +99,40 @@ static void compile(Vm *vm, Ctx *ctx, Node *n) {
     break;
   }
   case N_LIST: {
-    if (n->children_length > 0) {
+    size_t cl = n->children_length;
+    if (cl > 0) {
       Node first = n->children[0];
       switch (first.type) {
+      case N_BUILTIN:
+        String *s = &first.token.string;
+        if (String_eq(&STRING("println"), s)) {
+          // single argument at r0
+          if (cl == 2) {
+            compile(vm, ctx, &n->children[1]);
+            BC(OP_BUILTIN, BUILTIN_PRINTLN)
+          } else {
+            TODO("compile#N_BUILTIN for Node.children_length > 3 is not "
+                 "implemented");
+          }
+        } else if (String_eq(&STRING("print"), s)) {
+          if (cl == 2) {
+            compile(vm, ctx, &n->children[1]);
+            BC(OP_BUILTIN, BUILTIN_PRINT)
+          } else {
+            TODO("compile#N_BUILTIN for Node.children_length > 3 is not "
+                 "implemented");
+          }
+        } else if (String_eq(&STRING("len"), s)) {
+          ASSERT(cl == 2, "@len can only be called with a singular argument")
+          compile(vm, ctx, &n->children[1]);
+          BC(OP_BUILTIN, BUILTIN_LEN)
+        } else {
+          printf("Unkown builtin: `@");
+          String_debug(s);
+          puts("`");
+          exit(1);
+        }
+        break;
       case N_IDENT:
         TODO("function calls not implemented");
         break;
@@ -123,9 +159,9 @@ static void compile(Vm *vm, Ctx *ctx, Node *n) {
         }
 
         // single argument is just a return of that value
-        if (n->children_length == 2) {
+        if (cl == 2) {
           compile(vm, ctx, &n->children[1]);
-        } else if (n->children_length == 3) {
+        } else if (cl == 3) {
           // two arguments is easy to compile, just load and add two Values
           compile(vm, ctx, &n->children[1]);
           size_t r = Ctx_allocate_register(ctx);
@@ -156,7 +192,7 @@ Vm cc(Node *n) {
            .global_cap = INITIAL_GLOBAL_SIZE,
            .bytecode_len = 0,
            .bytecode_cap = INITIAL_BYTECODE_SIZE,
-           ._pc = 0,
+           .pc = 0,
            .bytecode = NULL,
            .globals = NULL};
   vm.bytecode = malloc(sizeof(byte) * INITIAL_BYTECODE_SIZE);

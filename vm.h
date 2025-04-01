@@ -7,8 +7,9 @@
 #define REGISTERS 128
 
 #define DIS(op, arg)                                                           \
-  printf("VM[%06zu(%06zu)] %s(%zu)\n", vm->_pc, vm->_pc + 1, OP_MAP[(op)].p,   \
-         (arg));
+  printf("VM[%06zu(%06zu)] ", vm->pc, vm->pc + 1);                             \
+  String_debug(&OP_MAP[(op)]);                                                 \
+  printf("(%zu)\n", (arg));
 
 // A frame represents a Scope, a new scope is created upon entering a lambda -
 // since lambdas are pure there is no way to interact with the previous frame
@@ -16,6 +17,9 @@
 // scope state to its state before entering the lambda
 typedef struct {
   struct Frame *prev;
+  // returning out of scope, we need to jump back to the callsite of the
+  // function
+  size_t return_to_bytecode;
 } Frame;
 
 typedef enum {
@@ -48,31 +52,17 @@ typedef enum {
   // OP_DIV rANY
   //
   // divide Value at rANY with r0, store result in r0
-  OP_DIV
-} VM_OP;
+  OP_DIV,
 
-typedef enum {
-  V_NULL,
-  V_STRING,
-  V_NUM,
-  V_TRUE,
-  V_FALSE,
-  V_LIST,
-} ValueType;
+  // OP_BUILTIN bANY
+  //
+  // call the builtin its argument refers to, with the argument stored in r0
+  OP_BUILTIN,
+} VM_OP;
 
 #if DEBUG
 extern String OP_MAP[];
-extern String VALUE_MAP[];
 #endif
-
-// Value represents a value known to the runtime
-typedef struct {
-  ValueType type;
-  union {
-    String string;
-    double number;
-  };
-} Value;
 
 typedef unsigned short byte;
 
@@ -86,13 +76,16 @@ typedef struct {
   size_t bytecode_cap;
   byte *bytecode;
 
-  size_t _pc;
-  Value _registers[REGISTERS + 1];
+  // current position in the bytecode
+  size_t pc;
+  Value registers[REGISTERS + 1];
+  // frame stores variables of the current scope, meta data and other required
+  // data
+  Frame frame;
 } Vm;
 
 int Vm_run(Vm *vm);
 void Vm_destroy(Vm vm);
-bool Vm_Value_cmp(Value a, Value b);
 #if DEBUG
 void Vm_Value_debug(Value *v);
 #endif

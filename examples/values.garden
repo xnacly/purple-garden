@@ -1,3 +1,8 @@
 ; vim: filetype=racket
 
-3.1415 true false "string"
+(@println
+  3.1415 
+  true 
+  false 
+  "string"
+)

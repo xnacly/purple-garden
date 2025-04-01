@@ -55,4 +55,41 @@ bool String_eq(String *a, String *b);
 // String_debug prints the content of str to stdout
 void String_debug(String *str);
 
+typedef enum {
+  V_UNDEFINED,
+  V_OPTION,
+  V_STRING,
+  V_NUM,
+  V_TRUE,
+  V_FALSE,
+  V_LIST,
+} ValueType;
+
+extern String VALUE_TYPE_MAP[];
+
+typedef struct Option Option;
+
+// Value represents a value known to the runtime
+typedef struct {
+  ValueType type;
+  union {
+    String string;
+    double number;
+    Option *option;
+  };
+} Value;
+
+struct Option {
+  bool is_some;
+  Value some;
+};
+
+#define SOME(val)                                                              \
+  (Option) { .is_some = true, .some = val }
+
+#define NONE                                                                   \
+  (Option) { .is_some = false }
+
+bool Value_cmp(Value a, Value b);
+
 #endif
