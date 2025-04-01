@@ -11,9 +11,9 @@ String OP_MAP[] = {
 #endif
 
 String VALUE_TYPE_MAP[] = {
-    [V_OPTION] = STRING("V_OPTION"), [V_STRING] = STRING("V_STRING"),
-    [V_NUM] = STRING("V_NUM"),       [V_TRUE] = STRING("V_TRUE"),
-    [V_FALSE] = STRING("V_FALSE"),   [V_LIST] = STRING("V_LIST"),
+    [V_OPTION] = STRING("Option("), [V_STRING] = STRING("String"),
+    [V_NUM] = STRING("Number"),     [V_TRUE] = STRING("True"),
+    [V_FALSE] = STRING("False"),    [V_LIST] = STRING("List"),
 };
 
 #define VM_ASSERT(expr, msg)                                                   \
@@ -29,13 +29,14 @@ void Vm_Value_debug(Value *v) {
   String_debug(&VALUE_TYPE_MAP[v->type]);
   switch (v->type) {
   case V_OPTION: {
-    if (v->option->is_some) {
+    if (v->option.is_some) {
       printf("Some(");
-      Vm_Value_debug(&v->option->some);
+      Vm_Value_debug(v->option.value);
       printf(")");
     } else {
       printf("None");
     }
+    putc(')', stdout);
     break;
   }
   case V_TRUE:

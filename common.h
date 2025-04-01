@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #ifndef DEBUG
-#define DEBUG 0
+#define DEBUG 1
 #endif
 
 #include <stddef.h>
@@ -67,28 +67,28 @@ typedef enum {
 
 extern String VALUE_TYPE_MAP[];
 
-typedef struct Option Option;
-
 // Value represents a value known to the runtime
-typedef struct {
+typedef struct Value {
   ValueType type;
+  // Value can also be just an option, similar to Rusts option if type is
+  // V_OPTION and .is_some is false, this acts as a NONE value
   union {
     String string;
     double number;
-    Option *option;
+    struct Option {
+      bool is_some;
+      struct Value *value;
+    } option;
   };
 } Value;
-
-struct Option {
-  bool is_some;
-  Value some;
-};
 
 #define SOME(val)                                                              \
   (Option) { .is_some = true, .some = val }
 
 #define NONE                                                                   \
-  (Option) { .is_some = false }
+  (Value) {                                                                    \
+    .type = V_OPTION, .option = (struct Option) { .is_some = false }           \
+  }
 
 bool Value_cmp(Value a, Value b);
 

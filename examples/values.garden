@@ -1,8 +1,23 @@
 ; vim: filetype=racket
 
+; atoms
 (@println
   3.1415 
   true 
   false 
   "string"
+)
+
+; lists
+(@println
+  ; same type lists
+  (1 2 3 4 5 6)
+  ; different type lists
+  (1 "hello" "world" true)
+)
+
+; optionals
+(@println
+  (@Some "value") ; Option::Some("value")
+  (@None)         ; Option::None
 )

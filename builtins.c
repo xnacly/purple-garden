@@ -14,9 +14,9 @@ builtin_function BUILTIN_MAP[] = {
 static void print_value(Value *v) {
   switch (v->type) {
   case V_OPTION: {
-    if (v->option->is_some) {
+    if (v->option.is_some) {
       printf("Some(");
-      print_value(&v->option->some);
+      print_value(v->option.value);
       printf(")");
     } else {
       printf("None");
@@ -47,12 +47,12 @@ static void print_value(Value *v) {
 Value builtin_println(Value *arg) {
   print_value(arg);
   putc('\n', stdout);
-  return (Value){.option = &NONE};
+  return NONE;
 }
 
 Value builtin_print(Value *arg) {
   print_value(arg);
-  return (Value){.option = &NONE};
+  return NONE;
 }
 
 Value builtin_len(Value *arg) {
@@ -63,5 +63,5 @@ Value builtin_len(Value *arg) {
   } else if (arg->type == V_LIST) {
     TODO("builtin_len#arg->type == V_LIST not implemented")
   }
-  return (Value){.option = &NONE};
+  return NONE;
 }
