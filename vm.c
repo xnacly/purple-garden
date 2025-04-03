@@ -2,16 +2,13 @@
 #include "builtins.h"
 #include "common.h"
 
-#if DEBUG
-String OP_MAP[] = {
-    [OP_LOAD] = STRING("OP_LOAD"),      [OP_STORE] = STRING("OP_STORE"),
-    [OP_ADD] = STRING("OP_ADD"),        [OP_SUB] = STRING("OP_SUB"),
-    [OP_MUL] = STRING("OP_MUL"),        [OP_DIV] = STRING("OP_DIV"),
-    [OP_BUILTIN] = STRING("OP_BUILTIN")};
-#endif
+Str OP_MAP[] = {[OP_LOAD] = STRING("LOAD"),      [OP_STORE] = STRING("STORE"),
+                [OP_ADD] = STRING("ADD"),        [OP_SUB] = STRING("SUB"),
+                [OP_MUL] = STRING("MUL"),        [OP_DIV] = STRING("DIV"),
+                [OP_BUILTIN] = STRING("BUILTIN")};
 
-String VALUE_TYPE_MAP[] = {
-    [V_OPTION] = STRING("Option("), [V_STRING] = STRING("String"),
+Str VALUE_TYPE_MAP[] = {
+    [V_OPTION] = STRING("Option("), [V_STRING] = STRING("Str"),
     [V_NUM] = STRING("Number"),     [V_TRUE] = STRING("True"),
     [V_FALSE] = STRING("False"),    [V_LIST] = STRING("List"),
 };
@@ -24,14 +21,13 @@ String VALUE_TYPE_MAP[] = {
     goto vm_end;                                                               \
   }
 
-#if DEBUG
-void Vm_Value_debug(Value *v) {
-  String_debug(&VALUE_TYPE_MAP[v->type]);
+void Value_debug(Value *v) {
+  Str_debug(&VALUE_TYPE_MAP[v->type]);
   switch (v->type) {
   case V_OPTION: {
     if (v->option.is_some) {
       printf("Some(");
-      Vm_Value_debug(v->option.value);
+      Value_debug(v->option.value);
       printf(")");
     } else {
       printf("None");
@@ -44,7 +40,7 @@ void Vm_Value_debug(Value *v) {
     break;
   case V_STRING:
     printf("(`");
-    String_debug(&v->string);
+    Str_debug(&v->string);
     printf("`)");
     break;
   case V_NUM:
@@ -58,16 +54,15 @@ void Vm_Value_debug(Value *v) {
   default:
     printf("<unkown>");
   }
-  puts("");
 }
-#endif
 
 int Vm_run(Vm *vm) {
 #if DEBUG
   puts("================= GLOB =================");
   for (size_t i = 0; i < vm->global_len; i++) {
     printf("VM[glob%zu/%zu] ", i + 1, vm->global_len);
-    Vm_Value_debug(&vm->globals[i]);
+    Value_debug(&vm->globals[i]);
+    puts("");
   }
   puts("================= VMOP =================");
 #endif
@@ -95,7 +90,7 @@ int Vm_run(Vm *vm) {
                                              vm->registers[arg].number};
         break;
       case V_STRING:
-        VM_ASSERT(0, "VM[+] String concat not implemented yet")
+        VM_ASSERT(0, "VM[+] Str concat not implemented yet")
       default:
         VM_ASSERT(0, "VM[+] Only strings and numbers can be concatinated")
       }
@@ -116,7 +111,8 @@ int Vm_run(Vm *vm) {
 #define REGISTER_PRINT_COUNT 3
   for (size_t i = 0; i < REGISTER_PRINT_COUNT; i++) {
     printf("VM[r%zu]: ", i);
-    Vm_Value_debug(&vm->registers[i]);
+    Value_debug(&vm->registers[i]);
+    puts("");
   }
 #endif
   return 0;

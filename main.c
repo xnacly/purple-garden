@@ -131,12 +131,12 @@ int main(int argc, char **argv) {
 
   BENCH_PUTS("parsed arguments");
 
-  String input = IO_read_file_to_string(a.filename);
+  Str input = IO_read_file_to_string(a.filename);
 #if DEBUG
   puts("================== IN ==================");
   printf(input.p);
 #endif
-  BENCH_PUTS("read file to String");
+  BENCH_PUTS("read file into memory");
 
   Lexer l = Lexer_new(input);
 
@@ -154,10 +154,14 @@ int main(int argc, char **argv) {
 #endif
 
   Vm vm = cc(&ast);
+#if DEBUG
+  puts("================= DASM =================");
+  a.disassemble = 1;
+#endif
   if (a.disassemble) {
     disassemble(&vm);
+    puts("");
   }
-  puts("");
   Node_destroy(&ast);
   BENCH_PUTS("compiled input");
 #if BENCH

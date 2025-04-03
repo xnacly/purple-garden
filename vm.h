@@ -8,7 +8,7 @@
 
 #define DIS(op, arg)                                                           \
   printf("VM[%06zu(%06zu)] ", vm->pc, vm->pc + 1);                             \
-  String_debug(&OP_MAP[(op)]);                                                 \
+  Str_debug(&OP_MAP[(op)]);                                                    \
   printf("(%zu)\n", (arg));
 
 // A frame represents a Scope, a new scope is created upon entering a lambda -
@@ -60,9 +60,7 @@ typedef enum {
   OP_BUILTIN,
 } VM_OP;
 
-#if DEBUG
-extern String OP_MAP[];
-#endif
+extern Str OP_MAP[];
 
 typedef unsigned short byte;
 
@@ -86,8 +84,6 @@ typedef struct {
 
 int Vm_run(Vm *vm);
 void Vm_destroy(Vm vm);
-#if DEBUG
-void Vm_Value_debug(Value *v);
-#endif
+void Value_debug(Value *v);
 
 #endif

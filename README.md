@@ -9,9 +9,9 @@
 ; prints `hello world to: user`
 ```
 
-## Run
+## Local Setup
 
-Currently there isn't much implemented, but you can test purple_garden as follows:
+### Running
 
 ```sh
 # by default purple_garden fills $PG to be ./examples/hello-world.garden
@@ -20,7 +20,7 @@ make
 # results in:
 # ================== IN ==================
 # ; vim: filetype=racket
-#
+# 
 # ; @println is a predefined function responsible for writing to stdout
 # ; builtins are specifically called via @<builtin>
 # (@println "Hello World")
@@ -37,11 +37,25 @@ make
 #   N_ATOM[T_STRING][Hello World]
 #  )
 # )
+# ================= DASM =================
+# ; vim: filetype=asm
+# ; Vm {global=1/128, bytecode=4/1024}
+# globals:
+#         Str(`Hello World`); [0]
+# 
+# entry:
+#         ; [op=0,arg=0] at (0/1)
+#         ; global=Str(`Hello World`)
+#         LOAD 0
+#         ; [op=6,arg=0] at (2/3)
+#         ; builtin=@println
+#         BUILTIN 0
+# 
 # ================= GLOB =================
-# VM[glob1/1] String(`Hello World`)
+# VM[glob1/1] Str(`Hello World`)
 # ================= VMOP =================
-# VM[000000(000001)] OP_LOAD(0)
-# VM[000002(000003)] OP_BUILTIN(0)
+# VM[000000(000001)] LOAD(0)
+# VM[000002(000003)] BUILTIN(0)
 # Hello World
 # ================= REGS =================
 # VM[r0]: Option(None)
@@ -52,6 +66,68 @@ make
 # provide a custom file to execute
 make PG=examples/ops.garden
 ```
+
+### Release builds
+
+```bash
+# produces a ./purple_garden binary with versioning information and
+# optimisations
+make release
+./purple_garden
+# usage: purple_garden [--disassemble] [--version] [--help] <file.garden>
+# purple-garden: ASSERT(a.filename != NULL): `Wanted a filename as an argument, not enough arguments` failed at ./main.c, line 106
+./purple_garden --help
+# purple_garden: pre-alpha-a587526
+# 
+# usage: purple_garden [--disassemble] [--version] [--help] <file.garden>
+# 
+# Options:
+#         --disassemble     readable bytecode representation with labels, globals and comments
+#         --version         display version information
+#         --help            extended usage information
+```
+
+### Disassembling bytecode
+
+```bash
+./purple_garden --disassemble <file.garden>
+```
+
+For readable bytecode representation with labels, globals and comments.
+
+> `--disassemble` is enabled by default when in debug builds via `-DDEBUG=1`
+
+```bash
+$ ./purple_garden --disassemble examples/hello-world.garden
+# [...] omitted - see below
+# Hello World
+```
+
+Results in `Hello World` and of course bytecode disassembly:
+
+```asm
+; vim: filetype=asm
+; Vm {global=1/128, bytecode=4/1024}
+globals:
+        Str(`Hello World`); [0]
+
+entry:
+        ; [op=0,arg=0] at (0/1)
+        ; global=Str(`Hello World`)
+        LOAD 0
+        ; [op=6,arg=0] at (2/3)
+        ; builtin=@println
+        BUILTIN 0
+```
+
+The disassembler attempts to display as much information as possible:
+
+- allocation informations `Vm {<field>=<actual elements>/<allocated element space>}`
+- bytecode operator and argument values and indexes: `[op=6,arg=0] at (0/1)`
+- readable bytecode names: `LOAD` and `BUILTIN` instead of `0` and `6`
+- global pool values for certain bytecode operators: ```global=Str(`Hello World`)```
+- names for builtin calls: `builtin=@println`
+- labels for function definitions `<function>:` and branching `if:`, `then:`, `match:`, `default:`
 
 ## Features
 

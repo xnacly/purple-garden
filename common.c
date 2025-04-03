@@ -1,7 +1,6 @@
 #include "common.h"
-#include <stdlib.h>
 
-#define PREC 1e7
+#define PREC 1e-7
 
 static double _fabs(double x) { return x < 0 ? -x : x; }
 
@@ -16,7 +15,7 @@ bool Value_cmp(Value a, Value b) {
 
   switch (a.type) {
   case V_STRING:
-    return String_eq(&a.string, &b.string);
+    return Str_eq(&a.string, &b.string);
   case V_NUM:
     // comparing doubles by subtracting them and comparing the result to an
     // epsilon is okay id say

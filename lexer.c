@@ -6,24 +6,24 @@
 
 #define SINGLE_TOK(t) ((Token){.type = t})
 
-String TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
-                           [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
-                           [T_STRING] = STRING("T_STRING"),
-                           [T_TRUE] = STRING("T_TRUE"),
-                           [T_FALSE] = STRING("T_FALSE"),
-                           [T_NUMBER] = STRING("T_NUMBER"),
-                           [T_AT] = STRING("T_AT"),
-                           [T_IDENT] = STRING("T_IDENT"),
-                           [T_PLUS] = STRING("T_PLUS"),
-                           [T_MINUS] = STRING("T_MINUS"),
-                           [T_ASTERISKS] = STRING("T_ASTERISKS"),
-                           [T_SLASH] = STRING("T_SLASH"),
-                           [T_EOF] = STRING("T_EOF")};
+Str TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
+                        [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
+                        [T_STRING] = STRING("T_STRING"),
+                        [T_TRUE] = STRING("T_TRUE"),
+                        [T_FALSE] = STRING("T_FALSE"),
+                        [T_NUMBER] = STRING("T_NUMBER"),
+                        [T_AT] = STRING("T_AT"),
+                        [T_IDENT] = STRING("T_IDENT"),
+                        [T_PLUS] = STRING("T_PLUS"),
+                        [T_MINUS] = STRING("T_MINUS"),
+                        [T_ASTERISKS] = STRING("T_ASTERISKS"),
+                        [T_SLASH] = STRING("T_SLASH"),
+                        [T_EOF] = STRING("T_EOF")};
 
 #if DEBUG
 void Token_debug(Token *token) {
   putc('[', stdout);
-  String_debug(&TOKEN_TYPE_MAP[token->type]);
+  Str_debug(&TOKEN_TYPE_MAP[token->type]);
   putc(']', stdout);
   switch (token->type) {
   case T_NUMBER:
@@ -32,7 +32,7 @@ void Token_debug(Token *token) {
   case T_STRING:
   case T_IDENT:
     putc('[', stdout);
-    String_debug(&token->string);
+    Str_debug(&token->string);
     putc(']', stdout);
     break;
   case T_TRUE:
@@ -43,7 +43,7 @@ void Token_debug(Token *token) {
 }
 #endif
 
-Lexer Lexer_new(String input) {
+Lexer Lexer_new(Str input) {
   return (Lexer){
       .input = input,
       .pos = 0,
@@ -51,7 +51,7 @@ Lexer Lexer_new(String input) {
 }
 
 static bool at_end(Lexer *l) { return l->pos >= l->input.len; }
-static char cur(Lexer *l) { return String_get(&l->input, l->pos); }
+static char cur(Lexer *l) { return Str_get(&l->input, l->pos); }
 static bool is_whitespace(char cc) {
   return cc == ' ' || cc == '\n' || cc == '\t';
 }
@@ -79,7 +79,7 @@ static Token num(Lexer *l) {
                                     cc == 'e' || cc == '+' || cc == '-');
        l->pos++, cc = cur(l))
     ;
-  String s = String_slice(&l->input, start, l->pos);
+  Str s = Str_slice(&l->input, start, l->pos);
   char buf[s.len + 1];
   memcpy(buf, s.p, s.len);
   buf[s.len] = '\0';
@@ -110,7 +110,7 @@ static Token string(Lexer *l) {
     fprintf(stderr, "lex: Unterminated string");
     return SINGLE_TOK(T_EOF);
   }
-  String s = String_slice(&l->input, start, l->pos);
+  Str s = Str_slice(&l->input, start, l->pos);
   // skip "
   advance(l);
   return (Token){
@@ -123,7 +123,7 @@ static Token ident(Lexer *l) {
   size_t start = l->pos;
   for (char cc = cur(l); cc > 0 && is_ident(cc); l->pos++, cc = cur(l))
     ;
-  String s = String_slice(&l->input, start, l->pos);
+  Str s = Str_slice(&l->input, start, l->pos);
   skip_whitespace(l);
   if (s.len == 4 &&
       (s.p[0] == 't' && s.p[1] == 'r' && s.p[2] == 'u' && s.p[3] == 'e')) {
@@ -189,8 +189,8 @@ Token Lexer_next(Lexer *l) {
       return ident(l);
     }
     printf("lex: Unknown token '%c' at ", cur(l));
-    String rest = String_slice(&l->input, l->pos, l->input.len);
-    String_debug(&rest);
+    Str rest = Str_slice(&l->input, l->pos, l->input.len);
+    Str_debug(&rest);
     putc('\n', stdout);
     advance(l);
     return SINGLE_TOK(T_EOF);

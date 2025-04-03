@@ -16,6 +16,8 @@ enum {
 typedef Value (*builtin_function)(Value *args);
 extern builtin_function BUILTIN_MAP[];
 
+extern Str BUILTIN_NAME_MAP[];
+
 // println outputs its argument to stdout, suffixed with a newline
 Value builtin_println(Value *args);
 

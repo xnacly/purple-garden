@@ -34,9 +34,9 @@ static void advance(Parser *p) {
 static void consume(Parser *p, TokenType tt) {
   if (p->cur.type != tt) {
     printf("purple-garden: Unexpected token, wanted: ");
-    String_debug(&TOKEN_TYPE_MAP[tt]);
+    Str_debug(&TOKEN_TYPE_MAP[tt]);
     printf(", got: ");
-    String_debug(&TOKEN_TYPE_MAP[p->cur.type]);
+    Str_debug(&TOKEN_TYPE_MAP[p->cur.type]);
     putc('\n', stdout);
     exit(1);
   }
@@ -132,7 +132,7 @@ void Node_destroy(Node *n) {
 
 #if DEBUG
 void Node_debug(Node *n, size_t depth) {
-  String NODE_TYPE_MAP[] = {
+  Str NODE_TYPE_MAP[] = {
       // strings, numbers, booleans
       [N_ATOM] = STRING("N_ATOM"),
       //
@@ -151,7 +151,7 @@ void Node_debug(Node *n, size_t depth) {
   for (size_t i = 0; i < depth; i++) {
     putc(' ', stdout);
   }
-  String_debug(&NODE_TYPE_MAP[n->type]);
+  Str_debug(&NODE_TYPE_MAP[n->type]);
   switch (n->type) {
   case N_ATOM:
   case N_IDENT:

@@ -32,13 +32,13 @@ typedef enum {
 } TokenType;
 
 // TOKEN_TYPE_MAP allows for mapping TokenType to its string representation
-extern String TOKEN_TYPE_MAP[];
+extern Str TOKEN_TYPE_MAP[];
 
 typedef struct {
   TokenType type;
   union {
     // filled when .type=T_STRING|T_IDENT
-    String string;
+    Str string;
     // filled when .type=T_NUMBER
     double number;
   };
@@ -50,11 +50,11 @@ void Token_debug(Token *token);
 #endif
 
 typedef struct {
-  String input;
+  Str input;
   size_t pos;
 } Lexer;
 
-Lexer Lexer_new(String input);
+Lexer Lexer_new(Str input);
 Token Lexer_next(Lexer *l);
 
 #endif

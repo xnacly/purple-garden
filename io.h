@@ -3,8 +3,8 @@
 
 #include "common.h"
 
-// Read file at path to String, resulting String.p has to be deallocated with
+// Read file at path to Str, resulting Str.p has to be deallocated with
 // munmap
-String IO_read_file_to_string(char *path);
+Str IO_read_file_to_string(char *path);
 
 #endif

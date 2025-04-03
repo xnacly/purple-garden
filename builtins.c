@@ -11,6 +11,12 @@ builtin_function BUILTIN_MAP[] = {
     [BUILTIN_LEN] = &builtin_len,
 };
 
+Str BUILTIN_NAME_MAP[] = {
+    [BUILTIN_PRINTLN] = STRING("println"),
+    [BUILTIN_PRINT] = STRING("print"),
+    [BUILTIN_LEN] = STRING("len"),
+};
+
 static void print_value(Value *v) {
   switch (v->type) {
   case V_OPTION: {
@@ -24,7 +30,7 @@ static void print_value(Value *v) {
     break;
   }
   case V_STRING:
-    String_debug(&v->string);
+    Str_debug(&v->string);
     break;
   case V_NUM:
     printf("%f", v->number);

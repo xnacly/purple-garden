@@ -7,7 +7,7 @@
 #include "common.h"
 #include "io.h"
 
-String IO_read_file_to_string(char *path) {
+Str IO_read_file_to_string(char *path) {
   ASSERT(path != NULL, "path was NULL")
 
   int fd = open(path, O_RDONLY);
@@ -30,5 +30,5 @@ String IO_read_file_to_string(char *path) {
   }
 
   close(fd);
-  return (String){.len = length, .p = buffer};
+  return (Str){.len = length, .p = buffer};
 }

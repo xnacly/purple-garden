@@ -7,8 +7,8 @@
 // bytecode and do all prep the runtime requires
 Vm cc(Node *n);
 
-// disassemble produces a readable bytecode representation with labels, globals
+// disassemble prints a readable bytecode representation with labels, globals
 // and comments as a heap allocated string
-String disassemble(const Vm *vm);
+void disassemble(const Vm *vm);
 
 #endif

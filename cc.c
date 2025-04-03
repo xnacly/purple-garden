@@ -104,8 +104,8 @@ static void compile(Vm *vm, Ctx *ctx, Node *n) {
       Node first = n->children[0];
       switch (first.type) {
       case N_BUILTIN:
-        String *s = &first.token.string;
-        if (String_eq(&STRING("println"), s)) {
+        Str *s = &first.token.string;
+        if (Str_eq(&STRING("println"), s)) {
           // single argument at r0
           if (cl == 2) {
             compile(vm, ctx, &n->children[1]);
@@ -114,7 +114,7 @@ static void compile(Vm *vm, Ctx *ctx, Node *n) {
             TODO("compile#N_BUILTIN for Node.children_length > 3 is not "
                  "implemented");
           }
-        } else if (String_eq(&STRING("print"), s)) {
+        } else if (Str_eq(&STRING("print"), s)) {
           if (cl == 2) {
             compile(vm, ctx, &n->children[1]);
             BC(OP_BUILTIN, BUILTIN_PRINT)
@@ -122,13 +122,13 @@ static void compile(Vm *vm, Ctx *ctx, Node *n) {
             TODO("compile#N_BUILTIN for Node.children_length > 3 is not "
                  "implemented");
           }
-        } else if (String_eq(&STRING("len"), s)) {
+        } else if (Str_eq(&STRING("len"), s)) {
           ASSERT(cl == 2, "@len can only be called with a singular argument")
           compile(vm, ctx, &n->children[1]);
           BC(OP_BUILTIN, BUILTIN_LEN)
         } else {
           printf("Unknown builtin: `@");
-          String_debug(s);
+          Str_debug(s);
           puts("`");
           exit(1);
         }
@@ -209,7 +209,42 @@ Vm cc(Node *n) {
   return vm;
 }
 
-String disassemble(const Vm *vm) { return STRING_EMPTY; }
+void disassemble(const Vm *vm) {
+  puts("; vim: filetype=asm");
+  printf("; Vm {global=%zu/%zu, bytecode=%zu/%zu}\n", vm->global_len,
+         vm->global_cap, vm->bytecode_len, vm->bytecode_cap);
+  if (vm->global_len > 0) {
+    printf("globals:\n\t");
+    for (size_t i = 0; i < vm->global_len; i++) {
+      Value *v = &vm->globals[i];
+      Value_debug(v);
+      printf("; [%zu]\n\t", i);
+    }
+  }
+  puts("\nentry: ");
+  if (vm->bytecode_len > 0) {
+    for (size_t i = 0; i < vm->bytecode_len; i += 2) {
+      VM_OP op = vm->bytecode[i];
+      size_t arg = vm->bytecode[i + 1];
+      printf("\t; [op=%d,arg=%zu] at (%zu/%zu)", op, arg, i, i + 1);
+      switch (op) {
+      case OP_LOAD:
+        printf("\n\t; global=");
+        Value_debug(&vm->globals[arg]);
+        break;
+      case OP_BUILTIN:
+        printf("\n\t; builtin=@");
+        Str_debug(&BUILTIN_NAME_MAP[arg]);
+        break;
+      default:
+        break;
+      }
+      printf("\n\t");
+      Str_debug(&OP_MAP[op]);
+      printf(" %zu\n", arg);
+    }
+  }
+}
 
 #undef BC
 #undef TODO

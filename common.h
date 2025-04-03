@@ -33,7 +33,7 @@ typedef enum {
   V_LIST,
 } ValueType;
 
-extern String VALUE_TYPE_MAP[];
+extern Str VALUE_TYPE_MAP[];
 
 // Value represents a value known to the runtime
 typedef struct Value {
@@ -41,7 +41,7 @@ typedef struct Value {
   // Value can also be just an option, similar to Rusts option if type is
   // V_OPTION and .is_some is false, this acts as a NONE value
   union {
-    String string;
+    Str string;
     double number;
     struct Option {
       bool is_some;
