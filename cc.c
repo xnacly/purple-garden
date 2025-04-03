@@ -127,7 +127,7 @@ static void compile(Vm *vm, Ctx *ctx, Node *n) {
           compile(vm, ctx, &n->children[1]);
           BC(OP_BUILTIN, BUILTIN_LEN)
         } else {
-          printf("Unkown builtin: `@");
+          printf("Unknown builtin: `@");
           String_debug(s);
           puts("`");
           exit(1);
@@ -208,6 +208,8 @@ Vm cc(Node *n) {
 
   return vm;
 }
+
+String disassemble(const Vm *vm) { return STRING_EMPTY; }
 
 #undef BC
 #undef TODO

@@ -188,7 +188,7 @@ Token Lexer_next(Lexer *l) {
     } else if (is_ident(cc)) {
       return ident(l);
     }
-    printf("lex: Unkown token '%c' at ", cur(l));
+    printf("lex: Unknown token '%c' at ", cur(l));
     String rest = String_slice(&l->input, l->pos, l->input.len);
     String_debug(&rest);
     putc('\n', stdout);
