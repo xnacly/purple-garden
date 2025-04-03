@@ -1,4 +1,5 @@
 #include <getopt.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <time.h>
@@ -21,37 +22,53 @@
 #endif
 
 typedef struct {
+  // options
+
   // use block allocator before starting a garden, instead of gc; int because
-  // getopt has no bool support
+  // getopt has no bool support (not yet supported)
   int alloc_block;
-  // enable debug logs
-  int debug;
+  // readable bytecode representation with labels, globals and comments
+  int disassemble;
+
+  // options in which we exit after toggle
   int version;
-  // entry garden
+  int help;
+
+  // entry point - last argument thats not an option
   char *filename;
 } Args;
 
-static const char *options[] = {
-    "alloc-block",
-    "debug",
-    "version",
+typedef struct {
+  char *name;
+  char *description;
+} cli_option;
+
+// WARN: DO NOT REORDER THIS - will result in option handling issues
+static const cli_option options[] = {
+    {"disassemble",
+     "readable bytecode representation with labels, globals and comments"},
+    {"version", "display version information"},
+    {"help", "extended usage information"},
 };
 
 void usage() {
   fprintf(stderr, "usage: purple_garden ");
-  size_t len = sizeof(options) / sizeof(char *);
+  size_t len = sizeof(options) / sizeof(cli_option);
   for (size_t i = 0; i < len; i++) {
-    fprintf(stderr, "[--%s] ", options[i]);
+    fprintf(stderr, "[--%s] ", options[i].name);
   }
   fprintf(stderr, "<file.garden>\n");
 }
 
 Args Args_parse(int argc, char **argv) {
   Args a = (Args){0};
-  struct option long_options[] = {{options[0], no_argument, &a.alloc_block, 1},
-                                  {options[1], no_argument, &a.debug, 1},
-                                  {options[2], no_argument, &a.version, 1},
-                                  {0, 0, 0, 0}};
+  // MUST be in sync with options, otherwise this will not work as intended
+  struct option long_options[] = {
+      {options[0].name, no_argument, &a.disassemble, 1},
+      {options[1].name, no_argument, &a.version, 1},
+      {options[2].name, no_argument, &a.help, 1},
+      {0, 0, 0, 0},
+  };
 
   int opt;
   while ((opt = getopt_long(argc, argv, "", long_options, NULL)) != -1) {
@@ -67,6 +84,28 @@ Args Args_parse(int argc, char **argv) {
   if (optind < argc) {
     a.filename = argv[optind];
   }
+
+  // command handling
+  if (a.version) {
+    fprintf(stderr, "purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
+    exit(EXIT_SUCCESS);
+  } else if (a.help) {
+    fprintf(stderr, "purple_garden: %s-%s-%s\n\n", CTX, VERSION, COMMIT);
+    usage();
+    size_t len = sizeof(options) / sizeof(cli_option);
+    fprintf(stderr, "\nOptions:\n");
+    for (size_t i = 0; i < len; i++) {
+      fprintf(stderr, "\t--%-15s %s\n", options[i].name,
+              options[i].description);
+    }
+    exit(EXIT_SUCCESS);
+  }
+
+  if (a.filename == NULL) {
+    usage();
+    ASSERT(a.filename != NULL,
+           "Wanted a filename as an argument, not enough arguments")
+  };
 
   return a;
 }
@@ -89,15 +128,7 @@ int main(int argc, char **argv) {
   size_t start = clock();
 #endif
   Args a = Args_parse(argc, argv);
-  if (a.version) {
-    fprintf(stderr, "purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
-    return EXIT_SUCCESS;
-  }
-  if (a.filename == NULL) {
-    usage();
-    ASSERT(a.filename != NULL,
-           "Wanted a filename as an argument, not enough arguments")
-  };
+
   BENCH_PUTS("parsed arguments");
 
   String input = IO_read_file_to_string(a.filename);
@@ -123,6 +154,10 @@ int main(int argc, char **argv) {
 #endif
 
   Vm vm = cc(&ast);
+  if (a.disassemble) {
+    disassemble(&vm);
+  }
+  puts("");
   Node_destroy(&ast);
   BENCH_PUTS("compiled input");
 #if BENCH
