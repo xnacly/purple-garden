@@ -24,6 +24,7 @@ FLAGS := -std=c2x \
 		-Wno-aggregate-return
 
 COMMIT := $(shell git rev-parse --short HEAD)
+COMMIT_MSG := $(shell git log -1 --pretty=format:%B)
 FILES := $(shell find . -maxdepth 1 -name "*.c" ! -name "main.c")
 TEST_FILES := $(shell find ./tests -name "*.c")
 PG := ./examples/hello-world.garden
@@ -35,7 +36,7 @@ run:
 	./purple_garden_debug $(PG)
 
 release:
-	$(CC) $(FLAGS) -DCOMMIT='"$(COMMIT)"' $(FILES) ./main.c -o purple_garden
+	$(CC) $(FLAGS) -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"' $(FILES) ./main.c -o purple_garden
 
 bench:
 	$(CC) $(FLAGS) -DCOMMIT='"BENCH"' -DBENCH=1 $(FILES) ./main.c -o bench

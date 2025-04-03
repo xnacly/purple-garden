@@ -39,23 +39,25 @@ typedef struct {
 } Args;
 
 typedef struct {
-  char *name;
+  char *name_long;
+  char name_short;
   char *description;
 } cli_option;
 
 // WARN: DO NOT REORDER THIS - will result in option handling issues
 static const cli_option options[] = {
-    {"disassemble",
+    {"disassemble", 'd',
      "readable bytecode representation with labels, globals and comments"},
-    {"version", "display version information"},
-    {"help", "extended usage information"},
+    {"version", 'v', "display version information"},
+    {"help", 'h', "extended usage information"},
 };
 
 void usage() {
   fprintf(stderr, "usage: purple_garden ");
   size_t len = sizeof(options) / sizeof(cli_option);
   for (size_t i = 0; i < len; i++) {
-    fprintf(stderr, "[--%s] ", options[i].name);
+    fprintf(stderr, "[-%c | --%s] ", options[i].name_short,
+            options[i].name_long);
   }
   fprintf(stderr, "<file.garden>\n");
 }
@@ -64,15 +66,24 @@ Args Args_parse(int argc, char **argv) {
   Args a = (Args){0};
   // MUST be in sync with options, otherwise this will not work as intended
   struct option long_options[] = {
-      {options[0].name, no_argument, &a.disassemble, 1},
-      {options[1].name, no_argument, &a.version, 1},
-      {options[2].name, no_argument, &a.help, 1},
+      {options[0].name_long, no_argument, &a.disassemble, 1},
+      {options[1].name_long, no_argument, &a.version, 1},
+      {options[2].name_long, no_argument, &a.help, 1},
       {0, 0, 0, 0},
   };
 
   int opt;
-  while ((opt = getopt_long(argc, argv, "", long_options, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "dvh", long_options, NULL)) != -1) {
     switch (opt) {
+    case 'd':
+      a.disassemble = 1;
+      break;
+    case 'h':
+      a.help = 1;
+      break;
+    case 'v':
+      a.version = 1;
+      break;
     case 0:
       break;
     default:
@@ -88,23 +99,26 @@ Args Args_parse(int argc, char **argv) {
   // command handling
   if (a.version) {
     fprintf(stderr, "purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
+#ifdef COMMIT_MSG
+    fprintf(stderr, "with commit=`" COMMIT_MSG "`\n");
+#endif
     exit(EXIT_SUCCESS);
   } else if (a.help) {
-    fprintf(stderr, "purple_garden: %s-%s-%s\n\n", CTX, VERSION, COMMIT);
+    fprintf(stderr, "purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
     usage();
     size_t len = sizeof(options) / sizeof(cli_option);
     fprintf(stderr, "\nOptions:\n");
     for (size_t i = 0; i < len; i++) {
-      fprintf(stderr, "\t--%-15s %s\n", options[i].name,
-              options[i].description);
+      fprintf(stderr, "\t-%c,--%-15s %s\n", options[i].name_short,
+              options[i].name_long, options[i].description);
     }
     exit(EXIT_SUCCESS);
   }
 
   if (a.filename == NULL) {
     usage();
-    ASSERT(a.filename != NULL,
-           "Wanted a filename as an argument, not enough arguments")
+    fprintf(stderr, "Wanted a filename as an argument, not enough arguments\n");
+    exit(EXIT_FAILURE);
   };
 
   return a;
