@@ -26,7 +26,7 @@ typedef struct {
 
   // use block allocator before starting a garden, instead of gc; int because
   // getopt has no bool support (not yet supported)
-  int alloc_block;
+  int _alloc_block;
   // readable bytecode representation with labels, globals and comments
   int disassemble;
 

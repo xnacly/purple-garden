@@ -9,14 +9,6 @@ char Str_get(Str *str, size_t index) {
   return (unsigned int)str->p[index];
 }
 
-char *Str_to(Str *str) {
-  size_t len = str->len;
-  char *s = malloc((len + 1) * sizeof(char *));
-  memcpy(s, str->p, len);
-  s[len + 1] = '\0';
-  return s;
-}
-
 Str Str_from(char *s) {
   return (Str){
       .len = strlen(s),

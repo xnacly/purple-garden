@@ -36,7 +36,7 @@ run:
 	./purple_garden_debug $(PG)
 
 release:
-	$(CC) $(FLAGS) -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"' $(FILES) ./main.c -o purple_garden
+	$(CC) -g3 $(FLAGS) -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"' $(FILES) ./main.c -o purple_garden
 
 bench:
 	$(CC) $(FLAGS) -DCOMMIT='"BENCH"' -DBENCH=1 $(FILES) ./main.c -o bench
