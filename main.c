@@ -148,7 +148,7 @@ int main(int argc, char **argv) {
   Str input = IO_read_file_to_string(a.filename);
 #if DEBUG
   puts("================== IN ==================");
-  printf(input.p);
+  Str_debug(&input);
 #endif
   BENCH_PUTS("read file into memory");
 

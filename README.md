@@ -159,6 +159,7 @@ The disassembler attempts to display as much information as possible:
 - [x] `io`: `mmap` instead of reading the input file manually (6x-35x)(5/10k-250k loc)
 - [x] `common`: turn `String` for `char*` abstraction into windows instead of allocating in the lexer (1.4x)(250k loc)
 - [ ] `parser`: either attach parser directly to compiler or move to a bump allocator for `Node.children`
+- [x] `cc`: replace `@<builtin>` calls with indexes into `builtin::BUILTIN_MAP` to move function lookup from runtime to compile time
 - [ ] `cc`: intern atoms to deduplicate `Vm.globals`
 - [ ] `cc`: bump allocator for globals and bytecode (separate or shared?)
 - [ ] `cc`: multiple string concatinations should use a shared buffer and only allocate on string usage
