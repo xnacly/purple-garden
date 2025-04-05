@@ -37,3 +37,18 @@ bool Str_eq(Str *a, Str *b) {
 }
 
 void Str_debug(Str *str) { printf("%.*s", (int)str->len, str->p); }
+
+// https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash
+// https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV_hash_parameters
+#define FNV_OFFSET_BASIS 0xcbf29ce484222325
+#define FNV_PRIME 0x00000100000001b3
+inline size_t Str_hash(const Str *str) {
+  size_t hash = FNV_OFFSET_BASIS;
+  for (size_t i = 0; i < str->len; i++) {
+    hash ^= str->p[i];
+    hash *= FNV_PRIME;
+  }
+  return hash;
+}
+#undef FNV_OFFSET_BASIS
+#undef FNV_PRIME

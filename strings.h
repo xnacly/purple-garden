@@ -36,4 +36,7 @@ bool Str_eq(Str *a, Str *b);
 // Str_debug prints the content of str to stdout
 void Str_debug(Str *str);
 
+// Str_hash computes a hash str
+size_t Str_hash(const Str *str);
+
 #endif
