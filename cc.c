@@ -4,6 +4,7 @@
 #include "cc.h"
 #include "common.h"
 #include "lexer.h"
+#include "map.h"
 #include "parser.h"
 #include "vm.h"
 
@@ -218,7 +219,7 @@ void disassemble(const Vm *vm) {
     for (size_t i = 0; i < vm->global_len; i++) {
       Value *v = &vm->globals[i];
       Value_debug(v);
-      printf("; [%zu]\n\t", i);
+      printf("; {idx=%zu,hash=%zu}\n\t", i, Value_hash(v, 1024));
     }
   }
   puts("\nentry: ");
