@@ -1,10 +1,6 @@
 #include "builtins.h"
 #include "common.h"
 
-static Value from_num(double num) {
-  return (Value){.type = V_NUM, .number = num};
-}
-
 builtin_function BUILTIN_MAP[] = {
     [BUILTIN_PRINTLN] = &builtin_println,
     [BUILTIN_PRINT] = &builtin_print,
@@ -62,12 +58,12 @@ Value builtin_print(Value *arg) {
 }
 
 Value builtin_len(Value *arg) {
-  ASSERT(arg->type == V_STRING || arg->type == V_LIST,
-         "Only strings and lists have a length")
   if (arg->type == V_STRING) {
-    return from_num(arg->string.len);
+    return (Value){.type = V_NUM, .number = arg->string.len};
   } else if (arg->type == V_LIST) {
     TODO("builtin_len#arg->type == V_LIST not implemented")
+  } else {
+    fputs("builtin_len only strings and lists have a length", stderr);
   }
   return NONE;
 }

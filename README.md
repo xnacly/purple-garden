@@ -1,6 +1,7 @@
 # purple_garden
 
-> purple_garden is a minimal lisp I am attempting to make as fast possible.
+> purple_garden is a lean lisp, designed and implemented with a focus on
+> performance
 
 ```racket
 (@function greeting (greetee)
@@ -11,7 +12,14 @@
 
 ## Local Setup
 
-### Running
+> purple garden is a C project, so you will need a C compiler toolchain and
+> make if you want to following along
+
+```sh
+$ git clone git@github.com:xNaCly/purple-garden.git
+# or
+$ git clone https://github.com/xNaCly/purple-garden.git
+```
 
 ```sh
 # by default purple_garden fills $PG to be ./examples/hello-world.garden
@@ -41,7 +49,7 @@ make
 # ; vim: filetype=asm
 # ; Vm {global=1/128, bytecode=4/1024}
 # globals:
-#         Str(`Hello World`); [0]
+#         Str(`Hello World`); {idx=0,hash=39}
 # 
 # entry:
 #         ; [op=0,arg=0] at (0/1)
@@ -69,22 +77,21 @@ make PG=examples/ops.garden
 
 ### Release builds
 
-```bash
-# produces a ./purple_garden binary with versioning information and
-# optimisations
-make release
+> produces a ./purple_garden binary with versioning information and optimisations
+
+```shell
+$ make release
 ./purple_garden
-# usage: purple_garden [--disassemble] [--version] [--help] <file.garden>
-# purple-garden: ASSERT(a.filename != NULL): `Wanted a filename as an argument, not enough arguments` failed at ./main.c, line 106
-./purple_garden --help
-# purple_garden: pre-alpha-a587526
-# 
-# usage: purple_garden [--disassemble] [--version] [--help] <file.garden>
-# 
-# Options:
-#         --disassemble     readable bytecode representation with labels, globals and comments
-#         --version         display version information
-#         --help            extended usage information
+usage: purple_garden [-d | --disassemble] [-v | --version] [-h | --help] <file.garden>
+Wanted a filename as an argument, not enough arguments
+$ ./purple_garden -h
+purple_garden: pre-alpha-30396d7
+usage: purple_garden [-d | --disassemble] [-v | --version] [-h | --help] <file.garden>
+
+Options:
+        -d,--disassemble     readable bytecode representation with labels, globals and comments
+        -v,--version         display version information
+        -h,--help            extended usage information
 ```
 
 ### Disassembling bytecode
@@ -109,7 +116,7 @@ Results in `Hello World` and of course bytecode disassembly:
 ; vim: filetype=asm
 ; Vm {global=1/128, bytecode=4/1024}
 globals:
-        Str(`Hello World`); [0]
+        Str(`Hello World`); {idx=0,hash=39}
 
 entry:
         ; [op=0,arg=0] at (0/1)
@@ -123,11 +130,58 @@ entry:
 The disassembler attempts to display as much information as possible:
 
 - allocation informations `Vm {<field>=<actual elements>/<allocated element space>}`
+- elements of the global pool, their pool index and their hashes
 - bytecode operator and argument values and indexes: `[op=6,arg=0] at (0/1)`
 - readable bytecode names: `LOAD` and `BUILTIN` instead of `0` and `6`
 - global pool values for certain bytecode operators: ```global=Str(`Hello World`)```
 - names for builtin calls: `builtin=@println`
 - labels for function definitions `<function>:` and branching `if:`, `then:`, `match:`, `default:`
+
+### Benchmarks
+
+For benchmarking, remember to create a large sample size via the purple garden source code:
+
+```shell
+$ wc -l examples/bench.garden
+250001 examples/bench.garden
+```
+
+> This benchmark is for optimizing `builtin_len`/`@len` calls and atom
+> interning:
+
+```racket
+(@len "hello world")
+(@len "hello world")
+(@len "hello world")
+(@len "hello world")
+(@len "hello world")
+; [...]
+```
+
+Running the whole thing with `make bench`, the time took for each stage is
+notated between `[` and `]`.
+
+```shell
+$ make bench PG=examples/bench.garden
+[    0.0050ms] main::Args_parse: Parsed arguments
+[    0.0420ms] io::IO_read_file_to_string: mmaped input
+[   90.6160ms] parser::Parser_run: Transformed source to AST
+[   18.2240ms] cc::cc: Flattened AST to byte code
+[   34.5640ms] parser::Node_destroy: Deallocated AST Nodes
+[    2.1820ms] vm::Vm_run: Walked and executed byte code
+[    0.4700ms] vm::Vm_destroy: Deallocated global pool and bytecode list
+```
+
+### Profiling
+
+Using perf and [hotspot](https://github.com/KDAB/hotspot), you can get a
+flamechart and other info:
+
+```shell
+$ make release
+$ perf record --call-graph dwarf ./purple_garden ./bench.garden
+$ hotspot
+```
 
 ## Features
 
@@ -165,5 +219,6 @@ The disassembler attempts to display as much information as possible:
 - [ ] `cc`: multiple string concatinations should use a shared buffer and only allocate on string usage
 - [ ] `vm`: trail call optimisation
 - [ ] `vm`: merge smaller bytecode ops often used together into new ops
-- [ ] `gc`: mark and sweep garbage collection, allow for bump/block allocator
-      with `--alloc-block` (useful for small scripts -> less time in gc)
+- [ ] `vm`: lock I/O for the whole program execution for faster performance via `--lock-io`
+- [ ] `gc`: mark and sweep garbage collection, 
+- [ ] `gc`: allow for bump/block allocator with `--alloc-block`

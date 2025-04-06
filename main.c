@@ -128,7 +128,7 @@ Args Args_parse(int argc, char **argv) {
 #define BENCH_PUTS(msg)                                                        \
   {                                                                            \
     size_t cur = clock();                                                      \
-    printf("[BENCH] (T-%.4fms): " msg "\n",                                    \
+    printf("[%10.4fms] " msg "\n",                                             \
            ((clock() - start) / (double)CLOCKS_PER_SEC) * 1000);               \
     start = cur;                                                               \
   }
@@ -137,20 +137,19 @@ Args Args_parse(int argc, char **argv) {
 #endif
 
 int main(int argc, char **argv) {
-  // TODO("ADD SUPPORT FOR T_AT");
 #if BENCH
   size_t start = clock();
 #endif
   Args a = Args_parse(argc, argv);
 
-  BENCH_PUTS("parsed arguments");
+  BENCH_PUTS("main::Args_parse: Parsed arguments");
 
   Str input = IO_read_file_to_string(a.filename);
 #if DEBUG
   puts("================== IN ==================");
   Str_debug(&input);
 #endif
-  BENCH_PUTS("read file into memory");
+  BENCH_PUTS("io::IO_read_file_to_string: mmaped input");
 
   Lexer l = Lexer_new(input);
 
@@ -159,7 +158,7 @@ int main(int argc, char **argv) {
 #endif
   Parser p = Parser_new(&l);
   Node ast = Parser_run(&p);
-  BENCH_PUTS("parsed input");
+  BENCH_PUTS("parser::Parser_run: Transformed source to AST");
 
 #if DEBUG
   puts("================= TREE =================");
@@ -176,18 +175,17 @@ int main(int argc, char **argv) {
     disassemble(&vm);
     puts("");
   }
+  BENCH_PUTS("cc::cc: Flattened AST to byte code");
+
   Node_destroy(&ast);
-  BENCH_PUTS("compiled input");
-#if BENCH
-  printf("[BENCH] (bc=%zu|globals=%zu)\n", vm.bytecode_len, vm.global_len);
-#endif
+  BENCH_PUTS("parser::Node_destroy: Deallocated AST Nodes");
 
   int runtime_code = Vm_run(&vm);
-  BENCH_PUTS("ran vm");
+  BENCH_PUTS("vm::Vm_run: Walked and executed byte code");
 
   Vm_destroy(vm);
+  BENCH_PUTS("vm::Vm_destroy: Deallocated global pool and bytecode list");
   munmap(input.p, input.len);
-  BENCH_PUTS("destroyed Nodes, vm and input");
 
   return runtime_code == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
