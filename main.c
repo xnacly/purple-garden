@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
-#include <time.h>
+#include <sys/time.h>
 
 #include "cc.h"
 #include "common.h"
@@ -127,10 +127,11 @@ Args Args_parse(int argc, char **argv) {
 #if BENCH
 #define BENCH_PUTS(msg)                                                        \
   {                                                                            \
-    size_t cur = clock();                                                      \
-    printf("[%10.4fms] " msg "\n",                                             \
-           ((clock() - start) / (double)CLOCKS_PER_SEC) * 1000);               \
-    start = cur;                                                               \
+    gettimeofday(&end_time, NULL);                                             \
+    double elapsed_time = (end_time.tv_sec - start_time.tv_sec) +              \
+                          (end_time.tv_usec - start_time.tv_usec) / 1000000.0; \
+    printf("[%10.4fms] %s\n", elapsed_time * 1000, msg);                       \
+    gettimeofday(&start_time, NULL);                                           \
   }
 #else
 #define BENCH_PUTS(msg)
@@ -138,7 +139,8 @@ Args Args_parse(int argc, char **argv) {
 
 int main(int argc, char **argv) {
 #if BENCH
-  size_t start = clock();
+  struct timeval start_time, end_time;
+  gettimeofday(&start_time, NULL);
 #endif
   Args a = Args_parse(argc, argv);
 

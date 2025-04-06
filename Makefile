@@ -1,4 +1,4 @@
-FLAGS := -std=c2x \
+FLAGS := -std=c23 \
         -O3 \
         -Wall \
         -Wextra \
@@ -43,7 +43,7 @@ bench:
 	./bench $(PG)
 
 test:
-	$(CC) $(FLAGS) -g3 -fsanitize=address,undefined -DDEBUG=1 $(TEST_FILES) $(FILES) -DDEBUG=1 -o ./tests/test
+	$(CC) $(FLAGS) -g3 -fsanitize=address,undefined -DDEBUG=0 $(TEST_FILES) $(FILES) -o ./tests/test
 	./tests/test
 
 clean:
