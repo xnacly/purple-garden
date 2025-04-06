@@ -1,7 +1,7 @@
 # purple_garden
 
-> purple_garden is a lean lisp, designed and implemented with a focus on
-> performance
+purple_garden is a lean lisp, designed and implemented with a focus on
+performance
 
 ```racket
 (@function greeting (greetee)
@@ -79,24 +79,24 @@ make PG=examples/ops.garden
 
 > produces a ./purple_garden binary with versioning information and optimisations
 
-```shell
+```sh
 $ make release
 ./purple_garden
-usage: purple_garden [-d | --disassemble] [-v | --version] [-h | --help] <file.garden>
-Wanted a filename as an argument, not enough arguments
+# usage: purple_garden [-d | --disassemble] [-v | --version] [-h | --help] <file.garden>
+# Wanted a filename as an argument, not enough arguments
 $ ./purple_garden -h
-purple_garden: pre-alpha-30396d7
-usage: purple_garden [-d | --disassemble] [-v | --version] [-h | --help] <file.garden>
-
-Options:
-        -d,--disassemble     readable bytecode representation with labels, globals and comments
-        -v,--version         display version information
-        -h,--help            extended usage information
+# purple_garden: pre-alpha-30396d7
+# usage: purple_garden [-d | --disassemble] [-v | --version] [-h | --help] <file.garden>
+# 
+# Options:
+#         -d,--disassemble     readable bytecode representation with labels, globals and comments
+#         -v,--version         display version information
+#         -h,--help            extended usage information
 ```
 
 ### Disassembling bytecode
 
-```bash
+```sh
 ./purple_garden --disassemble <file.garden>
 ```
 
@@ -104,7 +104,7 @@ For readable bytecode representation with labels, globals and comments.
 
 > `--disassemble` is enabled by default when in debug builds via `-DDEBUG=1`
 
-```bash
+```sh
 $ ./purple_garden --disassemble examples/hello-world.garden
 # [...] omitted - see below
 # Hello World
@@ -141,9 +141,9 @@ The disassembler attempts to display as much information as possible:
 
 For benchmarking, remember to create a large sample size via the purple garden source code:
 
-```shell
+```sh
 $ wc -l examples/bench.garden
-250001 examples/bench.garden
+# 250001 examples/bench.garden
 ```
 
 > This benchmark is for optimizing `builtin_len`/`@len` calls and atom
@@ -161,15 +161,15 @@ $ wc -l examples/bench.garden
 Running the whole thing with `make bench`, the time took for each stage is
 notated between `[` and `]`.
 
-```shell
+```sh
 $ make bench PG=examples/bench.garden
-[    0.0050ms] main::Args_parse: Parsed arguments
-[    0.0420ms] io::IO_read_file_to_string: mmaped input
-[   90.6160ms] parser::Parser_run: Transformed source to AST
-[   18.2240ms] cc::cc: Flattened AST to byte code
-[   34.5640ms] parser::Node_destroy: Deallocated AST Nodes
-[    2.1820ms] vm::Vm_run: Walked and executed byte code
-[    0.4700ms] vm::Vm_destroy: Deallocated global pool and bytecode list
+# [    0.0050ms] main::Args_parse: Parsed arguments
+# [    0.0420ms] io::IO_read_file_to_string: mmaped input
+# [   90.6160ms] parser::Parser_run: Transformed source to AST
+# [   18.2240ms] cc::cc: Flattened AST to byte code
+# [   34.5640ms] parser::Node_destroy: Deallocated AST Nodes
+# [    2.1820ms] vm::Vm_run: Walked and executed byte code
+# [    0.4700ms] vm::Vm_destroy: Deallocated global pool and bytecode list
 ```
 
 ### Profiling
@@ -177,7 +177,7 @@ $ make bench PG=examples/bench.garden
 Using perf and [hotspot](https://github.com/KDAB/hotspot), you can get a
 flamechart and other info:
 
-```shell
+```sh
 $ make release
 $ perf record --call-graph dwarf ./purple_garden ./bench.garden
 $ hotspot
