@@ -3,11 +3,12 @@
 
 #include "common.h"
 
-enum {
+typedef enum {
+  BUILTIN_UNKOWN,
   BUILTIN_PRINTLN,
   BUILTIN_PRINT,
   BUILTIN_LEN,
-};
+} Builtin;
 
 // each builtin must be defined in this header file both inside the enum below
 // (`BUILTIN_<name>`) and as a signature `Value builtin_<name>(Value *args)`,

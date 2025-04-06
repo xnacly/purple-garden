@@ -17,7 +17,7 @@ typedef enum {
   N_LIST,
   // function definition
   N_FUNCTION,
-  // builtins, like println
+  // builtins, like @println, @len, etc
   N_BUILTIN,
   // operator, like +-*/%
   N_OP,

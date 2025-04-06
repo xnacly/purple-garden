@@ -2,21 +2,21 @@
 #include "common.h"
 #include <string.h>
 
-char Str_get(Str *str, size_t index) {
+char Str_get(const Str *str, size_t index) {
   if (index >= str->len - 1) {
     return -1;
   }
   return (unsigned int)str->p[index];
 }
 
-Str Str_from(char *s) {
+Str Str_from(const char *s) {
   return (Str){
       .len = strlen(s),
       .p = s,
   };
 }
 
-Str Str_slice(Str *str, size_t start, size_t end) {
+Str Str_slice(const Str *str, size_t start, size_t end) {
   ASSERT(end >= start, "Str_slice: Invalid slice range: end must be >= start");
   ASSERT(end <= str->len, "Str_slice: Slice range exceeds string length");
 
@@ -26,7 +26,7 @@ Str Str_slice(Str *str, size_t start, size_t end) {
   };
 }
 
-bool Str_eq(Str *a, Str *b) {
+bool Str_eq(const Str *a, const Str *b) {
   ASSERT(a != NULL, "Str_eq: a is NULL");
   ASSERT(b != NULL, "Str_eq: b is NULL");
   if (a->len != b->len) {
@@ -36,7 +36,7 @@ bool Str_eq(Str *a, Str *b) {
   return 0 == memcmp(a->p, b->p, a->len);
 }
 
-void Str_debug(Str *str) { printf("%.*s", (int)str->len, str->p); }
+void Str_debug(const Str *str) { printf("%.*s", (int)str->len, str->p); }
 
 // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash
 // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV_hash_parameters

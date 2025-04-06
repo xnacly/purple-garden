@@ -15,8 +15,8 @@ typedef enum {
   T_FALSE,
   // floating point numbers
   T_NUMBER,
-  // @
-  T_AT,
+  // builtins in the format @<builtin>
+  T_BUILTIN,
   // any identifier
   T_IDENT,
   //

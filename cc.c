@@ -100,86 +100,68 @@ static void compile(Vm *vm, Ctx *ctx, Node *n) {
     TODO("compile#N_IDENT not implemented");
     break;
   }
-  case N_LIST: {
-    size_t cl = n->children_length;
-    if (cl > 0) {
-      Node first = n->children[0];
-      switch (first.type) {
-      case N_BUILTIN:
-        Str *s = &first.token.string;
-        if (Str_eq(&STRING("println"), s)) {
-          // single argument at r0
-          if (cl == 2) {
-            compile(vm, ctx, &n->children[1]);
-            BC(OP_BUILTIN, BUILTIN_PRINTLN)
-          } else {
-            TODO("compile#N_BUILTIN for Node.children_length > 3 is not "
-                 "implemented");
-          }
-        } else if (Str_eq(&STRING("print"), s)) {
-          if (cl == 2) {
-            compile(vm, ctx, &n->children[1]);
-            BC(OP_BUILTIN, BUILTIN_PRINT)
-          } else {
-            TODO("compile#N_BUILTIN for Node.children_length > 3 is not "
-                 "implemented");
-          }
-        } else if (Str_eq(&STRING("len"), s)) {
-          ASSERT(cl == 2, "@len can only be called with a singular argument")
-          compile(vm, ctx, &n->children[1]);
-          BC(OP_BUILTIN, BUILTIN_LEN)
-        } else {
-          printf("Unknown builtin: `@");
-          Str_debug(s);
-          puts("`");
-          exit(1);
-        }
-        break;
-      case N_IDENT:
-        TODO("function calls not implemented");
-        break;
-      case N_OP:
-        byte op;
-        switch (first.token.type) {
-        case T_PLUS:
-          op = OP_ADD;
-          break;
-        case T_MINUS:
-          op = OP_SUB;
-          break;
-        case T_ASTERISKS:
-          op = OP_MUL;
-          break;
-        case T_SLASH:
-          op = OP_DIV;
-          break;
-        default:
-#if DEBUG
-          Token_debug(&n->token);
-#endif
-          ASSERT(0, "Unknown operator")
-        }
+  case N_OP: {
+    byte op;
+    switch (n->token.type) {
+    case T_PLUS:
+      op = OP_ADD;
+      break;
+    case T_MINUS:
+      op = OP_SUB;
+      break;
+    case T_ASTERISKS:
+      op = OP_MUL;
+      break;
+    case T_SLASH:
+      op = OP_DIV;
+      break;
+    default:
+      ASSERT(0, "Unknown operator")
+    }
 
-        // single argument is just a return of that value
-        if (cl == 2) {
-          compile(vm, ctx, &n->children[1]);
-        } else if (cl == 3) {
-          // two arguments is easy to compile, just load and add two Values
-          compile(vm, ctx, &n->children[1]);
-          size_t r = Ctx_allocate_register(ctx);
-          BC(OP_STORE, r)
-          compile(vm, ctx, &n->children[2]);
-          BC(op, r)
-          Ctx_free_register(ctx, r);
-        } else {
-          TODO(
-              "compile#N_LIST for Node.children_length > 3 is not implemented");
-        }
-        break;
-      default:
-        TODO("compile#N_LIST is not implemented");
-        break;
-      }
+    // single argument is just a return of that value
+    if (n->children_length == 1) {
+      compile(vm, ctx, &n->children[0]);
+    } else if (n->children_length == 2) {
+      // two arguments is easy to compile, just load and add two Values
+      compile(vm, ctx, &n->children[0]);
+      size_t r = Ctx_allocate_register(ctx);
+      BC(OP_STORE, r)
+      compile(vm, ctx, &n->children[1]);
+      BC(op, r)
+      Ctx_free_register(ctx, r);
+    } else {
+      TODO("compile#N_LIST for Node.children_length > 3 is not implemented");
+    }
+    break;
+
+    break;
+  }
+  case N_BUILTIN: {
+    Str *s = &n->token.string;
+    Builtin b = BUILTIN_UNKOWN;
+    if (Str_eq(&STRING("println"), s)) {
+      b = BUILTIN_PRINTLN;
+    } else if (Str_eq(&STRING("print"), s)) {
+      b = BUILTIN_PRINT;
+    } else if (Str_eq(&STRING("len"), s)) {
+      b = BUILTIN_LEN;
+      ASSERT(n->children_length == 1,
+             "@len can only be called with a singular argument")
+    } else {
+      printf("Unknown builtin: `@");
+      Str_debug(s);
+      puts("`");
+      exit(1);
+    }
+
+    // single argument at r0
+    if (n->children_length == 1) {
+      compile(vm, ctx, &n->children[0]);
+      BC(OP_BUILTIN, b)
+    } else {
+      TODO("compile#N_BUILTIN for Node.children_length > 3 is not "
+           "implemented");
     }
     break;
   }

@@ -12,7 +12,7 @@ Str TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
                         [T_TRUE] = STRING("T_TRUE"),
                         [T_FALSE] = STRING("T_FALSE"),
                         [T_NUMBER] = STRING("T_NUMBER"),
-                        [T_AT] = STRING("T_AT"),
+                        [T_BUILTIN] = STRING("T_BUILTIN"),
                         [T_IDENT] = STRING("T_IDENT"),
                         [T_PLUS] = STRING("T_PLUS"),
                         [T_MINUS] = STRING("T_MINUS"),
@@ -30,6 +30,7 @@ void Token_debug(Token *token) {
     printf("(%f)", token->number);
     break;
   case T_STRING:
+  case T_BUILTIN:
   case T_IDENT:
     putc('[', stdout);
     Str_debug(&token->string);
@@ -160,9 +161,16 @@ Token Lexer_next(Lexer *l) {
     }
     advance(l);
     return Lexer_next(l);
-  case '@':
+  case '@': {
     advance(l);
-    return SINGLE_TOK(T_AT);
+    // not an ident after @, this is shit
+    if (!is_ident(cur(l))) {
+      return SINGLE_TOK(T_EOF);
+    }
+    auto a = ident(l);
+    a.type = T_BUILTIN;
+    return a;
+  }
   case '+':
     advance(l);
     return SINGLE_TOK(T_PLUS);

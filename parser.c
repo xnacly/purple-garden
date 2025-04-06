@@ -56,47 +56,34 @@ static void Node_add_child(Node *n, Node child) {
   n->children[n->children_length++] = child;
 }
 
-static Node list_elements(Parser *p) {
-  switch (p->cur.type) {
-  case T_STRING:
-  case T_TRUE:
-  case T_FALSE:
-  case T_NUMBER: {
-    SINGLE_NODE(p, N_ATOM)
-  }
-  case T_IDENT: {
-    SINGLE_NODE(p, N_IDENT)
-  }
-  case T_PLUS:
-  case T_MINUS:
-  case T_ASTERISKS:
-  case T_SLASH: {
-    SINGLE_NODE(p, N_OP)
-  }
-  case T_AT: {
-    advance(p);
-    if (p->cur.type == T_IDENT) {
-      SINGLE_NODE(p, N_BUILTIN)
-    } else {
-      TODO("support for other builtins, like objects, here");
-    }
-  }
-  default:
-    ASSERT(0, "Unexpected token at this point")
-    return (Node){
-        .type = N_UNKOWN,
-    };
-  }
-}
-
 static Node parse(Parser *p) {
   switch (p->cur.type) {
   case T_DELIMITOR_LEFT: {
     Node n = (Node){.type = N_LIST, ._children_cap = 0, .children_length = 0};
     consume(p, T_DELIMITOR_LEFT);
     while (p->cur.type != T_EOF && p->cur.type != T_DELIMITOR_RIGHT) {
-      Node_add_child(&n, p->cur.type == T_DELIMITOR_LEFT ? parse(p)
-                                                         : list_elements(p));
+      switch (p->cur.type) {
+      case T_IDENT:
+        TODO("FUNCTION CALL")
+      case T_BUILTIN:
+        n.token = p->cur;
+        n.type = N_BUILTIN;
+        // TODO: handle function declaration and other syntax like @{} objects
+        advance(p);
+        break;
+      case T_PLUS:
+      case T_MINUS:
+      case T_ASTERISKS:
+      case T_SLASH: {
+        n.token = p->cur;
+        n.type = N_OP;
+        advance(p);
+        break;
+      }
+      default:
+        Node child = parse(p);
+        Node_add_child(&n, child);
+      }
     }
     consume(p, T_DELIMITOR_RIGHT);
     return n;
