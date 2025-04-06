@@ -100,16 +100,21 @@ static Token string(Lexer *l) {
   advance(l);
   size_t start = l->pos;
   for (char cc = cur(l); cc > 0 && cc != '"'; l->pos++, cc = cur(l)) {
-    // next character is escaped
-    if (cc == '\\') {
-      // manual advance to skip \ and next char
-      l->pos += 2;
-    }
+    // escape handling
+    // if (cc == '\\') {
+    //   // manual advance to skip \ and next char, only one because the post
+    //   // section of the for loop already skips cc
+    //   l->pos += 1;
+    // }
   }
+
   if (cur(l) != '"') {
-    fprintf(stderr, "lex: Unterminated string");
+    Str slice = Str_slice(&l->input, l->pos, l->input.len);
+    fprintf(stderr, "lex: Unterminated string near: '%.*s'", (int)slice.len,
+            slice.p);
     return SINGLE_TOK(T_EOF);
   }
+
   Str s = Str_slice(&l->input, start, l->pos);
   // skip "
   advance(l);
