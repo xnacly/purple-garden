@@ -1,6 +1,7 @@
 #include "vm.h"
 #include "builtins.h"
 #include "common.h"
+#include "strings.h"
 
 Str OP_MAP[] = {[OP_LOAD] = STRING("LOAD"),      [OP_STORE] = STRING("STORE"),
                 [OP_ADD] = STRING("ADD"),        [OP_SUB] = STRING("SUB"),
@@ -13,13 +14,10 @@ Str VALUE_TYPE_MAP[] = {
     [V_FALSE] = STRING("False"),    [V_LIST] = STRING("List"),
 };
 
-#define VM_ASSERT(expr, msg)                                                   \
-  if (!(expr)) {                                                               \
-    fprintf(stderr,                                                            \
-            "[VM] ASSERT(" #expr "): `" msg "` failed at %s, line %d\n",       \
-            __FILE__, __LINE__);                                               \
-    goto vm_end;                                                               \
-  }
+#define VM_ERR(msg)                                                            \
+  fprintf(stderr, "[VM] ERROR: `" msg "` failed at %s, line %d\n", __FILE__,   \
+          __LINE__);                                                           \
+  goto vm_end;
 
 void Value_debug(Value *v) {
   Str_debug(&VALUE_TYPE_MAP[v->type]);
@@ -79,10 +77,12 @@ int Vm_run(Vm *vm) {
     case OP_STORE:
       vm->registers[arg] = vm->registers[0];
       break;
-    case OP_ADD:
+    case OP_ADD: {
       Value *a = &vm->registers[0];
       Value *b = &vm->registers[arg];
-      VM_ASSERT(a->type == b->type, "VM[+] Incompatible type")
+      if (a->type != b->type) {
+        VM_ERR("VM[+] Incompatible type")
+      }
       switch (a->type) {
       case V_NUM:
         vm->registers[0] = (Value){.type = V_NUM,
@@ -90,19 +90,49 @@ int Vm_run(Vm *vm) {
                                              vm->registers[arg].number};
         break;
       case V_STRING:
-        VM_ASSERT(0, "VM[+] Str concat not implemented yet")
+        VM_ERR("VM[+] Str concat not implemented yet")
       default:
-        VM_ASSERT(0, "VM[+] Only strings and numbers can be concatinated")
+        VM_ERR("VM[+] Only strings and numbers can be concatinated")
       }
       break;
-    case OP_BUILTIN: {
+    }
+    case OP_SUB: {
+      Value *a = &vm->registers[0];
+      Value *b = &vm->registers[arg];
+      if (a->type != V_NUM || b->type != V_NUM) {
+        VM_ERR("VM[-] Subtraction is only allowed for numbers")
+      }
+      vm->registers[0] =
+          (Value){.type = V_NUM, .number = b->number - a->number};
+      break;
+    }
+    case OP_MUL: {
+      Value *a = &vm->registers[0];
+      Value *b = &vm->registers[arg];
+      if (a->type != V_NUM || b->type != V_NUM) {
+        VM_ERR("VM[*] Multiplication is only allowed for numbers")
+      }
+      vm->registers[0] =
+          (Value){.type = V_NUM, .number = b->number * a->number};
+      break;
+    }
+    case OP_DIV: {
+      Value *a = &vm->registers[0];
+      Value *b = &vm->registers[arg];
+      if (a->type != V_NUM || b->type != V_NUM) {
+        VM_ERR("VM[/] Division is only allowed for numbers")
+      }
+      vm->registers[0] =
+          (Value){.type = V_NUM, .number = b->number / a->number};
+      break;
+    }
+    case OP_BUILTIN:
       // TODO: more checks here if we would handle some builtins differently
       // from just calling a function
       vm->registers[0] = BUILTIN_MAP[arg](&vm->registers[0]);
       break;
-    }
     default:
-      ASSERT(false, "Unimplemented instruction")
+      VM_ERR("Unimplemented instruction")
     }
     vm->pc += 2;
   }
