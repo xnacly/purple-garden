@@ -2,9 +2,11 @@
 #define PARSER_H
 
 #include "lexer.h"
+#include "mem.h"
 
 typedef struct {
   Lexer *lexer;
+  Allocator *alloc;
   Token cur;
 } Parser;
 
@@ -41,16 +43,14 @@ typedef struct Node {
   size_t children_length;
   // only populated for N_LAMBDA; stores the lambda parameter count
   size_t param_length;
-  // private field for efficient allocation of children
-  size_t _children_cap;
+  // stores the children_cap to implement a growing array
+  size_t children_cap;
 } Node;
 
-Parser Parser_new(Lexer *lexer);
+Parser Parser_new(Lexer *lexer, Allocator *alloc);
 // Returns the root of a file as a Node of type N_LIST, contains all nodes in
 // said file as children
 Node Parser_run(Parser *p);
-// Deallocates a node and all its children by calling itself on each one
-void Node_destroy(Node *n);
 void Node_debug(Node *n, size_t depth);
 
 #endif

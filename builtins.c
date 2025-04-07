@@ -64,6 +64,8 @@ Value builtin_len(const Value arg) {
     TODO("builtin_len#arg->type == V_LIST not implemented")
   } else {
     fputs("builtin_len only strings and lists have a length", stderr);
+    // TODO: think about failing here
+    exit(EXIT_FAILURE);
   }
   return NONE;
 }

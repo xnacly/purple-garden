@@ -71,7 +71,15 @@ int main() {
   for (size_t i = 0; i < len; i++) {
     Case c = cases[i];
     Lexer l = Lexer_new(c.input);
-    Parser p = Parser_new(&l);
+    Allocator parser_alloc = {
+        .init = bump_init,
+        .request = bump_request,
+        .destroy = bump_destroy,
+        .reset = bump_reset,
+    };
+
+    parser_alloc.ctx = parser_alloc.init(sizeof(Node) * c.input.len * 6);
+    Parser p = Parser_new(&l, &parser_alloc);
     Node ast = Parser_run(&p);
     Vm raw = cc(&ast);
     Vm *vm = &raw;
@@ -112,7 +120,7 @@ int main() {
       puts("");
       error = true;
     }
-    Node_destroy(&ast);
+    parser_alloc.destroy(parser_alloc.ctx);
 
     if (error) {
       failed++;

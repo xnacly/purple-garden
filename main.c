@@ -8,6 +8,7 @@
 #include "common.h"
 #include "io.h"
 #include "lexer.h"
+#include "mem.h"
 #include "parser.h"
 #include "vm.h"
 
@@ -163,10 +164,19 @@ int main(int argc, char **argv) {
 
   Lexer l = Lexer_new(input);
 
+  Allocator parser_alloc = {
+      .init = bump_init,
+      .request = bump_request,
+      .destroy = bump_destroy,
+      .reset = bump_reset,
+  };
+
+  parser_alloc.ctx = parser_alloc.init(sizeof(Node) * input.len * 6);
+  // TODO: attach allocator to parser
+  Parser p = Parser_new(&l, &parser_alloc);
 #if DEBUG
   puts("================= TOKS =================");
 #endif
-  Parser p = Parser_new(&l);
   Node ast = Parser_run(&p);
   BENCH_PUTS("parser::Parser_run: Transformed source to AST");
 
@@ -187,8 +197,8 @@ int main(int argc, char **argv) {
   }
   BENCH_PUTS("cc::cc: Flattened AST to byte code");
 
-  Node_destroy(&ast);
-  BENCH_PUTS("parser::Node_destroy: Deallocated AST Nodes");
+  parser_alloc.destroy(parser_alloc.ctx);
+  BENCH_PUTS("mem::Allocator::destroy: Deallocated AST memory space");
 
   int runtime_code = Vm_run(&vm);
   BENCH_PUTS("vm::Vm_run: Walked and executed byte code");

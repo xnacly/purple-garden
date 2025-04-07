@@ -14,9 +14,10 @@
       .token = t,                                                              \
   };
 
-Parser Parser_new(Lexer *lexer) {
+Parser Parser_new(Lexer *lexer, Allocator *alloc) {
   return (Parser){
       .lexer = lexer,
+      .alloc = alloc,
       .cur = Lexer_next(lexer),
   };
 }
@@ -46,20 +47,28 @@ static void consume(Parser *p, TokenType tt) {
 // attempts to efficiently grow n->children, since lists are the main
 // datastructure of purple garden - should be called before each new children
 // added to n->children
-static void Node_add_child(Node *n, Node child) {
-  if (n->children_length + 1 >= n->_children_cap) {
-    size_t new_size = n->_children_cap == 0 ? NODE_INITIAL_CHILD_SIZE
-                                            : n->_children_cap * NODE_CAP_GROW;
-    n->children = realloc(n->children, new_size * sizeof(Node));
-    n->_children_cap = new_size;
+static void Node_add_child(Allocator *alloc, Node *n, Node child) {
+  if (!n->children_cap) {
+    // initial allocation
+    n->children =
+        alloc->request(alloc->ctx, sizeof(Node) * NODE_INITIAL_CHILD_SIZE);
+    n->children_cap = NODE_INITIAL_CHILD_SIZE;
+  } else if (n->children_length + 1 >= n->children_cap) {
+    // growing array
+    size_t new = n->children_cap *NODE_CAP_GROW;
+    Node *old = n->children;
+    n->children = alloc->request(alloc->ctx, sizeof(Node) * new);
+    memcpy(n->children, old, sizeof(Node) * n->children_length);
+    n->children_cap = new;
   }
+
   n->children[n->children_length++] = child;
 }
 
 static Node parse(Parser *p) {
   switch (p->cur.type) {
   case T_DELIMITOR_LEFT: {
-    Node n = (Node){.type = N_LIST, ._children_cap = 0, .children_length = 0};
+    Node n = (Node){.type = N_LIST, .children_length = 0, .children_cap = 0};
     consume(p, T_DELIMITOR_LEFT);
     while (p->cur.type != T_EOF && p->cur.type != T_DELIMITOR_RIGHT) {
       switch (p->cur.type) {
@@ -81,8 +90,7 @@ static Node parse(Parser *p) {
         break;
       }
       default:
-        Node child = parse(p);
-        Node_add_child(&n, child);
+        Node_add_child(p->alloc, &n, parse(p));
       }
     }
     consume(p, T_DELIMITOR_RIGHT);
@@ -103,17 +111,6 @@ static Node parse(Parser *p) {
     };
   default:
     ASSERT(0, "Unexpected token at this point")
-  }
-}
-
-void Node_destroy(Node *n) {
-  if (n == NULL)
-    return;
-  for (size_t i = 0; i < n->children_length; i++) {
-    Node_destroy(&n->children[i]);
-  }
-  if (n->_children_cap > 0) {
-    free(n->children);
   }
 }
 
@@ -171,16 +168,18 @@ void Node_debug(Node *n, size_t depth) {
 #endif
 
 Node Parser_run(Parser *p) {
-  Node root = (Node){.type = N_LIST, .children_length = 0};
-  root._children_cap = NODE_INITIAL_CHILD_SIZE * NODE_INITIAL_CHILD_SIZE;
-  root.children = malloc(root._children_cap * sizeof(Node));
+  Node root = (Node){.type = N_LIST,
+                     .children_length = 0,
+                     .children_cap = NODE_INITIAL_CHILD_SIZE * 4};
+  root.children =
+      p->alloc->request(p->alloc->ctx, sizeof(Node) * root.children_cap);
 
   while (p->cur.type != T_EOF) {
     Node n = parse(p);
     if (n.type == N_UNKOWN) {
       break;
     }
-    Node_add_child(&root, n);
+    Node_add_child(p->alloc, &root, n);
   }
 
   return root;

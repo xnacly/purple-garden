@@ -47,9 +47,8 @@ static Value token_to_value(Token t) {
 #if DEBUG
     Token_debug(&t);
 #endif
-    ASSERT(0, "token_to_value: Unsupported Token.type")
     return (Value){
-        .type = V_OPTION,
+        .type = V_UNDEFINED,
     };
   }
 }
