@@ -82,16 +82,19 @@ make PG=examples/ops.garden
 ```sh
 $ make release
 ./purple_garden
-# usage: purple_garden [-d | --disassemble] [-v | --version] [-h | --help] <file.garden>
-# Wanted a filename as an argument, not enough arguments
+# usage: purple_garden [-v | --version] [-h | --help] [-d | --disassemble]
+#                      [-b | --block-allocator] [-a | --aot-functions] <file.garden>
+# error: Missing a file? try `-h/--help`
 $ ./purple_garden -h
-# purple_garden: pre-alpha-30396d7
-# usage: purple_garden [-d | --disassemble] [-v | --version] [-h | --help] <file.garden>
+# usage: purple_garden [-v | --version] [-h | --help] [-d | --disassemble]
+#                      [-b | --block-allocator] [-a | --aot-functions] <file.garden>
 # 
-# Options:
-#         -d,--disassemble     readable bytecode representation with labels, globals and comments
-#         -v,--version         display version information
-#         -h,--help            extended usage information
+# options:
+#         -v, --version         display version information
+#         -h, --help            extended usage information
+#         -d, --disassemble     readable bytecode representation with labels, globals and comments
+#         -b, --block-allocator use block allocator instead of garbage collection
+#         -a, --aot-functions   compile all functions to machine code
 ```
 
 ### Disassembling bytecode

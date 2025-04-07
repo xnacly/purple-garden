@@ -22,11 +22,12 @@
 #endif
 
 typedef struct {
-  // options
+  // options - int because getopt has no bool support
 
-  // use block allocator before starting a garden, instead of gc; int because
-  // getopt has no bool support (not yet supported)
-  int _alloc_block;
+  // use block allocator instead of garbage collection
+  int block_allocator;
+  // compile all functions to machine code
+  int aot_functions;
   // readable bytecode representation with labels, globals and comments
   int disassemble;
 
@@ -46,29 +47,37 @@ typedef struct {
 
 // WARN: DO NOT REORDER THIS - will result in option handling issues
 static const cli_option options[] = {
-    {"disassemble", 'd',
-     "readable bytecode representation with labels, globals and comments"},
     {"version", 'v', "display version information"},
     {"help", 'h', "extended usage information"},
+    {"disassemble", 'd',
+     "readable bytecode representation with labels, globals and comments"},
+    {"block-allocator", 'b',
+     "use block allocator instead of garbage collection"},
+    {"aot-functions", 'a', "compile all functions to machine code"},
 };
 
 void usage() {
-  fprintf(stderr, "usage: purple_garden ");
+  Str prefix = STRING("usage: purple_garden");
+  printf("%.*s ", (int)prefix.len, prefix.p);
   size_t len = sizeof(options) / sizeof(cli_option);
   for (size_t i = 0; i < len; i++) {
-    fprintf(stderr, "[-%c | --%s] ", options[i].name_short,
-            options[i].name_long);
+    printf("[-%c | --%s] ", options[i].name_short, options[i].name_long);
+    if ((i + 1) % 3 == 0 && i + 1 < len) {
+      printf("\n%*.s ", (int)prefix.len, "");
+    }
   }
-  fprintf(stderr, "<file.garden>\n");
+  printf("<file.garden>\n");
 }
 
 Args Args_parse(int argc, char **argv) {
   Args a = (Args){0};
   // MUST be in sync with options, otherwise this will not work as intended
   struct option long_options[] = {
-      {options[0].name_long, no_argument, &a.disassemble, 1},
-      {options[1].name_long, no_argument, &a.version, 1},
-      {options[2].name_long, no_argument, &a.help, 1},
+      {options[0].name_long, no_argument, &a.version, 1},
+      {options[1].name_long, no_argument, &a.help, 1},
+      {options[2].name_long, no_argument, &a.disassemble, 1},
+      {options[3].name_long, no_argument, &a.block_allocator, 1},
+      {options[4].name_long, no_argument, &a.aot_functions, 1},
       {0, 0, 0, 0},
   };
 
@@ -98,26 +107,25 @@ Args Args_parse(int argc, char **argv) {
 
   // command handling
   if (a.version) {
-    fprintf(stderr, "purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
+    printf("purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
 #ifdef COMMIT_MSG
-    fprintf(stderr, "with commit=`" COMMIT_MSG "`\n");
+    printf("with commit=`" COMMIT_MSG "`\n");
 #endif
     exit(EXIT_SUCCESS);
   } else if (a.help) {
-    fprintf(stderr, "purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
     usage();
     size_t len = sizeof(options) / sizeof(cli_option);
-    fprintf(stderr, "\nOptions:\n");
+    printf("\noptions:\n");
     for (size_t i = 0; i < len; i++) {
-      fprintf(stderr, "\t-%c,--%-15s %s\n", options[i].name_short,
-              options[i].name_long, options[i].description);
+      printf("\t-%c, --%-15s %s\n", options[i].name_short, options[i].name_long,
+             options[i].description);
     }
     exit(EXIT_SUCCESS);
   }
 
   if (a.filename == NULL) {
     usage();
-    fprintf(stderr, "Wanted a filename as an argument, not enough arguments\n");
+    fprintf(stderr, "error: Missing a file? try `-h/--help`\n");
     exit(EXIT_FAILURE);
   };
 
