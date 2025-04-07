@@ -129,7 +129,7 @@ int Vm_run(Vm *vm) {
     case OP_BUILTIN:
       // TODO: more checks here if we would handle some builtins differently
       // from just calling a function
-      vm->registers[0] = BUILTIN_MAP[arg](&vm->registers[0]);
+      vm->registers[0] = BUILTIN_MAP[arg](vm->registers[0]);
       break;
     default:
       VM_ERR("Unimplemented instruction")

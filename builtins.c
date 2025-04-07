@@ -13,23 +13,23 @@ Str BUILTIN_NAME_MAP[] = {
     [BUILTIN_LEN] = STRING("len"),
 };
 
-static void print_value(Value *v) {
-  switch (v->type) {
+static void print_value(const Value v) {
+  switch (v.type) {
   case V_OPTION: {
-    if (v->option.is_some) {
+    if (v.option.is_some) {
       printf("Some(");
-      print_value(v->option.value);
-      printf(")");
+      print_value(*v.option.value);
+      putc(')', stdout);
     } else {
       printf("None");
     }
     break;
   }
   case V_STRING:
-    Str_debug(&v->string);
+    Str_debug(&v.string);
     break;
   case V_NUM:
-    printf("%f", v->number);
+    printf("%f", v.number);
     break;
   case V_TRUE:
     printf("true");
@@ -46,21 +46,21 @@ static void print_value(Value *v) {
   }
 }
 
-Value builtin_println(Value *arg) {
+Value builtin_println(const Value arg) {
   print_value(arg);
   putc('\n', stdout);
   return NONE;
 }
 
-Value builtin_print(Value *arg) {
+Value builtin_print(const Value arg) {
   print_value(arg);
   return NONE;
 }
 
-Value builtin_len(Value *arg) {
-  if (arg->type == V_STRING) {
-    return (Value){.type = V_NUM, .number = arg->string.len};
-  } else if (arg->type == V_LIST) {
+Value builtin_len(const Value arg) {
+  if (arg.type == V_STRING) {
+    return (Value){.type = V_NUM, .number = arg.string.len};
+  } else if (arg.type == V_LIST) {
     TODO("builtin_len#arg->type == V_LIST not implemented")
   } else {
     fputs("builtin_len only strings and lists have a length", stderr);
