@@ -66,12 +66,10 @@ typedef unsigned short byte;
 
 typedef struct {
   size_t global_len;
-  size_t global_cap;
   // globals represents the global pool created by the bytecode compiler
   Value *globals;
 
   size_t bytecode_len;
-  size_t bytecode_cap;
   byte *bytecode;
 
   // current position in the bytecode

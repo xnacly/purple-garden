@@ -22,6 +22,10 @@
 #define BENCH 0
 #endif
 
+#ifndef MIN_MEM
+#define MIN_MEM 4 * 1024 * 1024
+#endif
+
 typedef struct {
   // options - int because getopt has no bool support
 
@@ -176,15 +180,18 @@ int main(int argc, char **argv) {
 
   Lexer l = Lexer_new(input);
 
-  Allocator parser_alloc = {
+  // this allocator stores both nodes, bytecode and the global pool of the vm,
+  // thus it has to life exactly as long as the vm does.
+  Allocator pipeline_allocator = {
       .init = bump_init,
       .request = bump_request,
       .destroy = bump_destroy,
       .reset = bump_reset,
       .stats = bump_stats,
   };
-  parser_alloc.ctx = parser_alloc.init(sizeof(Node) * input.len / 2);
-  Parser p = Parser_new(&l, &parser_alloc);
+  pipeline_allocator.ctx = pipeline_allocator.init(
+      sizeof(Node) * (input.len < MIN_MEM ? MIN_MEM : input.len));
+  Parser p = Parser_new(&l, &pipeline_allocator);
 
   Vm vm = cc(&p);
   BENCH_PUTS("cc::cc: Flattened AST to byte code");
@@ -202,29 +209,28 @@ int main(int argc, char **argv) {
 
 #if !BENCH
   if (a.memory_usage) {
-    Stats s = parser_alloc.stats(parser_alloc.ctx);
+    Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
     double percent = (s.current * 100) / (double)s.allocated;
-    printf("parsing: %.3f KB of %.3f KB used (%f%%)\n", s.current / 1024.0,
+    printf("%.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
-    // TODO: add compilation usage here
-    // TODO: add virtual usage here
   }
 #endif
 
 #if DEBUG
   puts("================= MEMORY =================");
-  Stats s = parser_alloc.stats(parser_alloc.ctx);
-  printf("%.3f KB of %.3f KB used\n", s.current / 1024.0, s.allocated / 1024.0);
+  Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
+  double percent = (s.current * 100) / (double)s.allocated;
+  printf("%.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
+         s.allocated / 1024.0, percent);
 #endif
-
-  parser_alloc.destroy(parser_alloc.ctx);
-  BENCH_PUTS("mem::Allocator::destroy: Deallocated AST memory space");
 
   int runtime_code = Vm_run(&vm);
   BENCH_PUTS("vm::Vm_run: Walked and executed byte code");
 
-  Vm_destroy(vm);
-  BENCH_PUTS("vm::Vm_destroy: Deallocated global pool and bytecode list");
+  pipeline_allocator.destroy(pipeline_allocator.ctx);
+  BENCH_PUTS("mem::Allocator::destroy: Deallocated AST memory space");
+  // Vm_destroy(vm);
+  // BENCH_PUTS("vm::Vm_destroy: Deallocated global pool and bytecode list");
   munmap(input.p, input.len);
 
   return runtime_code == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

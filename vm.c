@@ -127,8 +127,8 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_BUILTIN:
-      // TODO: more checks here if we would handle some builtins differently
-      // from just calling a function
+      // at this point all builtins are just syscalls into an array of
+      // function pointers
       vm->registers[0] = BUILTIN_MAP[arg](vm->registers[0]);
       break;
     default:
@@ -150,7 +150,4 @@ vm_end:
   return 1;
 }
 
-void Vm_destroy(Vm vm) {
-  free(vm.globals);
-  free(vm.bytecode);
-}
+void Vm_destroy(Vm vm) {}
