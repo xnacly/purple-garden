@@ -170,7 +170,7 @@ static void compile(Vm *vm, Ctx *ctx, Node *n) {
   }
 }
 
-Vm cc(Node *n) {
+Vm cc(Parser *p) {
   Vm vm = {.global_len = 0,
            .global_cap = INITIAL_GLOBAL_SIZE,
            .bytecode_len = 0,
@@ -182,13 +182,19 @@ Vm cc(Node *n) {
   vm.globals = malloc(sizeof(Value) * INITIAL_GLOBAL_SIZE);
   // specifically set size 1 to keep r0 the temporary register
   Ctx ctx = {.size = 1, .registers = {0}};
-
-  // we iterate over the children of n, since the parser stores all nodes of an
-  // input inside of a root node
-  for (size_t i = 0; i < n->children_length; i++) {
-    compile(&vm, &ctx, &n->children[i]);
+#if DEBUG
+  puts("================= TREE =================");
+#endif
+  while (p->cur.type != T_EOF) {
+    Node n = Parser_next(p);
+#if DEBUG
+    Node_debug(&n, 0);
+    puts("");
+#endif
+    if (n.type != N_UNKOWN) {
+      compile(&vm, &ctx, &n);
+    }
   }
-
   return vm;
 }
 

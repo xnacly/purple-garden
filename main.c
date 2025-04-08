@@ -109,9 +109,6 @@ Args Args_parse(int argc, char **argv) {
   // command handling
   if (a.version) {
     printf("purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
-#ifdef COMMIT_MSG
-    printf("with commit=`" COMMIT_MSG "`\n");
-#endif
     exit(EXIT_SUCCESS);
   } else if (a.help) {
     usage();
@@ -171,22 +168,14 @@ int main(int argc, char **argv) {
       .reset = bump_reset,
   };
 
-  parser_alloc.ctx = parser_alloc.init(sizeof(Node) * input.len * 6);
+  parser_alloc.ctx = parser_alloc.init(sizeof(Node) * input.len);
   // TODO: attach allocator to parser
   Parser p = Parser_new(&l, &parser_alloc);
 #if DEBUG
   puts("================= TOKS =================");
 #endif
-  Node ast = Parser_run(&p);
-  BENCH_PUTS("parser::Parser_run: Transformed source to AST");
 
-#if DEBUG
-  puts("================= TREE =================");
-  Node_debug(&ast, 0);
-  puts("");
-#endif
-
-  Vm vm = cc(&ast);
+  Vm vm = cc(&p);
 #if DEBUG
   puts("================= DASM =================");
   a.disassemble = 1;

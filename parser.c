@@ -167,22 +167,6 @@ void Node_debug(Node *n, size_t depth) {
 }
 #endif
 
-Node Parser_run(Parser *p) {
-  Node root = (Node){.type = N_LIST,
-                     .children_length = 0,
-                     .children_cap = NODE_INITIAL_CHILD_SIZE * 4};
-  root.children =
-      p->alloc->request(p->alloc->ctx, sizeof(Node) * root.children_cap);
-
-  while (p->cur.type != T_EOF) {
-    Node n = parse(p);
-    if (n.type == N_UNKOWN) {
-      break;
-    }
-    Node_add_child(p->alloc, &root, n);
-  }
-
-  return root;
-}
+Node Parser_next(Parser *p) { return parse(p); }
 
 #undef SINGLE_NODE

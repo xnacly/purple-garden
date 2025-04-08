@@ -48,9 +48,8 @@ typedef struct Node {
 } Node;
 
 Parser Parser_new(Lexer *lexer, Allocator *alloc);
-// Returns the root of a file as a Node of type N_LIST, contains all nodes in
-// said file as children
-Node Parser_run(Parser *p);
+// Returns the next top level Node
+Node Parser_next(Parser *p);
 void Node_debug(Node *n, size_t depth);
 
 #endif

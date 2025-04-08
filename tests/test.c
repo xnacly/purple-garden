@@ -22,10 +22,8 @@ typedef struct {
 
 #define CASE(in, ex, r0)                                                       \
   {                                                                            \
-      .input = STRING(#in "\0"),                                               \
-      .expected = ex,                                                          \
-      .expected_size = sizeof(ex) / sizeof(byte),                              \
-      .expected_r0 = r0,                                                       \
+    .input = STRING(#in "\0"), .expected = ex,                                 \
+    .expected_size = sizeof(ex) / sizeof(byte), .expected_r0 = r0,             \
   }
 
 int main() {
@@ -80,8 +78,7 @@ int main() {
 
     parser_alloc.ctx = parser_alloc.init(sizeof(Node) * c.input.len * 6);
     Parser p = Parser_new(&l, &parser_alloc);
-    Node ast = Parser_run(&p);
-    Vm raw = cc(&ast);
+    Vm raw = cc(&p);
     Vm *vm = &raw;
 
     bool error = false;
