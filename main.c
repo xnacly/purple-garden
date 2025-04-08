@@ -187,16 +187,20 @@ int main(int argc, char **argv) {
   Parser p = Parser_new(&l, &parser_alloc);
 
   Vm vm = cc(&p);
+  BENCH_PUTS("cc::cc: Flattened AST to byte code");
 #if DEBUG
   puts("================= DISASM =================");
   a.disassemble = 1;
 #endif
+
+#if !BENCH
   if (a.disassemble) {
     disassemble(&vm);
     puts("");
   }
-  BENCH_PUTS("cc::cc: Flattened AST to byte code");
+#endif
 
+#if !BENCH
   if (a.memory_usage) {
     Stats s = parser_alloc.stats(parser_alloc.ctx);
     double percent = (s.current * 100) / (double)s.allocated;
@@ -205,6 +209,7 @@ int main(int argc, char **argv) {
     // TODO: add compilation usage here
     // TODO: add virtual usage here
   }
+#endif
 
 #if DEBUG
   puts("================= MEMORY =================");
