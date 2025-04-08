@@ -13,7 +13,7 @@ performance
 ## Local Setup
 
 > purple garden is a C project, so you will need a C compiler toolchain and
-> make if you want to following along
+> make if you want to following along or you could use the flake :)
 
 ```sh
 $ git clone git@github.com:xNaCly/purple-garden.git
@@ -22,6 +22,9 @@ $ git clone https://github.com/xNaCly/purple-garden.git
 ```
 
 ```sh
+# flake flake, if you want
+nix develop
+
 # by default purple_garden fills $PG to be ./examples/hello-world.garden
 make
 
