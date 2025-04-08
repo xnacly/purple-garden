@@ -24,7 +24,6 @@ FLAGS := -std=c23 \
 		-Wno-aggregate-return
 
 COMMIT := $(shell git rev-parse --short HEAD)
-COMMIT_MSG := $(shell git log -1 --pretty=format:%B)
 FILES := $(shell find . -maxdepth 1 -name "*.c" ! -name "main.c")
 TEST_FILES := $(shell find ./tests -name "*.c")
 PG := ./examples/hello-world.garden

@@ -3,6 +3,11 @@
 
 #include "common.h"
 
+typedef struct {
+  size_t current;
+  size_t allocated;
+} Stats;
+
 // Allocator defines an interface abstracting different allocators, so the
 // runtime of the virtual machine does not need to know about implementation
 // details, can be used like this:
@@ -13,6 +18,9 @@ typedef struct {
   // position, cap, etc) here
   void *ctx;
 
+  // Allocator::stats is expected to return the current statistics of the
+  // underlying allocator
+  Stats (*stats)(void *ctx);
   // Allocator::init does initial house keeping and returns the value for
   // Allocator::ctx, this MUST outlive any callsite
   void *(*init)(size_t size);
@@ -35,5 +43,6 @@ void *bump_init(size_t size);
 void *bump_request(void *ctx, size_t size);
 void bump_destroy(void *ctx);
 void bump_reset(void *ctx);
+Stats bump_stats(void *ctx);
 
 #endif

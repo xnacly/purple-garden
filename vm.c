@@ -56,13 +56,13 @@ void Value_debug(Value *v) {
 
 int Vm_run(Vm *vm) {
 #if DEBUG
-  puts("================= GLOB =================");
+  puts("================= GLOBAL =================");
   for (size_t i = 0; i < vm->global_len; i++) {
     printf("VM[glob%zu/%zu] ", i + 1, vm->global_len);
     Value_debug(&vm->globals[i]);
     puts("");
   }
-  puts("================= VMOP =================");
+  puts("================= VM OPS =================");
 #endif
   while (vm->pc < vm->bytecode_len) {
     VM_OP op = vm->bytecode[vm->pc];
@@ -137,7 +137,7 @@ int Vm_run(Vm *vm) {
     vm->pc += 2;
   }
 #if DEBUG
-  puts("================= REGS =================");
+  puts("================= REGIST =================");
 #define REGISTER_PRINT_COUNT 3
   for (size_t i = 0; i < REGISTER_PRINT_COUNT; i++) {
     printf("VM[r%zu]: ", i);

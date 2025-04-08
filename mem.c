@@ -25,9 +25,6 @@ void *bump_request(void *ctx, size_t size) {
 
 void bump_destroy(void *ctx) {
   BumpCtx *b_ctx = (BumpCtx *)ctx;
-#if DEBUG
-  printf("bump: used %zub from %zub\n", b_ctx->pos, b_ctx->len);
-#endif
   free(b_ctx->block);
   free(ctx);
 }
@@ -35,4 +32,9 @@ void bump_destroy(void *ctx) {
 void bump_reset(void *ctx) {
   BumpCtx *b_ctx = (BumpCtx *)ctx;
   b_ctx->pos = 0;
+}
+
+Stats bump_stats(void *ctx) {
+  BumpCtx *b_ctx = (BumpCtx *)ctx;
+  return (Stats){.allocated = b_ctx->len, .current = b_ctx->pos};
 }

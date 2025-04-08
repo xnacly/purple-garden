@@ -24,10 +24,6 @@ Parser Parser_new(Lexer *lexer, Allocator *alloc) {
 
 static void advance(Parser *p) {
   if (p->cur.type != T_EOF) {
-#if DEBUG
-    Token_debug(&p->cur);
-    puts("");
-#endif
     p->cur = Lexer_next(p->lexer);
   }
 }

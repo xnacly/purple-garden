@@ -31,6 +31,8 @@ typedef struct {
   int aot_functions;
   // readable bytecode representation with labels, globals and comments
   int disassemble;
+  // display the memory usage of parsing, compilation and the virtual machine
+  int memory_usage;
 
   // options in which we exit after toggle
   int version;
@@ -55,6 +57,9 @@ static const cli_option options[] = {
     {"block-allocator", 'b',
      "use block allocator instead of garbage collection"},
     {"aot-functions", 'a', "compile all functions to machine code"},
+    {"memory-usage", 'm',
+     "display the memory usage of parsing, compilation and the virtual "
+     "machine"},
 };
 
 void usage() {
@@ -79,20 +84,30 @@ Args Args_parse(int argc, char **argv) {
       {options[2].name_long, no_argument, &a.disassemble, 1},
       {options[3].name_long, no_argument, &a.block_allocator, 1},
       {options[4].name_long, no_argument, &a.aot_functions, 1},
+      {options[5].name_long, no_argument, &a.memory_usage, 1},
       {0, 0, 0, 0},
   };
 
   int opt;
-  while ((opt = getopt_long(argc, argv, "dvh", long_options, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "vhdbam", long_options, NULL)) != -1) {
     switch (opt) {
-    case 'd':
-      a.disassemble = 1;
+    case 'v':
+      a.version = 1;
       break;
     case 'h':
       a.help = 1;
       break;
-    case 'v':
-      a.version = 1;
+    case 'd':
+      a.disassemble = 1;
+      break;
+    case 'b':
+      a.block_allocator = 1;
+      break;
+    case 'a':
+      a.aot_functions = 1;
+      break;
+    case 'm':
+      a.memory_usage = 1;
       break;
     case 0:
       break;
@@ -154,7 +169,7 @@ int main(int argc, char **argv) {
 
   Str input = IO_read_file_to_string(a.filename);
 #if DEBUG
-  puts("================== IN ==================");
+  puts("================== INPUTS ==================");
   Str_debug(&input);
 #endif
   BENCH_PUTS("io::IO_read_file_to_string: mmaped input");
@@ -166,18 +181,14 @@ int main(int argc, char **argv) {
       .request = bump_request,
       .destroy = bump_destroy,
       .reset = bump_reset,
+      .stats = bump_stats,
   };
-
-  parser_alloc.ctx = parser_alloc.init(sizeof(Node) * input.len);
-  // TODO: attach allocator to parser
+  parser_alloc.ctx = parser_alloc.init(sizeof(Node) * input.len / 2);
   Parser p = Parser_new(&l, &parser_alloc);
-#if DEBUG
-  puts("================= TOKS =================");
-#endif
 
   Vm vm = cc(&p);
 #if DEBUG
-  puts("================= DASM =================");
+  puts("================= DISASM =================");
   a.disassemble = 1;
 #endif
   if (a.disassemble) {
@@ -185,6 +196,21 @@ int main(int argc, char **argv) {
     puts("");
   }
   BENCH_PUTS("cc::cc: Flattened AST to byte code");
+
+  if (a.memory_usage) {
+    Stats s = parser_alloc.stats(parser_alloc.ctx);
+    double percent = (s.current * 100) / (double)s.allocated;
+    printf("parsing: %.3f KB of %.3f KB used (%f%%)\n", s.current / 1024.0,
+           s.allocated / 1024.0, percent);
+    // TODO: add compilation usage here
+    // TODO: add virtual usage here
+  }
+
+#if DEBUG
+  puts("================= MEMORY =================");
+  Stats s = parser_alloc.stats(parser_alloc.ctx);
+  printf("%.3f KB of %.3f KB used\n", s.current / 1024.0, s.allocated / 1024.0);
+#endif
 
   parser_alloc.destroy(parser_alloc.ctx);
   BENCH_PUTS("mem::Allocator::destroy: Deallocated AST memory space");

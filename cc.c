@@ -183,7 +183,7 @@ Vm cc(Parser *p) {
   // specifically set size 1 to keep r0 the temporary register
   Ctx ctx = {.size = 1, .registers = {0}};
 #if DEBUG
-  puts("================= TREE =================");
+  puts("=================  AST  =================");
 #endif
   while (p->cur.type != T_EOF) {
     Node n = Parser_next(p);
