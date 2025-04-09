@@ -22,10 +22,6 @@
 #define BENCH 0
 #endif
 
-#ifndef MIN_MEM
-#define MIN_MEM 4 * 1024 * 1024
-#endif
-
 typedef struct {
   // options - int because getopt has no bool support
 

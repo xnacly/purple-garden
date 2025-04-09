@@ -10,6 +10,10 @@
 #define DEBUG 0
 #endif
 
+#ifndef MIN_MEM
+#define MIN_MEM 4 * 1024 * 1024
+#endif
+
 #define ASSERT(EXP, context)                                                   \
   if (!(EXP)) {                                                                \
     fprintf(stderr,                                                            \
