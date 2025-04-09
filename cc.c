@@ -13,11 +13,10 @@
 
 #define BC(CODE, ARG)                                                          \
   vm->bytecode[vm->bytecode_len++] = CODE;                                     \
-  vm->bytecode[vm->bytecode_len++] = ARG;
-
-// ASSERT(vm->bytecode_len <= BYTECODE_SIZE,
-//        "cc: out of bytecode space, what the fuck are you doing (there is "
-//        "space for 4MB of bytecode)");
+  vm->bytecode[vm->bytecode_len++] = ARG;                                      \
+  ASSERT(vm->bytecode_len <= BYTECODE_SIZE,                                    \
+         "cc: out of bytecode space, what the fuck are you doing (there is "   \
+         "space for 4MB of bytecode)");
 
 // TODO: all of these require extensive benchmarking
 #define GROW_FACTOR 2
@@ -72,21 +71,21 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     // interning only for Strings
     if (n->token.type == T_STRING) {
       size_t hash = Str_hash(&n->token.string);
-      size_t cached_index = ctx->global_hash_buckets[hash % 1024];
+      size_t cached_index = ctx->global_hash_buckets[hash];
       size_t expected_index = vm->global_len;
       if (cached_index) {
         expected_index = cached_index - 1;
       } else {
-        ctx->global_hash_buckets[hash % 1024] = vm->global_len + 1;
+        ctx->global_hash_buckets[hash] = vm->global_len + 1;
         vm->globals[vm->global_len++] = token_to_value(n->token);
       }
       BC(OP_LOAD, expected_index)
     } else {
+      vm->globals[vm->global_len] = token_to_value(n->token);
       ASSERT(vm->global_len <= GLOBAL_SIZE,
              "cc: out of global space, what the fuck are you doing (there is "
              "space "
              "for 256k globals)");
-      vm->globals[vm->global_len] = token_to_value(n->token);
       BC(OP_LOAD, vm->global_len++)
     }
     break;
