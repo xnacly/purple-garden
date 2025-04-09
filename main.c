@@ -178,8 +178,6 @@ int main(int argc, char **argv) {
 #endif
   BENCH_PUTS("io::IO_read_file_to_string: mmaped input");
 
-  Lexer l = Lexer_new(input);
-
   // this allocator stores both nodes, bytecode and the global pool of the vm,
   // thus it has to life exactly as long as the vm does.
   Allocator pipeline_allocator = {
@@ -191,8 +189,9 @@ int main(int argc, char **argv) {
   };
   pipeline_allocator.ctx = pipeline_allocator.init(
       sizeof(Node) * (input.len < MIN_MEM ? MIN_MEM : input.len));
+  BENCH_PUTS("mem::init: Allocated memory block for parsing and compilation");
+  Lexer l = Lexer_new(input);
   Parser p = Parser_new(&l, &pipeline_allocator);
-
   Vm vm = cc(&p);
   BENCH_PUTS("cc::cc: Flattened AST to byte code");
 #if DEBUG
