@@ -5,24 +5,22 @@
 #include "cc.h"
 #include "common.h"
 #include "lexer.h"
-#include "map.h"
+#include "lookup.h"
 #include "mem.h"
 #include "parser.h"
+#include "strings.h"
 #include "vm.h"
 
 #define BC(CODE, ARG)                                                          \
-  {                                                                            \
-    vm->bytecode[vm->bytecode_len++] = CODE;                                   \
-    vm->bytecode[vm->bytecode_len++] = ARG;                                    \
-    ASSERT(vm->bytecode_len <= BYTECODE_SIZE,                                  \
-           "cc: out of bytecode space, what the fuck are you doing (there is " \
-           "space for 4MB of bytecode)");                                      \
-  }
+  vm->bytecode[vm->bytecode_len++] = CODE;                                     \
+  vm->bytecode[vm->bytecode_len++] = ARG;
+
+// ASSERT(vm->bytecode_len <= BYTECODE_SIZE,
+//        "cc: out of bytecode space, what the fuck are you doing (there is "
+//        "space for 4MB of bytecode)");
 
 // TODO: all of these require extensive benchmarking
 #define GROW_FACTOR 2
-#define BYTECODE_SIZE (4 * 1024 * 1024)
-#define GLOBAL_SIZE (256 * 1024)
 
 // token_to_value converts primitive tokens, such as strings, boolean and
 // numbers to runtime values
@@ -38,6 +36,7 @@ static Value token_to_value(Token t) {
   case T_NUMBER:
     return (Value){.type = V_NUM, .number = t.number};
   default:
+    // TODO: think about lists and options
 #if DEBUG
     Token_debug(&t);
 #endif
@@ -47,21 +46,9 @@ static Value token_to_value(Token t) {
   }
 }
 
-static size_t pool_new(Allocator *alloc, Vm *vm, Value v) {
-  // TODO: number interning via custom HashMap for Values, store each global
-  // only once - less allocations and less logic
-  ASSERT(vm->global_len <= GLOBAL_SIZE,
-         "cc: out of global space, what the fuck are you doing (there is space "
-         "for 256k globals)");
-
-  size_t index = vm->global_len;
-  vm->globals[index] = v;
-  vm->global_len++;
-  return index;
-}
-
 typedef struct {
   bool registers[REGISTERS + 1];
+  size_t global_hash_buckets[GLOBAL_SIZE];
   size_t size;
   // TODO: keep track of function definition bytecode index here
 } Ctx;
@@ -82,7 +69,26 @@ static void Ctx_free_register(Ctx *ctx, size_t i) {
 static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   switch (n->type) {
   case N_ATOM: {
-    BC(OP_LOAD, pool_new(alloc, vm, token_to_value(n->token)))
+    // interning only for Strings
+    if (n->token.type == T_STRING) {
+      size_t hash = Str_hash(&n->token.string);
+      size_t cached_index = ctx->global_hash_buckets[hash % 1024];
+      size_t expected_index = vm->global_len;
+      if (cached_index) {
+        expected_index = cached_index - 1;
+      } else {
+        ctx->global_hash_buckets[hash % 1024] = vm->global_len + 1;
+        vm->globals[vm->global_len++] = token_to_value(n->token);
+      }
+      BC(OP_LOAD, expected_index)
+    } else {
+      ASSERT(vm->global_len <= GLOBAL_SIZE,
+             "cc: out of global space, what the fuck are you doing (there is "
+             "space "
+             "for 256k globals)");
+      vm->globals[vm->global_len] = token_to_value(n->token);
+      BC(OP_LOAD, vm->global_len++)
+    }
     break;
   }
   case N_IDENT: {
@@ -129,22 +135,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     break;
   }
   case N_BUILTIN: {
-    Str *s = &n->token.string;
-    Builtin b = BUILTIN_UNKOWN;
-    if (Str_eq(&STRING("println"), s)) {
-      b = BUILTIN_PRINTLN;
-    } else if (Str_eq(&STRING("print"), s)) {
-      b = BUILTIN_PRINT;
-    } else if (Str_eq(&STRING("len"), s)) {
-      b = BUILTIN_LEN;
-      ASSERT(n->children_length == 1,
-             "@len can only be called with a singular argument")
-    } else {
-      printf("Unknown builtin: `@");
-      Str_debug(s);
-      puts("`");
-      exit(1);
-    }
+    Str s = n->token.string;
+
+    BUILTIN_LOOKUP
 
     // single argument at r0
     if (n->children_length == 1) {
@@ -172,7 +165,7 @@ Vm cc(Parser *p) {
       p->alloc->request(p->alloc->ctx, (sizeof(byte) * BYTECODE_SIZE));
   vm.globals = p->alloc->request(p->alloc->ctx, (sizeof(Value) * GLOBAL_SIZE));
   // specifically set size 1 to keep r0 the temporary register
-  Ctx ctx = {.size = 1, .registers = {0}};
+  Ctx ctx = {.size = 1, .registers = {0}, .global_hash_buckets = {0}};
 #if DEBUG
   puts("=================  AST  =================");
 #endif
@@ -198,7 +191,7 @@ void disassemble(const Vm *vm) {
     for (size_t i = 0; i < vm->global_len; i++) {
       Value *v = &vm->globals[i];
       Value_debug(v);
-      printf("; {idx=%zu,hash=%zu}\n\t", i, Value_hash(v, 1024));
+      printf("; {idx=%zu}\n\t", i);
     }
   }
   puts("\nentry: ");

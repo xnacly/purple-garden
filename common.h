@@ -14,6 +14,9 @@
 #define MIN_MEM 4 * 1024 * 1024
 #endif
 
+#define BYTECODE_SIZE (4 * 1024 * 1024)
+#define GLOBAL_SIZE 4 * 1024
+
 #define ASSERT(EXP, context)                                                   \
   if (!(EXP)) {                                                                \
     fprintf(stderr,                                                            \
