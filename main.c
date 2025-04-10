@@ -34,6 +34,9 @@ typedef struct {
   // display the memory usage of parsing, compilation and the virtual machine
   int memory_usage;
 
+  // verbose logging
+  int verbose;
+
   // options in which we exit after toggle
   int version;
   int help;
@@ -60,6 +63,7 @@ static const cli_option options[] = {
     {"memory-usage", 'm',
      "display the memory usage of parsing, compilation and the virtual "
      "machine"},
+    {"verbose", 'V', "verbose logging"},
 };
 
 void usage() {
@@ -85,14 +89,18 @@ Args Args_parse(int argc, char **argv) {
       {options[3].name_long, no_argument, &a.block_allocator, 1},
       {options[4].name_long, no_argument, &a.aot_functions, 1},
       {options[5].name_long, no_argument, &a.memory_usage, 1},
+      {options[6].name_long, no_argument, &a.verbose, 1},
       {0, 0, 0, 0},
   };
 
   int opt;
-  while ((opt = getopt_long(argc, argv, "vhdbam", long_options, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "vhdbamV", long_options, NULL)) != -1) {
     switch (opt) {
     case 'v':
       a.version = 1;
+      break;
+    case 'V':
+      a.verbose = 1;
       break;
     case 'h':
       a.help = 1;
@@ -183,11 +191,21 @@ int main(int argc, char **argv) {
       .reset = bump_reset,
       .stats = bump_stats,
   };
-  pipeline_allocator.ctx = pipeline_allocator.init(
-      sizeof(Node) * (input.len < MIN_MEM ? MIN_MEM : input.len));
+  double file_size_or_min = (input.len < MIN_MEM ? MIN_MEM : input.len);
+  size_t min_size = (
+                        // size for globals
+                        (file_size_or_min * sizeof(Value))
+                        // size for bytecode
+                        + file_size_or_min
+                        // size for nodes
+                        + (file_size_or_min * sizeof(Node))) *
+                    // keep a buffer by increasing the size by 40%
+                    1.4;
+  pipeline_allocator.ctx = pipeline_allocator.init(min_size);
   BENCH_PUTS("mem::init: Allocated memory block for parsing and compilation");
   Lexer l = Lexer_new(input);
   Parser p = Parser_new(&l, &pipeline_allocator);
+
   Vm vm = cc(&p);
   BENCH_PUTS("cc::cc: Flattened AST to byte code");
 #if DEBUG
