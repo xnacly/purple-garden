@@ -2,7 +2,6 @@
 #include "common.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #define SINGLE_TOK(t) ((Token){.type = t})
 
@@ -80,14 +79,9 @@ static Token num(Lexer *l) {
                                     cc == 'e' || cc == '+' || cc == '-');
        l->pos++, cc = cur(l))
     ;
-  Str s = Str_slice(&l->input, start, l->pos);
-  char buf[s.len + 1];
-  memcpy(buf, s.p, s.len);
-  buf[s.len] = '\0';
   char *endptr;
-  double d = strtod(buf, &endptr);
-
-  ASSERT(endptr != buf, "lex: Failed to parse number")
+  double d = strtod(l->input.p + start, &endptr);
+  ASSERT(endptr != (l->input.p + start), "lex: Failed to parse number")
 
   skip_whitespace(l);
   return (Token){
