@@ -92,7 +92,7 @@ static Token num(Lexer *l) {
 
 static Token string(Lexer *l) {
   // skip "
-  advance(l);
+  l->pos++;
   size_t start = l->pos;
   for (char cc = cur(l); cc > 0 && cc != '"'; l->pos++, cc = cur(l)) {
     // escape handling
@@ -112,7 +112,7 @@ static Token string(Lexer *l) {
 
   Str s = Str_slice(&l->input, start, l->pos);
   // skip "
-  advance(l);
+  l->pos++;
   return (Token){
       .type = T_STRING,
       .string = s,
@@ -153,41 +153,40 @@ Token Lexer_next(Lexer *l) {
   case ';':
     for (cc = cur(l); cc > 0 && cc != '\n'; l->pos++, cc = cur(l)) {
     }
-    advance(l);
     return Lexer_next(l);
   case '@': {
-    advance(l);
+    l->pos++;
     // not an ident after @, this is shit
     if (!is_ident(cur(l))) {
       return SINGLE_TOK(T_EOF);
     }
-    auto a = ident(l);
+    Token a = ident(l);
     a.type = T_BUILTIN;
     return a;
   }
   case '+':
-    advance(l);
+    l->pos++;
     return SINGLE_TOK(T_PLUS);
   case '-':
-    advance(l);
+    l->pos++;
     return SINGLE_TOK(T_MINUS);
   case '*':
-    advance(l);
+    l->pos++;
     return SINGLE_TOK(T_ASTERISKS);
   case '/':
-    advance(l);
+    l->pos++;
     return SINGLE_TOK(T_SLASH);
   case '"':
     return string(l);
   case '(':
-    advance(l);
+    l->pos++;
     return SINGLE_TOK(T_DELIMITOR_LEFT);
   case ')':
-    advance(l);
+    l->pos++;
     return SINGLE_TOK(T_DELIMITOR_RIGHT);
     // EOF case
   case -1:
-    advance(l);
+    l->pos++;
     return SINGLE_TOK(T_EOF);
   default:
     if ((cc >= '0' && cc <= '9') || cc == '.') {
@@ -199,7 +198,7 @@ Token Lexer_next(Lexer *l) {
     Str rest = Str_slice(&l->input, l->pos, l->input.len);
     Str_debug(&rest);
     putc('\n', stdout);
-    advance(l);
+    l->pos++;
     return SINGLE_TOK(T_EOF);
   }
 }
