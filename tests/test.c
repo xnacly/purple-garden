@@ -37,6 +37,10 @@ int main() {
     // CASE("escaped string\"", BC(OP_LOAD, 0), VAL(.type = V_STRING, .string
     // = STRING("escaped string\""))),
     CASE(true false, BC(OP_LOAD, 1, OP_LOAD, 0), VAL(.type = V_FALSE)),
+    // checking if boolean interning works
+    CASE(true false true false,
+         BC(OP_LOAD, 1, OP_LOAD, 0, OP_LOAD, 1, OP_LOAD, 0),
+         VAL(.type = V_FALSE)),
     CASE("hello", BC(OP_LOAD, 2),
          VAL(.type = V_STRING, .string = STRING("hello"))),
 
@@ -57,6 +61,11 @@ int main() {
 
     // builtins:
     CASE((@len "hello"), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
+         VAL(.type = V_NUM, .number = 5)),
+    // checking if string interning works
+    CASE((@len "hello")(@len "hello"),
+         BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN, OP_LOAD, 2, OP_BUILTIN,
+            BUILTIN_LEN),
          VAL(.type = V_NUM, .number = 5)),
     CASE((@len ""), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
          VAL(.type = V_NUM, .number = 0)),
