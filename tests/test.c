@@ -22,24 +22,22 @@ typedef struct {
 
 #define CASE(in, ex, r0)                                                       \
   {                                                                            \
-      .input = STRING(#in "\0"),                                               \
-      .expected = ex,                                                          \
-      .expected_size = sizeof(ex) / sizeof(byte),                              \
-      .expected_r0 = r0,                                                       \
+    .input = STRING(#in "\0"), .expected = ex,                                 \
+    .expected_size = sizeof(ex) / sizeof(byte), .expected_r0 = r0,             \
   }
 
 int main() {
   Case cases[] = {
     // atoms:
-    CASE(3.1415, BC(OP_LOAD, 0), VAL(.type = V_NUM, .number = 3.1415)),
-    CASE(.1415, BC(OP_LOAD, 0), VAL(.type = V_NUM, .number = 0.1415)),
-    CASE("string", BC(OP_LOAD, 0),
+    CASE(3.1415, BC(OP_LOAD, 2), VAL(.type = V_NUM, .number = 3.1415)),
+    CASE(.1415, BC(OP_LOAD, 2), VAL(.type = V_NUM, .number = 0.1415)),
+    CASE("string", BC(OP_LOAD, 2),
          VAL(.type = V_STRING, .string = STRING("string"))),
     // TODO: this is for future me to implement
     // CASE("escaped string\"", BC(OP_LOAD, 0), VAL(.type = V_STRING, .string
     // = STRING("escaped string\""))),
-    CASE(true false, BC(OP_LOAD, 0, OP_LOAD, 1), VAL(.type = V_FALSE)),
-    CASE("hello", BC(OP_LOAD, 0),
+    CASE(true false, BC(OP_LOAD, 1, OP_LOAD, 0), VAL(.type = V_FALSE)),
+    CASE("hello", BC(OP_LOAD, 2),
          VAL(.type = V_STRING, .string = STRING("hello"))),
 
     // INFO: infinity comparison case:
@@ -48,21 +46,21 @@ int main() {
     //      VAL(.type = V_NUM, .number = 1.7976931348623157E+309)),
 
     // math:
-    CASE((+2 2), BC(OP_LOAD, 0, OP_STORE, 1, OP_LOAD, 1, OP_ADD, 1),
+    CASE((+2 2), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_ADD, 1),
          VAL(.type = V_NUM, .number = 4)),
-    CASE((-5 3), BC(OP_LOAD, 0, OP_STORE, 1, OP_LOAD, 1, OP_SUB, 1),
+    CASE((-5 3), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_SUB, 1),
          VAL(.type = V_NUM, .number = 2)),
-    CASE((*3 4), BC(OP_LOAD, 0, OP_STORE, 1, OP_LOAD, 1, OP_MUL, 1),
+    CASE((*3 4), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_MUL, 1),
          VAL(.type = V_NUM, .number = 12)),
-    CASE((/ 6 2), BC(OP_LOAD, 0, OP_STORE, 1, OP_LOAD, 1, OP_DIV, 1),
+    CASE((/ 6 2), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_DIV, 1),
          VAL(.type = V_NUM, .number = 3)),
 
     // builtins:
-    CASE((@len "hello"), BC(OP_LOAD, 0, OP_BUILTIN, BUILTIN_LEN),
+    CASE((@len "hello"), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
          VAL(.type = V_NUM, .number = 5)),
-    CASE((@len ""), BC(OP_LOAD, 0, OP_BUILTIN, BUILTIN_LEN),
+    CASE((@len ""), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
          VAL(.type = V_NUM, .number = 0)),
-    CASE((@len "a"), BC(OP_LOAD, 0, OP_BUILTIN, BUILTIN_LEN),
+    CASE((@len "a"), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
          VAL(.type = V_NUM, .number = 1)),
   };
   size_t passed = 0;
