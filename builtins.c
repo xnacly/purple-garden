@@ -29,7 +29,7 @@ static void print_value(const Value v) {
     Str_debug(&v.string);
     break;
   case V_NUM:
-    printf("%f", v.number);
+    printf("%.f", v.number);
     break;
   case V_TRUE:
     printf("true");
@@ -46,25 +46,39 @@ static void print_value(const Value v) {
   }
 }
 
-Value builtin_println(const Value arg) {
-  print_value(arg);
+Value builtin_println(const Value *arg, size_t count) {
+  if (count == 1) {
+    print_value(arg[0]);
+  } else {
+    for (size_t i = 0; i < count; i++) {
+      print_value(arg[i]);
+      putc(' ', stdout);
+    }
+  }
   putc('\n', stdout);
   return NONE;
 }
 
-Value builtin_print(const Value arg) {
-  print_value(arg);
+Value builtin_print(const Value *arg, size_t count) {
+  if (count == 1) {
+    print_value(arg[0]);
+  } else {
+    for (size_t i = 0; i < count; i++) {
+      print_value(arg[i]);
+    }
+  }
   return NONE;
 }
 
-Value builtin_len(const Value arg) {
-  if (arg.type == V_STRING) {
-    return (Value){.type = V_NUM, .number = arg.string.len};
-  } else if (arg.type == V_LIST) {
+Value builtin_len(const Value *arg, size_t count) {
+  ASSERT(count == 1, "len only works for a singular argument")
+  Value a = arg[0];
+  if (a.type == V_STRING) {
+    return (Value){.type = V_NUM, .number = a.string.len};
+  } else if (a.type == V_LIST) {
     TODO("builtin_len#arg->type == V_LIST not implemented")
   } else {
     fputs("builtin_len only strings and lists have a length", stderr);
-    // TODO: think about failing here
     exit(EXIT_FAILURE);
   }
   return NONE;

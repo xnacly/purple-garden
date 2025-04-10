@@ -3,7 +3,9 @@
 
 void *bump_init(size_t size) {
   void *b = malloc(size);
+  ASSERT(b != NULL, "failed to allocate allocator buffer");
   BumpCtx *ctx = malloc(sizeof(BumpCtx));
+  ASSERT(ctx != NULL, "failed to allocate allocator context");
   ctx->len = size;
   ctx->pos = 0;
   ctx->block = b;

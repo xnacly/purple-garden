@@ -28,6 +28,7 @@ FLAGS := -std=c23 \
 		-Wno-aggregate-return
 
 COMMIT := $(shell git rev-parse --short HEAD)
+COMMIT_MSG := $(shell git log -1 --pretty=format:'hash=`%H`\nauthor=`%an`\nauthor_email=`%ae`\ncommit_date=`%cd`\ncommit_msg=`%s`')
 FILES := $(shell find . -maxdepth 1 -name "*.c" ! -name "main.c")
 TEST_FILES := $(shell find ./tests -name "*.c")
 PG := ./examples/hello-world.garden
@@ -39,11 +40,11 @@ run:
 	./purple_garden_debug $(PG)
 
 release:
-	$(CC) -g3 $(FLAGS) -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"' $(FILES) ./main.c -o purple_garden
+	$(CC) $(FLAGS) -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"' $(FILES) ./main.c -o purple_garden
 
 bench:
-	$(CC) $(FLAGS) -DCOMMIT='"BENCH"' -DBENCH=1 $(FILES) ./main.c -o bench
-	./bench $(PG)
+	$(CC) $(FLAGS) -DCOMMIT='"BENCH"' $(FILES) ./main.c -o bench
+	./bench -V $(PG)
 
 test:
 	$(CC) $(FLAGS) -g3 -fsanitize=address,undefined -DDEBUG=0 $(TEST_FILES) $(FILES) -o ./tests/test

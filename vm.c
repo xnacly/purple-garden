@@ -6,6 +6,7 @@
 Str OP_MAP[] = {[OP_LOAD] = STRING("LOAD"),      [OP_STORE] = STRING("STORE"),
                 [OP_ADD] = STRING("ADD"),        [OP_SUB] = STRING("SUB"),
                 [OP_MUL] = STRING("MUL"),        [OP_DIV] = STRING("DIV"),
+                [OP_ARGS] = STRING("ARGS"),      [OP_OFFSET] = STRING("OFFSET"),
                 [OP_BUILTIN] = STRING("BUILTIN")};
 
 Str VALUE_TYPE_MAP[] = {
@@ -126,10 +127,30 @@ int Vm_run(Vm *vm) {
           (Value){.type = V_NUM, .number = b->number / a->number};
       break;
     }
+    case OP_ARGS:
+      vm->arg_count = arg;
+      break;
+    case OP_OFFSET:
+      vm->register_offset = arg;
+      break;
     case OP_BUILTIN:
-      // at this point all builtins are just syscalls into an array of
-      // function pointers
-      vm->registers[0] = BUILTIN_MAP[arg](vm->registers[0]);
+      // at this point all builtins are just syscalls into an array of function
+      // pointers
+      if (!vm->arg_count) {
+        vm->registers[0] = BUILTIN_MAP[arg](NULL, 0);
+      } else if (vm->arg_count == 1) {
+        vm->registers[0] =
+            BUILTIN_MAP[arg](&vm->registers[vm->register_offset], 1);
+      } else {
+        Value v[vm->arg_count];
+        for (size_t i = 0; i < vm->arg_count; i++) {
+          v[vm->arg_count - 1 - i] = vm->registers[vm->register_offset + i];
+        }
+        vm->registers[0] = BUILTIN_MAP[arg](v, vm->arg_count);
+      }
+
+      vm->arg_count = 1;
+      vm->register_offset = 0;
       break;
     default:
       VM_ERR("Unimplemented instruction")

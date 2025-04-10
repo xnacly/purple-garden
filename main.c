@@ -14,13 +14,26 @@
 
 #define CTX "pre"
 #define VERSION "alpha"
+
 #ifndef COMMIT
-#define COMMIT "(no commit)"
+#define COMMIT "(no commit associated)"
 #endif
 
-#ifndef BENCH
-#define BENCH 0
+#ifndef COMMIT_MSG
+#define COMMIT_MSG "(no commit message associated)"
 #endif
+
+#define VERBOSE_PUTS(msg)                                                      \
+  do {                                                                         \
+    if (UNLIKELY(a.verbose)) {                                                 \
+      gettimeofday(&end_time, NULL);                                           \
+      double elapsed_time =                                                    \
+          (end_time.tv_sec - start_time.tv_sec) +                              \
+          (end_time.tv_usec - start_time.tv_usec) / 1000000.0;                 \
+      printf("[%10.4fms] %s\n", elapsed_time * 1000, msg);                     \
+      gettimeofday(&start_time, NULL);                                         \
+    }                                                                          \
+  } while (0)
 
 typedef struct {
   // options - int because getopt has no bool support
@@ -130,10 +143,13 @@ Args Args_parse(int argc, char **argv) {
   }
 
   // command handling
-  if (a.version) {
+  if (UNLIKELY(a.version)) {
     printf("purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
+    if (UNLIKELY(a.verbose)) {
+      puts(COMMIT_MSG);
+    }
     exit(EXIT_SUCCESS);
-  } else if (a.help) {
+  } else if (UNLIKELY(a.help)) {
     usage();
     size_t len = sizeof(options) / sizeof(cli_option);
     printf("\noptions:\n");
@@ -144,7 +160,7 @@ Args Args_parse(int argc, char **argv) {
     exit(EXIT_SUCCESS);
   }
 
-  if (a.filename == NULL) {
+  if (UNLIKELY(a.filename == NULL)) {
     usage();
     fprintf(stderr, "error: Missing a file? try `-h/--help`\n");
     exit(EXIT_FAILURE);
@@ -153,34 +169,20 @@ Args Args_parse(int argc, char **argv) {
   return a;
 }
 
-#if BENCH
-#define BENCH_PUTS(msg)                                                        \
-  {                                                                            \
-    gettimeofday(&end_time, NULL);                                             \
-    double elapsed_time = (end_time.tv_sec - start_time.tv_sec) +              \
-                          (end_time.tv_usec - start_time.tv_usec) / 1000000.0; \
-    printf("[%10.4fms] %s\n", elapsed_time * 1000, msg);                       \
-    gettimeofday(&start_time, NULL);                                           \
-  }
-#else
-#define BENCH_PUTS(msg)
-#endif
-
 int main(int argc, char **argv) {
-#if BENCH
   struct timeval start_time, end_time;
-  gettimeofday(&start_time, NULL);
-#endif
   Args a = Args_parse(argc, argv);
-
-  BENCH_PUTS("main::Args_parse: Parsed arguments");
+  if (UNLIKELY(a.verbose)) {
+    gettimeofday(&start_time, NULL);
+  }
+  VERBOSE_PUTS("main::Args_parse: Parsed arguments");
 
   Str input = IO_read_file_to_string(a.filename);
+  VERBOSE_PUTS("io::IO_read_file_to_string: mmaped input");
 #if DEBUG
   puts("================== INPUTS ==================");
   Str_debug(&input);
 #endif
-  BENCH_PUTS("io::IO_read_file_to_string: mmaped input");
 
   // this allocator stores both nodes, bytecode and the global pool of the vm,
   // thus it has to life exactly as long as the vm does.
@@ -191,60 +193,57 @@ int main(int argc, char **argv) {
       .reset = bump_reset,
       .stats = bump_stats,
   };
-  double file_size_or_min = (input.len < MIN_MEM ? MIN_MEM : input.len);
+  size_t file_size_or_min = (input.len < MIN_MEM ? MIN_MEM : input.len);
   size_t min_size = (
-                        // size for globals
-                        (file_size_or_min * sizeof(Value))
-                        // size for bytecode
-                        + file_size_or_min
-                        // size for nodes
-                        + (file_size_or_min * sizeof(Node))) *
-                    // keep a buffer by increasing the size by 40%
-                    1.4;
+      // size for globals
+      (file_size_or_min * sizeof(Value))
+      // size for bytecode
+      + file_size_or_min
+      // size for nodes
+      + (file_size_or_min * sizeof(Node)));
   pipeline_allocator.ctx = pipeline_allocator.init(min_size);
-  BENCH_PUTS("mem::init: Allocated memory block for parsing and compilation");
+  VERBOSE_PUTS("mem::init: Allocated memory block for parsing and compilation");
   Lexer l = Lexer_new(input);
   Parser p = Parser_new(&l, &pipeline_allocator);
 
   Vm vm = cc(&p);
-  BENCH_PUTS("cc::cc: Flattened AST to byte code");
+  VERBOSE_PUTS("cc::cc: Flattened AST to byte code");
 #if DEBUG
   puts("================= DISASM =================");
   a.disassemble = 1;
 #endif
 
-#if !BENCH
-  if (a.disassemble) {
+  if (UNLIKELY(a.disassemble)) {
     disassemble(&vm);
     puts("");
   }
-#endif
 
-#if !BENCH
-  if (a.memory_usage) {
+  if (UNLIKELY(a.memory_usage)) {
     Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
     double percent = (s.current * 100) / (double)s.allocated;
     printf("%.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
   }
-#endif
 
 #if DEBUG
   puts("================= MEMORY =================");
   Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
   double percent = (s.current * 100) / (double)s.allocated;
-  printf("%.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
+  printf("%.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
          s.allocated / 1024.0, percent);
 #endif
 
   int runtime_code = Vm_run(&vm);
-  BENCH_PUTS("vm::Vm_run: Walked and executed byte code");
+  VERBOSE_PUTS("vm::Vm_run: executed byte code");
 
   pipeline_allocator.destroy(pipeline_allocator.ctx);
-  BENCH_PUTS("mem::Allocator::destroy: Deallocated AST memory space");
-  // Vm_destroy(vm);
-  // BENCH_PUTS("vm::Vm_destroy: Deallocated global pool and bytecode list");
+  VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");
+
+  Vm_destroy(vm);
+  VERBOSE_PUTS("vm::Vm_destroy: teared vm down");
+
   munmap(input.p, input.len);
+  VERBOSE_PUTS("munmap: unmapped input");
 
   return runtime_code == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

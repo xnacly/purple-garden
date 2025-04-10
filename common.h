@@ -17,8 +17,9 @@
 #define BYTECODE_SIZE (4 * 1024 * 1024)
 #define GLOBAL_SIZE 4 * 1024 * 1024
 
+#define UNLIKELY(condition) __builtin_expect(condition, 0)
 #define ASSERT(EXP, context)                                                   \
-  if (!(EXP)) {                                                                \
+  if (!(UNLIKELY(EXP))) {                                                      \
     fprintf(stderr,                                                            \
             "purple-garden: ASSERT(" #EXP "): `" context                       \
             "` failed at %s, line %d\n",                                       \

@@ -7,20 +7,15 @@
 #define REGISTERS 128
 
 #define DIS(op, arg)                                                           \
-  printf("VM[%06zu(%06zu)] ", vm->pc, vm->pc + 1);                             \
-  Str_debug(&OP_MAP[(op)]);                                                    \
-  printf("(%zu)\n", (arg));
-
-// A frame represents a Scope, a new scope is created upon entering a lambda -
-// since lambdas are pure there is no way to interact with the previous frame
-// inside of a lambda, the pointer is kept to allow the runtime to restore the
-// scope state to its state before entering the lambda
-typedef struct {
-  struct Frame *prev;
-  // returning out of scope, we need to jump back to the callsite of the
-  // function
-  size_t return_to_bytecode;
-} Frame;
+  printf("VM[%06zu][%-8.*s][%3zu]: ", vm->pc, (int)OP_MAP[(op)].len,           \
+         OP_MAP[(op)].p, arg);                                                 \
+  for (size_t i = 0; i < 3; i++) {                                             \
+    Value_debug(&vm->registers[i]);                                            \
+    if (i < 2) {                                                               \
+      printf(", ");                                                            \
+    }                                                                          \
+  }                                                                            \
+  printf("\n");
 
 typedef enum {
   // LOAD rANY
@@ -54,6 +49,16 @@ typedef enum {
   // divide Value at rANY with r0, store result in r0
   OP_DIV,
 
+  // OP_ARGS aANY
+  //
+  // defines how many arguments the following function or builtin call will
+  // accept
+  OP_ARGS,
+  // OP_OFFSET aANY
+  //
+  // defines where the arguments to a function or builtin call start
+  OP_OFFSET,
+
   // OP_BUILTIN bANY
   //
   // call the builtin its argument refers to, with the argument stored in r0
@@ -63,6 +68,17 @@ typedef enum {
 extern Str OP_MAP[];
 
 typedef unsigned short byte;
+
+// A frame represents a Scope, a new scope is created upon entering a lambda -
+// since lambdas are pure there is no way to interact with the previous frame
+// inside of a lambda, the pointer is kept to allow the runtime to restore the
+// scope state to its state before entering the lambda
+typedef struct {
+  struct Frame *prev;
+  // returning out of scope, we need to jump back to the callsite of the
+  // function
+  size_t return_to_bytecode;
+} Frame;
 
 typedef struct {
   size_t global_len;
@@ -74,10 +90,18 @@ typedef struct {
 
   // current position in the bytecode
   size_t pc;
+
   Value registers[REGISTERS + 1];
   // frame stores variables of the current scope, meta data and other required
   // data
   Frame frame;
+
+  // arg_count enables the vm to know how many registers it should pass to the
+  // function called via CALL or BUILTIN
+  size_t arg_count;
+  // register_offset enables the vm to know where to start with collecting
+  // values out of registers
+  size_t register_offset;
 } Vm;
 
 int Vm_run(Vm *vm);

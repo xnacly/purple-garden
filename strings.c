@@ -3,7 +3,7 @@
 #include <string.h>
 
 char Str_get(const Str *str, size_t index) {
-  if (index >= str->len - 1) {
+  if (str == NULL || index >= str->len - 1) {
     return -1;
   }
   return (unsigned int)str->p[index];
@@ -48,7 +48,8 @@ inline size_t Str_hash(const Str *str) {
     hash ^= str->p[i];
     hash *= FNV_PRIME;
   }
-  return hash % GLOBAL_SIZE;
+
+  return (hash >> str->len) % GLOBAL_SIZE;
 #undef FNV_OFFSET_BASIS
 #undef FNV_PRIME
 }

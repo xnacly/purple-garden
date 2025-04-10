@@ -144,17 +144,56 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   }
   case N_BUILTIN: {
     Str s = n->token.string;
-
     BUILTIN_LOOKUP
 
+    size_t registers[n->children_length > 1 ? n->children_length - 1 : 1];
     // single argument at r0
     if (n->children_length == 1) {
       compile(alloc, vm, ctx, &n->children[0]);
-      BC(OP_BUILTIN, b)
+      BC(OP_ARGS, 1);
     } else {
-      TODO("compile#N_BUILTIN for Node.children_length > 3 is not "
-           "implemented");
+      size_t offset = ctx->size - 1;
+      for (size_t i = 0; i < n->children_length; i++) {
+        compile(alloc, vm, ctx, &n->children[i]);
+        if (i < n->children_length - 1) {
+          size_t r = Ctx_allocate_register(ctx);
+          BC(OP_STORE, r)
+          registers[i] = r;
+        }
+      }
+
+      // TODO: pack ARGS and OFFSET into a ARGOFF bytecode via bytepacking,
+      // lower 4 bits for the former and higher 4 bits for the latter
+      //
+      // packing:
+      //
+      // uint8_t operand =
+      //    ((offset & 0x0F) << 4) | (n->children_length & 0x0F)
+      //
+      // unpacking:
+      //
+      // uint8_t num_args = operand & 0x0F;
+      // uint8_t offset = (operand >> 4) & 0x0F;
+      //
+      // This would result in limiting both length and offset to 0-15, should be
+      // fine, normally it would be 256, i could also use 3 bytes as the length
+      // and 5 bytes as the offset, resulting in not 16/16 limits but 8/32, that
+      // should be better, since no functions should really even have 8
+      // arguments, thats a smell.
+      BC(OP_ARGS, n->children_length);
+      BC(OP_OFFSET, offset);
     }
+
+    BC(OP_BUILTIN, b);
+    // only deallocate registers if we have any allocated
+    if (n->children_length > 1) {
+      // skip last because we dont store the last in a specific register, free
+      // others
+      for (int i = n->children_length - 2; i > -1; i--) {
+        Ctx_free_register(ctx, registers[i]);
+      }
+    }
+
     break;
   }
   default:
@@ -176,10 +215,8 @@ Vm cc(Parser *p) {
   vm.globals[1] = (Value){.type = V_TRUE};
   vm.global_len += 2;
   // specifically set size 1 to keep r0 the temporary register
-  Ctx ctx = {.size = 1,
-             .registers = {0},
-             .global_hash_buckets =
-                 p->alloc->request(p->alloc->ctx, GLOBAL_SIZE)};
+  Ctx ctx = {.size = 1, .registers = {0}};
+  ctx.global_hash_buckets = p->alloc->request(p->alloc->ctx, GLOBAL_SIZE);
 #if DEBUG
   puts("=================  AST  =================");
 #endif
