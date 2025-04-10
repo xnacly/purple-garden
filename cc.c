@@ -12,11 +12,11 @@
 #include "vm.h"
 
 #define BC(CODE, ARG)                                                          \
-  vm->bytecode[vm->bytecode_len++] = CODE;                                     \
-  vm->bytecode[vm->bytecode_len++] = ARG;                                      \
   ASSERT(vm->bytecode_len <= BYTECODE_SIZE,                                    \
          "cc: out of bytecode space, what the fuck are you doing (there is "   \
-         "space for 4MB of bytecode)");
+         "space for 4MB of bytecode)");                                        \
+  vm->bytecode[vm->bytecode_len++] = CODE;                                     \
+  vm->bytecode[vm->bytecode_len++] = ARG;
 
 // TODO: all of these require extensive benchmarking
 #define GROW_FACTOR 2
@@ -47,7 +47,7 @@ static Value token_to_value(Token t) {
 
 typedef struct {
   bool registers[REGISTERS + 1];
-  size_t global_hash_buckets[GLOBAL_SIZE];
+  size_t *global_hash_buckets;
   size_t size;
   // TODO: keep track of function definition bytecode index here
 } Ctx;
@@ -68,24 +68,33 @@ static void Ctx_free_register(Ctx *ctx, size_t i) {
 static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   switch (n->type) {
   case N_ATOM: {
-    // interning only for Strings
-    if (n->token.type == T_STRING) {
+    // interning logic, global pool 0 is the only instance for false in the
+    // runtime, 1 for true, strings get interned by their hashes
+    if (n->token.type == T_FALSE) {
+      BC(OP_LOAD, 0)
+    } else if (n->token.type == T_TRUE) {
+      BC(OP_LOAD, 1)
+    } else if (n->token.type == T_STRING) {
       size_t hash = Str_hash(&n->token.string);
       size_t cached_index = ctx->global_hash_buckets[hash];
       size_t expected_index = vm->global_len;
       if (cached_index) {
         expected_index = cached_index - 1;
       } else {
+        ASSERT(vm->global_len <= GLOBAL_SIZE,
+               "cc: out of global space, what the fuck are you doing (there is "
+               "space "
+               "for 256k globals)");
         ctx->global_hash_buckets[hash] = vm->global_len + 1;
         vm->globals[vm->global_len++] = token_to_value(n->token);
       }
       BC(OP_LOAD, expected_index)
     } else {
-      vm->globals[vm->global_len] = token_to_value(n->token);
       ASSERT(vm->global_len <= GLOBAL_SIZE,
              "cc: out of global space, what the fuck are you doing (there is "
              "space "
              "for 256k globals)");
+      vm->globals[vm->global_len] = token_to_value(n->token);
       BC(OP_LOAD, vm->global_len++)
     }
     break;
@@ -163,8 +172,14 @@ Vm cc(Parser *p) {
   vm.bytecode =
       p->alloc->request(p->alloc->ctx, (sizeof(byte) * BYTECODE_SIZE));
   vm.globals = p->alloc->request(p->alloc->ctx, (sizeof(Value) * GLOBAL_SIZE));
+  vm.globals[0] = (Value){.type = V_FALSE};
+  vm.globals[1] = (Value){.type = V_TRUE};
+  vm.global_len += 2;
   // specifically set size 1 to keep r0 the temporary register
-  Ctx ctx = {.size = 1, .registers = {0}, .global_hash_buckets = {0}};
+  Ctx ctx = {.size = 1,
+             .registers = {0},
+             .global_hash_buckets =
+                 p->alloc->request(p->alloc->ctx, GLOBAL_SIZE)};
 #if DEBUG
   puts("=================  AST  =================");
 #endif
