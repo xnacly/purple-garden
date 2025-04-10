@@ -13,6 +13,7 @@
         pkgs.gnumake
         pkgs.clang-tools
         pkgs.hyperfine
+        pkgs.valgrind
       ];
     };
   };
