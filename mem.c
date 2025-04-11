@@ -15,10 +15,8 @@ void *bump_init(size_t size) {
 void *bump_request(void *ctx, size_t size) {
   BumpCtx *b_ctx = (BumpCtx *)ctx;
   ASSERT(b_ctx->pos + size <= b_ctx->len, "OOM :(")
-
-  // INFO: maybe align this?
-  // size_t align = sizeof(void *);
-  // b_ctx->pos = (b_ctx->pos + align - 1) & ~(align - 1);
+  size_t align = sizeof(void *);
+  b_ctx->pos = (b_ctx->pos + align - 1) & ~(align - 1);
   void *block_entry = (char *)b_ctx->block + b_ctx->pos;
   b_ctx->pos += size;
   return block_entry;
