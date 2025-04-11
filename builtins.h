@@ -11,26 +11,12 @@ typedef enum {
 } Builtin;
 
 // each builtin must be defined in this header file both inside the enum below
-// (`BUILTIN_<name>`) and as a signature `Value builtin_<name>(const Value
-// args)`, it also needs to be added to BUILTIN_MAP via its enum value
+// (`BUILTIN_<name>`) and as a signature
+// `Value builtin_<name>(const Value args)`, it also needs to be added to
+// `BUILTIN_MAP` via its enum value
 // `{[BUILTIN_<name>] = &builtin_<name> }`. The argument Value is constant,
 // because all builtins are pure.
 typedef Value (*builtin_function)(const Value *args, size_t count);
 extern builtin_function BUILTIN_MAP[];
-
 extern Str BUILTIN_NAME_MAP[];
-
-// println outputs its argument to stdout, suffixed with a newline
-Value builtin_println(const Value *args, size_t count);
-
-// print outputs its argument to stdout
-Value builtin_print(const Value *args, size_t count);
-
-// len returns the value of its argument:
-//
-// - for V_STRING: string length
-// - for V_LIST: amount of children in list
-// - else 0
-Value builtin_len(const Value *args, size_t count);
-
 #endif

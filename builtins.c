@@ -1,18 +1,6 @@
 #include "builtins.h"
 #include "common.h"
 
-builtin_function BUILTIN_MAP[] = {
-    [BUILTIN_PRINTLN] = &builtin_println,
-    [BUILTIN_PRINT] = &builtin_print,
-    [BUILTIN_LEN] = &builtin_len,
-};
-
-Str BUILTIN_NAME_MAP[] = {
-    [BUILTIN_PRINTLN] = STRING("println"),
-    [BUILTIN_PRINT] = STRING("print"),
-    [BUILTIN_LEN] = STRING("len"),
-};
-
 static void print_value(const Value v) {
   switch (v.type) {
   case V_OPTION: {
@@ -46,6 +34,8 @@ static void print_value(const Value v) {
   }
 }
 
+// println outputs its argument to stdout, joined with ' ' and postfixed with a
+// newline
 Value builtin_println(const Value *arg, size_t count) {
   if (count == 1) {
     print_value(arg[0]);
@@ -59,6 +49,7 @@ Value builtin_println(const Value *arg, size_t count) {
   return NONE;
 }
 
+// print works the same as println but without the newline
 Value builtin_print(const Value *arg, size_t count) {
   if (count == 1) {
     print_value(arg[0]);
@@ -70,6 +61,11 @@ Value builtin_print(const Value *arg, size_t count) {
   return NONE;
 }
 
+// len returns the value of its argument:
+//
+// - for V_STRING: string length
+// - for V_LIST: amount of children in list
+// - else None
 Value builtin_len(const Value *arg, size_t count) {
   ASSERT(count == 1, "len only works for a singular argument")
   Value a = arg[0];
@@ -83,3 +79,15 @@ Value builtin_len(const Value *arg, size_t count) {
   }
   return NONE;
 }
+
+builtin_function BUILTIN_MAP[] = {
+    [BUILTIN_PRINTLN] = &builtin_println,
+    [BUILTIN_PRINT] = &builtin_print,
+    [BUILTIN_LEN] = &builtin_len,
+};
+
+Str BUILTIN_NAME_MAP[] = {
+    [BUILTIN_PRINTLN] = STRING("println"),
+    [BUILTIN_PRINT] = STRING("print"),
+    [BUILTIN_LEN] = STRING("len"),
+};
