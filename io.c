@@ -14,21 +14,17 @@ Str IO_read_file_to_string(char *path) {
   ASSERT(fd != -1, "failed to read input file")
 
   struct stat s;
-  fstat(fd, &s);
-  ASSERT(S_ISREG(s.st_mode), "Path is not a file")
+  ASSERT(fstat(fd, &s) == 0, "failed to fstat")
+  ASSERT(S_ISREG(s.st_mode), "path is not a file")
 
   long length = s.st_size;
   if (length < 0) {
     close(fd);
-    return STRING_EMPTY;
+    // TODO: should we really assert here?
+    ASSERT(length > 0, "input is empty")
   }
   char *buffer = mmap(NULL, length, PROT_READ, MAP_PRIVATE, fd, 0);
-  close(fd);
-
-  if (buffer == MAP_FAILED) {
-    return STRING_EMPTY;
-  }
-
-  close(fd);
+  ASSERT(close(fd) == 0, "failed to close file");
+  ASSERT(buffer != MAP_FAILED, "failed to mmap input")
   return (Str){.len = length, .p = buffer};
 }
