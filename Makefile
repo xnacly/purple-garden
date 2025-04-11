@@ -1,9 +1,4 @@
 FLAGS := -std=c23 \
-        -O3 \
-		-flto \
-		-fno-semantic-interposition \
-		-fno-asynchronous-unwind-tables \
-		-march=native \
         -Wall \
         -Wextra \
         -Werror \
@@ -26,6 +21,11 @@ FLAGS := -std=c23 \
 		-Wno-unused-parameter \
 		-Wno-unused-function \
 		-Wno-aggregate-return
+RELEASE_FLAGS := -O3 \
+		-flto \
+		-fno-semantic-interposition \
+		-fno-asynchronous-unwind-tables \
+		-march=native 
 
 COMMIT := $(shell git rev-parse --short HEAD)
 COMMIT_MSG := $(shell git log -1 --pretty=format:'hash=`%H`\nauthor=`%an`\nauthor_email=`%ae`\ncommit_date=`%cd`\ncommit_msg=`%s`')
@@ -40,14 +40,14 @@ run:
 	./purple_garden_debug $(PG)
 
 verbose:
-	$(CC) -g3 $(FLAGS) -fsanitize=address,undefined $(FILES) ./main.c -o purple_garden_verbose
+	$(CC) -g3 $(FLAGS) $(RELEASE_FLAGS) $(FILES) ./main.c -o purple_garden_verbose
 	./purple_garden_verbose -V $(PG)
 
 release:
-	$(CC) $(FLAGS) -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"' $(FILES) ./main.c -o purple_garden
+	$(CC) -g3 $(FLAGS) $(RELEASE_FLAGS) -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"' $(FILES) ./main.c -o purple_garden
 
 bench:
-	$(CC) $(FLAGS) -DCOMMIT='"BENCH"' $(FILES) ./main.c -o bench
+	$(CC) $(FLAGS) $(RELEASE_FLAGS) -DCOMMIT='"BENCH"' $(FILES) ./main.c -o bench
 	./bench -V $(PG)
 
 test:
