@@ -35,9 +35,7 @@ static Value token_to_value(Token t) {
     return (Value){.type = V_NUM, .number = t.number};
   default:
     // TODO: think about lists and options
-#if DEBUG
-    Token_debug(&t);
-#endif
+    ASSERT(0, "Unsupported value for this")
     return (Value){
         .type = V_UNDEFINED,
     };
@@ -71,12 +69,12 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   case N_ATOM: {
     // interning logic, global pool 0 is the only instance for false in the
     // runtime, 1 for true, strings get interned by their hashes
-    if (n->token.type == T_FALSE) {
+    if (n->token->type == T_FALSE) {
       BC(OP_LOAD, 0)
-    } else if (n->token.type == T_TRUE) {
+    } else if (n->token->type == T_TRUE) {
       BC(OP_LOAD, 1)
-    } else if (n->token.type == T_STRING) {
-      size_t hash = n->token.string.hash;
+    } else if (n->token->type == T_STRING) {
+      size_t hash = n->token->string.hash;
       size_t cached_index = ctx->global_hash_buckets[hash];
       size_t expected_index = vm->global_len;
       if (cached_index) {
@@ -87,7 +85,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
                "space "
                "for 256k globals)");
         ctx->global_hash_buckets[hash] = vm->global_len + 1;
-        vm->globals[vm->global_len++] = token_to_value(n->token);
+        vm->globals[vm->global_len++] = token_to_value(*n->token);
       }
       BC(OP_LOAD, expected_index)
     } else {
@@ -95,7 +93,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
              "cc: out of global space, what the fuck are you doing (there is "
              "space "
              "for 256k globals)");
-      vm->globals[vm->global_len] = token_to_value(n->token);
+      vm->globals[vm->global_len] = token_to_value(*n->token);
       BC(OP_LOAD, vm->global_len++)
     }
     break;
@@ -108,7 +106,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   }
   case N_OP: {
     byte op;
-    switch (n->token.type) {
+    switch (n->token->type) {
     case T_PLUS:
       op = OP_ADD;
       break;
@@ -140,12 +138,10 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       TODO("compile#N_LIST for Node.children_length > 3 is not implemented");
     }
     break;
-
-    break;
   }
   case N_BUILTIN: {
     Builtin b = BUILTIN_UNKOWN;
-    Str *s = &(n->token.string);
+    Str *s = &n->token->string;
     if (s->hash == hashes[BUILTIN_LEN]) {
       b = BUILTIN_LEN;
     } else if (s->hash == hashes[BUILTIN_PRINT]) {
@@ -211,7 +207,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   }
 }
 
-Vm cc(Parser *p) {
+Vm cc(Allocator *alloc, Node *nodes, size_t size) {
   hashes[BUILTIN_PRINTLN] = Str_hash(&STRING("println"));
   hashes[BUILTIN_PRINT] = Str_hash(&STRING("print"));
   hashes[BUILTIN_LEN] = Str_hash(&STRING("len"));
@@ -221,27 +217,18 @@ Vm cc(Parser *p) {
            .pc = 0,
            .bytecode = NULL,
            .globals = NULL};
-  vm.bytecode =
-      p->alloc->request(p->alloc->ctx, (sizeof(byte) * BYTECODE_SIZE));
-  vm.globals = p->alloc->request(p->alloc->ctx, (sizeof(Value) * GLOBAL_SIZE));
+  vm.bytecode = alloc->request(alloc->ctx, (sizeof(byte) * BYTECODE_SIZE));
+  vm.globals = alloc->request(alloc->ctx, (sizeof(Value) * GLOBAL_SIZE));
   vm.globals[0] = (Value){.type = V_FALSE};
   vm.globals[1] = (Value){.type = V_TRUE};
   vm.global_len += 2;
   // specifically set size 1 to keep r0 the temporary register
   Ctx ctx = {.size = 1, .registers = {0}};
-  ctx.global_hash_buckets = p->alloc->request(p->alloc->ctx, GLOBAL_SIZE);
-#if DEBUG
-  puts("=================  AST  =================");
-#endif
-  while (p->cur.type != T_EOF) {
-    Node n = Parser_next(p);
-#if DEBUG
-    Node_debug(&n, 0);
-    puts("");
-#endif
-    if (n.type != N_UNKOWN) {
-      compile(p->alloc, &vm, &ctx, &n);
-    }
+  ctx.global_hash_buckets = alloc->request(alloc->ctx, GLOBAL_SIZE);
+
+  for (size_t i = 0; i < size; i++) {
+    Node n = nodes[i];
+    compile(alloc, &vm, &ctx, &n);
   }
   return vm;
 }

@@ -5,9 +5,12 @@
 #include "mem.h"
 
 typedef struct {
-  Lexer *lexer;
   Allocator *alloc;
-  Token cur;
+  Token *tokens;
+  size_t token_len;
+  size_t pos;
+  Token *cur;
+  bool err;
 } Parser;
 
 typedef enum {
@@ -32,7 +35,7 @@ typedef struct Node {
   NodeType type;
   // N_ATOM values and the N_FUNCTION name are stored in the Token struct - this
   // reduces copies
-  Token token;
+  Token *token;
   // params of a lambda, length encoded in Node.param_length
   struct Node *params;
   // either children of a list or body of lambda, length encoded in
@@ -47,7 +50,7 @@ typedef struct Node {
   size_t children_cap;
 } Node;
 
-Parser Parser_new(Lexer *lexer, Allocator *alloc);
+Parser Parser_new(Allocator *alloc, Token *t);
 // Returns the next top level Node
 Node Parser_next(Parser *p);
 void Node_debug(Node *n, size_t depth);

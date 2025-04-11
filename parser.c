@@ -1,41 +1,47 @@
 #include "parser.h"
 #include "common.h"
 #include "lexer.h"
+#include "strings.h"
 #include <stdlib.h>
 
 #define NODE_CAP_GROW 1.75
-#define NODE_INITIAL_CHILD_SIZE 8
+#define NODE_INITIAL_CHILD_SIZE 2
 
 #define SINGLE_NODE(p, TYPE)                                                   \
-  Token t = p->cur;                                                            \
+  Token *t = p->cur;                                                           \
   advance(p);                                                                  \
   return (Node){                                                               \
       .type = TYPE,                                                            \
       .token = t,                                                              \
   };
 
-Parser Parser_new(Lexer *lexer, Allocator *alloc) {
+Parser Parser_new(Allocator *alloc, Token *t) {
   return (Parser){
-      .lexer = lexer,
       .alloc = alloc,
-      .cur = Lexer_next(lexer),
+      .tokens = t,
+      .pos = 0,
+      .cur = &t[0],
+      .err = false,
   };
 }
 
 static void advance(Parser *p) {
-  if (p->cur.type != T_EOF) {
-    p->cur = Lexer_next(p->lexer);
+  if (p->cur->type != T_EOF) {
+    p->pos++;
+    p->cur = &p->tokens[p->pos];
   }
 }
 
 static void consume(Parser *p, TokenType tt) {
-  if (p->cur.type != tt) {
+  // TODO: benchmark this
+  if (UNLIKELY(p->cur->type != tt)) {
     printf("purple-garden: Unexpected token, wanted: ");
     Str_debug(&TOKEN_TYPE_MAP[tt]);
     printf(", got: ");
-    Str_debug(&TOKEN_TYPE_MAP[p->cur.type]);
+    Str_debug(&TOKEN_TYPE_MAP[p->cur->type]);
     putc('\n', stdout);
-    exit(1);
+    p->err = true;
+    return;
   }
   advance(p);
 }
@@ -62,12 +68,12 @@ static void Node_add_child(Allocator *alloc, Node *n, Node child) {
 }
 
 static Node parse(Parser *p) {
-  switch (p->cur.type) {
+  switch (p->cur->type) {
   case T_DELIMITOR_LEFT: {
     Node n = (Node){.type = N_LIST, .children_length = 0, .children_cap = 0};
     consume(p, T_DELIMITOR_LEFT);
-    while (p->cur.type != T_EOF && p->cur.type != T_DELIMITOR_RIGHT) {
-      switch (p->cur.type) {
+    while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
+      switch (p->cur->type) {
       case T_IDENT:
         TODO("FUNCTION CALL")
       case T_BUILTIN:
@@ -138,7 +144,7 @@ void Node_debug(Node *n, size_t depth) {
   case N_FUNCTION:
   case N_OP:
   case N_BUILTIN:
-    Token_debug(&n->token);
+    Token_debug(n->token);
     break;
   default:
     break;

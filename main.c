@@ -183,6 +183,8 @@ int main(int argc, char **argv) {
 #if DEBUG
   puts("================== INPUTS ==================");
   Str_debug(&input);
+  a.disassemble = 1;
+  a.memory_usage = 1;
 #endif
 
   // this allocator stores both nodes, bytecode and the global pool of the vm,
@@ -196,23 +198,75 @@ int main(int argc, char **argv) {
   };
   size_t file_size_or_min = (input.len < MIN_MEM ? MIN_MEM : input.len);
   size_t min_size = (
-      // size for globals
-      (file_size_or_min * sizeof(Value))
-      // size for bytecode
-      + file_size_or_min
-      // size for nodes
-      + (file_size_or_min * sizeof(Node)));
+                        // size for globals
+                        (file_size_or_min * sizeof(Value))
+                        // size for bytecode
+                        + file_size_or_min
+                        // size for nodes
+                        + (file_size_or_min * sizeof(Node))) *
+                    2;
+
   pipeline_allocator.ctx = pipeline_allocator.init(min_size);
   VERBOSE_PUTS("mem::init: Allocated memory block of size=%zuB", min_size);
   Lexer l = Lexer_new(input);
-  Parser p = Parser_new(&l, &pipeline_allocator);
+  Token *tokens = pipeline_allocator.request(pipeline_allocator.ctx,
+                                             file_size_or_min * sizeof(Token));
+  size_t token_count = 0;
+#if DEBUG
+  puts("================== TOKENS ==================");
+#endif
 
-  Vm vm = cc(&p);
+  while (1) {
+    Token t = Lexer_next(&l);
+#if DEBUG
+    Token_debug(&t);
+    puts("");
+#endif
+    tokens[token_count] = t;
+    token_count++;
+    if (t.type == T_EOF) {
+      break;
+    }
+  }
+  VERBOSE_PUTS("lexer::Lexer_next lexed tokens count=%zu", token_count);
+  if (UNLIKELY(a.memory_usage)) {
+    Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
+    double percent = (s.current * 100) / (double)s.allocated;
+    printf("lex: %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
+           s.allocated / 1024.0, percent);
+  }
+  Parser p = Parser_new(&pipeline_allocator, tokens);
+  Node *nodes = pipeline_allocator.request(pipeline_allocator.ctx,
+                                           file_size_or_min * sizeof(Node) / 4);
+#if DEBUG
+  puts("================== ASTREE ==================");
+#endif
+  size_t node_count = 0;
+  while (1) {
+    Node n = Parser_next(&p);
+    if (n.type == N_UNKOWN) {
+      break;
+    }
+#if DEBUG
+    Node_debug(&n, 0);
+    puts("");
+#endif
+    nodes[node_count] = n;
+    node_count++;
+  }
+  VERBOSE_PUTS("parser::Parser_next created AST with node_count=%zu",
+               token_count);
+  if (UNLIKELY(a.memory_usage)) {
+    Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
+    double percent = (s.current * 100) / (double)s.allocated;
+    printf("parse: %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
+           s.allocated / 1024.0, percent);
+  }
+  Vm vm = cc(&pipeline_allocator, nodes, node_count);
   VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu",
                vm.bytecode_len, vm.global_len);
 #if DEBUG
-  puts("================= DISASM =================");
-  a.disassemble = 1;
+  puts("================== DISASM ==================");
 #endif
 
   if (UNLIKELY(a.disassemble)) {
@@ -223,15 +277,15 @@ int main(int argc, char **argv) {
   if (UNLIKELY(a.memory_usage)) {
     Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
     double percent = (s.current * 100) / (double)s.allocated;
-    printf("%.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
+    printf("cc: %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
   }
 
 #if DEBUG
-  puts("================= MEMORY =================");
+  puts("================== MEMORY ==================");
   Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
   double percent = (s.current * 100) / (double)s.allocated;
-  printf("%.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
+  printf("total: %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
          s.allocated / 1024.0, percent);
 #endif
 

@@ -15,9 +15,8 @@ Str VALUE_TYPE_MAP[] = {
     [V_FALSE] = STRING("False"),    [V_LIST] = STRING("List"),
 };
 
-#define VM_ERR(msg)                                                            \
-  fprintf(stderr, "[VM] ERROR: `" msg "` failed at %s, line %d\n", __FILE__,   \
-          __LINE__);                                                           \
+#define VM_ERR(fmt, ...)                                                       \
+  fprintf(stderr, "[VM] ERROR: `" fmt "\n", ##__VA_ARGS__);                    \
   goto vm_end;
 
 void Value_debug(const Value *v) {
@@ -57,13 +56,13 @@ void Value_debug(const Value *v) {
 
 int Vm_run(Vm *vm) {
 #if DEBUG
-  puts("================= GLOBAL =================");
+  puts("================== GLOBAL ==================");
   for (size_t i = 0; i < vm->global_len; i++) {
     printf("VM[glob%zu/%zu] ", i + 1, vm->global_len);
     Value_debug(&vm->globals[i]);
     puts("");
   }
-  puts("================= VM OPS =================");
+  puts("================== VM OPS ==================");
 #endif
   while (vm->pc < vm->bytecode_len) {
     VM_OP op = vm->bytecode[vm->pc];
@@ -82,7 +81,9 @@ int Vm_run(Vm *vm) {
       Value *a = &vm->registers[0];
       Value *b = &vm->registers[arg];
       if (a->type != b->type) {
-        VM_ERR("VM[+] Incompatible type")
+        VM_ERR("VM[+] Incompatible types %.*s and %.*s",
+               (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
+               (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
       }
       switch (a->type) {
       case V_NUM:
@@ -93,7 +94,7 @@ int Vm_run(Vm *vm) {
       case V_STRING:
         VM_ERR("VM[+] Str concat not implemented yet")
       default:
-        VM_ERR("VM[+] Only strings and numbers can be concatinated")
+        VM_ERR("VM[+] Only strings and numbers can be concatenated")
       }
       break;
     }
@@ -101,7 +102,10 @@ int Vm_run(Vm *vm) {
       Value *a = &vm->registers[0];
       Value *b = &vm->registers[arg];
       if (a->type != V_NUM || b->type != V_NUM) {
-        VM_ERR("VM[-] Subtraction is only allowed for numbers")
+        VM_ERR("VM[-] Subtraction is only allowed for numbers, not for types "
+               "%.*s and %.*s",
+               (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
+               (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
       }
       vm->registers[0] =
           (Value){.type = V_NUM, .number = b->number - a->number};
@@ -111,7 +115,10 @@ int Vm_run(Vm *vm) {
       Value *a = &vm->registers[0];
       Value *b = &vm->registers[arg];
       if (a->type != V_NUM || b->type != V_NUM) {
-        VM_ERR("VM[*] Multiplication is only allowed for numbers")
+        VM_ERR("VM[*] Subtraction is only allowed for numbers, not for types "
+               "%.*s and %.*s",
+               (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
+               (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
       }
       vm->registers[0] =
           (Value){.type = V_NUM, .number = b->number * a->number};
@@ -121,7 +128,10 @@ int Vm_run(Vm *vm) {
       Value *a = &vm->registers[0];
       Value *b = &vm->registers[arg];
       if (a->type != V_NUM || b->type != V_NUM) {
-        VM_ERR("VM[/] Division is only allowed for numbers")
+        VM_ERR("VM[/] Subtraction is only allowed for numbers, not for types "
+               "%.*s and %.*s",
+               (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
+               (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
       }
       vm->registers[0] =
           (Value){.type = V_NUM, .number = b->number / a->number};
@@ -143,6 +153,9 @@ int Vm_run(Vm *vm) {
             BUILTIN_MAP[arg](&vm->registers[vm->register_offset], 1);
       } else {
         Value v[vm->arg_count];
+        // FIXME: this still doesnt work, see (@println "Hello" "World" (+1 1)),
+        // which prints `World Hello 2`, so either fix this here or in the
+        // compiler, or even in the parser
         for (size_t i = 0; i < vm->arg_count; i++) {
           v[vm->arg_count - 1 - i] = vm->registers[vm->register_offset + i];
         }
@@ -154,12 +167,13 @@ int Vm_run(Vm *vm) {
       break;
     }
     default:
-      VM_ERR("Unimplemented instruction")
+      VM_ERR("Unimplemented instruction %.*s", (int)OP_MAP[op].len,
+             OP_MAP[op].p)
     }
     vm->pc += 2;
   }
 #if DEBUG
-  puts("================= REGIST =================");
+  puts("==================  REGS  ==================");
 #define REGISTER_PRINT_COUNT 3
   for (size_t i = 0; i < REGISTER_PRINT_COUNT; i++) {
     printf("VM[r%zu]: ", i);

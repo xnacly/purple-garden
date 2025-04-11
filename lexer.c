@@ -21,6 +21,7 @@ Str TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
 
 #if DEBUG
 void Token_debug(Token *token) {
+  ASSERT(token->type <= T_EOF, "Out of bounds type, SHOULD NEVER HAPPEN");
   putc('[', stdout);
   Str_debug(&TOKEN_TYPE_MAP[token->type]);
   putc(']', stdout);
@@ -50,7 +51,9 @@ Lexer Lexer_new(Str input) {
   };
 }
 
-#define cur(L) L->input.p[l->pos]
+inline static char cur(Lexer *l) {
+  return (l->pos < l->input.len) ? l->input.p[l->pos] : 0;
+}
 
 inline static bool is_whitespace(char cc) {
   return cc == ' ' || cc == '\n' || cc == '\t';
@@ -63,18 +66,35 @@ inline static bool is_ident(char cc) {
 
 static Token num(Lexer *l) {
   size_t start = l->pos;
-  for (char cc = cur(l); cc > 0 && ((cc >= '0' && cc <= '9') || cc == '.' ||
-                                    cc == 'e' || cc == '+' || cc == '-');
-       l->pos++, cc = cur(l))
-    ;
-  char *endptr;
-  double d = strtod(l->input.p + start, &endptr);
-  ASSERT(endptr != (l->input.p + start), "lex: Failed to parse number")
+  char *input_start = l->input.p + start;
+  // PERF: using strtol if number is not a floating point number ~1.405243x
+  // faster (-28.84%)
+  bool is_double = false;
+  for (char cc = cur(l); cc > 0; l->pos++, cc = cur(l)) {
+    if (cc == '.' || cc == 'e') {
+      is_double = true;
+    } else if (!((cc >= '0' && cc <= '9') || cc == '+' || cc == '-')) {
+      break;
+    }
+  }
+
+  // limit how far strto* can go in the input, because no strings we use are 0
+  // terminated (strings::Str) and we know the length of the number
+  char *endptr = input_start + l->pos;
+
+  double d;
+  if (is_double) {
+    d = strtod(input_start, &endptr);
+  } else {
+    d = (double)strtol(input_start, &endptr, 10);
+  }
+  ASSERT(endptr != input_start, "lex: Failed to parse number")
   return (Token){
       .type = T_NUMBER,
       .number = d,
   };
 }
+
 static Token string(Lexer *l) {
   // skip "
   l->pos++;
