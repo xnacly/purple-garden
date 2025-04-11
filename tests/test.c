@@ -79,17 +79,48 @@ int main() {
   size_t len = sizeof(cases) / sizeof(Case);
   for (size_t i = 0; i < len; i++) {
     Case c = cases[i];
-    Lexer l = Lexer_new(c.input);
-    Allocator parser_alloc = {
+    Allocator alloc = {
         .init = bump_init,
         .request = bump_request,
         .destroy = bump_destroy,
         .reset = bump_reset,
     };
 
-    parser_alloc.ctx = parser_alloc.init(sizeof(Node) * MIN_MEM);
-    Parser p = Parser_new(&l, &parser_alloc);
-    Vm raw = cc(&p);
+    size_t min_size = (
+                          // size for globals
+                          (MIN_MEM * sizeof(Value))
+                          // size for bytecode
+                          + MIN_MEM
+                          // size for nodes
+                          + (MIN_MEM * sizeof(Node))) *
+                      2;
+
+    Lexer l = Lexer_new(c.input);
+    alloc.ctx = alloc.init(min_size);
+    Token *tokens = alloc.request(alloc.ctx, MIN_MEM * sizeof(Token));
+    size_t token_count = 0;
+
+    while (1) {
+      Token t = Lexer_next(&l);
+      tokens[token_count] = t;
+      token_count++;
+      if (t.type == T_EOF) {
+        break;
+      }
+    }
+
+    Parser p = Parser_new(&alloc, tokens);
+    Node *nodes = alloc.request(alloc.ctx, MIN_MEM * sizeof(Node) / 4);
+    size_t node_count = 0;
+    while (1) {
+      Node n = Parser_next(&p);
+      if (n.type == N_UNKOWN) {
+        break;
+      }
+      nodes[node_count] = n;
+      node_count++;
+    }
+    Vm raw = cc(&alloc, nodes, node_count);
     Vm *vm = &raw;
 
     bool error = false;
@@ -129,7 +160,7 @@ int main() {
       puts("");
       error = true;
     }
-    parser_alloc.destroy(parser_alloc.ctx);
+    alloc.destroy(alloc.ctx);
 
     if (error) {
       failed++;
