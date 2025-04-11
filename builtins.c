@@ -1,5 +1,6 @@
 #include "builtins.h"
 #include "common.h"
+#include "vm.h"
 
 static void print_value(const Value v) {
   switch (v.type) {
@@ -34,9 +35,8 @@ static void print_value(const Value v) {
   }
 }
 
-// println outputs its argument to stdout, joined with ' ' and postfixed with a
-// newline
-Value builtin_println(const Value *arg, size_t count) {
+// print works the same as println but without the newline
+Value builtin_print(const Value *arg, size_t count) {
   if (count == 1) {
     print_value(arg[0]);
   } else {
@@ -45,19 +45,14 @@ Value builtin_println(const Value *arg, size_t count) {
       putc(' ', stdout);
     }
   }
-  putc('\n', stdout);
   return NONE;
 }
 
-// print works the same as println but without the newline
-Value builtin_print(const Value *arg, size_t count) {
-  if (count == 1) {
-    print_value(arg[0]);
-  } else {
-    for (size_t i = 0; i < count; i++) {
-      print_value(arg[i]);
-    }
-  }
+// println outputs its argument to stdout, joined with ' ' and postfixed with a
+// newline
+Value builtin_println(const Value *arg, size_t count) {
+  builtin_print(arg, count);
+  putc('\n', stdout);
   return NONE;
 }
 
@@ -68,16 +63,20 @@ Value builtin_print(const Value *arg, size_t count) {
 // - else None
 Value builtin_len(const Value *arg, size_t count) {
   ASSERT(count == 1, "len only works for a singular argument")
-  Value a = arg[0];
-  if (a.type == V_STRING) {
-    return (Value){.type = V_NUM, .number = a.string.len};
-  } else if (a.type == V_LIST) {
-    TODO("builtin_len#arg->type == V_LIST not implemented")
-  } else {
-    fputs("builtin_len only strings and lists have a length", stderr);
-    exit(EXIT_FAILURE);
+  const Value *a = &arg[0];
+  if (a->type != V_STRING) {
+    Value_debug(a);
+    ASSERT(a->type == V_STRING, "len only works for strings")
   }
-  return NONE;
+  return (Value){.type = V_NUM, .number = a->string.len};
+  // if (a.type == V_STRING) {
+  // } else if (a.type == V_LIST) {
+  //   TODO("builtin_len#arg->type == V_LIST not implemented")
+  // } else {
+  //   fputs("builtin_len only strings and lists have a length", stderr);
+  //   exit(EXIT_FAILURE);
+  // }
+  // return NONE;
 }
 
 builtin_function BUILTIN_MAP[] = {
