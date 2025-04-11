@@ -39,6 +39,10 @@ run:
 	$(CC) -g3 $(FLAGS) -fsanitize=address,undefined -DDEBUG=1 $(FILES) ./main.c -o purple_garden_debug
 	./purple_garden_debug $(PG)
 
+verbose:
+	$(CC) -g3 $(FLAGS) -fsanitize=address,undefined $(FILES) ./main.c -o purple_garden_verbose
+	./purple_garden_verbose -V $(PG)
+
 release:
 	$(CC) $(FLAGS) -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"' $(FILES) ./main.c -o purple_garden
 
@@ -51,4 +55,4 @@ test:
 	./tests/test
 
 clean:
-	rm -fv ./purple_garden ./purple_garden_debug ./tests/test ./bench 
+	rm -fv ./purple_garden ./purple_garden_debug ./tests/test ./bench purple_garden_verbose

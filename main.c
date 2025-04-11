@@ -23,14 +23,14 @@
 #define COMMIT_MSG "(no commit message associated)"
 #endif
 
-#define VERBOSE_PUTS(msg)                                                      \
+#define VERBOSE_PUTS(fmt, ...)                                                 \
   do {                                                                         \
     if (UNLIKELY(a.verbose)) {                                                 \
       gettimeofday(&end_time, NULL);                                           \
       double elapsed_time =                                                    \
           (end_time.tv_sec - start_time.tv_sec) +                              \
           (end_time.tv_usec - start_time.tv_usec) / 1000000.0;                 \
-      printf("[%10.4fms] %s\n", elapsed_time * 1000, msg);                     \
+      printf("[%10.4fms] " fmt "\n", elapsed_time * 1000, ##__VA_ARGS__);      \
       gettimeofday(&start_time, NULL);                                         \
     }                                                                          \
   } while (0)
@@ -178,7 +178,8 @@ int main(int argc, char **argv) {
   VERBOSE_PUTS("main::Args_parse: Parsed arguments");
 
   Str input = IO_read_file_to_string(a.filename);
-  VERBOSE_PUTS("io::IO_read_file_to_string: mmaped input");
+  VERBOSE_PUTS("io::IO_read_file_to_string: mmaped input of size=%zuB",
+               input.len);
 #if DEBUG
   puts("================== INPUTS ==================");
   Str_debug(&input);
@@ -202,12 +203,13 @@ int main(int argc, char **argv) {
       // size for nodes
       + (file_size_or_min * sizeof(Node)));
   pipeline_allocator.ctx = pipeline_allocator.init(min_size);
-  VERBOSE_PUTS("mem::init: Allocated memory block for parsing and compilation");
+  VERBOSE_PUTS("mem::init: Allocated memory block of size=%zuB", min_size);
   Lexer l = Lexer_new(input);
   Parser p = Parser_new(&l, &pipeline_allocator);
 
   Vm vm = cc(&p);
-  VERBOSE_PUTS("cc::cc: Flattened AST to byte code");
+  VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu",
+               vm.bytecode_len, vm.global_len);
 #if DEBUG
   puts("================= DISASM =================");
   a.disassemble = 1;
