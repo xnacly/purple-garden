@@ -9,9 +9,16 @@
 typedef struct {
   // store the pointer to the underlying char
   const char *p;
+  // hash of the input, do not expect it to be filled, has to be computed via
+  // Str_hash or inline in the lexer
+  size_t hash;
   // length of the input without a zero terminator
   size_t len;
 } Str;
+
+#define FNV_OFFSET_BASIS 0x811c9dc5
+#define FNV_PRIME 0x01000193
+#define GLOBAL_MASK (GLOBAL_SIZE - 1)
 
 #define STRING(str) ((Str){.len = sizeof(str) - 1, .p = str})
 #define STRING_EMPTY ((Str){.len = 0, .p = NULL})

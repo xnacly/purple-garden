@@ -20,7 +20,7 @@ Str VALUE_TYPE_MAP[] = {
           __LINE__);                                                           \
   goto vm_end;
 
-void Value_debug(Value *v) {
+void Value_debug(const Value *v) {
   Str_debug(&VALUE_TYPE_MAP[v->type]);
   switch (v->type) {
   case V_OPTION: {
@@ -133,7 +133,7 @@ int Vm_run(Vm *vm) {
     case OP_OFFSET:
       vm->register_offset = arg;
       break;
-    case OP_BUILTIN:
+    case OP_BUILTIN: {
       // at this point all builtins are just syscalls into an array of function
       // pointers
       if (!vm->arg_count) {
@@ -152,6 +152,7 @@ int Vm_run(Vm *vm) {
       vm->arg_count = 1;
       vm->register_offset = 0;
       break;
+    }
     default:
       VM_ERR("Unimplemented instruction")
     }

@@ -106,6 +106,6 @@ typedef struct {
 
 int Vm_run(Vm *vm);
 void Vm_destroy(Vm vm);
-void Value_debug(Value *v);
+void Value_debug(const Value *v);
 
 #endif

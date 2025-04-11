@@ -5,18 +5,17 @@
 #include "cc.h"
 #include "common.h"
 #include "lexer.h"
-#include "lookup.h"
 #include "mem.h"
 #include "parser.h"
 #include "strings.h"
 #include "vm.h"
 
 #define BC(CODE, ARG)                                                          \
+  vm->bytecode[vm->bytecode_len++] = CODE;                                     \
+  vm->bytecode[vm->bytecode_len++] = ARG;                                      \
   ASSERT(vm->bytecode_len <= BYTECODE_SIZE,                                    \
          "cc: out of bytecode space, what the fuck are you doing (there is "   \
-         "space for 4MB of bytecode)");                                        \
-  vm->bytecode[vm->bytecode_len++] = CODE;                                     \
-  vm->bytecode[vm->bytecode_len++] = ARG;
+         "space for 4MB of bytecode)");
 
 // TODO: all of these require extensive benchmarking
 #define GROW_FACTOR 2
@@ -65,6 +64,8 @@ static void Ctx_free_register(Ctx *ctx, size_t i) {
   ctx->registers[i] = false;
 }
 
+static size_t hashes[4];
+
 static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   switch (n->type) {
   case N_ATOM: {
@@ -75,7 +76,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     } else if (n->token.type == T_TRUE) {
       BC(OP_LOAD, 1)
     } else if (n->token.type == T_STRING) {
-      size_t hash = Str_hash(&n->token.string);
+      size_t hash = n->token.string.hash;
       size_t cached_index = ctx->global_hash_buckets[hash];
       size_t expected_index = vm->global_len;
       if (cached_index) {
@@ -143,8 +144,16 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     break;
   }
   case N_BUILTIN: {
-    Str s = n->token.string;
-    BUILTIN_LOOKUP
+    Builtin b = BUILTIN_UNKOWN;
+    Str *s = &(n->token.string);
+    if (s->hash == hashes[BUILTIN_LEN]) {
+      b = BUILTIN_LEN;
+    } else if (s->hash == hashes[BUILTIN_PRINT]) {
+      b = BUILTIN_PRINT;
+    } else if (s->hash == hashes[BUILTIN_PRINTLN]) {
+      b = BUILTIN_PRINTLN;
+    }
+    ASSERT(b != BUILTIN_UNKOWN, "Unknown builtin at this point...")
 
     size_t registers[n->children_length > 1 ? n->children_length - 1 : 1];
     // single argument at r0
@@ -152,7 +161,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       compile(alloc, vm, ctx, &n->children[0]);
       BC(OP_ARGS, 1);
     } else {
-      size_t offset = ctx->size - 1;
+      int offset = ctx->size - 1;
       for (size_t i = 0; i < n->children_length; i++) {
         compile(alloc, vm, ctx, &n->children[i]);
         if (i < n->children_length - 1) {
@@ -180,8 +189,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       // and 5 bytes as the offset, resulting in not 16/16 limits but 8/32, that
       // should be better, since no functions should really even have 8
       // arguments, thats a smell.
-      BC(OP_ARGS, n->children_length);
       BC(OP_OFFSET, offset);
+      BC(OP_ARGS, n->children_length);
     }
 
     BC(OP_BUILTIN, b);
@@ -203,6 +212,10 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
 }
 
 Vm cc(Parser *p) {
+  hashes[BUILTIN_PRINTLN] = Str_hash(&STRING("println"));
+  hashes[BUILTIN_PRINT] = Str_hash(&STRING("print"));
+  hashes[BUILTIN_LEN] = Str_hash(&STRING("len"));
+
   Vm vm = {.global_len = 0,
            .bytecode_len = 0,
            .pc = 0,
@@ -242,7 +255,11 @@ void disassemble(const Vm *vm) {
     for (size_t i = 0; i < vm->global_len; i++) {
       Value *v = &vm->globals[i];
       Value_debug(v);
-      printf("; {idx=%zu}\n\t", i);
+      printf("; {idx=%zu", i);
+      if (v->type == V_STRING) {
+        printf(",hash=%zu", v->string.hash);
+      }
+      printf("}\n\t");
     }
   }
   puts("\nentry: ");

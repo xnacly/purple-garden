@@ -50,27 +50,15 @@ Lexer Lexer_new(Str input) {
   };
 }
 
-static bool at_end(Lexer *l) { return l->pos >= l->input.len; }
-static char cur(Lexer *l) { return Str_get(&l->input, l->pos); }
-static bool is_whitespace(char cc) {
+#define cur(L) L->input.p[l->pos]
+
+inline static bool is_whitespace(char cc) {
   return cc == ' ' || cc == '\n' || cc == '\t';
 }
-static bool is_ident(char cc) {
+
+inline static bool is_ident(char cc) {
   return (cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') || cc == '_' ||
          cc == '-';
-}
-
-static void advance(Lexer *l) {
-  do {
-    if (l->pos < l->input.len)
-      l->pos++;
-  } while (is_whitespace(cur(l)));
-}
-
-static void skip_whitespace(Lexer *l) {
-  while (is_whitespace(cur(l))) {
-    l->pos++;
-  }
 }
 
 static Token num(Lexer *l) {
@@ -82,25 +70,19 @@ static Token num(Lexer *l) {
   char *endptr;
   double d = strtod(l->input.p + start, &endptr);
   ASSERT(endptr != (l->input.p + start), "lex: Failed to parse number")
-
-  skip_whitespace(l);
   return (Token){
       .type = T_NUMBER,
       .number = d,
   };
 }
-
 static Token string(Lexer *l) {
   // skip "
   l->pos++;
   size_t start = l->pos;
+  size_t hash = FNV_OFFSET_BASIS;
   for (char cc = cur(l); cc > 0 && cc != '"'; l->pos++, cc = cur(l)) {
-    // escape handling
-    // if (cc == '\\') {
-    //   // manual advance to skip \ and next char, only one because the post
-    //   // section of the for loop already skips cc
-    //   l->pos += 1;
-    // }
+    hash ^= cc;
+    hash *= FNV_PRIME;
   }
 
   if (cur(l) != '"') {
@@ -110,7 +92,11 @@ static Token string(Lexer *l) {
     return SINGLE_TOK(T_EOF);
   }
 
-  Str s = Str_slice(&l->input, start, l->pos);
+  Str s = (Str){
+      .p = l->input.p + start,
+      .len = l->pos - start,
+      .hash = hash & GLOBAL_MASK,
+  };
   // skip "
   l->pos++;
   return (Token){
@@ -121,21 +107,32 @@ static Token string(Lexer *l) {
 
 static Token ident(Lexer *l) {
   size_t start = l->pos;
-  for (char cc = cur(l); cc > 0 && is_ident(cc); l->pos++, cc = cur(l))
-    ;
-  Str s = Str_slice(&l->input, start, l->pos);
-  skip_whitespace(l);
-  if (s.len == 4 &&
-      (s.p[0] == 't' && s.p[1] == 'r' && s.p[2] == 'u' && s.p[3] == 'e')) {
+  size_t hash = FNV_OFFSET_BASIS;
+  for (char cc = cur(l); cc > 0 && is_ident(cc); l->pos++, cc = cur(l)) {
+    hash ^= cc;
+    hash *= FNV_PRIME;
+  }
+
+  size_t len = l->pos - start;
+  if (len == 4 &&
+      (l->input.p[start + 0] == 't' && l->input.p[start + 1] == 'r' &&
+       l->input.p[start + 2] == 'u' && l->input.p[start + 3] == 'e')) {
     return (Token){
         .type = T_TRUE,
     };
-  } else if (s.len == 5 && (s.p[0] == 'f' && s.p[1] == 'a' && s.p[2] == 'l' &&
-                            s.p[3] == 's' && s.p[4] == 'e')) {
+  } else if (len == 5 &&
+             (l->input.p[start + 0] == 'f' && l->input.p[start + 1] == 'a' &&
+              l->input.p[start + 2] == 'l' && l->input.p[start + 3] == 's' &&
+              l->input.p[start + 4] == 'e')) {
     return (Token){
         .type = T_FALSE,
     };
   } else {
+    Str s = (Str){
+        .p = l->input.p + start,
+        .len = len,
+        .hash = hash & GLOBAL_MASK,
+    };
     return (Token){
         .type = T_IDENT,
         .string = s,
@@ -144,16 +141,14 @@ static Token ident(Lexer *l) {
 }
 
 Token Lexer_next(Lexer *l) {
-  skip_whitespace(l);
-  if (at_end(l)) {
+  while (is_whitespace(cur(l))) {
+    l->pos++;
+  }
+  if (l->pos >= l->input.len) {
     return SINGLE_TOK(T_EOF);
   }
   char cc = cur(l);
   switch (cc) {
-  case ';':
-    for (cc = cur(l); cc > 0 && cc != '\n'; l->pos++, cc = cur(l)) {
-    }
-    return Lexer_next(l);
   case '@': {
     l->pos++;
     // not an ident after @, this is shit
@@ -164,6 +159,10 @@ Token Lexer_next(Lexer *l) {
     a.type = T_BUILTIN;
     return a;
   }
+  case ';':
+    for (cc = cur(l); cc > 0 && cc != '\n'; l->pos++, cc = cur(l)) {
+    }
+    return Lexer_next(l);
   case '+':
     l->pos++;
     return SINGLE_TOK(T_PLUS);
@@ -185,7 +184,7 @@ Token Lexer_next(Lexer *l) {
     l->pos++;
     return SINGLE_TOK(T_DELIMITOR_RIGHT);
     // EOF case
-  case -1:
+  case 0:
     l->pos++;
     return SINGLE_TOK(T_EOF);
   default:
@@ -193,13 +192,14 @@ Token Lexer_next(Lexer *l) {
       return num(l);
     } else if (is_ident(cc)) {
       return ident(l);
+    } else {
+      printf("lex: Unknown token '%c' at ", cur(l));
+      Str rest = Str_slice(&l->input, l->pos, l->input.len);
+      Str_debug(&rest);
+      putc('\n', stdout);
+      l->pos++;
+      return SINGLE_TOK(T_EOF);
     }
-    printf("lex: Unknown token '%c' at ", cur(l));
-    Str rest = Str_slice(&l->input, l->pos, l->input.len);
-    Str_debug(&rest);
-    putc('\n', stdout);
-    l->pos++;
-    return SINGLE_TOK(T_EOF);
   }
 }
 

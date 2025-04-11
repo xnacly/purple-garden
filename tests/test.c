@@ -111,7 +111,8 @@ int main() {
           error = true;
         }
         if (expected_arg != got_arg) {
-          printf("\tbad arg: want=%zu got=%zu\n", expected_arg, got_arg);
+          printf("\tbad arg(%s): want=%zu got=%zu\n", OP_MAP[got_op].p,
+                 expected_arg, got_arg);
           error = true;
         }
       }
