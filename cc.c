@@ -153,7 +153,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     } else if (s->hash == hashes[BUILTIN_PRINTLN]) {
       b = BUILTIN_PRINTLN;
     }
-    ASSERT(b != BUILTIN_UNKOWN, "Unknown builtin at this point...")
+
+    ASSERT(b != BUILTIN_UNKOWN, "Unknown builtin `@%.*s`", (int)s->len, s->p)
 
     // single argument at r0
     if (n->children_length == 1) {

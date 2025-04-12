@@ -62,10 +62,25 @@ typedef enum {
   // divide Value at rANY with r0, store result in r0
   OP_DIV,
 
+  // TODO: possibly optimisable by adding a OP_PUSHG for directly pushing a
+  // global atom by its index into the vm arg stack
+
   // OP_PUSH rANY
   //
   // pushes the value in rANY to the stack
   OP_PUSH,
+
+  // OP_VAR rANY
+  //
+  // stores the Value in the register rANY in the variable table via the
+  // identifier stored in r0
+  OP_VAR,
+
+  // OP_LOADV rANY
+  //
+  // loads the Value stored in the variable table by the identifier stored in
+  // rANY
+  OP_LOADV,
 
   // OP_ARGS aANY
   //

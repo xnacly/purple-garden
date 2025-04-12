@@ -7,6 +7,7 @@ Str OP_MAP[] = {[OP_LOAD] = STRING("LOAD"),      [OP_STORE] = STRING("STORE"),
                 [OP_ADD] = STRING("ADD"),        [OP_SUB] = STRING("SUB"),
                 [OP_MUL] = STRING("MUL"),        [OP_DIV] = STRING("DIV"),
                 [OP_ARGS] = STRING("ARGS"),      [OP_PUSH] = STRING("PUSH"),
+                [OP_LOADV] = STRING("LOADV"),    [OP_VAR] = STRING("VAR"),
                 [OP_BUILTIN] = STRING("BUILTIN")};
 
 Str VALUE_TYPE_MAP[] = {
