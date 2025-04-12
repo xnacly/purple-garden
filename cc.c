@@ -140,6 +140,10 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     break;
   }
   case N_BUILTIN: {
+    if (!n->children_length) {
+      // PERF: skip generating bytecode for empty builtin invocations
+      return;
+    }
     Builtin b = BUILTIN_UNKOWN;
     Str *s = &n->token->string;
     if (s->hash == hashes[BUILTIN_LEN]) {

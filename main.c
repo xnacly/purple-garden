@@ -211,24 +211,17 @@ int main(int argc, char **argv) {
   Lexer l = Lexer_new(input);
   Token *tokens = pipeline_allocator.request(pipeline_allocator.ctx,
                                              file_size_or_min * sizeof(Token));
-  size_t token_count = 0;
 #if DEBUG
   puts("================== TOKENS ==================");
 #endif
-
-  while (1) {
-    Token t = Lexer_next(&l);
+  size_t count = Lexer_all(&l, tokens);
 #if DEBUG
-    Token_debug(&t);
+  for (size_t i = 0; i < count; i++) {
+    Token_debug(&tokens[i]);
     puts("");
-#endif
-    tokens[token_count] = t;
-    token_count++;
-    if (t.type == T_EOF) {
-      break;
-    }
   }
-  VERBOSE_PUTS("lexer::Lexer_next lexed tokens count=%zu", token_count);
+#endif
+  VERBOSE_PUTS("lexer::Lexer_next lexed tokens count=%zu", count);
   if (UNLIKELY(a.memory_usage)) {
     Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
     double percent = (s.current * 100) / (double)s.allocated;
@@ -255,7 +248,7 @@ int main(int argc, char **argv) {
     node_count++;
   }
   VERBOSE_PUTS("parser::Parser_next created AST with node_count=%zu",
-               token_count);
+               node_count);
   if (UNLIKELY(a.memory_usage)) {
     Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
     double percent = (s.current * 100) / (double)s.allocated;

@@ -299,6 +299,7 @@ $ hotspot
 ## Optimisations
 
 - [x] `vm`: register based instead of stack based
+- [x] `lexer`: computed goto jump table
 - [x] `io`: `mmap` instead of reading the input file manually
 - [x] `common`: turn `String` for `char*` abstraction into windows instead of allocating in the lexer
 - [x] `parser`: use bump allocator for node children
@@ -306,6 +307,7 @@ $ hotspot
 - [x] `lexer`: fastpath for non floating point numbers
 - [x] `lexer`: fastpath for boolean identification
 - [x] `lexer+parser+cc`: no dynamic allocations by using bump allocator
+- [x] `cc`: zero argument builtin calls and operations are skipped
 - [x] `cc`: bump allocator for globals and bytecode
 - [x] `cc`: replace `@<builtin>` calls with indexes into `builtin::BUILTIN_MAP` to move function lookup from runtime to compile time
 - [x] `cc`: compute `@<builtin>` indexes for identifiers via hash compare with precomputed builtin hashes

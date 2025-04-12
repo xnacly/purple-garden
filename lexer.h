@@ -56,5 +56,6 @@ typedef struct {
 
 Lexer Lexer_new(Str input);
 Token Lexer_next(Lexer *l);
+size_t Lexer_all(Lexer *l, Token *out);
 
 #endif

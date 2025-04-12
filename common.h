@@ -18,12 +18,12 @@
 #define GLOBAL_SIZE 4 * 1024 * 1024
 
 #define UNLIKELY(condition) __builtin_expect(condition, 0)
-#define ASSERT(EXP, context)                                                   \
+#define ASSERT(EXP, fmt, ...)                                                  \
   if (!(UNLIKELY(EXP))) {                                                      \
     fprintf(stderr,                                                            \
-            "purple-garden: ASSERT(" #EXP "): `" context                       \
-            "` failed at %s, line %d\n",                                       \
-            __FILE__, __LINE__);                                               \
+            "purple-garden: ASSERT(" #EXP "): " fmt                            \
+            " failed at %s, line %d\n",                                        \
+            ##__VA_ARGS__, __FILE__, __LINE__);                                \
     exit(EXIT_FAILURE);                                                        \
   }
 
