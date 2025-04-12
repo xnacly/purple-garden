@@ -49,7 +49,7 @@ static void consume(Parser *p, TokenType tt) {
 // attempts to efficiently grow n->children, since lists are the main
 // datastructure of purple garden - should be called before each new children
 // added to n->children
-static void Node_add_child(Allocator *alloc, Node *n, Node child) {
+inline static void Node_add_child(Allocator *alloc, Node *n, Node child) {
   if (!n->children_cap) {
     // initial allocation
     n->children =

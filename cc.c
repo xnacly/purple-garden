@@ -155,54 +155,23 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     }
     ASSERT(b != BUILTIN_UNKOWN, "Unknown builtin at this point...")
 
-    size_t registers[n->children_length > 1 ? n->children_length - 1 : 1];
     // single argument at r0
     if (n->children_length == 1) {
       compile(alloc, vm, ctx, &n->children[0]);
-      BC(OP_ARGS, 1);
+      // PERF: removed BC(OP_ARGS, 1), since a singular argument to a builtin is
+      // the default optimized branch
     } else {
-      int offset = ctx->size - 1;
       for (size_t i = 0; i < n->children_length; i++) {
         compile(alloc, vm, ctx, &n->children[i]);
         if (i < n->children_length - 1) {
-          size_t r = Ctx_allocate_register(ctx);
-          BC(OP_STORE, r)
-          registers[i] = r;
+          BC(OP_PUSH, 0)
         }
       }
 
-      // TODO: pack ARGS and OFFSET into a ARGOFF bytecode via bytepacking,
-      // lower 4 bits for the former and higher 4 bits for the latter
-      //
-      // packing:
-      //
-      // uint8_t operand =
-      //    ((offset & 0x0F) << 4) | (n->children_length & 0x0F)
-      //
-      // unpacking:
-      //
-      // uint8_t num_args = operand & 0x0F;
-      // uint8_t offset = (operand >> 4) & 0x0F;
-      //
-      // This would result in limiting both length and offset to 0-15, should be
-      // fine, normally it would be 256, i could also use 3 bytes as the length
-      // and 5 bytes as the offset, resulting in not 16/16 limits but 8/32, that
-      // should be better, since no functions should really even have 8
-      // arguments, thats a smell.
-      BC(OP_OFFSET, offset);
       BC(OP_ARGS, n->children_length);
     }
 
     BC(OP_BUILTIN, b);
-    // only deallocate registers if we have any allocated
-    if (n->children_length > 1) {
-      // skip last because we dont store the last in a specific register, free
-      // others
-      for (int i = n->children_length - 2; i > -1; i--) {
-        Ctx_free_register(ctx, registers[i]);
-      }
-    }
-
     break;
   }
   default:
@@ -216,11 +185,15 @@ Vm cc(Allocator *alloc, Node *nodes, size_t size) {
   hashes[BUILTIN_PRINT] = Str_hash(&STRING("print"));
   hashes[BUILTIN_LEN] = Str_hash(&STRING("len"));
 
-  Vm vm = {.global_len = 0,
-           .bytecode_len = 0,
-           .pc = 0,
-           .bytecode = NULL,
-           .globals = NULL};
+  Vm vm = {
+      .global_len = 0,
+      .bytecode_len = 0,
+      .pc = 0,
+      .bytecode = NULL,
+      .globals = NULL,
+      .stack = {{0}},
+      .stack_cur = 0,
+  };
   vm.bytecode = alloc->request(alloc->ctx, (sizeof(byte) * BYTECODE_SIZE));
   vm.globals = alloc->request(alloc->ctx, (sizeof(Value) * GLOBAL_SIZE));
   vm.globals[0] = (Value){.type = V_FALSE};

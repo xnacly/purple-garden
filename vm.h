@@ -5,17 +5,30 @@
 #include <stdlib.h>
 
 #define REGISTERS 128
+#define CALL_ARGUMENT_STACK 256
 
 #define DIS(op, arg)                                                           \
-  printf("VM[%06zu][%-8.*s][%3zu]: ", vm->pc, (int)OP_MAP[(op)].len,           \
-         OP_MAP[(op)].p, arg);                                                 \
-  for (size_t i = 0; i < 3; i++) {                                             \
+  printf("VM[%06zu][%-8.*s][%3zu]: {.registers=[", vm->pc,                     \
+         (int)OP_MAP[(op)].len, OP_MAP[(op)].p, arg);                          \
+  for (size_t i = 0; i < REGISTERS; i++) {                                     \
+    if (vm->registers[i].type == V_UNDEFINED)                                  \
+      break;                                                                   \
     Value_debug(&vm->registers[i]);                                            \
-    if (i < 2) {                                                               \
+  }                                                                            \
+  printf("]");                                                                 \
+  if (vm->stack_cur) {                                                         \
+    printf(",.stack=[");                                                       \
+  }                                                                            \
+  for (size_t i = 0; i < vm->stack_cur; i++) {                                 \
+    Value_debug(&vm->stack[i]);                                                \
+    if (i + 1 < vm->stack_cur) {                                               \
       printf(", ");                                                            \
     }                                                                          \
   }                                                                            \
-  printf("\n");
+  if (vm->stack_cur) {                                                         \
+    printf("]");                                                               \
+  }                                                                            \
+  printf("}\n");
 
 typedef enum {
   // LOAD rANY
@@ -49,15 +62,15 @@ typedef enum {
   // divide Value at rANY with r0, store result in r0
   OP_DIV,
 
+  // OP_PUSH rANY
+  //
+  // pushes the value in rANY to the stack
+  OP_PUSH,
+
   // OP_ARGS aANY
   //
-  // defines how many arguments the following function or builtin call will
-  // accept
+  // instructs the vm on how many values to pop of the argument stacks
   OP_ARGS,
-  // OP_OFFSET aANY
-  //
-  // defines where the arguments to a function or builtin call start
-  OP_OFFSET,
 
   // OP_BUILTIN bANY
   //
@@ -96,12 +109,17 @@ typedef struct {
   // data
   Frame frame;
 
-  // arg_count enables the vm to know how many registers it should pass to the
-  // function called via CALL or BUILTIN
+  // stack is used for handling arguments of a function or builtin call, if more
+  // than one arguments are passed to a function these are pushed to the stack,
+  // except the last one, which is in r0 either way, so we just take it from
+  // there
+  Value stack[CALL_ARGUMENT_STACK];
+  // stack_cur stores how many elements there currently are in the stack
+  size_t stack_cur;
+
+  // arg_count enables the vm to know how many register values it needs to pop
+  // off the stack and pass to the function called via CALL or BUILTIN
   size_t arg_count;
-  // register_offset enables the vm to know where to start with collecting
-  // values out of registers
-  size_t register_offset;
 } Vm;
 
 int Vm_run(Vm *vm);

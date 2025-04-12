@@ -81,7 +81,7 @@ size_t Lexer_all(Lexer *l, Token *out) {
     goto *target;                                                              \
   } while (0);
 
-  JUMP_TARGET
+  JUMP_TARGET;
 
 delimitor_left:
   out[count++] = SINGLE_TOK(T_DELIMITOR_LEFT);

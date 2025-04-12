@@ -62,16 +62,16 @@ int main() {
          VAL(.type = V_NUM, .number = 3)),
 
     // builtins:
-    CASE((@len "hello"), BC(OP_LOAD, 2, OP_ARGS, 1, OP_BUILTIN, BUILTIN_LEN),
+    CASE((@len "hello"), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
          VAL(.type = V_NUM, .number = 5)),
     // checking if string interning works
     CASE((@len "hello")(@len "hello"),
-         BC(OP_LOAD, 2, OP_ARGS, 1, OP_BUILTIN, BUILTIN_LEN, OP_LOAD, 2,
-            OP_ARGS, 1, OP_BUILTIN, BUILTIN_LEN),
+         BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN, OP_LOAD, 2, OP_BUILTIN,
+            BUILTIN_LEN),
          VAL(.type = V_NUM, .number = 5)),
-    CASE((@len ""), BC(OP_LOAD, 2, OP_ARGS, 1, OP_BUILTIN, BUILTIN_LEN),
+    CASE((@len ""), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
          VAL(.type = V_NUM, .number = 0)),
-    CASE((@len "a"), BC(OP_LOAD, 2, OP_ARGS, 1, OP_BUILTIN, BUILTIN_LEN),
+    CASE((@len "a"), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
          VAL(.type = V_NUM, .number = 1)),
   };
   size_t passed = 0;

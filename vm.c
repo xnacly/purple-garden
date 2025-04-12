@@ -6,7 +6,7 @@
 Str OP_MAP[] = {[OP_LOAD] = STRING("LOAD"),      [OP_STORE] = STRING("STORE"),
                 [OP_ADD] = STRING("ADD"),        [OP_SUB] = STRING("SUB"),
                 [OP_MUL] = STRING("MUL"),        [OP_DIV] = STRING("DIV"),
-                [OP_ARGS] = STRING("ARGS"),      [OP_OFFSET] = STRING("OFFSET"),
+                [OP_ARGS] = STRING("ARGS"),      [OP_PUSH] = STRING("PUSH"),
                 [OP_BUILTIN] = STRING("BUILTIN")};
 
 Str VALUE_TYPE_MAP[] = {
@@ -55,6 +55,7 @@ void Value_debug(const Value *v) {
 }
 
 int Vm_run(Vm *vm) {
+  vm->arg_count = 1;
 #if DEBUG
   puts("================== GLOBAL ==================");
   for (size_t i = 0; i < vm->global_len; i++) {
@@ -140,30 +141,28 @@ int Vm_run(Vm *vm) {
     case OP_ARGS:
       vm->arg_count = arg;
       break;
-    case OP_OFFSET:
-      vm->register_offset = arg;
+    case OP_PUSH:
+      ASSERT(vm->stack_cur < CALL_ARGUMENT_STACK,
+             "Out of argument stack space: %d", CALL_ARGUMENT_STACK)
+      vm->stack[vm->stack_cur++] = vm->registers[0];
       break;
     case OP_BUILTIN: {
       // at this point all builtins are just syscalls into an array of function
       // pointers
-      if (!vm->arg_count) {
-        vm->registers[0] = BUILTIN_MAP[arg](NULL, 0);
-      } else if (vm->arg_count == 1) {
-        vm->registers[0] =
-            BUILTIN_MAP[arg](&vm->registers[vm->register_offset], 1);
+      if (vm->arg_count == 1) {
+        vm->registers[0] = BUILTIN_MAP[arg](&vm->registers[0], 1);
       } else {
         Value v[vm->arg_count];
-        // FIXME: this still doesnt work, see (@println "Hello" "World" (+1 1)),
-        // which prints `World Hello 2`, so either fix this here or in the
-        // compiler, or even in the parser
-        for (size_t i = 0; i < vm->arg_count; i++) {
-          v[vm->arg_count - 1 - i] = vm->registers[vm->register_offset + i];
+        for (int i = vm->arg_count - 1; i > 0; i--) {
+          ASSERT(vm->stack_cur != 0,
+                 "No element in argument stack, failed to pop");
+          v[i - 1] = vm->stack[--vm->stack_cur];
         }
+        v[vm->arg_count - 1] = vm->registers[0];
         vm->registers[0] = BUILTIN_MAP[arg](v, vm->arg_count);
       }
 
       vm->arg_count = 1;
-      vm->register_offset = 0;
       break;
     }
     default:

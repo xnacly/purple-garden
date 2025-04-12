@@ -18,7 +18,7 @@ static void print_value(const Value v) {
     Str_debug(&v.string);
     break;
   case V_NUM:
-    printf("%.f", v.number);
+    printf("%g", v.number);
     break;
   case V_TRUE:
     printf("true");

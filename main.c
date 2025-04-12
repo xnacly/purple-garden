@@ -221,7 +221,7 @@ int main(int argc, char **argv) {
     puts("");
   }
 #endif
-  VERBOSE_PUTS("lexer::Lexer_next lexed tokens count=%zu", count);
+  VERBOSE_PUTS("lexer::Lexer_all: lexed tokens count=%zu", count);
   if (UNLIKELY(a.memory_usage)) {
     Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
     double percent = (s.current * 100) / (double)s.allocated;
