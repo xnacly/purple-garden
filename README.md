@@ -291,7 +291,7 @@ $ hotspot
 
 ## Optimisations
 
-- [x] `vm`: register based instead of stack based
+- [x] `vm`: register based, instead of stack based
 - [x] `cc`: fastpaths for zero argument builtin stripping
 - [x] `cc`: fastpaths for one argument call sites
 - [x] `lexer`: computed goto jump table
