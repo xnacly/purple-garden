@@ -61,7 +61,7 @@ inline static bool is_ident(char cc) {
 size_t Lexer_all(Lexer *l, Token *out) {
   ASSERT(out != NULL, "Failed to allocate token list");
   size_t count = 0;
-  static void *jump_table[] = {
+  static void *jump_table[256] = {
       ['('] = &&delimitor_left, [')'] = &&delimitor_right,
       ['@'] = &&builtin,        ['+'] = &&plus,
       ['-'] = &&minus,          ['/'] = &&slash,
@@ -75,7 +75,9 @@ size_t Lexer_all(Lexer *l, Token *out) {
 
 #define JUMP_TARGET                                                            \
   do {                                                                         \
-    void *target = jump_table[cur(l)];                                         \
+    int c = cur(l);                                                            \
+    ASSERT(!(c & 0x80), "Non-ASCII input!");                                   \
+    void *target = jump_table[c];                                              \
     ASSERT(target != NULL, "Unknown character in lexer: '%c'(%d)",             \
            l->input.p[l->pos], l->input.p[l->pos]);                            \
     goto *target;                                                              \

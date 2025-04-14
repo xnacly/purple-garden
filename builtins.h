@@ -7,6 +7,7 @@ typedef enum {
   BUILTIN_UNKOWN,
   BUILTIN_PRINTLN,
   BUILTIN_PRINT,
+  BUILTIN_TYPE,
   BUILTIN_LEN,
 } Builtin;
 

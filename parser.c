@@ -75,7 +75,7 @@ static Node parse(Parser *p) {
     while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
       switch (p->cur->type) {
       case T_IDENT:
-        TODO("FUNCTION CALL")
+        TODO("variable parsing is currently not implemented")
       case T_BUILTIN:
         n.token = p->cur;
         n.type = N_BUILTIN;

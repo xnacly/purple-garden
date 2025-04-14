@@ -20,6 +20,47 @@
 // TODO: all of these require extensive benchmarking
 #define GROW_FACTOR 2
 
+void disassemble(const Vm *vm) {
+  puts("; vim: filetype=asm");
+  printf("; Vm {global=%zu/%d, bytecode=%zu/%d}\n", vm->global_len, GLOBAL_SIZE,
+         vm->bytecode_len, BYTECODE_SIZE);
+  if (vm->global_len > 0) {
+    printf("globals:\n\t");
+    for (size_t i = 0; i < vm->global_len; i++) {
+      Value *v = &vm->globals[i];
+      Value_debug(v);
+      printf("; {idx=%zu", i);
+      if (v->type == V_STRING) {
+        printf(",hash=%zu", v->string.hash);
+      }
+      printf("}\n\t");
+    }
+  }
+  puts("\nentry: ");
+  if (vm->bytecode_len > 0) {
+    for (size_t i = 0; i < vm->bytecode_len; i += 2) {
+      VM_OP op = vm->bytecode[i];
+      size_t arg = vm->bytecode[i + 1];
+      printf("\t; [op=%d,arg=%zu] at (%zu/%zu)", op, arg, i, i + 1);
+      switch (op) {
+      case OP_LOAD:
+        printf("\n\t; global=");
+        Value_debug(&vm->globals[arg]);
+        break;
+      case OP_BUILTIN:
+        printf("\n\t; builtin=@");
+        Str_debug(&BUILTIN_NAME_MAP[arg]);
+        break;
+      default:
+        break;
+      }
+      printf("\n\t");
+      Str_debug(&OP_MAP[op]);
+      printf(" %zu\n", arg);
+    }
+  }
+}
+
 // token_to_value converts primitive tokens, such as strings, boolean and
 // numbers to runtime values
 static Value token_to_value(Token t) {
@@ -62,7 +103,7 @@ static void Ctx_free_register(Ctx *ctx, size_t i) {
   ctx->registers[i] = false;
 }
 
-static size_t hashes[4];
+static size_t hashes[5];
 
 static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   switch (n->type) {
@@ -152,6 +193,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       b = BUILTIN_PRINT;
     } else if (s->hash == hashes[BUILTIN_PRINTLN]) {
       b = BUILTIN_PRINTLN;
+    } else if (s->hash == hashes[BUILTIN_TYPE]) {
+      b = BUILTIN_TYPE;
     }
 
     ASSERT(b != BUILTIN_UNKOWN, "Unknown builtin `@%.*s`", (int)s->len, s->p)
@@ -185,6 +228,7 @@ Vm cc(Allocator *alloc, Node *nodes, size_t size) {
   hashes[BUILTIN_PRINTLN] = Str_hash(&STRING("println"));
   hashes[BUILTIN_PRINT] = Str_hash(&STRING("print"));
   hashes[BUILTIN_LEN] = Str_hash(&STRING("len"));
+  hashes[BUILTIN_TYPE] = Str_hash(&STRING("type"));
 
   Vm vm = {
       .global_len = 0,
@@ -209,47 +253,6 @@ Vm cc(Allocator *alloc, Node *nodes, size_t size) {
     compile(alloc, &vm, &ctx, &n);
   }
   return vm;
-}
-
-void disassemble(const Vm *vm) {
-  puts("; vim: filetype=asm");
-  printf("; Vm {global=%zu/%d, bytecode=%zu/%d}\n", vm->global_len, GLOBAL_SIZE,
-         vm->bytecode_len, BYTECODE_SIZE);
-  if (vm->global_len > 0) {
-    printf("globals:\n\t");
-    for (size_t i = 0; i < vm->global_len; i++) {
-      Value *v = &vm->globals[i];
-      Value_debug(v);
-      printf("; {idx=%zu", i);
-      if (v->type == V_STRING) {
-        printf(",hash=%zu", v->string.hash);
-      }
-      printf("}\n\t");
-    }
-  }
-  puts("\nentry: ");
-  if (vm->bytecode_len > 0) {
-    for (size_t i = 0; i < vm->bytecode_len; i += 2) {
-      VM_OP op = vm->bytecode[i];
-      size_t arg = vm->bytecode[i + 1];
-      printf("\t; [op=%d,arg=%zu] at (%zu/%zu)", op, arg, i, i + 1);
-      switch (op) {
-      case OP_LOAD:
-        printf("\n\t; global=");
-        Value_debug(&vm->globals[arg]);
-        break;
-      case OP_BUILTIN:
-        printf("\n\t; builtin=@");
-        Str_debug(&BUILTIN_NAME_MAP[arg]);
-        break;
-      default:
-        break;
-      }
-      printf("\n\t");
-      Str_debug(&OP_MAP[op]);
-      printf(" %zu\n", arg);
-    }
-  }
 }
 
 #undef BC
