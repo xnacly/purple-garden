@@ -1,15 +1,6 @@
 ; vim: filetype=racket
 (@let str "hi")
 (@let number 12)
-(@let array ("index0" 3.1415))
-(@let booleans (true false))
+(@let bool true)
 
-(@println str number array booleans)
-
-;; (let language #{
-;;   name "purple garden"
-;;   age 1
-;; })
-;; (let language_age 
-;;   (get language "age"))
-;; (println (+ "is " language_age " old"))
+(@println str number bool)

@@ -33,7 +33,6 @@ static void advance(Parser *p) {
 }
 
 static void consume(Parser *p, TokenType tt) {
-  // TODO: benchmark this
   if (UNLIKELY(p->cur->type != tt)) {
     printf("purple-garden: Unexpected token, wanted: ");
     Str_debug(&TOKEN_TYPE_MAP[tt]);
@@ -74,12 +73,10 @@ static Node parse(Parser *p) {
     consume(p, T_DELIMITOR_LEFT);
     while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
       switch (p->cur->type) {
-      case T_IDENT:
-        TODO("variable parsing is currently not implemented")
       case T_BUILTIN:
         n.token = p->cur;
         n.type = N_BUILTIN;
-        // TODO: handle function declaration and other syntax like @{} objects
+        //
         advance(p);
         break;
       case T_PLUS:

@@ -106,24 +106,24 @@ Syntax constructs and builtins are prefixed with `@`
 Via inline:
 
 ```racket
-((: 0..9) 5) ; returns true
-@let ident_pattern (: a..z | A..Z)
+(:0..9 5) ; returns true
+@let ident_pattern :a..z A..Z
 (ident_pattern b) ; true
 (ident_pattern B) ; true
 (ident_pattern 3) ; false
 
-((: (_ 5)) (2 5)) ; true
-((: (_ 5)) (2 2)) ; false
-((: (_ 5)) (2 5 1)) ; false
-((: (_ 5 _)) (2 5 1)) ; true
+(:(_ 5) (2 5)) ; true
+(:(_ 5) (2 2)) ; false
+(:(_ 5) (2 5 1)) ; false
+(:(_ 5 _) (2 5 1)) ; true
 
-((: {name "xnacly"}) {name "xnacly"}) ; true
+(:{name "xnacly"} {name "xnacly"}) ; true
 @let user {name "xnacly" age 25}
 ; true and puts age=25 and name into scope
-@if ((: {name _ age 25}) user) { (@println name "is 25 years old") }
+@if (:{name _ age 25} user) { (@println name "is 25 years old") }
 
 @let words "word1 word2 word3 word4"
-@for capture ((: captures /(\w\+)/) words) { (@println capture) }
+@for capture (:/(\w\+)/ words) { (@println capture) }
 ```
 
 Via `match`:

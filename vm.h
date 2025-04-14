@@ -6,6 +6,8 @@
 
 #define REGISTERS 128
 #define CALL_ARGUMENT_STACK 256
+// TODO: make this work dynamically via gc
+#define VARIABLE_TABLE_SIZE 1023
 
 #define DIS(op, arg)                                                           \
   printf("VM[%06zu][%-8.*s][%3zu]: {.registers=[", vm->pc,                     \
@@ -106,24 +108,22 @@ typedef struct {
   // returning out of scope, we need to jump back to the callsite of the
   // function
   size_t return_to_bytecode;
+  // stores Values by their hash, serving as a variable table
+  Value variable_table[VARIABLE_TABLE_SIZE + 1];
 } Frame;
 
 typedef struct {
   size_t global_len;
   // globals represents the global pool created by the bytecode compiler
   Value *globals;
-
   size_t bytecode_len;
   byte *bytecode;
-
   // current position in the bytecode
   size_t pc;
-
   Value registers[REGISTERS + 1];
   // frame stores variables of the current scope, meta data and other required
   // data
   Frame frame;
-
   // stack is used for handling arguments of a function or builtin call, if more
   // than one arguments are passed to a function these are pushed to the stack,
   // except the last one, which is in r0 either way, so we just take it from
@@ -131,13 +131,12 @@ typedef struct {
   Value stack[CALL_ARGUMENT_STACK];
   // stack_cur stores how many elements there currently are in the stack
   size_t stack_cur;
-
   // arg_count enables the vm to know how many register values it needs to pop
   // off the stack and pass to the function called via CALL or BUILTIN
   size_t arg_count;
 } Vm;
 
-int Vm_run(Vm *vm);
+int Vm_run(Vm *vm, Allocator *alloc);
 void Vm_destroy(Vm vm);
 void Value_debug(const Value *v);
 

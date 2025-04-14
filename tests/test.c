@@ -73,6 +73,16 @@ int main() {
          VAL(.type = V_NUM, .number = 0)),
     CASE((@len "a"), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
          VAL(.type = V_NUM, .number = 1)),
+
+    // variables
+    CASE((@let name "user"), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_VAR, 1),
+         VAL(.type = V_STRING, .string = STRING("name"))),
+    CASE((@let name "user")name,
+         BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_VAR, 1, OP_LOADV, 4),
+         VAL(.type = V_STRING, .string = STRING("user"))),
+    CASE((@let age 25)age,
+         BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_VAR, 1, OP_LOADV, 4),
+         VAL(.type = V_NUM, .number = 25)),
   };
   size_t passed = 0;
   size_t failed = 0;
@@ -138,7 +148,7 @@ int main() {
         }
       }
     }
-    Vm_run(vm);
+    Vm_run(vm, &alloc);
     if (!Value_cmp(vm->registers[0], c.expected_r0)) {
       printf("\n\tbad value at r0: want=%s got=%s",
              VALUE_TYPE_MAP[c.expected_r0.type].p,

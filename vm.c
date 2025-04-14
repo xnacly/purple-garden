@@ -1,14 +1,16 @@
 #include "vm.h"
 #include "builtins.h"
 #include "common.h"
+#include "mem.h"
 #include "strings.h"
 
-Str OP_MAP[] = {[OP_LOAD] = STRING("LOAD"),      [OP_STORE] = STRING("STORE"),
-                [OP_ADD] = STRING("ADD"),        [OP_SUB] = STRING("SUB"),
-                [OP_MUL] = STRING("MUL"),        [OP_DIV] = STRING("DIV"),
-                [OP_ARGS] = STRING("ARGS"),      [OP_PUSH] = STRING("PUSH"),
-                [OP_LOADV] = STRING("LOADV"),    [OP_VAR] = STRING("VAR"),
-                [OP_BUILTIN] = STRING("BUILTIN")};
+Str OP_MAP[256] = {
+    [OP_LOAD] = STRING("LOAD"),      [OP_STORE] = STRING("STORE"),
+    [OP_ADD] = STRING("ADD"),        [OP_SUB] = STRING("SUB"),
+    [OP_MUL] = STRING("MUL"),        [OP_DIV] = STRING("DIV"),
+    [OP_PUSH] = STRING("PUSH"),      [OP_VAR] = STRING("VAR"),
+    [OP_LOADV] = STRING("LOADV"),    [OP_ARGS] = STRING("ARGS"),
+    [OP_BUILTIN] = STRING("BUILTIN")};
 
 Str VALUE_TYPE_MAP[] = {
     [V_OPTION] = STRING("Option("), [V_STRING] = STRING("Str"),
@@ -17,7 +19,7 @@ Str VALUE_TYPE_MAP[] = {
 };
 
 #define VM_ERR(fmt, ...)                                                       \
-  fprintf(stderr, "[VM] ERROR: `" fmt "\n", ##__VA_ARGS__);                    \
+  fprintf(stderr, "[VM] ERROR: " fmt "\n", ##__VA_ARGS__);                     \
   goto vm_end;
 
 void Value_debug(const Value *v) {
@@ -55,7 +57,7 @@ void Value_debug(const Value *v) {
   }
 }
 
-int Vm_run(Vm *vm) {
+int Vm_run(Vm *vm, Allocator *alloc) {
   vm->arg_count = 1;
 #if DEBUG
   puts("================== GLOBAL ==================");
@@ -76,8 +78,22 @@ int Vm_run(Vm *vm) {
     case OP_LOAD:
       vm->registers[0] = vm->globals[arg];
       break;
+    case OP_LOADV: {
+      Str *global_entry = &vm->globals[arg].string;
+      Value v = vm->frame.variable_table[global_entry->hash];
+      if (v.type == V_UNDEFINED) {
+        VM_ERR("Undefined variable: `%.*s` not found in current scope",
+               (int)global_entry->len, global_entry->p);
+      }
+      vm->registers[0] = v;
+      break;
+    }
     case OP_STORE:
       vm->registers[arg] = vm->registers[0];
+      break;
+    case OP_VAR:
+      vm->frame.variable_table[vm->registers[0].string.hash] =
+          vm->registers[arg];
       break;
     case OP_ADD: {
       Value *a = &vm->registers[0];

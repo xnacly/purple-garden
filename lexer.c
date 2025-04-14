@@ -112,7 +112,7 @@ builtin: {
   Str s = (Str){
       .p = l->input.p + start,
       .len = len,
-      .hash = hash & GLOBAL_MASK,
+      .hash = hash,
   };
   Token a = (Token){
       .type = T_IDENT,
@@ -202,7 +202,7 @@ ident: {
     Str s = (Str){
         .p = l->input.p + start,
         .len = len,
-        .hash = hash & GLOBAL_MASK,
+        .hash = hash,
     };
     t = (Token){
         .type = T_IDENT,
@@ -232,7 +232,7 @@ string: {
     Str s = (Str){
         .p = l->input.p + start,
         .len = l->pos - start,
-        .hash = hash & GLOBAL_MASK,
+        .hash = hash,
     };
     // skip "
     l->pos++;

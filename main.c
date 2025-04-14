@@ -39,7 +39,7 @@ typedef struct {
   // options - int because getopt has no bool support
 
   // use block allocator instead of garbage collection
-  int block_allocator;
+  size_t block_allocator;
   // compile all functions to machine code
   int aot_functions;
   // readable bytecode representation with labels, globals and comments
@@ -62,21 +62,23 @@ typedef struct {
   char *name_long;
   char name_short;
   char *description;
+  char *arg_name;
 } cli_option;
 
 // WARN: DO NOT REORDER THIS - will result in option handling issues
 static const cli_option options[] = {
-    {"version", 'v', "display version information"},
-    {"help", 'h', "extended usage information"},
+    {"version", 'v', "display version information", ""},
+    {"help", 'h', "extended usage information", ""},
     {"disassemble", 'd',
-     "readable bytecode representation with labels, globals and comments"},
+     "readable bytecode representation with labels, globals and comments", ""},
     {"block-allocator", 'b',
-     "use block allocator instead of garbage collection"},
-    {"aot-functions", 'a', "compile all functions to machine code"},
+     "use block allocator instead of garbage collection", "<size>"},
+    {"aot-functions", 'a', "compile all functions to machine code", ""},
     {"memory-usage", 'm',
      "display the memory usage of parsing, compilation and the virtual "
-     "machine"},
-    {"verbose", 'V', "verbose logging"},
+     "machine",
+     ""},
+    {"verbose", 'V', "verbose logging", ""},
 };
 
 void usage() {
@@ -84,14 +86,19 @@ void usage() {
   printf("%.*s ", (int)prefix.len, prefix.p);
   size_t len = sizeof(options) / sizeof(cli_option);
   for (size_t i = 0; i < len; i++) {
-    printf("[-%c | --%s] ", options[i].name_short, options[i].name_long);
-    if ((i + 1) % 3 == 0 && i + 1 < len) {
+    char *equal_or_not = options[i].arg_name[0] == 0 ? "" : "=";
+    char *name_or_not = options[i].arg_name[0] == 0 ? "" : options[i].arg_name;
+    printf("[-%c%s | --%s%s%s] ", options[i].name_short, name_or_not,
+           options[i].name_long, equal_or_not, name_or_not);
+    if ((i + 1) % 2 == 0 && i + 1 < len) {
       printf("\n%*.s ", (int)prefix.len, "");
     }
   }
   printf("<file.garden>\n");
 }
 
+// TODO: replace this shit with `weed` - the purple garden and 6wm arguments
+// parser
 Args Args_parse(int argc, char **argv) {
   Args a = (Args){0};
   // MUST be in sync with options, otherwise this will not work as intended
@@ -99,7 +106,7 @@ Args Args_parse(int argc, char **argv) {
       {options[0].name_long, no_argument, &a.version, 1},
       {options[1].name_long, no_argument, &a.help, 1},
       {options[2].name_long, no_argument, &a.disassemble, 1},
-      {options[3].name_long, no_argument, &a.block_allocator, 1},
+      {options[3].name_long, required_argument, 0, 'b'},
       {options[4].name_long, no_argument, &a.aot_functions, 1},
       {options[5].name_long, no_argument, &a.memory_usage, 1},
       {options[6].name_long, no_argument, &a.verbose, 1},
@@ -107,7 +114,8 @@ Args Args_parse(int argc, char **argv) {
   };
 
   int opt;
-  while ((opt = getopt_long(argc, argv, "vhdbamV", long_options, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "vhdb:amV", long_options, NULL)) !=
+         -1) {
     switch (opt) {
     case 'v':
       a.version = 1;
@@ -122,7 +130,10 @@ Args Args_parse(int argc, char **argv) {
       a.disassemble = 1;
       break;
     case 'b':
-      a.block_allocator = 1;
+      char *endptr;
+      size_t block_size = strtol(optarg, &endptr, 10);
+      ASSERT(endptr != optarg, "args: Failed to parse number from: %s", optarg);
+      a.block_allocator = block_size;
       break;
     case 'a':
       a.aot_functions = 1;
@@ -152,10 +163,14 @@ Args Args_parse(int argc, char **argv) {
   } else if (UNLIKELY(a.help)) {
     usage();
     size_t len = sizeof(options) / sizeof(cli_option);
-    printf("\noptions:\n");
+    printf("\nOptions:\n");
     for (size_t i = 0; i < len; i++) {
-      printf("\t-%c, --%-15s %s\n", options[i].name_short, options[i].name_long,
-             options[i].description);
+      char *equal_or_not = options[i].arg_name[0] == 0 ? "" : "=";
+      char *name_or_not =
+          options[i].arg_name[0] == 0 ? "" : options[i].arg_name;
+      printf("\t-%c%s%s, --%s%s%s\n\t\t%s\n\n", options[i].name_short,
+             equal_or_not, name_or_not, options[i].name_long, equal_or_not,
+             name_or_not, options[i].description);
     }
     exit(EXIT_SUCCESS);
   }
@@ -282,13 +297,30 @@ int main(int argc, char **argv) {
          s.allocated / 1024.0, percent);
 #endif
 
-  int runtime_code = Vm_run(&vm);
+  // TODO: fill this with the value of --block-allocator
+  Allocator vm_alloc = {0};
+  if (a.block_allocator > 0) {
+    VERBOSE_PUTS(
+        "vm: got --block-allocator, using bump allocator with size %zu",
+        a.block_allocator);
+    vm_alloc = (Allocator){
+        .init = bump_init,
+        .request = bump_request,
+        .destroy = bump_destroy,
+        .reset = bump_reset,
+        .stats = bump_stats,
+    };
+  } else {
+    // TODO: init gc here
+  }
+  int runtime_code = Vm_run(&vm, &vm_alloc);
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
 
   pipeline_allocator.destroy(pipeline_allocator.ctx);
   VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");
 
   Vm_destroy(vm);
+
   VERBOSE_PUTS("vm::Vm_destroy: teared vm down");
 
   munmap(input.p, input.len);

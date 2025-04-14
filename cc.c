@@ -17,8 +17,13 @@
          "cc: out of bytecode space, what the fuck are you doing (there is "   \
          "space for 4MB of bytecode)");
 
-// TODO: all of these require extensive benchmarking
 #define GROW_FACTOR 2
+#define MAX_BUILTIN_SIZE 1024
+#define MAX_BUILTIN_SIZE_MASK (MAX_BUILTIN_SIZE - 1)
+
+typedef enum {
+  COMPILE_BUILTIN_LET = 256,
+} COMPILE_BUILTIN;
 
 void disassemble(const Vm *vm) {
   puts("; vim: filetype=asm");
@@ -103,7 +108,7 @@ static void Ctx_free_register(Ctx *ctx, size_t i) {
   ctx->registers[i] = false;
 }
 
-static size_t hashes[5];
+static size_t runtime_builtin_hashes[MAX_BUILTIN_SIZE + 1];
 
 static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   switch (n->type) {
@@ -115,7 +120,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     } else if (n->token->type == T_TRUE) {
       BC(OP_LOAD, 1)
     } else if (n->token->type == T_STRING) {
-      size_t hash = n->token->string.hash;
+      size_t hash = n->token->string.hash & GLOBAL_MASK;
       size_t cached_index = ctx->global_hash_buckets[hash];
       size_t expected_index = vm->global_len;
       if (cached_index) {
@@ -140,9 +145,15 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     break;
   }
   case N_IDENT: {
-    // size_t index = pool_new(vm, token_to_value(n->token));
-    // BC(OP_VAR, index);
-    TODO("compile#N_IDENT not implemented");
+    ASSERT(vm->global_len <= GLOBAL_SIZE,
+           "cc: out of global space, what the fuck are you doing (there is "
+           "space "
+           "for 256k globals)");
+
+    Value v = token_to_value(*n->token);
+    v.string.hash &= VARIABLE_TABLE_SIZE;
+    vm->globals[vm->global_len] = v;
+    BC(OP_LOADV, vm->global_len++);
     break;
   }
   case N_OP: {
@@ -182,40 +193,51 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   }
   case N_BUILTIN: {
     if (!n->children_length) {
-      // PERF: skip generating bytecode for empty builtin invocations
+      // NOTE: skip generating bytecode for empty builtin invocations
       return;
     }
-    Builtin b = BUILTIN_UNKOWN;
-    Str *s = &n->token->string;
-    if (s->hash == hashes[BUILTIN_LEN]) {
-      b = BUILTIN_LEN;
-    } else if (s->hash == hashes[BUILTIN_PRINT]) {
-      b = BUILTIN_PRINT;
-    } else if (s->hash == hashes[BUILTIN_PRINTLN]) {
-      b = BUILTIN_PRINTLN;
-    } else if (s->hash == hashes[BUILTIN_TYPE]) {
-      b = BUILTIN_TYPE;
-    }
 
+    Str *s = &n->token->string;
+    int b = runtime_builtin_hashes[s->hash & MAX_BUILTIN_SIZE_MASK];
     ASSERT(b != BUILTIN_UNKOWN, "Unknown builtin `@%.*s`", (int)s->len, s->p)
 
-    // single argument at r0
-    if (n->children_length == 1) {
-      compile(alloc, vm, ctx, &n->children[0]);
-      // PERF: removed BC(OP_ARGS, 1), since a singular argument to a builtin is
-      // the default optimized branch
-    } else {
-      for (size_t i = 0; i < n->children_length; i++) {
-        compile(alloc, vm, ctx, &n->children[i]);
-        if (i < n->children_length - 1) {
-          BC(OP_PUSH, 0)
+    // compile time pseudo builtins
+    switch (b) {
+    case COMPILE_BUILTIN_LET: // @len <var-name> <var-value>
+      ASSERT(n->children_length == 2,
+             "@let requires two arguments: `@let "
+             "<var-name> <var-value>`, got %zu",
+             n->children_length);
+      compile(alloc, vm, ctx, &n->children[1]);
+      size_t r = Ctx_allocate_register(ctx);
+      BC(OP_STORE, r);
+      Value v = token_to_value(*n->children[0].token);
+      v.string.hash &= VARIABLE_TABLE_SIZE;
+      vm->globals[vm->global_len] = v;
+      BC(OP_LOAD, vm->global_len++);
+      BC(OP_VAR, r);
+      Ctx_free_register(ctx, r);
+      break;
+    default:
+      // single argument at r0
+      if (n->children_length == 1) {
+        compile(alloc, vm, ctx, &n->children[0]);
+        // PERF: removed BC(OP_ARGS, 1), since a singular argument to a builtin
+        // is the default optimized branch
+      } else {
+        for (size_t i = 0; i < n->children_length; i++) {
+          compile(alloc, vm, ctx, &n->children[i]);
+          if (i < n->children_length - 1) {
+            BC(OP_PUSH, 0)
+          }
         }
+
+        BC(OP_ARGS, n->children_length);
       }
 
-      BC(OP_ARGS, n->children_length);
+      BC(OP_BUILTIN, b);
+      break;
     }
-
-    BC(OP_BUILTIN, b);
     break;
   }
   default:
@@ -225,10 +247,19 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
 }
 
 Vm cc(Allocator *alloc, Node *nodes, size_t size) {
-  hashes[BUILTIN_PRINTLN] = Str_hash(&STRING("println"));
-  hashes[BUILTIN_PRINT] = Str_hash(&STRING("print"));
-  hashes[BUILTIN_LEN] = Str_hash(&STRING("len"));
-  hashes[BUILTIN_TYPE] = Str_hash(&STRING("type"));
+  // runtime functions
+  runtime_builtin_hashes[Str_hash(&STRING("println")) & MAX_BUILTIN_SIZE_MASK] =
+      BUILTIN_PRINTLN;
+  runtime_builtin_hashes[Str_hash(&STRING("print")) & MAX_BUILTIN_SIZE_MASK] =
+      BUILTIN_PRINT;
+  runtime_builtin_hashes[Str_hash(&STRING("len")) & MAX_BUILTIN_SIZE_MASK] =
+      BUILTIN_LEN;
+  runtime_builtin_hashes[Str_hash(&STRING("type")) & MAX_BUILTIN_SIZE_MASK] =
+      BUILTIN_TYPE;
+
+  // compile time constructs
+  runtime_builtin_hashes[Str_hash(&STRING("let")) & MAX_BUILTIN_SIZE_MASK] =
+      COMPILE_BUILTIN_LET;
 
   Vm vm = {
       .global_len = 0,
