@@ -47,6 +47,9 @@ typedef struct {
   // display the memory usage of parsing, compilation and the virtual machine
   int memory_usage;
 
+  // executes the argument as if an input file was given
+  char *run;
+
   // verbose logging
   int verbose;
 
@@ -79,6 +82,8 @@ static const cli_option options[] = {
      "machine",
      ""},
     {"verbose", 'V', "verbose logging", ""},
+    {"run", 'r', "executes the argument as if an input file was given",
+     "<input>"},
 };
 
 void usage() {
@@ -97,7 +102,7 @@ void usage() {
   printf("<file.garden>\n");
 }
 
-// TODO: replace this shit with `weed` - the purple garden and 6wm arguments
+// TODO: replace this shit with `6cl` - the purple garden and 6wm arguments
 // parser
 Args Args_parse(int argc, char **argv) {
   Args a = (Args){0};
@@ -110,11 +115,12 @@ Args Args_parse(int argc, char **argv) {
       {options[4].name_long, no_argument, &a.aot_functions, 1},
       {options[5].name_long, no_argument, &a.memory_usage, 1},
       {options[6].name_long, no_argument, &a.verbose, 1},
+      {options[7].name_long, required_argument, 0, 'r'},
       {0, 0, 0, 0},
   };
 
   int opt;
-  while ((opt = getopt_long(argc, argv, "vhdb:amV", long_options, NULL)) !=
+  while ((opt = getopt_long(argc, argv, "vhdb:amVr:", long_options, NULL)) !=
          -1) {
     switch (opt) {
     case 'v':
@@ -128,6 +134,9 @@ Args Args_parse(int argc, char **argv) {
       break;
     case 'd':
       a.disassemble = 1;
+      break;
+    case 'r':
+      a.run = optarg;
       break;
     case 'b':
       char *endptr;
@@ -175,7 +184,7 @@ Args Args_parse(int argc, char **argv) {
     exit(EXIT_SUCCESS);
   }
 
-  if (UNLIKELY(a.filename == NULL)) {
+  if (UNLIKELY(a.filename == NULL && a.run == NULL)) {
     usage();
     fprintf(stderr, "error: Missing a file? try `-h/--help`\n");
     exit(EXIT_FAILURE);
@@ -192,9 +201,14 @@ int main(int argc, char **argv) {
   }
   VERBOSE_PUTS("main::Args_parse: Parsed arguments");
 
-  Str input = IO_read_file_to_string(a.filename);
-  VERBOSE_PUTS("io::IO_read_file_to_string: mmaped input of size=%zuB",
-               input.len);
+  Str input;
+  if (a.run != NULL) {
+    input = (Str){.p = a.run, .len = strlen(a.run)};
+  } else {
+    input = IO_read_file_to_string(a.filename);
+    VERBOSE_PUTS("io::IO_read_file_to_string: mmaped input of size=%zuB",
+                 input.len);
+  }
 #if DEBUG
   puts("================== INPUTS ==================");
   Str_debug(&input);
@@ -323,7 +337,9 @@ int main(int argc, char **argv) {
 
   VERBOSE_PUTS("vm::Vm_destroy: teared vm down");
 
-  munmap(input.p, input.len);
+  if (a.run == NULL) {
+    munmap(input.p, input.len);
+  }
   VERBOSE_PUTS("munmap: unmapped input");
 
   return runtime_code == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
