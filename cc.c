@@ -119,14 +119,14 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       BC(OP_LOAD, 0)
     } else if (n->token->type == T_TRUE) {
       BC(OP_LOAD, 1)
-    } else if (n->token->type == T_STRING) {
+    } else if (n->token->type == T_STRING || n->token->type == T_IDENT) {
       size_t hash = n->token->string.hash & GLOBAL_MASK;
       size_t cached_index = ctx->global_hash_buckets[hash];
       size_t expected_index = vm->global_len;
       if (cached_index) {
         expected_index = cached_index - 1;
       } else {
-        ASSERT(vm->global_len <= GLOBAL_SIZE,
+        ASSERT(vm->global_len + 1 <= GLOBAL_SIZE,
                "cc: out of global space, what the fuck are you doing (there is "
                "space "
                "for 256k globals)");
@@ -135,7 +135,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       }
       BC(OP_LOAD, expected_index)
     } else {
-      ASSERT(vm->global_len <= GLOBAL_SIZE,
+      ASSERT(vm->global_len + 1 <= GLOBAL_SIZE,
              "cc: out of global space, what the fuck are you doing (there is "
              "space "
              "for 256k globals)");
@@ -145,15 +145,20 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     break;
   }
   case N_IDENT: {
-    ASSERT(vm->global_len <= GLOBAL_SIZE,
-           "cc: out of global space, what the fuck are you doing (there is "
-           "space "
-           "for 256k globals)");
-
-    Value v = token_to_value(*n->token);
-    v.string.hash &= VARIABLE_TABLE_SIZE;
-    vm->globals[vm->global_len] = v;
-    BC(OP_LOADV, vm->global_len++);
+    size_t hash = n->token->string.hash & GLOBAL_MASK;
+    size_t cached_index = ctx->global_hash_buckets[hash];
+    size_t expected_index = vm->global_len;
+    if (cached_index) {
+      expected_index = cached_index - 1;
+    } else {
+      ASSERT(vm->global_len + 1 <= GLOBAL_SIZE,
+             "cc: out of global space, what the fuck are you doing (there is "
+             "space "
+             "for 256k globals)");
+      ctx->global_hash_buckets[hash] = vm->global_len + 1;
+      vm->globals[vm->global_len++] = token_to_value(*n->token);
+    }
+    BC(OP_LOADV, expected_index);
     break;
   }
   case N_OP: {
@@ -211,10 +216,22 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       compile(alloc, vm, ctx, &n->children[1]);
       size_t r = Ctx_allocate_register(ctx);
       BC(OP_STORE, r);
-      Value v = token_to_value(*n->children[0].token);
-      v.string.hash &= VARIABLE_TABLE_SIZE;
-      vm->globals[vm->global_len] = v;
-      BC(OP_LOAD, vm->global_len++);
+      Token *ident = n->children[0].token;
+      size_t hash = ident->string.hash & GLOBAL_MASK;
+      size_t cached_index = ctx->global_hash_buckets[hash];
+      size_t expected_index = vm->global_len;
+      if (cached_index) {
+        expected_index = cached_index - 1;
+      } else {
+        ASSERT(vm->global_len + 1 <= GLOBAL_SIZE,
+               "cc: out of global space, what the fuck are you doing (there is "
+               "space "
+               "for 256k globals)");
+        ctx->global_hash_buckets[hash] = vm->global_len + 1;
+        vm->globals[vm->global_len++] =
+            (Value){.type = V_STRING, .string = ident->string};
+      }
+      BC(OP_LOAD, expected_index);
       BC(OP_VAR, r);
       Ctx_free_register(ctx, r);
       break;

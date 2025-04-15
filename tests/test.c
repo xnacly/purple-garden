@@ -78,10 +78,10 @@ int main() {
     CASE((@let name "user"), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_VAR, 1),
          VAL(.type = V_STRING, .string = STRING("name"))),
     CASE((@let name "user")name,
-         BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_VAR, 1, OP_LOADV, 4),
+         BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_VAR, 1, OP_LOADV, 3),
          VAL(.type = V_STRING, .string = STRING("user"))),
     CASE((@let age 25)age,
-         BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_VAR, 1, OP_LOADV, 4),
+         BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_VAR, 1, OP_LOADV, 3),
          VAL(.type = V_NUM, .number = 25)),
   };
   size_t passed = 0;

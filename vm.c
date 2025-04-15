@@ -80,7 +80,8 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       break;
     case OP_LOADV: {
       Str *global_entry = &vm->globals[arg].string;
-      Value v = vm->frame.variable_table[global_entry->hash];
+      Value v =
+          vm->frame.variable_table[global_entry->hash & VARIABLE_TABLE_SIZE];
       if (v.type == V_UNDEFINED) {
         VM_ERR("Undefined variable: `%.*s` not found in current scope",
                (int)global_entry->len, global_entry->p);
@@ -92,7 +93,8 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      vm->frame.variable_table[vm->registers[0].string.hash] =
+      vm->frame
+          .variable_table[vm->registers[0].string.hash & VARIABLE_TABLE_SIZE] =
           vm->registers[arg];
       break;
     case OP_ADD: {
