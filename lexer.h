@@ -6,7 +6,7 @@
 
 typedef enum {
   // (
-  T_DELIMITOR_LEFT,
+  T_DELIMITOR_LEFT = 1,
   // )
   T_DELIMITOR_RIGHT,
   // anything between ""

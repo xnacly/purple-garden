@@ -162,24 +162,13 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     break;
   }
   case N_OP: {
-    byte op;
-    switch (n->token->type) {
-    case T_PLUS:
-      op = OP_ADD;
-      break;
-    case T_MINUS:
-      op = OP_SUB;
-      break;
-    case T_ASTERISKS:
-      op = OP_MUL;
-      break;
-    case T_SLASH:
-      op = OP_DIV;
-      break;
-    default:
-      ASSERT(0, "Unknown operator")
-    }
-
+    // assumes lexer did its work correctly
+    byte op = ((byte[]){
+        [T_PLUS] = OP_ADD,
+        [T_MINUS] = OP_SUB,
+        [T_ASTERISKS] = OP_MUL,
+        [T_SLASH] = OP_DIV,
+    }[n->token->type]);
     // single argument is just a return of that value
     if (n->children_length == 1) {
       compile(alloc, vm, ctx, &n->children[0]);

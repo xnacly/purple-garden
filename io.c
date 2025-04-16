@@ -8,14 +8,14 @@
 #include "io.h"
 
 Str IO_read_file_to_string(char *path) {
-  ASSERT(path != NULL, "path was NULL")
+  ASSERT(path != NULL, "path was NULL");
 
   int fd = open(path, O_RDONLY);
-  ASSERT(fd != -1, "failed to read input file")
+  ASSERT(fd != -1, "failed to read input file");
 
   struct stat s;
-  ASSERT(fstat(fd, &s) == 0, "failed to fstat")
-  ASSERT(S_ISREG(s.st_mode), "path is not a file")
+  fstat(fd, &s);
+  ASSERT(S_ISREG(s.st_mode), "path is not a file");
 
   long length = s.st_size;
   if (length < 0) {

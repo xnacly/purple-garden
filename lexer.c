@@ -76,7 +76,7 @@ size_t Lexer_all(Lexer *l, Token *out) {
 #define JUMP_TARGET                                                            \
   do {                                                                         \
     int c = cur(l);                                                            \
-    ASSERT(!(c & 0x80), "Non-ASCII input!");                                   \
+    ASSERT(!(c & 0x80), "Non-ASCII input character!");                         \
     void *target = jump_table[c];                                              \
     ASSERT(target != NULL, "Unknown character in lexer: '%c'(%d)",             \
            l->input.p[l->pos], l->input.p[l->pos]);                            \

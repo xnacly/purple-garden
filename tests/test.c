@@ -110,16 +110,9 @@ int main() {
     Token *tokens = alloc.request(alloc.ctx, MIN_MEM * sizeof(Token));
     Lexer_all(&l, tokens);
     Parser p = Parser_new(&alloc, tokens);
-    Node *nodes = alloc.request(alloc.ctx, MIN_MEM * sizeof(Node) / 4);
-    size_t node_count = 0;
-    while (1) {
-      Node n = Parser_next(&p);
-      if (n.type == N_UNKOWN) {
-        break;
-      }
-      nodes[node_count] = n;
-      node_count++;
-    }
+    size_t node_count = MIN_MEM * sizeof(Node) / 4;
+    Node *nodes = alloc.request(alloc.ctx, node_count);
+    node_count = Parser_all(nodes, &p, node_count);
     Vm raw = cc(&alloc, nodes, node_count);
     Vm *vm = &raw;
 

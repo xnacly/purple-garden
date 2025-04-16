@@ -27,12 +27,19 @@ typedef enum {
   // operator, like +-*/%
   N_OP,
   // error and end case
-  N_UNKOWN,
+  N_UNKNOWN,
 } NodeType;
 
 // stores all possible values of a node
 typedef struct Node {
   NodeType type;
+  // only populated for N_LAMBDA and N_LIST; stores the amount of nodes in the
+  // lambdas body or the amount of children in a list
+  size_t children_length;
+  // only populated for N_LAMBDA; stores the lambda parameter count
+  size_t param_length;
+  // stores the children_cap to implement a growing array
+  size_t children_cap;
   // N_ATOM values and the N_FUNCTION name are stored in the Token struct - this
   // reduces copies
   Token *token;
@@ -41,18 +48,12 @@ typedef struct Node {
   // either children of a list or body of lambda, length encoded in
   // Node.children_length
   struct Node *children;
-  // only populated for N_LAMBDA and N_LIST; stores the amount of nodes in the
-  // lambdas body or the amount of children in a list
-  size_t children_length;
-  // only populated for N_LAMBDA; stores the lambda parameter count
-  size_t param_length;
-  // stores the children_cap to implement a growing array
-  size_t children_cap;
 } Node;
 
 Parser Parser_new(Allocator *alloc, Token *t);
 // Returns the next top level Node
 Node Parser_next(Parser *p);
+size_t Parser_all(Node *nodes, Parser *p, size_t max_nodes);
 void Node_debug(Node *n, size_t depth);
 
 #endif

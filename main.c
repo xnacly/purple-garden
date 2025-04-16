@@ -258,24 +258,18 @@ int main(int argc, char **argv) {
            s.allocated / 1024.0, percent);
   }
   Parser p = Parser_new(&pipeline_allocator, tokens);
-  Node *nodes = pipeline_allocator.request(pipeline_allocator.ctx,
-                                           file_size_or_min * sizeof(Node) / 4);
+  size_t node_count = file_size_or_min * sizeof(Node) / 4;
+  Node *nodes = pipeline_allocator.request(pipeline_allocator.ctx, node_count);
 #if DEBUG
   puts("================== ASTREE ==================");
 #endif
-  size_t node_count = 0;
-  while (1) {
-    Node n = Parser_next(&p);
-    if (n.type == N_UNKOWN) {
-      break;
-    }
+  node_count = Parser_all(nodes, &p, node_count);
 #if DEBUG
-    Node_debug(&n, 0);
+  for (size_t i = 0; i < node_count; i++) {
+    Node_debug(&nodes[i], 0);
     puts("");
-#endif
-    nodes[node_count] = n;
-    node_count++;
   }
+#endif
   VERBOSE_PUTS("parser::Parser_next created AST with node_count=%zu",
                node_count);
   if (UNLIKELY(a.memory_usage)) {
