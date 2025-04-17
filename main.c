@@ -280,7 +280,7 @@ int main(int argc, char **argv) {
   }
   Vm vm = cc(&pipeline_allocator, nodes, node_count);
   VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu",
-               vm.bytecode_len, vm.global_len);
+               vm.bytecode_len, (size_t)vm.global_len);
 #if DEBUG
   puts("================== DISASM ==================");
 #endif

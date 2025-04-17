@@ -4,4 +4,4 @@ purple_garden_debug
 purple_garden_verbose
 tests/test
 bench
-examples/bench.garden
+examples/bench.*

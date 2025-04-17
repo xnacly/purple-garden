@@ -27,7 +27,7 @@ typedef enum {
 
 void disassemble(const Vm *vm) {
   puts("; vim: filetype=asm");
-  printf("; Vm {global=%zu/%d, bytecode=%zu/%d}\n", vm->global_len, GLOBAL_SIZE,
+  printf("; Vm {global=%u/%d, bytecode=%zu/%d}\n", vm->global_len, GLOBAL_SIZE,
          vm->bytecode_len, BYTECODE_SIZE);
   if (vm->global_len > 0) {
     printf("globals:\n\t");
@@ -126,7 +126,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       if (cached_index) {
         expected_index = cached_index - 1;
       } else {
-        ASSERT(vm->global_len + 1 <= GLOBAL_SIZE,
+        ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
                "cc: out of global space, what the fuck are you doing (there is "
                "space "
                "for 256k globals)");
@@ -135,7 +135,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       }
       BC(OP_LOAD, expected_index)
     } else {
-      ASSERT(vm->global_len + 1 <= GLOBAL_SIZE,
+      ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
              "cc: out of global space, what the fuck are you doing (there is "
              "space "
              "for 256k globals)");
@@ -151,7 +151,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     if (cached_index) {
       expected_index = cached_index - 1;
     } else {
-      ASSERT(vm->global_len + 1 <= GLOBAL_SIZE,
+      ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
              "cc: out of global space, what the fuck are you doing (there is "
              "space "
              "for 256k globals)");
@@ -212,7 +212,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       if (cached_index) {
         expected_index = cached_index - 1;
       } else {
-        ASSERT(vm->global_len + 1 <= GLOBAL_SIZE,
+        ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
                "cc: out of global space, what the fuck are you doing (there is "
                "space "
                "for 256k globals)");
@@ -283,7 +283,8 @@ Vm cc(Allocator *alloc, Node *nodes, size_t size) {
   vm.global_len += 2;
   // specifically set size 1 to keep r0 the temporary register
   Ctx ctx = {.size = 1, .registers = {0}};
-  ctx.global_hash_buckets = alloc->request(alloc->ctx, GLOBAL_SIZE);
+  ctx.global_hash_buckets =
+      alloc->request(alloc->ctx, sizeof(Value) * GLOBAL_SIZE);
 
   for (size_t i = 0; i < size; i++) {
     Node n = nodes[i];

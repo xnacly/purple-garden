@@ -2,6 +2,7 @@
 #define VM_H
 
 #include "parser.h"
+#include <stdint.h>
 #include <stdlib.h>
 
 #define REGISTERS 128
@@ -97,7 +98,7 @@ typedef enum {
 
 extern Str OP_MAP[];
 
-typedef unsigned short byte;
+typedef uint32_t byte;
 
 // A frame represents a Scope, a new scope is created upon entering a lambda -
 // since lambdas are pure there is no way to interact with the previous frame
@@ -113,10 +114,10 @@ typedef struct {
 } Frame;
 
 typedef struct {
-  size_t global_len;
+  uint32_t global_len;
   // globals represents the global pool created by the bytecode compiler
   Value *globals;
-  size_t bytecode_len;
+  uint64_t bytecode_len;
   byte *bytecode;
   // current position in the bytecode
   size_t pc;

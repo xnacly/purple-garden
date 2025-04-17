@@ -60,6 +60,10 @@ int main() {
          VAL(.type = V_NUM, .number = 12)),
     CASE((/ 6 2), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_DIV, 1),
          VAL(.type = V_NUM, .number = 3)),
+    CASE((+1(-2 1)),
+         BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_STORE, 2, OP_LOAD, 4,
+            OP_SUB, 2, OP_ADD, 1),
+         VAL(.type = V_NUM, .number = 2)),
 
     // builtins:
     CASE((@len "hello"), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
