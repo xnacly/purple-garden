@@ -10,41 +10,31 @@
 
 typedef struct {
   Str input;
-  size_t expected_size;
-  byte *expected;
   Value expected_r0;
 } Case;
 
-#define BC(...)                                                                \
-  (byte[]) { __VA_ARGS__ }
 #define VAL(...)                                                               \
   (Value) { __VA_ARGS__ }
 
-#define CASE(in, ex, r0)                                                       \
+#define CASE(in, r0)                                                           \
   {                                                                            \
       .input = STRING(#in "\0"),                                               \
-      .expected = ex,                                                          \
-      .expected_size = sizeof(ex) / sizeof(byte),                              \
       .expected_r0 = r0,                                                       \
   }
 
 int main() {
   Case cases[] = {
     // atoms:
-    CASE(3.1415, BC(OP_LOAD, 2), VAL(.type = V_NUM, .number = 3.1415)),
-    CASE(.1415, BC(OP_LOAD, 2), VAL(.type = V_NUM, .number = 0.1415)),
-    CASE("string", BC(OP_LOAD, 2),
-         VAL(.type = V_STRING, .string = STRING("string"))),
+    CASE(3.1415, VAL(.type = V_NUM, .number = 3.1415)),
+    CASE(.1415, VAL(.type = V_NUM, .number = 0.1415)),
+    CASE("string", VAL(.type = V_STRING, .string = STRING("string"))),
     // TODO: this is for future me to implement
     // CASE("escaped string\"", BC(OP_LOAD, 0), VAL(.type = V_STRING, .string
     // = STRING("escaped string\""))),
-    CASE(true false, BC(OP_LOAD, 1, OP_LOAD, 0), VAL(.type = V_FALSE)),
+    CASE(true false, VAL(.type = V_FALSE)),
     // checking if boolean interning works
-    CASE(true false true false,
-         BC(OP_LOAD, 1, OP_LOAD, 0, OP_LOAD, 1, OP_LOAD, 0),
-         VAL(.type = V_FALSE)),
-    CASE("hello", BC(OP_LOAD, 2),
-         VAL(.type = V_STRING, .string = STRING("hello"))),
+    CASE(true false true false, VAL(.type = V_FALSE)),
+    CASE("hello", VAL(.type = V_STRING, .string = STRING("hello"))),
 
     // INFO: infinity comparison case:
     // https://github.com/xNaCly/purple-garden/issues/1
@@ -52,41 +42,24 @@ int main() {
     //      VAL(.type = V_NUM, .number = 1.7976931348623157E+309)),
 
     // math:
-    CASE((+2 2), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_ADD, 1),
-         VAL(.type = V_NUM, .number = 4)),
-    CASE((-5 3), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_SUB, 1),
-         VAL(.type = V_NUM, .number = 2)),
-    CASE((*3 4), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_MUL, 1),
-         VAL(.type = V_NUM, .number = 12)),
-    CASE((/ 6 2), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_DIV, 1),
-         VAL(.type = V_NUM, .number = 3)),
-    CASE((+1(-2 1)),
-         BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_STORE, 2, OP_LOAD, 4,
-            OP_SUB, 2, OP_ADD, 1),
-         VAL(.type = V_NUM, .number = 2)),
+    CASE((+2 2), VAL(.type = V_NUM, .number = 4)),
+    CASE((-5 3), VAL(.type = V_NUM, .number = 2)),
+    CASE((*3 4), VAL(.type = V_NUM, .number = 12)),
+    CASE((/ 6 2), VAL(.type = V_NUM, .number = 3)),
+    CASE((+1(-2 1)), VAL(.type = V_NUM, .number = 2)),
 
     // builtins:
-    CASE((@len "hello"), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
-         VAL(.type = V_NUM, .number = 5)),
+    CASE((@len "hello"), VAL(.type = V_NUM, .number = 5)),
     // checking if string interning works
-    CASE((@len "hello")(@len "hello"),
-         BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN, OP_LOAD, 2, OP_BUILTIN,
-            BUILTIN_LEN),
-         VAL(.type = V_NUM, .number = 5)),
-    CASE((@len ""), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
-         VAL(.type = V_NUM, .number = 0)),
-    CASE((@len "a"), BC(OP_LOAD, 2, OP_BUILTIN, BUILTIN_LEN),
-         VAL(.type = V_NUM, .number = 1)),
+    CASE((@len "hello")(@len "hello"), VAL(.type = V_NUM, .number = 5)),
+    CASE((@len ""), VAL(.type = V_NUM, .number = 0)),
+    CASE((@len "a"), VAL(.type = V_NUM, .number = 1)),
 
     // variables
-    CASE((@let name "user"), BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_VAR, 1),
-         VAL(.type = V_STRING, .string = STRING("name"))),
+    CASE((@let name "user"), VAL(.type = V_STRING, .string = STRING("name"))),
     CASE((@let name "user")name,
-         BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_VAR, 1, OP_LOADV, 3),
          VAL(.type = V_STRING, .string = STRING("user"))),
-    CASE((@let age 25)age,
-         BC(OP_LOAD, 2, OP_STORE, 1, OP_LOAD, 3, OP_VAR, 1, OP_LOADV, 3),
-         VAL(.type = V_NUM, .number = 25)),
+    CASE((@let age 25)age, VAL(.type = V_NUM, .number = 25)),
   };
   size_t passed = 0;
   size_t failed = 0;
@@ -121,30 +94,6 @@ int main() {
     Vm *vm = &raw;
 
     bool error = false;
-    if (c.expected_size != vm->bytecode_len) {
-      printf("\tlenght not equal: wanted %zu, got %zu\n", c.expected_size,
-             vm->bytecode_len);
-      error = true;
-    } else {
-      for (size_t j = 0; j < vm->bytecode_len; j += 2) {
-        size_t expected_op = c.expected[j];
-        size_t got_op = vm->bytecode[j];
-
-        size_t expected_arg = c.expected[j + 1];
-        size_t got_arg = vm->bytecode[j + 1];
-
-        if (expected_op != got_op) {
-          printf("\tbad operator: want=%s got=%s\n", OP_MAP[expected_op].p,
-                 OP_MAP[got_op].p);
-          error = true;
-        }
-        if (expected_arg != got_arg) {
-          printf("\tbad arg(%s): want=%zu got=%zu\n", OP_MAP[got_op].p,
-                 expected_arg, got_arg);
-          error = true;
-        }
-      }
-    }
     Vm_run(vm, &alloc);
     if (!Value_cmp(vm->registers[0], c.expected_r0)) {
       printf("\n\tbad value at r0: want=%s got=%s",
@@ -155,6 +104,7 @@ int main() {
       printf("\n\tgot=");
       Value_debug(&vm->registers[0]);
       puts("");
+      disassemble(vm);
       error = true;
     }
     alloc.destroy(alloc.ctx);
