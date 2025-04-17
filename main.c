@@ -258,15 +258,15 @@ int main(int argc, char **argv) {
            s.allocated / 1024.0, percent);
   }
   Parser p = Parser_new(&pipeline_allocator, tokens);
-  size_t node_count = file_size_or_min * sizeof(Node) / 4;
-  Node *nodes = pipeline_allocator.request(pipeline_allocator.ctx, node_count);
+  size_t node_count = file_size_or_min * sizeof(Node *) / 4;
+  Node **nodes = pipeline_allocator.request(pipeline_allocator.ctx, node_count);
 #if DEBUG
   puts("================== ASTREE ==================");
 #endif
   node_count = Parser_all(nodes, &p, node_count);
 #if DEBUG
   for (size_t i = 0; i < node_count; i++) {
-    Node_debug(&nodes[i], 0);
+    Node_debug(nodes[i], 0);
     puts("");
   }
 #endif

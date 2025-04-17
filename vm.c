@@ -62,7 +62,7 @@ int Vm_run(Vm *vm, Allocator *alloc) {
 #if DEBUG
   puts("================== GLOBAL ==================");
   for (size_t i = 0; i < vm->global_len; i++) {
-    printf("VM[glob%zu/%zu] ", i + 1, vm->global_len);
+    printf("VM[glob%zu/%zu] ", i + 1, (size_t)vm->global_len);
     Value_debug(&vm->globals[i]);
     puts("");
   }
@@ -70,21 +70,18 @@ int Vm_run(Vm *vm, Allocator *alloc) {
 #endif
   while (vm->pc < vm->bytecode_len) {
     VM_OP op = vm->bytecode[vm->pc];
-    size_t arg = vm->bytecode[vm->pc + 1];
-#if DEBUG
-    DIS(op, arg)
-#endif
+    uint64_t arg = vm->bytecode[vm->pc + 1];
+
     switch (op) {
     case OP_LOAD:
       vm->registers[0] = vm->globals[arg];
       break;
     case OP_LOADV: {
-      Str *global_entry = &vm->globals[arg].string;
-      Value v =
-          vm->frame.variable_table[global_entry->hash & VARIABLE_TABLE_SIZE];
+      Value v = vm->frame.variable_table[arg & VARIABLE_TABLE_SIZE];
       if (v.type == V_UNDEFINED) {
-        VM_ERR("Undefined variable: `%.*s` not found in current scope",
-               (int)global_entry->len, global_entry->p);
+        Value *var = &vm->globals[arg & GLOBAL_MASK];
+        VM_ERR("Undefined variable `%.*s` in current scope",
+               (int)var->string.len, var->string.p);
       }
       vm->registers[0] = v;
       break;
@@ -189,6 +186,9 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       VM_ERR("Unimplemented instruction %.*s", (int)OP_MAP[op].len,
              OP_MAP[op].p)
     }
+#if DEBUG
+    DIS(op, arg)
+#endif
     vm->pc += 2;
   }
 #if DEBUG

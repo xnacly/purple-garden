@@ -10,7 +10,6 @@ typedef struct {
   size_t token_len;
   size_t pos;
   Token *cur;
-  bool err;
 } Parser;
 
 typedef enum {
@@ -44,16 +43,16 @@ typedef struct Node {
   // reduces copies
   Token *token;
   // params of a lambda, length encoded in Node.param_length
-  struct Node *params;
+  struct Node **params;
   // either children of a list or body of lambda, length encoded in
   // Node.children_length
-  struct Node *children;
+  struct Node **children;
 } Node;
 
 Parser Parser_new(Allocator *alloc, Token *t);
 // Returns the next top level Node
 Node Parser_next(Parser *p);
-size_t Parser_all(Node *nodes, Parser *p, size_t max_nodes);
+size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes);
 void Node_debug(Node *n, size_t depth);
 
 #endif

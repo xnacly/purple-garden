@@ -119,7 +119,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       BC(OP_LOAD, 0)
     } else if (n->token->type == T_TRUE) {
       BC(OP_LOAD, 1)
-    } else if (n->token->type == T_STRING || n->token->type == T_IDENT) {
+    } else if (n->token->type == T_STRING) {
       size_t hash = n->token->string.hash & GLOBAL_MASK;
       size_t cached_index = ctx->global_hash_buckets[hash];
       size_t expected_index = vm->global_len;
@@ -145,20 +145,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     break;
   }
   case N_IDENT: {
-    size_t hash = n->token->string.hash & GLOBAL_MASK;
-    size_t cached_index = ctx->global_hash_buckets[hash];
-    size_t expected_index = vm->global_len;
-    if (cached_index) {
-      expected_index = cached_index - 1;
-    } else {
-      ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
-             "cc: out of global space, what the fuck are you doing (there is "
-             "space "
-             "for 256k globals)");
-      ctx->global_hash_buckets[hash] = vm->global_len + 1;
-      vm->globals[vm->global_len++] = token_to_value(*n->token);
-    }
-    BC(OP_LOADV, expected_index);
+    BC(OP_LOADV, n->token->string.hash & GLOBAL_MASK);
     break;
   }
   case N_OP: {
@@ -169,15 +156,16 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         [T_ASTERISKS] = OP_MUL,
         [T_SLASH] = OP_DIV,
     }[n->token->type]);
+
     // single argument is just a return of that value
     if (n->children_length == 1) {
-      compile(alloc, vm, ctx, &n->children[0]);
+      compile(alloc, vm, ctx, n->children[0]);
     } else if (n->children_length == 2) {
       // two arguments is easy to compile, just load and add two Values
-      compile(alloc, vm, ctx, &n->children[0]);
+      compile(alloc, vm, ctx, n->children[0]);
       size_t r = Ctx_allocate_register(ctx);
       BC(OP_STORE, r)
-      compile(alloc, vm, ctx, &n->children[1]);
+      compile(alloc, vm, ctx, n->children[1]);
       BC(op, r)
       Ctx_free_register(ctx, r);
     } else {
@@ -202,10 +190,10 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
              "@let requires two arguments: `@let "
              "<var-name> <var-value>`, got %zu",
              n->children_length);
-      compile(alloc, vm, ctx, &n->children[1]);
+      compile(alloc, vm, ctx, n->children[1]);
       size_t r = Ctx_allocate_register(ctx);
       BC(OP_STORE, r);
-      Token *ident = n->children[0].token;
+      Token *ident = n->children[0]->token;
       size_t hash = ident->string.hash & GLOBAL_MASK;
       size_t cached_index = ctx->global_hash_buckets[hash];
       size_t expected_index = vm->global_len;
@@ -227,12 +215,12 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     default:
       // single argument at r0
       if (n->children_length == 1) {
-        compile(alloc, vm, ctx, &n->children[0]);
+        compile(alloc, vm, ctx, n->children[0]);
         // PERF: removed BC(OP_ARGS, 1), since a singular argument to a builtin
         // is the default optimized branch
       } else {
         for (size_t i = 0; i < n->children_length; i++) {
-          compile(alloc, vm, ctx, &n->children[i]);
+          compile(alloc, vm, ctx, n->children[i]);
           if (i < n->children_length - 1) {
             BC(OP_PUSH, 0)
           }
@@ -252,7 +240,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   }
 }
 
-Vm cc(Allocator *alloc, Node *nodes, size_t size) {
+Vm cc(Allocator *alloc, Node **nodes, size_t size) {
   // runtime functions
   runtime_builtin_hashes[Str_hash(&STRING("println")) & MAX_BUILTIN_SIZE_MASK] =
       BUILTIN_PRINTLN;
@@ -281,14 +269,13 @@ Vm cc(Allocator *alloc, Node *nodes, size_t size) {
   vm.globals[0] = (Value){.type = V_FALSE};
   vm.globals[1] = (Value){.type = V_TRUE};
   vm.global_len += 2;
-  // specifically set size 1 to keep r0 the temporary register
+  // specifically set size 1 to keep r0 the temporary register reserved
   Ctx ctx = {.size = 1, .registers = {0}};
   ctx.global_hash_buckets =
       alloc->request(alloc->ctx, sizeof(Value) * GLOBAL_SIZE);
 
   for (size_t i = 0; i < size; i++) {
-    Node n = nodes[i];
-    compile(alloc, &vm, &ctx, &n);
+    compile(alloc, &vm, &ctx, nodes[i]);
   }
   return vm;
 }

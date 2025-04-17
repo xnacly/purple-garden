@@ -11,9 +11,10 @@
 #define VARIABLE_TABLE_SIZE 1023
 
 #define DIS(op, arg)                                                           \
-  printf("VM[%06zu][%-8.*s][%3zu]: {.registers=[", vm->pc,                     \
-         (int)OP_MAP[(op)].len, OP_MAP[(op)].p, arg);                          \
+  printf("VM[%06zu][%-8.*s][%3lu]: {.registers=[", vm->pc,                     \
+         (int)OP_MAP[(op)].len, OP_MAP[(op)].p, (size_t)arg);                  \
   for (size_t i = 0; i < REGISTERS; i++) {                                     \
+    printf(" ");                                                               \
     if (vm->registers[i].type == V_UNDEFINED)                                  \
       break;                                                                   \
     Value_debug(&vm->registers[i]);                                            \
@@ -23,13 +24,11 @@
     printf(",.stack=[");                                                       \
   }                                                                            \
   for (size_t i = 0; i < vm->stack_cur; i++) {                                 \
+    printf(" ");                                                               \
     Value_debug(&vm->stack[i]);                                                \
-    if (i + 1 < vm->stack_cur) {                                               \
-      printf(", ");                                                            \
-    }                                                                          \
   }                                                                            \
   if (vm->stack_cur) {                                                         \
-    printf("]");                                                               \
+    printf(" ]");                                                              \
   }                                                                            \
   printf("}\n");
 
@@ -79,10 +78,9 @@ typedef enum {
   // identifier stored in r0
   OP_VAR,
 
-  // OP_LOADV rANY
+  // OP_LOADV hash
   //
-  // loads the Value stored in the variable table by the identifier stored in
-  // rANY
+  // loads the Value stored in the variable table by hash
   OP_LOADV,
 
   // OP_ARGS aANY

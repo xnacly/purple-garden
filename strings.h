@@ -2,6 +2,7 @@
 #define STRINGS_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 // str is a simple stack allocated wrapper around C char arrays, providing
 // constant time length access and zero allocation+copy interactions for all
@@ -11,7 +12,7 @@ typedef struct {
   const char *p;
   // hash of the input, do not expect it to be filled, has to be computed via
   // Str_hash or inline in the lexer
-  size_t hash;
+  uint64_t hash;
   // length of the input without a zero terminator
   size_t len;
 } Str;

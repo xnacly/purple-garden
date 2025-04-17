@@ -14,7 +14,6 @@ Parser Parser_new(Allocator *alloc, Token *t) {
       .tokens = t,
       .pos = 0,
       .cur = &t[0],
-      .err = false,
   };
 }
 
@@ -34,7 +33,6 @@ static void consume(Parser *p, TokenType tt) {
     printf(", got: ");
     Str_debug(&TOKEN_TYPE_MAP[p->cur->type]);
     putc('\n', stdout);
-    p->err = true;
     return;
   }
   advance(p);
@@ -43,24 +41,24 @@ static void consume(Parser *p, TokenType tt) {
 // attempts to efficiently grow n->children, since lists are the main
 // datastructure of purple garden - should be called before each new children
 // added to n->children
-static void Node_add_child(Allocator *alloc, Node *n, Node child) {
+static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
   if (n->children_length + 1 >= n->children_cap) {
     // growing array
     size_t new = n->children_cap *NODE_CAP_GROW;
-    Node *old = n->children;
-    n->children = alloc->request(alloc->ctx, sizeof(Node) * new);
-    memcpy(n->children, old, sizeof(Node) * n->children_length);
+    Node **old = n->children;
+    n->children = alloc->request(alloc->ctx, sizeof(Node *) * new);
+    memcpy(n->children, old, sizeof(Node *) * n->children_length);
     n->children_cap = new;
   }
 
   n->children[n->children_length++] = child;
 }
 
-size_t Parser_all(Node *nodes, Parser *p, size_t max_nodes) {
+size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
   // stack keeps the list(s) we are in, the last element is always the current
   // list, the first (0) is root
-  Node stack[256];
-  stack[0] = (Node){
+  Node *stack[256];
+  stack[0] = &(Node){
       .type = N_UNKNOWN,
       .children = nodes,
       .children_cap = max_nodes,
@@ -85,49 +83,45 @@ size_t Parser_all(Node *nodes, Parser *p, size_t max_nodes) {
   JUMP_NEXT;
 
 atom: {
-  Node n = (Node){
-      .type = N_ATOM,
-      .token = p->cur,
-  };
+  Node *n = p->alloc->request(p->alloc->ctx, sizeof(Node));
+  n->type = N_ATOM;
+  n->token = p->cur;
   advance(p);
-  Node_add_child(p->alloc, &stack[stack_top], n);
+  Node_add_child(p->alloc, stack[stack_top], n);
   JUMP_NEXT;
 }
 
 ident: {
-  Node n = (Node){
-      .type = N_IDENT,
-      .token = p->cur,
-  };
+  Node *n = p->alloc->request(p->alloc->ctx, sizeof(Node));
+  n->type = N_IDENT;
+  n->token = p->cur;
   advance(p);
-  Node_add_child(p->alloc, &stack[stack_top], n);
+  Node_add_child(p->alloc, stack[stack_top], n);
   JUMP_NEXT;
 }
 
 begin: {
-  Node n = (Node){
-      .type = N_LIST,
-      .children_length = 0,
-      .children_cap = NODE_INITIAL_CHILD_SIZE,
-      .children = p->alloc->request(p->alloc->ctx,
-                                    NODE_INITIAL_CHILD_SIZE * sizeof(Node)),
-  };
+  Node *n = p->alloc->request(p->alloc->ctx, sizeof(Node));
+  n->children_length = 0, n->children_cap = NODE_INITIAL_CHILD_SIZE,
+  n->children =
+      p->alloc->request(p->alloc->ctx, NODE_INITIAL_CHILD_SIZE * sizeof(Node)),
   consume(p, T_DELIMITOR_LEFT);
   switch (p->cur->type) {
   case T_BUILTIN:
-    n.token = p->cur;
-    n.type = N_BUILTIN;
+    n->token = p->cur;
+    n->type = N_BUILTIN;
     advance(p);
     break;
   case T_PLUS:
   case T_MINUS:
   case T_ASTERISKS:
   case T_SLASH:
-    n.token = p->cur;
-    n.type = N_OP;
+    n->type = N_OP;
+    n->token = p->cur;
     advance(p);
     break;
   default:
+    n->type = N_LIST;
   }
   stack_top++;
   stack[stack_top] = n;
@@ -137,15 +131,15 @@ begin: {
 end: {
   consume(p, T_DELIMITOR_RIGHT);
   if (stack_top) {
-    Node prev = stack[stack_top];
+    Node *prev = stack[stack_top];
     stack_top--;
-    Node_add_child(p->alloc, &stack[stack_top], prev);
+    Node_add_child(p->alloc, stack[stack_top], prev);
   }
   JUMP_NEXT;
 }
 
 eof:
-  return stack[0].children_length;
+  return stack[0]->children_length;
 }
 
 #if DEBUG
@@ -186,7 +180,7 @@ void Node_debug(Node *n, size_t depth) {
     putc('\n', stdout);
   }
   for (size_t i = 0; i < n->children_length; i++) {
-    Node_debug(&n->children[i], depth + 1);
+    Node_debug(n->children[i], depth + 1);
     if (i + 1 < n->children_length) {
       putc(',', stdout);
     }

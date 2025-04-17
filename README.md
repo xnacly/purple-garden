@@ -291,6 +291,9 @@ $ hotspot
 
 ## Optimisations
 
+- [x] `lexer`,`parser`, `cc`: separate memory regions and allocation strategies
+  from `vm`
+- [x] `lexer`, `cc`, `vm`: hash idents at lex time, use hash for variable access
 - [x] `vm`: register based, instead of stack based
 - [x] `cc`: fastpaths for zero argument builtin stripping
 - [x] `cc`: fastpaths for one argument call sites
