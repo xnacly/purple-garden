@@ -6,8 +6,7 @@
 
 typedef struct {
   Allocator *alloc;
-  Token *tokens;
-  size_t token_len;
+  Token **tokens;
   size_t pos;
   Token *cur;
 } Parser;
@@ -49,7 +48,7 @@ typedef struct Node {
   struct Node **children;
 } Node;
 
-Parser Parser_new(Allocator *alloc, Token *t);
+Parser Parser_new(Allocator *alloc, Token **t);
 // Returns the next top level Node
 Node Parser_next(Parser *p);
 size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes);

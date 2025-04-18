@@ -202,10 +202,6 @@ int Vm_run(Vm *vm, Allocator *alloc) {
 #endif
   return 0;
 vm_end:
-  DIS(vm->bytecode[vm->pc - 8], (size_t)vm->bytecode[vm->pc - 7]);
-  DIS(vm->bytecode[vm->pc - 6], (size_t)vm->bytecode[vm->pc - 5]);
-  DIS(vm->bytecode[vm->pc - 4], (size_t)vm->bytecode[vm->pc - 3]);
-  DIS(vm->bytecode[vm->pc - 2], (size_t)vm->bytecode[vm->pc - 1]);
   DIS(vm->bytecode[vm->pc], (size_t)vm->bytecode[vm->pc + 1]);
   return 1;
 }

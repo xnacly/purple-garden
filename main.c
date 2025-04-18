@@ -238,15 +238,15 @@ int main(int argc, char **argv) {
   pipeline_allocator.ctx = pipeline_allocator.init(min_size);
   VERBOSE_PUTS("mem::init: Allocated memory block of size=%zuB", min_size);
   Lexer l = Lexer_new(input);
-  Token *tokens = pipeline_allocator.request(pipeline_allocator.ctx,
-                                             file_size_or_min * sizeof(Token));
+  Token **tokens = pipeline_allocator.request(
+      pipeline_allocator.ctx, file_size_or_min * sizeof(Token *));
 #if DEBUG
   puts("================== TOKENS ==================");
 #endif
-  size_t count = Lexer_all(&l, tokens);
+  size_t count = Lexer_all(&l, &pipeline_allocator, tokens);
 #if DEBUG
   for (size_t i = 0; i < count; i++) {
-    Token_debug(&tokens[i]);
+    Token_debug(tokens[i]);
     puts("");
   }
 #endif

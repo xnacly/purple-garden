@@ -2,6 +2,7 @@
 #define LEXER_H
 
 #include "common.h"
+#include "mem.h"
 #include "string.h"
 
 typedef enum {
@@ -56,6 +57,6 @@ typedef struct {
 
 Lexer Lexer_new(Str input);
 Token Lexer_next(Lexer *l);
-size_t Lexer_all(Lexer *l, Token *out);
+size_t Lexer_all(Lexer *l, Allocator *a, Token **out);
 
 #endif

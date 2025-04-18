@@ -8,12 +8,12 @@
 #define NODE_CAP_GROW 1.75
 #define NODE_INITIAL_CHILD_SIZE 2
 
-Parser Parser_new(Allocator *alloc, Token *t) {
+Parser Parser_new(Allocator *alloc, Token **t) {
   return (Parser){
       .alloc = alloc,
       .tokens = t,
       .pos = 0,
-      .cur = &t[0],
+      .cur = t[0],
   };
 }
 
@@ -23,7 +23,7 @@ Parser Parser_new(Allocator *alloc, Token *t) {
 
 static void advance(Parser *p) {
   p->pos++;
-  p->cur = &p->tokens[p->pos];
+  p->cur = p->tokens[p->pos];
 }
 
 static void consume(Parser *p, TokenType tt) {

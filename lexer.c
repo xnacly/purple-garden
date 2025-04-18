@@ -1,5 +1,6 @@
 #include "lexer.h"
 #include "common.h"
+#include "mem.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -53,12 +54,23 @@ Lexer Lexer_new(Str input) {
 
 #define cur(L) ((L->pos < L->input.len) ? L->input.p[L->pos] : 0)
 
-inline static bool is_ident(char cc) {
+static bool is_ident(char cc) {
   return (cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') || cc == '_' ||
          cc == '-';
 }
 
-size_t Lexer_all(Lexer *l, Token *out) {
+// we can "intern" these, since all of them are the same, regardless of position
+Token *INTERN_DELIMITOR_LEFT = &(Token){.type = T_DELIMITOR_LEFT};
+Token *INTERN_DELIMITOR_RIGHT = &(Token){.type = T_DELIMITOR_RIGHT};
+Token *INTERN_MINUS = &(Token){.type = T_MINUS};
+Token *INTERN_PLUS = &(Token){.type = T_PLUS};
+Token *INTERN_ASTERISKS = &(Token){.type = T_ASTERISKS};
+Token *INTERN_SLASH = &(Token){.type = T_SLASH};
+Token *INTERN_FALSE = &(Token){.type = T_FALSE};
+Token *INTERN_TRUE = &(Token){.type = T_TRUE};
+Token *INTERN_EOF = &(Token){.type = T_EOF};
+
+size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
   ASSERT(out != NULL, "Failed to allocate token list");
   size_t count = 0;
   static void *jump_table[256] = {
@@ -86,12 +98,12 @@ size_t Lexer_all(Lexer *l, Token *out) {
   JUMP_TARGET;
 
 delimitor_left:
-  out[count++] = SINGLE_TOK(T_DELIMITOR_LEFT);
+  out[count++] = INTERN_DELIMITOR_LEFT;
   l->pos++;
   JUMP_TARGET;
 
 delimitor_right:
-  out[count++] = SINGLE_TOK(T_DELIMITOR_RIGHT);
+  out[count++] = INTERN_DELIMITOR_RIGHT;
   l->pos++;
   JUMP_TARGET;
 
@@ -99,7 +111,7 @@ builtin: {
   l->pos++;
   // not an ident after @, this is shit
   if (!is_ident(cur(l))) {
-    out[count++] = SINGLE_TOK(T_EOF);
+    out[count++] = INTERN_EOF;
   }
   size_t start = l->pos;
   size_t hash = FNV_OFFSET_BASIS;
@@ -114,32 +126,30 @@ builtin: {
       .len = len,
       .hash = hash,
   };
-  Token a = (Token){
-      .type = T_IDENT,
-      .string = s,
-  };
-  a.type = T_BUILTIN;
-  out[count++] = a;
+  Token *b = a->request(a->ctx, sizeof(Token));
+  b->string = s;
+  b->type = T_BUILTIN;
+  out[count++] = b;
   JUMP_TARGET;
 }
 
 plus:
-  out[count++] = SINGLE_TOK(T_PLUS);
+  out[count++] = INTERN_PLUS;
   l->pos++;
   JUMP_TARGET;
 
 minus:
-  out[count++] = SINGLE_TOK(T_MINUS);
+  out[count++] = INTERN_MINUS;
   l->pos++;
   JUMP_TARGET;
 
 slash:
-  out[count++] = SINGLE_TOK(T_SLASH);
+  out[count++] = INTERN_SLASH;
   l->pos++;
   JUMP_TARGET;
 
 asterisks:
-  out[count++] = SINGLE_TOK(T_ASTERISKS);
+  out[count++] = INTERN_ASTERISKS;
   l->pos++;
   JUMP_TARGET;
 
@@ -168,10 +178,10 @@ number: {
     d = (double)strtol(input_start, &endptr, 10);
   }
   ASSERT(endptr != input_start, "lex: Failed to parse number")
-  out[count++] = (Token){
-      .type = T_NUMBER,
-      .number = d,
-  };
+  Token *n = a->request(a->ctx, sizeof(Token));
+  n->type = T_NUMBER;
+  n->number = d;
+  out[count++] = n;
   JUMP_TARGET;
 }
 
@@ -184,29 +194,23 @@ ident: {
   }
 
   size_t len = l->pos - start;
-  Token t;
+  Token *t;
   if (len == 4 &&
       (l->input.p[start + 0] == 't' && l->input.p[start + 1] == 'r' &&
        l->input.p[start + 2] == 'u' && l->input.p[start + 3] == 'e')) {
-    t = (Token){
-        .type = T_TRUE,
-    };
+    t = INTERN_TRUE;
   } else if (len == 5 &&
              (l->input.p[start + 0] == 'f' && l->input.p[start + 1] == 'a' &&
               l->input.p[start + 2] == 'l' && l->input.p[start + 3] == 's' &&
               l->input.p[start + 4] == 'e')) {
-    t = (Token){
-        .type = T_FALSE,
-    };
+    t = INTERN_FALSE;
   } else {
-    Str s = (Str){
+    t = a->request(a->ctx, sizeof(Token));
+    t->type = T_IDENT;
+    t->string = (Str){
         .p = l->input.p + start,
         .len = len,
         .hash = hash,
-    };
-    t = (Token){
-        .type = T_IDENT,
-        .string = s,
     };
   }
   out[count++] = t;
@@ -227,19 +231,18 @@ string: {
     Str slice = Str_slice(&l->input, l->pos, l->input.len);
     fprintf(stderr, "lex: Unterminated string near: '%.*s'", (int)slice.len,
             slice.p);
-    out[count++] = SINGLE_TOK(T_EOF);
+    out[count++] = INTERN_EOF;
   } else {
-    Str s = (Str){
+    Token *t = a->request(a->ctx, sizeof(Token));
+    t->type = T_STRING;
+    t->string = (Str){
         .p = l->input.p + start,
         .len = l->pos - start,
         .hash = hash,
     };
+    out[count++] = t;
     // skip "
     l->pos++;
-    out[count++] = (Token){
-        .type = T_STRING,
-        .string = s,
-    };
   }
   JUMP_TARGET;
 }
@@ -254,7 +257,7 @@ whitespace:
   JUMP_TARGET;
 
 end:
-  out[count++] = SINGLE_TOK(T_EOF);
+  out[count++] = INTERN_EOF;
   return count;
 }
 

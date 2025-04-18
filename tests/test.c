@@ -84,8 +84,8 @@ int main() {
 
     Lexer l = Lexer_new(c.input);
     alloc.ctx = alloc.init(min_size);
-    Token *tokens = alloc.request(alloc.ctx, MIN_MEM * sizeof(Token));
-    Lexer_all(&l, tokens);
+    Token **tokens = alloc.request(alloc.ctx, MIN_MEM * sizeof(Token));
+    Lexer_all(&l, &alloc, tokens);
     Parser p = Parser_new(&alloc, tokens);
     size_t node_count = MIN_MEM * sizeof(Node *) / 4;
     Node **nodes = alloc.request(alloc.ctx, node_count);
