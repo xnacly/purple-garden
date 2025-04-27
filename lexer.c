@@ -107,15 +107,25 @@ delimitor_right:
   l->pos++;
   JUMP_TARGET;
 
+braket_left:
+  out[count++] = INTERN_BRAKET_LEFT;
+  l->pos++;
+  JUMP_TARGET;
+
+braket_right:
+  out[count++] = INTERN_BRAKET_RIGHT;
+  l->pos++;
+  JUMP_TARGET;
+
 builtin: {
   l->pos++;
   // not an ident after @, this is shit
-  if (!is_ident(cur(l))) {
+  if (!is_alphanum(cur(l))) {
     out[count++] = INTERN_EOF;
   }
   size_t start = l->pos;
   size_t hash = FNV_OFFSET_BASIS;
-  for (char cc = cur(l); cc > 0 && is_ident(cc); l->pos++, cc = cur(l)) {
+  for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
   }
@@ -155,9 +165,9 @@ asterisks:
 
 number: {
   size_t start = l->pos;
-  char *input_start = l->input.p + start;
-  // PERF: using strtol if number is not a floating point number ~1.405243x
-  // faster (-28.84%)
+  const char *input_start = l->input.p + start;
+  // using strtol if number is not a floating point number ~1.405243x
+  // faster (-28.84%); replace with specified T_INT, rename T_NUMBER to T_FLOAT
   bool is_double = false;
   for (char cc = cur(l); cc > 0; l->pos++, cc = cur(l)) {
     if (cc == '.' || cc == 'e') {
@@ -188,7 +198,7 @@ number: {
 ident: {
   size_t start = l->pos;
   size_t hash = FNV_OFFSET_BASIS;
-  for (char cc = cur(l); cc > 0 && is_ident(cc); l->pos++, cc = cur(l)) {
+  for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
   }
