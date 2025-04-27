@@ -8,6 +8,8 @@
 
 Str TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
                         [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
+                        [T_BRAKET_LEFT] = STRING("T_BRAKET_LEFT"),
+                        [T_BRAKET_RIGHT] = STRING("T_BRAKET_RIGHT"),
                         [T_STRING] = STRING("T_STRING"),
                         [T_TRUE] = STRING("T_TRUE"),
                         [T_FALSE] = STRING("T_FALSE"),
@@ -54,14 +56,16 @@ Lexer Lexer_new(Str input) {
 
 #define cur(L) ((L->pos < L->input.len) ? L->input.p[L->pos] : 0)
 
-static bool is_ident(char cc) {
-  return (cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') || cc == '_' ||
-         cc == '-';
+static bool is_alphanum(char cc) {
+  return (cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') ||
+         (cc >= '0' && cc <= '9') || cc == '_' || cc == '-';
 }
 
 // we can "intern" these, since all of them are the same, regardless of position
 Token *INTERN_DELIMITOR_LEFT = &(Token){.type = T_DELIMITOR_LEFT};
 Token *INTERN_DELIMITOR_RIGHT = &(Token){.type = T_DELIMITOR_RIGHT};
+Token *INTERN_BRAKET_LEFT = &(Token){.type = T_BRAKET_LEFT};
+Token *INTERN_BRAKET_RIGHT = &(Token){.type = T_BRAKET_RIGHT};
 Token *INTERN_MINUS = &(Token){.type = T_MINUS};
 Token *INTERN_PLUS = &(Token){.type = T_PLUS};
 Token *INTERN_ASTERISKS = &(Token){.type = T_ASTERISKS};
@@ -75,6 +79,7 @@ size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
   size_t count = 0;
   static void *jump_table[256] = {
       ['('] = &&delimitor_left, [')'] = &&delimitor_right,
+      ['['] = &&braket_left,    [']'] = &&braket_right,
       ['@'] = &&builtin,        ['+'] = &&plus,
       ['-'] = &&minus,          ['/'] = &&slash,
       ['*'] = &&asterisks,      [' '] = &&whitespace,
