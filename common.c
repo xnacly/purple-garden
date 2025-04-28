@@ -14,7 +14,7 @@ bool Value_cmp(Value a, Value b) {
   }
 
   switch (a.type) {
-  case V_STRING:
+  case V_STR:
     return Str_eq(&a.string, &b.string);
   case V_NUM:
     // comparing doubles by subtracting them and comparing the result to an
@@ -23,7 +23,7 @@ bool Value_cmp(Value a, Value b) {
   case V_TRUE:
   case V_FALSE:
     return true;
-  case V_LIST:
+  case V_ARRAY:
   default:
     // lists arent really the same, this is not a deep equal
     return false;

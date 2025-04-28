@@ -8,8 +8,18 @@
 typedef enum {
   // (
   T_DELIMITOR_LEFT = 1,
+  // assigned OP numbers because we directly map these in the compiler, see
+  // vm.h#VM_OP
+  T_PLUS = 2,
+  T_MINUS = 3,
+  T_ASTERISKS = 4,
+  T_SLASH = 5,
   // )
   T_DELIMITOR_RIGHT,
+  // [
+  T_BRAKET_LEFT,
+  // ]
+  T_BRAKET_RIGHT,
   // anything between ""
   T_STRING,
   T_TRUE,
@@ -20,16 +30,8 @@ typedef enum {
   T_BUILTIN,
   // any identifier
   T_IDENT,
-  //
-  T_PLUS,
-  //
-  T_MINUS,
-  //
-  T_ASTERISKS,
-  //
-  T_SLASH,
   // end marker
-  T_EOF
+  T_EOF,
 } TokenType;
 
 // TOKEN_TYPE_MAP allows for mapping TokenType to its string representation

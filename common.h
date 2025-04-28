@@ -27,18 +27,21 @@
     exit(EXIT_FAILURE);                                                        \
   }
 
-#define TODO(msg) ASSERT(0, "TODO: " msg)
+#define TODO(fmt, ...)                                                         \
+  fprintf(stderr, "TODO: " fmt " failed in " __FILE__ ":%d\n", ##__VA_ARGS__,  \
+          __LINE__);                                                           \
+  exit(EXIT_FAILURE);
 
 #include "strings.h"
 
 typedef enum {
   V_UNDEFINED,
   V_OPTION,
-  V_STRING,
+  V_STR,
   V_NUM,
   V_TRUE,
   V_FALSE,
-  V_LIST,
+  V_ARRAY,
 } ValueType;
 
 extern Str VALUE_TYPE_MAP[];
@@ -51,8 +54,14 @@ typedef struct Value {
   union {
     Str string;
     double number;
+    struct {
+      size_t len;
+      // holds members of the array
+      struct Value *value;
+    } array;
     struct Option {
       bool is_some;
+      // holds some
       struct Value *value;
     } option;
   };
