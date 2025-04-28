@@ -1,6 +1,5 @@
 #include "builtins.h"
 #include "common.h"
-#include "vm.h"
 
 static void print_value(const Value v) {
   switch (v.type) {
@@ -14,7 +13,7 @@ static void print_value(const Value v) {
     }
     break;
   }
-  case V_STRING:
+  case V_STR:
     Str_debug(&v.string);
     break;
   case V_NUM:
@@ -26,8 +25,16 @@ static void print_value(const Value v) {
   case V_FALSE:
     printf("false");
     break;
-  case V_LIST:
-    // TODO: iterate each one and print with ,
+  case V_ARRAY:
+    printf("[");
+    for (size_t i = 0; i < v.array.len; i++) {
+      print_value(v.array.value[i]);
+      if (i + 1 <= v.array.len) {
+        printf(", ");
+      }
+    }
+    printf("]");
+    break;
   case V_UNDEFINED:
     printf("undefined");
     break;
@@ -64,19 +71,15 @@ Value builtin_println(const Value *arg, size_t count) {
 Value builtin_len(const Value *arg, size_t count) {
   ASSERT(count == 1, "len only works for a singular argument")
   const Value *a = &arg[0];
-  if (a->type != V_STRING) {
-    Value_debug(a);
-    ASSERT(a->type == V_STRING, "len only works for strings")
+  if (a->type == V_STR) {
+    return (Value){.type = V_NUM, .number = a->string.len};
+  } else if (a->type == V_ARRAY) {
+    return (Value){.type = V_NUM, .number = a->array.len};
+  } else {
+    fputs("builtin_len only strings and lists have a length", stderr);
+    exit(EXIT_FAILURE);
   }
-  return (Value){.type = V_NUM, .number = a->string.len};
-  // if (a.type == V_STRING) {
-  // } else if (a.type == V_LIST) {
-  //   TODO("builtin_len#arg->type == V_LIST not implemented")
-  // } else {
-  //   fputs("builtin_len only strings and lists have a length", stderr);
-  //   exit(EXIT_FAILURE);
-  // }
-  // return NONE;
+  return NONE;
 }
 
 Value builtin_type(const Value *arg, size_t count) {
@@ -89,7 +92,7 @@ Value builtin_type(const Value *arg, size_t count) {
   case V_OPTION:
     s = STRING("option");
     break;
-  case V_STRING:
+  case V_STR:
     s = STRING("string");
     break;
   case V_NUM:
@@ -99,12 +102,12 @@ Value builtin_type(const Value *arg, size_t count) {
   case V_FALSE:
     s = STRING("boolean");
     break;
-  case V_LIST:
-    s = STRING("list");
+  case V_ARRAY:
+    s = STRING("array");
     break;
   default:
   }
-  return (Value){.type = V_STRING, .string = s};
+  return (Value){.type = V_STR, .string = s};
 }
 
 builtin_function BUILTIN_MAP[] = {
