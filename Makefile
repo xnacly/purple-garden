@@ -20,6 +20,7 @@ FLAGS := -std=c23 \
         -Wno-discarded-qualifiers \
 		-Wno-unused-parameter \
 		-Wno-unused-function \
+		-Wno-unused-variable \
 		-Wno-aggregate-return
 RELEASE_FLAGS := -O3 \
 		-flto \
