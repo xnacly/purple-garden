@@ -17,9 +17,7 @@ Parser Parser_new(Allocator *alloc, Token **t) {
   };
 }
 
-/* #define advance(P) \
-   P->pos++; \ P->cur = &P->tokens[P->pos];
-*/
+/* #define advance(P) \ p->pos++; p->cur = p->tokens[p->pos]; */
 
 static void advance(Parser *p) {
   p->pos++;
@@ -67,6 +65,7 @@ size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
 
   static void *jump_table[256] = {
       [T_DELIMITOR_LEFT] = &&begin, [T_DELIMITOR_RIGHT] = &&end,
+      [T_BRAKET_LEFT] = &&arr_left, [T_BRAKET_RIGHT] = &&arr_right,
       [T_STRING] = &&atom,          [T_TRUE] = &&atom,
       [T_FALSE] = &&atom,           [T_NUMBER] = &&atom,
       [T_IDENT] = &&ident,          [T_EOF] = &&eof};
@@ -106,9 +105,9 @@ begin: {
   n->children =
       p->alloc->request(p->alloc->ctx, NODE_INITIAL_CHILD_SIZE * sizeof(Node)),
   consume(p, T_DELIMITOR_LEFT);
+  n->token = p->cur;
   switch (p->cur->type) {
   case T_BUILTIN:
-    n->token = p->cur;
     n->type = N_BUILTIN;
     advance(p);
     break;
@@ -116,10 +115,14 @@ begin: {
   case T_MINUS:
   case T_ASTERISKS:
   case T_SLASH:
-    n->type = N_OP;
-    n->token = p->cur;
+    n->type = N_BIN;
     advance(p);
     break;
+  case T_IDENT: {
+    n->type = N_CALL;
+    advance(p);
+    break;
+  }
   default:
     n->type = N_LIST;
   }
@@ -130,11 +133,29 @@ begin: {
 
 end: {
   consume(p, T_DELIMITOR_RIGHT);
-  if (stack_top) {
-    Node *prev = stack[stack_top];
-    stack_top--;
-    Node_add_child(p->alloc, stack[stack_top], prev);
-  }
+  Node *prev = stack[stack_top];
+  stack_top--;
+  Node_add_child(p->alloc, stack[stack_top], prev);
+  JUMP_NEXT;
+}
+
+arr_left: {
+  Node *n = p->alloc->request(p->alloc->ctx, sizeof(Node));
+  n->children_cap = NODE_INITIAL_CHILD_SIZE;
+  n->children =
+      p->alloc->request(p->alloc->ctx, NODE_INITIAL_CHILD_SIZE * sizeof(Node));
+  n->type = N_ARRAY;
+  consume(p, T_BRAKET_LEFT);
+  stack_top++;
+  stack[stack_top] = n;
+  JUMP_NEXT;
+}
+
+arr_right: {
+  consume(p, T_BRAKET_RIGHT);
+  Node *prev = stack[stack_top];
+  stack_top--;
+  Node_add_child(p->alloc, stack[stack_top], prev);
   JUMP_NEXT;
 }
 
@@ -142,24 +163,25 @@ eof:
   return stack[0]->children_length;
 }
 
+Str NODE_TYPE_MAP[] = {
+    // strings, numbers, booleans
+    [N_ATOM] = STRING("N_ATOM"),
+    //
+    [N_IDENT] = STRING("N_IDENT"),
+    [N_ARRAY] = STRING("N_ARRAY"),
+    // main data structure
+    [N_LIST] = STRING("N_LIST"),
+    // builtin call
+    [N_BUILTIN] = STRING("N_BUILTIN"),
+    // operator, like +-*/%
+    [N_BIN] = STRING("N_BIN"),
+    [N_CALL] = STRING("N_CALL"),
+    // error and end case
+    [N_UNKNOWN] = STRING("N_UNKOWN"),
+};
+
 #if DEBUG
 void Node_debug(Node *n, size_t depth) {
-  Str NODE_TYPE_MAP[] = {
-      // strings, numbers, booleans
-      [N_ATOM] = STRING("N_ATOM"),
-      //
-      [N_IDENT] = STRING("N_IDENT"),
-      // main data structure
-      [N_LIST] = STRING("N_LIST"),
-      // function definition
-      [N_FUNCTION] = STRING("N_LAMBDA"),
-      // builtin call
-      [N_BUILTIN] = STRING("N_BUILTIN"),
-      // operator, like +-*/%
-      [N_OP] = STRING("N_OP"),
-      // error and end case
-      [N_UNKNOWN] = STRING("N_UNKOWN"),
-  };
   for (size_t i = 0; i < depth; i++) {
     putc(' ', stdout);
   }
@@ -167,10 +189,14 @@ void Node_debug(Node *n, size_t depth) {
   switch (n->type) {
   case N_ATOM:
   case N_IDENT:
-  case N_FUNCTION:
-  case N_OP:
+  case N_BIN:
   case N_BUILTIN:
     Token_debug(n->token);
+    break;
+  case N_CALL:
+    putc('[', stdout);
+    Str_debug(&n->token->string);
+    putc(']', stdout);
     break;
   default:
     break;

@@ -14,19 +14,23 @@ typedef struct {
 typedef enum {
   // strings, numbers, booleans
   N_ATOM,
-  //
+  // all identifiers
   N_IDENT,
+  // anything between [ and ]
+  N_ARRAY,
   // main data structure
   N_LIST,
-  // function definition
-  N_FUNCTION,
-  // builtins, like @println, @len, etc
+  // builtins, like @println, @len, @let, @function, etc
   N_BUILTIN,
   // operator, like +-*/%
-  N_OP,
+  N_BIN,
+  // function call
+  N_CALL,
   // error and end case
   N_UNKNOWN,
 } NodeType;
+
+extern Str NODE_TYPE_MAP[];
 
 // stores all possible values of a node
 typedef struct Node {
@@ -35,14 +39,14 @@ typedef struct Node {
   // lambdas body or the amount of children in a list
   size_t children_length;
   // only populated for N_LAMBDA; stores the lambda parameter count
-  size_t param_length;
+  // size_t param_length;
   // stores the children_cap to implement a growing array
   size_t children_cap;
   // N_ATOM values and the N_FUNCTION name are stored in the Token struct - this
   // reduces copies
   Token *token;
   // params of a lambda, length encoded in Node.param_length
-  struct Node **params;
+  // struct Node **params;
   // either children of a list or body of lambda, length encoded in
   // Node.children_length
   struct Node **children;
