@@ -62,10 +62,10 @@ typedef struct {
 } Args;
 
 typedef struct {
-  char *name_long;
-  char name_short;
-  char *description;
-  char *arg_name;
+  const char *name_long;
+  const char name_short;
+  const char *description;
+  const char *arg_name;
 } cli_option;
 
 // WARN: DO NOT REORDER THIS - will result in option handling issues
@@ -91,8 +91,9 @@ void usage() {
   printf("%.*s ", (int)prefix.len, prefix.p);
   size_t len = sizeof(options) / sizeof(cli_option);
   for (size_t i = 0; i < len; i++) {
-    char *equal_or_not = options[i].arg_name[0] == 0 ? "" : "=";
-    char *name_or_not = options[i].arg_name[0] == 0 ? "" : options[i].arg_name;
+    const char *equal_or_not = options[i].arg_name[0] == 0 ? "" : "=";
+    const char *name_or_not =
+        options[i].arg_name[0] == 0 ? "" : options[i].arg_name;
     printf("[-%c%s | --%s%s%s] ", options[i].name_short, name_or_not,
            options[i].name_long, equal_or_not, name_or_not);
     if ((i + 1) % 2 == 0 && i + 1 < len) {
@@ -174,8 +175,8 @@ Args Args_parse(int argc, char **argv) {
     size_t len = sizeof(options) / sizeof(cli_option);
     printf("\nOptions:\n");
     for (size_t i = 0; i < len; i++) {
-      char *equal_or_not = options[i].arg_name[0] == 0 ? "" : "=";
-      char *name_or_not =
+      const char *equal_or_not = options[i].arg_name[0] == 0 ? "" : "=";
+      const char *name_or_not =
           options[i].arg_name[0] == 0 ? "" : options[i].arg_name;
       printf("\t-%c%s%s, --%s%s%s\n\t\t%s\n\n", options[i].name_short,
              equal_or_not, name_or_not, options[i].name_long, equal_or_not,
@@ -278,15 +279,15 @@ int main(int argc, char **argv) {
     printf("parse: %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
   }
-  Vm vm = cc(&pipeline_allocator, nodes, node_count);
+  CompileOutput c = cc(&pipeline_allocator, nodes, node_count);
   VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu",
-               vm.bytecode_len, (size_t)vm.global_len);
+               c.vm.bytecode_len, (size_t)c.vm.global_len);
 #if DEBUG
   puts("================== DISASM ==================");
 #endif
 
   if (UNLIKELY(a.disassemble)) {
-    disassemble(&vm);
+    disassemble(&c.vm, &c.ctx);
     puts("");
   }
 
@@ -296,14 +297,6 @@ int main(int argc, char **argv) {
     printf("cc: %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
   }
-
-#if DEBUG
-  puts("================== MEMORY ==================");
-  Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
-  double percent = (s.current * 100) / (double)s.allocated;
-  printf("total: %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
-         s.allocated / 1024.0, percent);
-#endif
 
   // TODO: fill this with the value of --block-allocator
   Allocator vm_alloc = {0};
@@ -319,15 +312,24 @@ int main(int argc, char **argv) {
         .stats = bump_stats,
     };
   } else {
-    // TODO: init gc here
+    // TODO: replace this with default gc
+    vm_alloc = pipeline_allocator;
   }
-  int runtime_code = Vm_run(&vm, &vm_alloc);
+  int runtime_code = Vm_run(&c.vm, &vm_alloc);
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
+
+#if DEBUG
+  puts("================== MEMORY ==================");
+  Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
+  double percent = (s.current * 100) / (double)s.allocated;
+  printf("cc: %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
+         s.allocated / 1024.0, percent);
+#endif
 
   pipeline_allocator.destroy(pipeline_allocator.ctx);
   VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");
 
-  Vm_destroy(vm);
+  Vm_destroy(&c.vm);
 
   VERBOSE_PUTS("vm::Vm_destroy: teared vm down");
 
