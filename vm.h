@@ -8,10 +8,11 @@
 #define REGISTERS 128
 #define CALL_ARGUMENT_STACK 256
 // TODO: make this work dynamically via gc
-#define VARIABLE_TABLE_SIZE 1023
+#define VARIABLE_TABLE_SIZE 1024
+#define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
 
 #define DIS(op, arg)                                                           \
-  printf("VM[%06zu][%-8.*s][%3lu]: {.registers=[", vm->pc,                     \
+  printf("VM[%06zu][%-8.*s][%10lu]: {.registers=[", vm->pc,                    \
          (int)OP_MAP[(op)].len, OP_MAP[(op)].p, (size_t)arg);                  \
   for (size_t i = 0; i < REGISTERS; i++) {                                     \
     printf(" ");                                                               \
@@ -50,19 +51,19 @@ typedef enum {
   // OP_ADD rANY
   //
   // add Value at rANY to r0, store result in r0
-  OP_ADD,
+  OP_ADD = 2,
   // OP_SUB rANY
   //
   // subtract Value at rANY from r0, store result in r0
-  OP_SUB,
+  OP_SUB = 3,
   // OP_MUL rANY
   //
   // multiply Value at rANY with r0, store result in r0
-  OP_MUL,
+  OP_MUL = 4,
   // OP_DIV rANY
   //
   // divide Value at rANY with r0, store result in r0
-  OP_DIV,
+  OP_DIV = 5,
 
   // TODO: possibly optimisable by adding a OP_PUSHG for directly pushing a
   // global atom by its index into the vm arg stack
@@ -71,6 +72,11 @@ typedef enum {
   //
   // pushes the value in rANY to the stack
   OP_PUSH,
+
+  // OP_POP rANY
+  //
+  // pops a value from the stack
+  OP_POP,
 
   // OP_VAR rANY
   //
@@ -92,6 +98,24 @@ typedef enum {
   //
   // call the builtin its argument refers to, with the argument stored in r0
   OP_BUILTIN,
+
+  // OP_RET rANY
+  //
+  // returns r0 from the current scope
+  OP_RET,
+
+  // OP_CALL ADDR
+  //
+  // 1 enters a new stackframe, stores the last vm->pc in
+  // Frame.return_to_bytecode
+  //
+  // 2 jumps to ADDR
+  OP_CALL,
+
+  // OP_JMP bc
+  //
+  // Jumps to bc in bytecode index, does no bounds checking
+  OP_JMP,
 } VM_OP;
 
 extern Str OP_MAP[];
@@ -102,13 +126,13 @@ typedef uint32_t byte;
 // since lambdas are pure there is no way to interact with the previous frame
 // inside of a lambda, the pointer is kept to allow the runtime to restore the
 // scope state to its state before entering the lambda
-typedef struct {
+typedef struct Frame {
   struct Frame *prev;
   // returning out of scope, we need to jump back to the callsite of the
   // function
   size_t return_to_bytecode;
   // stores Values by their hash, serving as a variable table
-  Value variable_table[VARIABLE_TABLE_SIZE + 1];
+  Value *variable_table;
 } Frame;
 
 typedef struct {
@@ -122,7 +146,7 @@ typedef struct {
   Value registers[REGISTERS + 1];
   // frame stores variables of the current scope, meta data and other required
   // data
-  Frame frame;
+  Frame *frame;
   // stack is used for handling arguments of a function or builtin call, if more
   // than one arguments are passed to a function these are pushed to the stack,
   // except the last one, which is in r0 either way, so we just take it from
@@ -136,7 +160,7 @@ typedef struct {
 } Vm;
 
 int Vm_run(Vm *vm, Allocator *alloc);
-void Vm_destroy(Vm vm);
+void Vm_destroy(Vm *vm);
 void Value_debug(const Value *v);
 
 #endif

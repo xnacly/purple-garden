@@ -4,18 +4,19 @@
 #include "mem.h"
 #include "strings.h"
 
-Str OP_MAP[256] = {
-    [OP_LOAD] = STRING("LOAD"),      [OP_STORE] = STRING("STORE"),
-    [OP_ADD] = STRING("ADD"),        [OP_SUB] = STRING("SUB"),
-    [OP_MUL] = STRING("MUL"),        [OP_DIV] = STRING("DIV"),
-    [OP_PUSH] = STRING("PUSH"),      [OP_VAR] = STRING("VAR"),
-    [OP_LOADV] = STRING("LOADV"),    [OP_ARGS] = STRING("ARGS"),
-    [OP_BUILTIN] = STRING("BUILTIN")};
+Str OP_MAP[256] = {[OP_LOAD] = STRING("LOAD"), [OP_STORE] = STRING("STORE"),
+                   [OP_ADD] = STRING("ADD"),   [OP_SUB] = STRING("SUB"),
+                   [OP_MUL] = STRING("MUL"),   [OP_DIV] = STRING("DIV"),
+                   [OP_POP] = STRING("POP"),   [OP_PUSH] = STRING("PUSH"),
+                   [OP_VAR] = STRING("VAR"),   [OP_LOADV] = STRING("LOADV"),
+                   [OP_ARGS] = STRING("ARGS"), [OP_BUILTIN] = STRING("BUILTIN"),
+                   [OP_RET] = STRING("RET"),   [OP_CALL] = STRING("CALL"),
+                   [OP_JMP] = STRING("JMP")};
 
 Str VALUE_TYPE_MAP[] = {
-    [V_OPTION] = STRING("Option("), [V_STRING] = STRING("Str"),
+    [V_OPTION] = STRING("Option("), [V_STR] = STRING("Str"),
     [V_NUM] = STRING("Number"),     [V_TRUE] = STRING("True"),
-    [V_FALSE] = STRING("False"),    [V_LIST] = STRING("List"),
+    [V_FALSE] = STRING("False"),    [V_ARRAY] = STRING("Array"),
 };
 
 #define VM_ERR(fmt, ...)                                                       \
@@ -39,7 +40,7 @@ void Value_debug(const Value *v) {
   case V_TRUE:
   case V_FALSE:
     break;
-  case V_STRING:
+  case V_STR:
     printf("(`");
     Str_debug(&v->string);
     printf("`)");
@@ -50,8 +51,14 @@ void Value_debug(const Value *v) {
   case V_UNDEFINED:
     printf("undefined");
     break;
-  case V_LIST:
-    TODO("Vm_Value_debug#V_LIST unimplemend")
+  case V_ARRAY: {
+    printf("[");
+    for (size_t i = 0; i < v->array.len; i++) {
+      Value_debug(&v->array.value[i]);
+    }
+    printf("]");
+    break;
+  };
   default:
     printf("<unkown>");
   }
@@ -59,6 +66,10 @@ void Value_debug(const Value *v) {
 
 int Vm_run(Vm *vm, Allocator *alloc) {
   vm->arg_count = 1;
+  Frame *f = alloc->request(alloc->ctx, sizeof(Frame));
+  f->variable_table =
+      alloc->request(alloc->ctx, sizeof(Value) * VARIABLE_TABLE_SIZE);
+  vm->frame = f;
 #if DEBUG
   puts("================== GLOBAL ==================");
   for (size_t i = 0; i < vm->global_len; i++) {
@@ -70,18 +81,29 @@ int Vm_run(Vm *vm, Allocator *alloc) {
 #endif
   while (vm->pc < vm->bytecode_len) {
     VM_OP op = vm->bytecode[vm->pc];
-    uint64_t arg = vm->bytecode[vm->pc + 1];
+    uint32_t arg = vm->bytecode[vm->pc + 1];
 
     switch (op) {
     case OP_LOAD:
       vm->registers[0] = vm->globals[arg];
       break;
     case OP_LOADV: {
-      Value v = vm->frame.variable_table[arg & VARIABLE_TABLE_SIZE];
+      // bounds checking and checking for variable validity is performed at
+      // compile time, but we still have to check if the variable is available
+      // in the current scope...
+      Value v = vm->frame->variable_table[arg & VARIABLE_TABLE_SIZE_MASK];
       if (v.type == V_UNDEFINED) {
-        Value *var = &vm->globals[arg & GLOBAL_MASK];
-        VM_ERR("Undefined variable `%.*s` in current scope",
-               (int)var->string.len, var->string.p);
+        Value possible_ident_name = vm->globals[arg & GLOBAL_MASK];
+        // this is for when we know the identifier because we interned it
+        // already
+        if (possible_ident_name.type != V_UNDEFINED) {
+          VM_ERR("Undefined variable `%.*s`",
+                 (int)possible_ident_name.string.len,
+                 possible_ident_name.string.p);
+        } else {
+          // this is for when we dont know the identifier
+          VM_ERR("Undefined variable with hash %i", arg);
+        }
       }
       vm->registers[0] = v;
       break;
@@ -90,9 +112,8 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      vm->frame
-          .variable_table[vm->registers[0].string.hash & VARIABLE_TABLE_SIZE] =
-          vm->registers[arg];
+      vm->frame->variable_table[vm->registers[0].string.hash &
+                                VARIABLE_TABLE_SIZE_MASK] = vm->registers[arg];
       break;
     case OP_ADD: {
       Value *a = &vm->registers[0];
@@ -104,11 +125,11 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       }
       switch (a->type) {
       case V_NUM:
-        vm->registers[0] = (Value){.type = V_NUM,
-                                   .number = vm->registers[0].number +
-                                             vm->registers[arg].number};
+        // avoid copy here, write directly into register, possible here,
+        // since order is irrelevant
+        vm->registers[0].number += vm->registers[arg].number;
         break;
-      case V_STRING:
+      case V_STR:
         VM_ERR("VM[+] Str concat not implemented yet")
       default:
         VM_ERR("VM[+] Only strings and numbers can be concatenated")
@@ -138,8 +159,9 @@ int Vm_run(Vm *vm, Allocator *alloc) {
             (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
             (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
       }
-      vm->registers[0] =
-          (Value){.type = V_NUM, .number = b->number * a->number};
+      // avoid copy here, write directly into register, possible here,
+      // since order is irrelevant
+      vm->registers[0].number *= vm->registers[arg].number;
       break;
     }
     case OP_DIV: {
@@ -157,6 +179,10 @@ int Vm_run(Vm *vm, Allocator *alloc) {
     }
     case OP_ARGS:
       vm->arg_count = arg;
+      break;
+    case OP_POP:
+      ASSERT(vm->stack_cur, "Attempting to pop from stack, but stack is empty")
+      vm->registers[0] = vm->stack[--vm->stack_cur];
       break;
     case OP_PUSH:
       ASSERT(vm->stack_cur < CALL_ARGUMENT_STACK,
@@ -180,6 +206,30 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       }
 
       vm->arg_count = 1;
+      break;
+    }
+    case OP_CALL: {
+      // TODO: reuse frames allocated in an arena
+      Frame *new_frame = alloc->request(alloc->ctx, sizeof(Frame));
+      new_frame->variable_table =
+          alloc->request(alloc->ctx, sizeof(Value) * VARIABLE_TABLE_SIZE);
+      new_frame->prev = vm->frame;
+      new_frame->return_to_bytecode = vm->pc;
+      vm->frame = new_frame;
+      vm->pc = arg;
+      vm->arg_count = 1;
+      break;
+    }
+    case OP_RET: {
+      // TODO: move no longer used frames to arena as free
+      if (vm->frame->prev) {
+        vm->pc = vm->frame->return_to_bytecode;
+        vm->frame = vm->frame->prev;
+      }
+      break;
+    }
+    case OP_JMP: {
+      vm->pc = arg;
       break;
     }
     default:
@@ -206,4 +256,4 @@ vm_end:
   return 1;
 }
 
-void Vm_destroy(Vm vm) {}
+void Vm_destroy(Vm *vm) {}
