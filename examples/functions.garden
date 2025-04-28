@@ -1,12 +1,15 @@
 ; vim: filetype=racket
-
 (@function
-  add3               ; name
-  (arg1 arg2 arg3)   ; arguments
-  (+ arg1 arg2 arg3) ; body, last element is returned
+  ; name
+  add3        
+  ; arguments
+  [arg1 arg2 arg3]
+  ; body, last element is returned
+  (+ 
+    (+ arg1 arg2) arg3)  
 )
-(add3 (3.1415 3.1415 3.1415))
+(@println
+  (add3 3.1415 3.1415 3.1415))
 
-(@function greeting (greetee) 
-           (+ "hello world to: " greetee))
-(@println (greeting "user"))
+(@function greeting [greetee] (@println "hello world to:" greetee))
+(greeting "user")

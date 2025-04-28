@@ -50,18 +50,18 @@ entry:
 ```
 
 ```asm
-globals:
+__globals:
         False; {idx=0}
         True; {idx=1}
-        Str(`Hello World`); {idx=2,hash=1058087}
+        Str(`Hello`); {idx=2,hash=1847627}
+        Str(`World`); {idx=3,hash=2157875}
 
-entry:
-        ; [op=0,arg=2] at (0/1)
-        ; global=Str(`Hello World`)
-        LOAD 2
-        ; [op=8,arg=1] at (2/3)
-        ; builtin=@println
-        BUILTIN 1
+__entry:
+        LOAD 2: Str(`Hello`)
+        PUSH 0
+        LOAD 3: Str(`World`)
+        ARGS 2
+        BUILTIN 1: <@println>
 ```
 
 #### n-Arguments
@@ -79,7 +79,7 @@ entry:
 ```
 
 ```asm
-globals:
+__globals:
         False; {idx=0}
         True; {idx=1}
         Str(`Hello`); {idx=2,hash=1847627}
@@ -87,28 +87,14 @@ globals:
         Number(3.141500); {idx=4}
         Number(127.000000); {idx=5}
 
-entry:
-        ; [op=0,arg=2] at (0/1)
-        ; global=Str(`Hello`)
-        LOAD 2
-        ; [op=6,arg=0] at (2/3)
+__entry:
+        LOAD 2: Str(`Hello`)
         PUSH 0
-        ; [op=0,arg=3] at (4/5)
-        ; global=Str(`World`)
-        LOAD 3
-        ; [op=6,arg=0] at (6/7)
+        LOAD 3: Str(`World`)
         PUSH 0
-        ; [op=0,arg=4] at (8/9)
-        ; global=Number(3.141500)
-        LOAD 4
-        ; [op=6,arg=0] at (10/11)
+        LOAD 4: Number(3.141500)
         PUSH 0
-        ; [op=0,arg=5] at (12/13)
-        ; global=Number(127.000000)
-        LOAD 5
-        ; [op=7,arg=4] at (14/15)
+        LOAD 5: Number(127.000000)
         ARGS 4
-        ; [op=8,arg=1] at (16/17)
-        ; builtin=@println
-        BUILTIN 1
+        BUILTIN 1: <@println>
 ```

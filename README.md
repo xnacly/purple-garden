@@ -4,10 +4,10 @@ purple_garden is a lean lisp, designed and implemented with a focus on
 performance
 
 ```racket
-(@function greeting (greetee)
-    (+ "hello world to: " greetee))
-(@println (greeting "user"))
+(@function greeting [greetee] 
+    (@println "hello world to:" greetee))
 ; prints `hello world to: user`
+(greeting "user")
 ```
 
 ## Local Setup
@@ -32,7 +32,7 @@ make
 # ================== INPUTS ==================
 # ; vim: filetype=racket
 # 
-# ; @println is a predefined function responsible for writing to stdout 
+# ; @println is a predefined function responsible for writing to stdout
 # ; builtins are specifically called via @<builtin>
 # (@println "Hello" "World")
 # ================== TOKENS ==================
@@ -42,56 +42,47 @@ make
 # [T_STRING][World]
 # [T_DELIMITOR_RIGHT]
 # [T_EOF]
-# lex: 131072.00KB of 729088.00KB used (17.98%)
+# lex: 32768.09KB of 598016.00KB used (5.48%)
 # ================== ASTREE ==================
 # N_BUILTIN[T_BUILTIN][println](
 #  N_ATOM[T_STRING][Hello],
 #  N_ATOM[T_STRING][World]
 # )
-# parse: 188416.27KB of 729088.00KB used (25.84%)
+# parse: 40960.31KB of 598016.00KB used (6.85%)
 # ================== DISASM ==================
 # ; vim: filetype=asm
 # ; Vm {global=4/4194304, bytecode=10/4194304}
-# globals:
-# 	False; {idx=0}
-# 	True; {idx=1}
-# 	Str(`Hello`); {idx=2,hash=1847627}
-# 	Str(`World`); {idx=3,hash=2157875}
-# 	
-# entry: 
-# 	; [op=0,arg=2] at (0/1)
-# 	; global=Str(`Hello`)
-# 	LOAD 2
-# 	; [op=6,arg=0] at (2/3)
-# 	PUSH 0
-# 	; [op=0,arg=3] at (4/5)
-# 	; global=Str(`World`)
-# 	LOAD 3
-# 	; [op=7,arg=2] at (6/7)
-# 	ARGS 2
-# 	; [op=8,arg=1] at (8/9)
-# 	; builtin=@println
-# 	BUILTIN 1
+# __globals:
+#         False; {idx=0}
+#         True; {idx=1}
+#         Str(`Hello`); {idx=2,hash=1847627}
+#         Str(`World`); {idx=3,hash=2157875}
 # 
-# cc: 331776.27KB of 729088.00KB used (45.505655%)
-# ================== MEMORY ==================
-# total: 331776.27KB of 729088.00KB used (45.51%)
+# __entry:
+#         LOAD 2: Str(`Hello`)
+#         PUSH 0
+#         LOAD 3: Str(`World`)
+#         ARGS 2
+#         BUILTIN 1: <@println>
+# cc: 319496.31KB of 598016.00KB used (53.426048%)
 # ================== GLOBAL ==================
 # VM[glob1/4] False
 # VM[glob2/4] True
 # VM[glob3/4] Str(`Hello`)
 # VM[glob4/4] Str(`World`)
 # ================== VM OPS ==================
-# VM[000000][LOAD    ][  2]: {.registers=[]}
-# VM[000002][PUSH    ][  0]: {.registers=[Str(`Hello`)]}
-# VM[000004][LOAD    ][  3]: {.registers=[Str(`Hello`)],.stack=[Str(`Hello`)]}
-# VM[000006][ARGS    ][  2]: {.registers=[Str(`World`)],.stack=[Str(`Hello`)]}
-# VM[000008][BUILTIN ][  1]: {.registers=[Str(`World`)],.stack=[Str(`Hello`)]}
-# Hello World 
+# VM[000000][LOAD    ][         2]: {.registers=[ Str(`Hello`) ]}
+# VM[000002][PUSH    ][         0]: {.registers=[ Str(`Hello`) ],.stack=[ Str(`Hello`) ]}
+# VM[000004][LOAD    ][         3]: {.registers=[ Str(`World`) ],.stack=[ Str(`Hello`) ]}
+# VM[000006][ARGS    ][         2]: {.registers=[ Str(`World`) ],.stack=[ Str(`Hello`) ]}
+# Hello World
+# VM[000008][BUILTIN ][         1]: {.registers=[ Option(None) ]}
 # ==================  REGS  ==================
 # VM[r0]: Option(None)
 # VM[r1]: undefined
 # VM[r2]: undefined
+# ================== MEMORY ==================
+# cc: 319528.34KB of 598016.00KB used (53.431402%
 
 # provide a custom file to execute
 make PG=examples/ops.garden
@@ -104,44 +95,66 @@ make PG=examples/ops.garden
 ```sh
 $ make release
 ./purple_garden
-# usage: purple_garden [-v | --version] [-h | --help] [-d | --disassemble]
-#                      [-b | --block-allocator] [-a | --aot-functions] [-m | --memory-usage]
-#                      [-V | --verbose] <file.garden>
-# error: Missing a file? try `-h/--help
+# usage: purple_garden [-v | --version] [-h | --help]
+#                      [-d | --disassemble] [-b<size> | --block-allocator=<size>]
+#                      [-a | --aot-functions] [-m | --memory-usage]
+#                      [-V | --verbose] [-r<input> | --run=<input>] <file.garden>
+# error: Missing a file? try `-h/--help`
 $ ./purple_garden -h
-# usage: purple_garden [-v | --version] [-h | --help] [-d | --disassemble]
-#                      [-b | --block-allocator] [-a | --aot-functions] [-m | --memory-usage]
-#                      [-V | --verbose] <file.garden>
+# usage: purple_garden [-v | --version] [-h | --help]
+#                      [-d | --disassemble] [-b<size> | --block-allocator=<size>]
+#                      [-a | --aot-functions] [-m | --memory-usage]
+#                      [-V | --verbose] [-r<input> | --run=<input>] <file.garden>
 # 
-# options:
-#         -v, --version         display version information
-#         -h, --help            extended usage information
-#         -d, --disassemble     readable bytecode representation with labels, globals and comments
-#         -b, --block-allocator use block allocator instead of garbage collection
-#         -a, --aot-functions   compile all functions to machine code
-#         -m, --memory-usage    display the memory usage of parsing, compilation and the virtual machine
-#         -V, --verbose         verbose logging
+# Options:
+#         -v, --version
+#                 display version information
+# 
+#         -h, --help
+#                 extended usage information
+# 
+#         -d, --disassemble
+#                 readable bytecode representation with labels, globals and comments
+# 
+#         -b=<size>, --block-allocator=<size>
+#                 use block allocator instead of garbage collection
+# 
+#         -a, --aot-functions
+#                 compile all functions to machine code
+# 
+#         -m, --memory-usage
+#                 display the memory usage of parsing, compilation and the virtual machine
+# 
+#         -V, --verbose
+#                 verbose logging
+# 
+#         -r=<input>, --run=<input>
+#                 executes the argument as if an input file was given
 ```
 
 ### Running tests
 
 ```sh
 $ make test
-# [+][PASS][Case 1/14] in=`3.1415`
-# [+][PASS][Case 2/14] in=`.1415`
-# [+][PASS][Case 3/14] in=`"string"`
-# [+][PASS][Case 4/14] in=`true false`
-# [+][PASS][Case 5/14] in=`true false true false`
-# [+][PASS][Case 6/14] in=`"hello"`
-# [+][PASS][Case 7/14] in=`(+2 2)`
-# [+][PASS][Case 8/14] in=`(-5 3)`
-# [+][PASS][Case 9/14] in=`(*3 4)`
-# [+][PASS][Case 10/14] in=`(/ 6 2)`
-# [+][PASS][Case 11/14] in=`(@len "hello")`
-# [+][PASS][Case 12/14] in=`(@len "hello")(@len "hello")`
-# [+][PASS][Case 13/14] in=`(@len "")`
-# [+][PASS][Case 14/14] in=`(@len "a")`
-# 14 of 14 passed, 0 failed
+# [+][PASS][Case 1/18] in=`3.1415`
+# [+][PASS][Case 2/18] in=`.1415`
+# [+][PASS][Case 3/18] in=`"string"`
+# [+][PASS][Case 4/18] in=`true false`
+# [+][PASS][Case 5/18] in=`true false true false`
+# [+][PASS][Case 6/18] in=`"hello"`
+# [+][PASS][Case 7/18] in=`(+2 2)`
+# [+][PASS][Case 8/18] in=`(-5 3)`
+# [+][PASS][Case 9/18] in=`(*3 4)`
+# [+][PASS][Case 10/18] in=`(/ 6 2)`
+# [+][PASS][Case 11/18] in=`(+1(-2 1))`
+# [+][PASS][Case 12/18] in=`(@len "hello")`
+# [+][PASS][Case 13/18] in=`(@len "hello")(@len "hello")`
+# [+][PASS][Case 14/18] in=`(@len "")`
+# [+][PASS][Case 15/18] in=`(@len "a")`
+# [+][PASS][Case 16/18] in=`(@let name "user")`
+# [+][PASS][Case 17/18] in=`(@let name "user")name`
+# [+][PASS][Case 18/18] in=`(@let age 25)age`
+# 18 of 18 passed, 0 failed
 ```
 
 
@@ -172,33 +185,24 @@ $ ./purple_garden --disassemble examples/hello-world.garden
 Results in `Hello World` and of course bytecode disassembly:
 
 ```asm
-globals:
+__globals:
         False; {idx=0}
         True; {idx=1}
         Str(`Hello`); {idx=2,hash=1847627}
         Str(`World`); {idx=3,hash=2157875}
 
-entry:
-        ; [op=0,arg=2] at (0/1)
-        ; global=Str(`Hello`)
-        LOAD 2
-        ; [op=6,arg=0] at (2/3)
+__entry:
+        LOAD 2: Str(`Hello`)
         PUSH 0
-        ; [op=0,arg=3] at (4/5)
-        ; global=Str(`World`)
-        LOAD 3
-        ; [op=7,arg=2] at (6/7)
+        LOAD 3: Str(`World`)
         ARGS 2
-        ; [op=8,arg=1] at (8/9)
-        ; builtin=@println
-        BUILTIN 1
+        BUILTIN 1: <@println>
 ```
 
 The disassembler attempts to display as much information as possible:
 
 - allocation informations `Vm {<field>=<actual elements>/<allocated element space>}`
 - elements of the global pool, their pool index and their hashes
-- bytecode operator and argument values and indexes: `[op=6,arg=0] at (0/1)`
 - readable bytecode names: `LOAD` and `BUILTIN` instead of `0` and `6`
 - global pool values for certain bytecode operators: ```global=Str(`Hello World`)```
 - names for builtin calls: `builtin=@println`
@@ -213,7 +217,7 @@ $ wc -l examples/bench.garden
 # 250001 examples/bench.garden
 ```
 
-> This benchmark is for optimizing `builtin_len`/`@len` calls and atom
+> This benchmark example is for optimizing `builtin_len`/`@len` calls and atom
 > interning:
 
 ```racket
@@ -277,11 +281,11 @@ $ hotspot
   - [ ] optionals (support in backend - compiler, vm)
   - [ ] objects
 - [ ] language constructs
-  - [ ] variables
+  - [x] variables
   - [ ] if
   - [ ] match
   - [ ] loops
-  - [ ] functions
+  - [x] functions
   - [ ] pattern matching
 - [ ] builtins
   - [x] println

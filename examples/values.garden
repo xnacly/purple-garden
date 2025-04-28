@@ -14,10 +14,10 @@
    (@None)         ; Option::None
 )
 
-;; ; lists
+;; lists
 (@println
   ; same type lists
-  (1 2 3 4 5 6)
+  [1 2 3 4 5 6]
   ; different type lists
-  (1 "hello" "world" true)
+  [1 "hello" "world" true]
 )
