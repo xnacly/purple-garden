@@ -27,16 +27,16 @@ int main() {
     // atoms:
     CASE(3.1415, VAL(.type = V_NUM, .number = 3.1415)),
     CASE(.1415, VAL(.type = V_NUM, .number = 0.1415)),
-    CASE("string", VAL(.type = V_STRING, .string = STRING("string"))),
+    CASE("string", VAL(.type = V_STR, .string = STRING("string"))),
     // TODO: this is for future me to implement
     // CASE("escaped string\"", BC(OP_LOAD, 0), VAL(.type = V_STRING, .string
     // = STRING("escaped string\""))),
     CASE(true false, VAL(.type = V_FALSE)),
     // checking if boolean interning works
     CASE(true false true false, VAL(.type = V_FALSE)),
-    CASE("hello", VAL(.type = V_STRING, .string = STRING("hello"))),
+    CASE("hello", VAL(.type = V_STR, .string = STRING("hello"))),
 
-    // INFO: infinity comparison case:
+    // infinity comparison case:
     // https://github.com/xNaCly/purple-garden/issues/1
     // CASE("1.7976931348623157e+309", BC(OP_LOAD, 0),
     //      VAL(.type = V_NUM, .number = 1.7976931348623157E+309)),
@@ -56,10 +56,14 @@ int main() {
     CASE((@len "a"), VAL(.type = V_NUM, .number = 1)),
 
     // variables
-    CASE((@let name "user"), VAL(.type = V_STRING, .string = STRING("name"))),
-    CASE((@let name "user")name,
-         VAL(.type = V_STRING, .string = STRING("user"))),
+    CASE((@let name "user"), VAL(.type = V_STR, .string = STRING("name"))),
+    CASE((@let name "user")name, VAL(.type = V_STR, .string = STRING("user"))),
     CASE((@let age 25)age, VAL(.type = V_NUM, .number = 25)),
+
+    // functions
+    CASE((@function ret[arg] arg)(ret 25), VAL(.type = V_NUM, .number = 25)),
+    CASE((@function add25[arg](+arg 25))(add25 25),
+         VAL(.type = V_NUM, .number = 50)),
   };
   size_t passed = 0;
   size_t failed = 0;
@@ -90,8 +94,8 @@ int main() {
     size_t node_count = MIN_MEM * sizeof(Node *) / 4;
     Node **nodes = alloc.request(alloc.ctx, node_count);
     node_count = Parser_all(nodes, &p, node_count);
-    Vm raw = cc(&alloc, nodes, node_count);
-    Vm *vm = &raw;
+    CompileOutput out = cc(&alloc, nodes, node_count);
+    Vm *vm = &out.vm;
 
     bool error = false;
     Vm_run(vm, &alloc);
@@ -104,7 +108,7 @@ int main() {
       printf("\n\tgot=");
       Value_debug(&vm->registers[0]);
       puts("");
-      disassemble(vm);
+      disassemble(vm, &out.ctx);
       error = true;
     }
     alloc.destroy(alloc.ctx);
@@ -116,7 +120,7 @@ int main() {
       passed++;
       printf("[+][PASS][Case %zu/%zu] in=`%s` \n", i + 1, len, c.input.p);
     }
-    Vm_destroy(raw);
+    Vm_destroy(vm);
   }
 
   printf("%zu of %zu passed, %zu failed\n", passed, len, failed);
