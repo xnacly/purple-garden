@@ -1,6 +1,7 @@
 #include "lexer.h"
 #include "common.h"
 #include "mem.h"
+#include "strings.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -58,6 +59,7 @@ Lexer Lexer_new(Str input) {
   };
 }
 
+// TODO: replace these macro usages with simple indexing when length is valid
 #define cur(L) ((L->pos < L->input.len) ? L->input.p[L->pos] : 0)
 
 static bool is_alphanum(char cc) {
@@ -174,30 +176,33 @@ asterisks:
 
 number: {
   size_t start = l->pos;
-  const char *input_start = l->input.p + start;
+  size_t i = start;
   bool is_double = false;
-  for (char cc = cur(l); cc > 0; l->pos++, cc = cur(l)) {
-    if (cc == '.' || cc == 'e') {
+  for (; i < l->input.len; i++) {
+    char cc = l->input.p[i];
+    if (cc >= '0' && cc <= '9')
+      continue;
+    if (cc == '.') {
       is_double = true;
-    } else if (!((cc >= '0' && cc <= '9') || cc == '+' || cc == '-')) {
-      break;
+      continue;
     }
+    break;
   }
 
-  // limit how far strto* can go in the input, because no strings we use are 0
-  // terminated (strings::Str) and we know the length of the number
-  char *endptr = input_start + l->pos;
-
+  l->pos = i;
+  Str s = {
+      .p = l->input.p + start,
+      .len = i - start,
+  };
   Token *n = a->request(a->ctx, sizeof(Token));
   if (is_double) {
     n->type = T_DOUBLE;
-    n->floating = strtod(input_start, &endptr);
+    n->floating = Str_to_double(&s);
   } else {
     n->type = T_INTEGER;
-    n->integer = strtol(input_start, &endptr, 10);
+    n->integer = Str_to_int64_t(&s);
   }
 
-  ASSERT(endptr != input_start, "lex: Failed to parse number")
   out[count++] = n;
   JUMP_TARGET;
 }

@@ -17,8 +17,6 @@ Parser Parser_new(Allocator *alloc, Token **t) {
   };
 }
 
-/* #define advance(P) \ p->pos++; p->cur = p->tokens[p->pos]; */
-
 static void advance(Parser *p) {
   p->pos++;
   p->cur = p->tokens[p->pos];

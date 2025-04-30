@@ -47,4 +47,8 @@ void Str_debug(const Str *str);
 // Str_hash computes a hash str
 size_t Str_hash(const Str *str);
 
+int64_t Str_to_int64_t(const Str *str);
+
+double Str_to_double(const Str *str);
+
 #endif
