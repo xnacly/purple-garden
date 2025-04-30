@@ -3,6 +3,7 @@
 #include "common.h"
 #include "mem.h"
 #include "strings.h"
+#include <stdint.h>
 
 Str OP_MAP[256] = {[OP_LOAD] = STRING("LOAD"), [OP_STORE] = STRING("STORE"),
                    [OP_ADD] = STRING("ADD"),   [OP_SUB] = STRING("SUB"),
@@ -15,8 +16,9 @@ Str OP_MAP[256] = {[OP_LOAD] = STRING("LOAD"), [OP_STORE] = STRING("STORE"),
 
 Str VALUE_TYPE_MAP[] = {
     [V_OPTION] = STRING("Option("), [V_STR] = STRING("Str"),
-    [V_NUM] = STRING("Number"),     [V_TRUE] = STRING("True"),
-    [V_FALSE] = STRING("False"),    [V_ARRAY] = STRING("Array"),
+    [V_INT] = STRING("Int"),        [V_DOUBLE] = STRING("Double"),
+    [V_TRUE] = STRING("True"),      [V_FALSE] = STRING("False"),
+    [V_ARRAY] = STRING("Array"),
 };
 
 #define VM_ERR(fmt, ...)                                                       \
@@ -45,8 +47,11 @@ void Value_debug(const Value *v) {
     Str_debug(&v->string);
     printf("`)");
     break;
-  case V_NUM:
-    printf("(%f)", v->number);
+  case V_DOUBLE:
+    printf("(%g)", v->floating);
+    break;
+  case V_INT:
+    printf("(%ld)", v->integer);
     break;
   case V_UNDEFINED:
     printf("undefined");
@@ -116,65 +121,219 @@ int Vm_run(Vm *vm, Allocator *alloc) {
                                 VARIABLE_TABLE_SIZE_MASK] = vm->registers[arg];
       break;
     case OP_ADD: {
-      Value *a = &vm->registers[0];
-      Value *b = &vm->registers[arg];
-      if (a->type != b->type) {
-        VM_ERR("VM[+] Incompatible types %.*s and %.*s",
-               (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
-               (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
-      }
-      switch (a->type) {
-      case V_NUM:
-        // avoid copy here, write directly into register, possible here,
-        // since order is irrelevant
-        vm->registers[0].number += vm->registers[arg].number;
+      Value *left = &vm->registers[0];
+      Value *right = &vm->registers[arg];
+      switch (left->type) {
+      case V_INT:
+        switch (right->type) {
+        case V_INT:
+          // avoid copy here, write directly into register, possible here,
+          // since order is irrelevant
+          vm->registers[0].integer += right->integer;
+          break;
+        case V_DOUBLE:
+          vm->registers[0] = (Value){
+              .type = V_DOUBLE,
+              .floating = (double)left->integer + right->floating,
+          };
+          break;
+        default:
+          VM_ERR("VM[+] Incompatible types %.*s and %.*s",
+                 (int)VALUE_TYPE_MAP[left->type].len,
+                 VALUE_TYPE_MAP[left->type].p,
+                 (int)VALUE_TYPE_MAP[right->type].len,
+                 VALUE_TYPE_MAP[right->type].p)
+        }
         break;
-      case V_STR:
-        VM_ERR("VM[+] Str concat not implemented yet")
+      case V_DOUBLE:
+        switch (right->type) {
+        case V_INT:
+          vm->registers[0] = (Value){
+              .type = V_DOUBLE,
+              .floating = left->floating + (double)right->integer,
+          };
+          break;
+        case V_DOUBLE:
+          // avoid copy here, write directly into register, possible here,
+          // since order is irrelevant
+          vm->registers[0].floating += right->floating;
+          break;
+        default:
+          VM_ERR("VM[+] Incompatible types %.*s and %.*s",
+                 (int)VALUE_TYPE_MAP[left->type].len,
+                 VALUE_TYPE_MAP[left->type].p,
+                 (int)VALUE_TYPE_MAP[right->type].len,
+                 VALUE_TYPE_MAP[right->type].p)
+        }
+        break;
       default:
-        VM_ERR("VM[+] Only strings and numbers can be concatenated")
+        VM_ERR(
+            "VM[+] Incompatible types %.*s and %.*s",
+            (int)VALUE_TYPE_MAP[left->type].len, VALUE_TYPE_MAP[left->type].p,
+            (int)VALUE_TYPE_MAP[right->type].len, VALUE_TYPE_MAP[right->type].p)
       }
       break;
     }
     case OP_SUB: {
       Value *a = &vm->registers[0];
       Value *b = &vm->registers[arg];
-      if (a->type != V_NUM || b->type != V_NUM) {
-        VM_ERR("VM[-] Subtraction is only allowed for numbers, not for types "
-               "%.*s and %.*s",
+      switch (a->type) {
+      case V_INT:
+        switch (b->type) {
+        case V_INT:
+          vm->registers[0] = (Value){
+              .type = V_INT,
+              .integer = b->integer - a->integer,
+          };
+          break;
+        case V_DOUBLE:
+          vm->registers[0] = (Value){
+              .type = V_DOUBLE,
+              .floating = b->floating - (double)a->integer,
+          };
+          break;
+        default:
+          VM_ERR("VM[-] Incompatible types %.*s and %.*s",
+                 (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
+                 (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
+        }
+        break;
+      case V_DOUBLE:
+        switch (b->type) {
+        case V_INT:
+          vm->registers[0] = (Value){
+              .type = V_DOUBLE,
+              .floating = (double)b->integer - a->floating,
+          };
+          break;
+        case V_DOUBLE:
+          // avoid copy here, write directly into register, possible here,
+          // since order is irrelevant
+          vm->registers[0] = (Value){
+              .type = V_DOUBLE,
+              .floating = b->floating - a->floating,
+          };
+          break;
+        default:
+          VM_ERR("VM[-] Incompatible types %.*s and %.*s",
+                 (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
+                 (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
+        }
+        break;
+        break;
+      default:
+        VM_ERR("VM[-] Incompatible types %.*s and %.*s",
                (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
                (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
       }
-      vm->registers[0] =
-          (Value){.type = V_NUM, .number = b->number - a->number};
       break;
     }
     case OP_MUL: {
-      Value *a = &vm->registers[0];
-      Value *b = &vm->registers[arg];
-      if (a->type != V_NUM || b->type != V_NUM) {
+      Value *left = &vm->registers[0];
+      Value *right = &vm->registers[arg];
+      switch (left->type) {
+      case V_INT:
+        switch (right->type) {
+        case V_INT:
+          // avoid copy here, write directly into register, possible here,
+          // since order is irrelevant
+          vm->registers[0].integer *= right->integer;
+          break;
+        case V_DOUBLE:
+          vm->registers[0] = (Value){
+              .type = V_DOUBLE,
+              .floating = (double)left->integer * right->floating,
+          };
+          break;
+        default:
+          VM_ERR("VM[*] Incompatible types %.*s and %.*s",
+                 (int)VALUE_TYPE_MAP[left->type].len,
+                 VALUE_TYPE_MAP[left->type].p,
+                 (int)VALUE_TYPE_MAP[right->type].len,
+                 VALUE_TYPE_MAP[right->type].p)
+        }
+        break;
+      case V_DOUBLE:
+        switch (right->type) {
+        case V_INT:
+          vm->registers[0] = (Value){
+              .type = V_DOUBLE,
+              .floating = left->floating * (double)right->integer,
+          };
+          break;
+        case V_DOUBLE:
+          // avoid copy here, write directly into register, possible here,
+          // since order is irrelevant
+          vm->registers[0].floating *= right->floating;
+          break;
+        default:
+          VM_ERR("VM[*] Incompatible types %.*s and %.*s",
+                 (int)VALUE_TYPE_MAP[left->type].len,
+                 VALUE_TYPE_MAP[left->type].p,
+                 (int)VALUE_TYPE_MAP[right->type].len,
+                 VALUE_TYPE_MAP[right->type].p)
+        }
+        break;
+      default:
         VM_ERR(
-            "VM[*] Multiplication is only allowed for numbers, not for types "
-            "%.*s and %.*s",
-            (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
-            (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
+            "VM[*] Incompatible types %.*s and %.*s",
+            (int)VALUE_TYPE_MAP[left->type].len, VALUE_TYPE_MAP[left->type].p,
+            (int)VALUE_TYPE_MAP[right->type].len, VALUE_TYPE_MAP[right->type].p)
       }
-      // avoid copy here, write directly into register, possible here,
-      // since order is irrelevant
-      vm->registers[0].number *= vm->registers[arg].number;
       break;
     }
     case OP_DIV: {
       Value *a = &vm->registers[0];
       Value *b = &vm->registers[arg];
-      if (a->type != V_NUM || b->type != V_NUM) {
-        VM_ERR("VM[/] Subtraction is only allowed for numbers, not for types "
-               "%.*s and %.*s",
+      switch (a->type) {
+      case V_INT:
+        switch (b->type) {
+        case V_INT:
+          vm->registers[0] = (Value){
+              .type = V_INT,
+              .integer = b->integer / a->integer,
+          };
+          break;
+        case V_DOUBLE:
+          vm->registers[0] = (Value){
+              .type = V_DOUBLE,
+              .floating = b->floating / (double)a->integer,
+          };
+          break;
+        default:
+          VM_ERR("VM[/] Incompatible types %.*s and %.*s",
+                 (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
+                 (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
+        }
+        break;
+      case V_DOUBLE:
+        switch (b->type) {
+        case V_INT:
+          vm->registers[0] = (Value){
+              .type = V_DOUBLE,
+              .floating = (double)b->integer / a->floating,
+          };
+          break;
+        case V_DOUBLE:
+          // avoid copy here, write directly into register, possible here,
+          // since order is irrelevant
+          vm->registers[0] = (Value){
+              .type = V_DOUBLE,
+              .floating = b->floating / a->floating,
+          };
+          break;
+        default:
+          VM_ERR("VM[/] Incompatible types %.*s and %.*s",
+                 (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
+                 (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
+        }
+        break;
+        break;
+      default:
+        VM_ERR("VM[/] Incompatible types %.*s and %.*s",
                (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
                (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
       }
-      vm->registers[0] =
-          (Value){.type = V_NUM, .number = b->number / a->number};
       break;
     }
     case OP_ARGS:
@@ -252,7 +411,6 @@ int Vm_run(Vm *vm, Allocator *alloc) {
 #endif
   return 0;
 vm_end:
-  DIS(vm->bytecode[vm->pc], (size_t)vm->bytecode[vm->pc + 1]);
   return 1;
 }
 

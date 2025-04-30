@@ -13,6 +13,8 @@ typedef struct {
   Value expected_r0;
 } Case;
 
+#define PRINT_DISASM_ON_ERR 0
+
 #define VAL(...)                                                               \
   (Value) { __VA_ARGS__ }
 
@@ -25,8 +27,11 @@ typedef struct {
 int main() {
   Case cases[] = {
     // atoms:
-    CASE(3.1415, VAL(.type = V_NUM, .number = 3.1415)),
-    CASE(.1415, VAL(.type = V_NUM, .number = 0.1415)),
+
+    // doubles
+    CASE(3.1415, VAL(.type = V_DOUBLE, .floating = 3.1415)),
+    CASE(.1415, VAL(.type = V_DOUBLE, .floating = 0.1415)),
+
     CASE("string", VAL(.type = V_STR, .string = STRING("string"))),
     // TODO: this is for future me to implement
     // CASE("escaped string\"", BC(OP_LOAD, 0), VAL(.type = V_STRING, .string
@@ -42,28 +47,38 @@ int main() {
     //      VAL(.type = V_NUM, .number = 1.7976931348623157E+309)),
 
     // math:
-    CASE((+2 2), VAL(.type = V_NUM, .number = 4)),
-    CASE((-5 3), VAL(.type = V_NUM, .number = 2)),
-    CASE((*3 4), VAL(.type = V_NUM, .number = 12)),
-    CASE((/ 6 2), VAL(.type = V_NUM, .number = 3)),
-    CASE((+1(-2 1)), VAL(.type = V_NUM, .number = 2)),
+    CASE((+2 2), VAL(.type = V_INT, .integer = 4)),
+    CASE((-5 3), VAL(.type = V_INT, .integer = 2)),
+    CASE((*3 4), VAL(.type = V_INT, .integer = 12)),
+    CASE((/ 6 2), VAL(.type = V_INT, .integer = 3)),
+    CASE((+1(-2 1)), VAL(.type = V_INT, .integer = 2)),
+
+    // double and int math:
+    CASE((+2.0 2), VAL(.type = V_DOUBLE, .floating = 4.0)),
+    CASE((+2 2.0), VAL(.type = V_DOUBLE, .floating = 4.0)),
+    CASE((-5.0 3), VAL(.type = V_DOUBLE, .floating = 2)),
+    CASE((-5 3.0), VAL(.type = V_DOUBLE, .floating = 2)),
+    CASE((*3.0 4), VAL(.type = V_DOUBLE, .floating = 12)),
+    CASE((*3 4.0), VAL(.type = V_DOUBLE, .floating = 12)),
+    CASE((/ 6.0 2), VAL(.type = V_DOUBLE, .floating = 3)),
+    CASE((/ 6 2.0), VAL(.type = V_DOUBLE, .floating = 3)),
 
     // builtins:
-    CASE((@len "hello"), VAL(.type = V_NUM, .number = 5)),
+    CASE((@len "hello"), VAL(.type = V_INT, .integer = 5)),
     // checking if string interning works
-    CASE((@len "hello")(@len "hello"), VAL(.type = V_NUM, .number = 5)),
-    CASE((@len ""), VAL(.type = V_NUM, .number = 0)),
-    CASE((@len "a"), VAL(.type = V_NUM, .number = 1)),
+    CASE((@len "hello")(@len "hello"), VAL(.type = V_INT, .integer = 5)),
+    CASE((@len ""), VAL(.type = V_INT, .integer = 0)),
+    CASE((@len "a"), VAL(.type = V_INT, .integer = 1)),
 
     // variables
     CASE((@let name "user"), VAL(.type = V_STR, .string = STRING("name"))),
     CASE((@let name "user")name, VAL(.type = V_STR, .string = STRING("user"))),
-    CASE((@let age 25)age, VAL(.type = V_NUM, .number = 25)),
+    CASE((@let age 25)age, VAL(.type = V_INT, .integer = 25)),
 
     // functions
-    CASE((@function ret[arg] arg)(ret 25), VAL(.type = V_NUM, .number = 25)),
+    CASE((@function ret[arg] arg)(ret 25), VAL(.type = V_INT, .integer = 25)),
     CASE((@function add25[arg](+arg 25))(add25 25),
-         VAL(.type = V_NUM, .number = 50)),
+         VAL(.type = V_INT, .integer = 50)),
   };
   size_t passed = 0;
   size_t failed = 0;
@@ -99,8 +114,8 @@ int main() {
 
     bool error = false;
     Vm_run(vm, &alloc);
-    if (!Value_cmp(vm->registers[0], c.expected_r0)) {
-      printf("\n\tbad value at r0: want=%s got=%s",
+    if (!Value_cmp(&vm->registers[0], &c.expected_r0)) {
+      printf("\tbad value at r0: want=%s got=%s",
              VALUE_TYPE_MAP[c.expected_r0.type].p,
              VALUE_TYPE_MAP[vm->registers[0].type].p);
       printf("\n\twant=");
@@ -108,7 +123,9 @@ int main() {
       printf("\n\tgot=");
       Value_debug(&vm->registers[0]);
       puts("");
+#if PRINT_DISASM_ON_ERR
       disassemble(vm, &out.ctx);
+#endif
       error = true;
     }
     alloc.destroy(alloc.ctx);

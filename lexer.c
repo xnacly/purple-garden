@@ -13,7 +13,8 @@ Str TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
                         [T_STRING] = STRING("T_STRING"),
                         [T_TRUE] = STRING("T_TRUE"),
                         [T_FALSE] = STRING("T_FALSE"),
-                        [T_NUMBER] = STRING("T_NUMBER"),
+                        [T_DOUBLE] = STRING("T_DOUBLE"),
+                        [T_INTEGER] = STRING("T_INTEGER"),
                         [T_BUILTIN] = STRING("T_BUILTIN"),
                         [T_IDENT] = STRING("T_IDENT"),
                         [T_PLUS] = STRING("T_PLUS"),
@@ -29,8 +30,11 @@ void Token_debug(Token *token) {
   Str_debug(&TOKEN_TYPE_MAP[token->type]);
   putc(']', stdout);
   switch (token->type) {
-  case T_NUMBER:
-    printf("(%f)", token->number);
+  case T_DOUBLE:
+    printf("(%g)", token->floating);
+    break;
+  case T_INTEGER:
+    printf("(%ld)", token->integer);
     break;
   case T_STRING:
   case T_BUILTIN:
@@ -171,8 +175,6 @@ asterisks:
 number: {
   size_t start = l->pos;
   const char *input_start = l->input.p + start;
-  // using strtol if number is not a floating point number ~1.405243x
-  // faster (-28.84%); replace with specified T_INT, rename T_NUMBER to T_FLOAT
   bool is_double = false;
   for (char cc = cur(l); cc > 0; l->pos++, cc = cur(l)) {
     if (cc == '.' || cc == 'e') {
@@ -186,16 +188,16 @@ number: {
   // terminated (strings::Str) and we know the length of the number
   char *endptr = input_start + l->pos;
 
-  double d;
-  if (is_double) {
-    d = strtod(input_start, &endptr);
-  } else {
-    d = (double)strtol(input_start, &endptr, 10);
-  }
-  ASSERT(endptr != input_start, "lex: Failed to parse number")
   Token *n = a->request(a->ctx, sizeof(Token));
-  n->type = T_NUMBER;
-  n->number = d;
+  if (is_double) {
+    n->type = T_DOUBLE;
+    n->floating = strtod(input_start, &endptr);
+  } else {
+    n->type = T_INTEGER;
+    n->integer = strtol(input_start, &endptr, 10);
+  }
+
+  ASSERT(endptr != input_start, "lex: Failed to parse number")
   out[count++] = n;
   JUMP_TARGET;
 }

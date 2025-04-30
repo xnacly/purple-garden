@@ -64,11 +64,18 @@ size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
   size_t stack_top = 0;
 
   static void *jump_table[256] = {
-      [T_DELIMITOR_LEFT] = &&begin, [T_DELIMITOR_RIGHT] = &&end,
-      [T_BRAKET_LEFT] = &&arr_left, [T_BRAKET_RIGHT] = &&arr_right,
-      [T_STRING] = &&atom,          [T_TRUE] = &&atom,
-      [T_FALSE] = &&atom,           [T_NUMBER] = &&atom,
-      [T_IDENT] = &&ident,          [T_EOF] = &&eof};
+      [T_DELIMITOR_LEFT] = &&begin,
+      [T_DELIMITOR_RIGHT] = &&end,
+      [T_BRAKET_LEFT] = &&arr_left,
+      [T_BRAKET_RIGHT] = &&arr_right,
+      [T_STRING] = &&atom,
+      [T_TRUE] = &&atom,
+      [T_FALSE] = &&atom,
+      [T_DOUBLE] = &&atom,
+      [T_INTEGER] = &&atom,
+      [T_IDENT] = &&ident,
+      [T_EOF] = &&eof,
+  };
 
 #define JUMP_NEXT                                                              \
   do {                                                                         \

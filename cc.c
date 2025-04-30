@@ -116,8 +116,10 @@ static Value token_to_value(Token t) {
     return (Value){.type = V_TRUE};
   case T_FALSE:
     return (Value){.type = V_FALSE};
-  case T_NUMBER:
-    return (Value){.type = V_NUM, .number = t.number};
+  case T_INTEGER:
+    return (Value){.type = V_INT, .integer = t.integer};
+  case T_DOUBLE:
+    return (Value){.type = V_DOUBLE, .floating = t.floating};
   default:
     // TODO: think about lists and options
     ASSERT(0, "Unsupported value for this")
@@ -126,6 +128,7 @@ static Value token_to_value(Token t) {
     };
   }
 }
+
 static size_t Ctx_allocate_register(Ctx *ctx) {
   ASSERT(ctx->register_allocated_count < REGISTERS, "cc: out of registers")
   ctx->registers[ctx->register_allocated_count] = true;

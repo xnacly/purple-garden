@@ -16,8 +16,11 @@ static void print_value(const Value v) {
   case V_STR:
     Str_debug(&v.string);
     break;
-  case V_NUM:
-    printf("%g", v.number);
+  case V_DOUBLE:
+    printf("%g", v.floating);
+    break;
+  case V_INT:
+    printf("%ld", v.integer);
     break;
   case V_TRUE:
     printf("true");
@@ -72,9 +75,9 @@ Value builtin_len(const Value *arg, size_t count) {
   ASSERT(count == 1, "len only works for a singular argument")
   const Value *a = &arg[0];
   if (a->type == V_STR) {
-    return (Value){.type = V_NUM, .number = a->string.len};
+    return (Value){.type = V_INT, .integer = a->string.len};
   } else if (a->type == V_ARRAY) {
-    return (Value){.type = V_NUM, .number = a->array.len};
+    return (Value){.type = V_INT, .integer = a->array.len};
   } else {
     fputs("builtin_len only strings and lists have a length", stderr);
     exit(EXIT_FAILURE);
@@ -95,7 +98,8 @@ Value builtin_type(const Value *arg, size_t count) {
   case V_STR:
     s = STRING("string");
     break;
-  case V_NUM:
+  case V_INT:
+  case V_DOUBLE:
     s = STRING("number");
     break;
   case V_TRUE:

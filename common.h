@@ -38,7 +38,8 @@ typedef enum {
   V_UNDEFINED,
   V_OPTION,
   V_STR,
-  V_NUM,
+  V_DOUBLE,
+  V_INT,
   V_TRUE,
   V_FALSE,
   V_ARRAY,
@@ -53,12 +54,14 @@ typedef struct Value {
   // V_OPTION and .is_some is false, this acts as a NONE value
   union {
     Str string;
-    double number;
+    double floating;
+    int64_t integer;
     struct {
       size_t len;
       // holds members of the array
       struct Value *value;
     } array;
+
     struct Option {
       bool is_some;
       // holds some
@@ -75,6 +78,6 @@ typedef struct Value {
     .type = V_OPTION, .option = (struct Option) { .is_some = false }           \
   }
 
-bool Value_cmp(Value a, Value b);
+bool Value_cmp(Value *a, Value *b);
 
 #endif

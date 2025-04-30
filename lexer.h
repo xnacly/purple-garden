@@ -25,7 +25,9 @@ typedef enum {
   T_TRUE,
   T_FALSE,
   // floating point numbers
-  T_NUMBER,
+  T_DOUBLE,
+  // whole numbers
+  T_INTEGER,
   // builtins in the format @<builtin>
   T_BUILTIN,
   // any identifier
@@ -42,8 +44,10 @@ typedef struct {
   union {
     // filled when .type=T_STRING|T_IDENT
     Str string;
-    // filled when .type=T_NUMBER
-    double number;
+    // filled when .type=T_DOUBLE
+    double floating;
+    // filled when .type=T_INTEGER
+    int64_t integer;
   };
 } Token;
 
