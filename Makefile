@@ -1,4 +1,5 @@
 FLAGS := -std=c23 \
+		-lm \
         -Wall \
         -Wextra \
         -Werror \

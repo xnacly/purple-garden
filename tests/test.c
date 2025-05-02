@@ -1,4 +1,3 @@
-#include "../builtins.h"
 #include "../cc.h"
 #include "../common.h"
 #include "../lexer.h"
@@ -19,10 +18,7 @@ typedef struct {
   (Value) { __VA_ARGS__ }
 
 #define CASE(in, r0)                                                           \
-  {                                                                            \
-      .input = STRING(#in "\0"),                                               \
-      .expected_r0 = r0,                                                       \
-  }
+  { .input = STRING(#in "\0"), .expected_r0 = r0, }
 
 int main() {
   Case cases[] = {
@@ -41,10 +37,12 @@ int main() {
     CASE(true false true false, VAL(.type = V_FALSE)),
     CASE("hello", VAL(.type = V_STR, .string = STRING("hello"))),
 
-    // infinity comparison case:
+    // too large integer and double values
     // https://github.com/xNaCly/purple-garden/issues/1
-    // CASE("1.7976931348623157e+309", BC(OP_LOAD, 0),
-    //      VAL(.type = V_NUM, .number = 1.7976931348623157E+309)),
+    // CASE(9223372036854775807, VAL(.type = V_UNDEFINED)),
+    // CASE(
+    //     179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858369.0,
+    //     VAL(.type = V_UNDEFINED)),
 
     // math:
     CASE((+2 2), VAL(.type = V_INT, .integer = 4)),

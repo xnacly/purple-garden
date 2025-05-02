@@ -1,5 +1,6 @@
 #include "strings.h"
 #include "common.h"
+#include <math.h>
 #include <string.h>
 
 char Str_get(const Str *str, size_t index) {
@@ -71,39 +72,37 @@ double Str_to_double(const Str *str) {
   size_t len = str->len;
 
   uint64_t mantissa = 0;
-  int exponent = 0; // decimal exponent
+  int exponent = 0;
   bool seen_dot = false;
   bool has_digits = false;
 
+  // we dont check specific chars here, since the lexer already does that
   for (size_t i = 0; i < len; i++) {
     char c = p[i];
 
-    if (c >= '0' && c <= '9') {
-      has_digits = true;
-      mantissa = mantissa * 10 + (c - '0');
-      if (seen_dot) {
-        exponent -= 1;
-      }
-    } else if (c == '.') {
+    if (c == '.') {
       ASSERT(!seen_dot, "Multiple dots in double: `%.*s`", (int)len, p);
       seen_dot = true;
-    } else {
-      ASSERT(false,
-             "Invalid character in double `%.*s`, stopped at position %zu",
-             (int)len, p, i);
+      continue;
+    }
+
+    has_digits = true;
+    short digit = c - '0';
+    ASSERT(mantissa <= (UINT64_MAX - digit) / 10, "Mantissa overflow");
+    mantissa = mantissa * 10 + digit;
+    if (seen_dot) {
+      exponent -= 1;
     }
   }
 
+  // if there were no digits after the '.'
   ASSERT(has_digits, "Can't parse `%.*s` into a double", (int)len, p);
 
-  // Scale mantissa by 10^exponent
   double result = (double)mantissa;
-  if (exponent < 0) {
-    for (int i = 0; i < -exponent; i++)
-      result /= 10.0;
-  } else {
-    for (int i = 0; i < exponent; i++)
-      result *= 10.0;
+  // skip exponent computation for <mantissa>.0, since these are just the
+  // mantissa
+  if (exponent != 0) {
+    result *= pow(10.0, exponent);
   }
 
   return result;
