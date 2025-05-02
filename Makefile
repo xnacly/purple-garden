@@ -23,6 +23,7 @@ FLAGS := -std=c23 \
 		-Wno-unused-function \
 		-Wno-unused-variable \
 		-Wno-aggregate-return
+
 RELEASE_FLAGS := -O3 \
 		-flto \
 		-fno-semantic-interposition \

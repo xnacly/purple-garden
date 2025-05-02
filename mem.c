@@ -1,10 +1,19 @@
+#define _GNU_SOURCE
 #include "mem.h"
 #include "common.h"
+#include <sys/mman.h>
+#include <unistd.h>
 
 void *bump_init(size_t size) {
-  void *b = malloc(size);
-  ASSERT(b != NULL, "failed to allocate allocator buffer");
-  BumpCtx *ctx = malloc(sizeof(BumpCtx));
+  // Page-align the requested size
+  long page_size = sysconf(_SC_PAGESIZE);
+  size = (size + page_size - 1) & ~(page_size - 1);
+
+  void *b = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT(b != MAP_FAILED, "failed to mmap allocator buffer");
+
+  BumpCtx *ctx = malloc(sizeof(BumpCtx)); // still malloc'd for simplicity
   ASSERT(ctx != NULL, "failed to allocate allocator context");
   ctx->len = size;
   ctx->pos = 0;
@@ -14,7 +23,7 @@ void *bump_init(size_t size) {
 
 void *bump_request(void *ctx, size_t size) {
   BumpCtx *b_ctx = (BumpCtx *)ctx;
-  ASSERT(b_ctx->pos + size <= b_ctx->len, "OOM :(")
+  ASSERT(b_ctx->pos + size <= b_ctx->len, "OOM :(");
   size_t align = sizeof(void *);
   b_ctx->pos = (b_ctx->pos + align - 1) & ~(align - 1);
   void *block_entry = (char *)b_ctx->block + b_ctx->pos;
@@ -24,8 +33,14 @@ void *bump_request(void *ctx, size_t size) {
 
 void bump_destroy(void *ctx) {
   BumpCtx *b_ctx = (BumpCtx *)ctx;
-  free(b_ctx->block);
-  free(ctx);
+
+  // Optional: advise kernel we don't need the pages anymore
+  madvise(b_ctx->block, b_ctx->len, MADV_FREE);
+
+  int res = munmap(b_ctx->block, b_ctx->len);
+  ASSERT(res == 0, "munmap failed");
+
+  free(ctx); // still using malloc here
 }
 
 void bump_reset(void *ctx) {
