@@ -76,12 +76,12 @@ double Str_to_double(const Str *str) {
   bool seen_dot = false;
   bool has_digits = false;
 
-  // we dont check specific chars here, since the lexer already does that
+  // we dont check that all chars are numbers here, since the lexer already does
+  // that
   for (size_t i = 0; i < len; i++) {
     char c = p[i];
 
     if (c == '.') {
-      ASSERT(!seen_dot, "Multiple dots in double: `%.*s`", (int)len, p);
       seen_dot = true;
       continue;
     }

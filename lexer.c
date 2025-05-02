@@ -183,6 +183,7 @@ number: {
     if (cc >= '0' && cc <= '9')
       continue;
     if (cc == '.') {
+      ASSERT(!is_double, "Two dots in double");
       is_double = true;
       continue;
     }
