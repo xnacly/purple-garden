@@ -75,7 +75,8 @@ static const cli_option options[] = {
     {"disassemble", 'd',
      "readable bytecode representation with labels, globals and comments", ""},
     {"block-allocator", 'b',
-     "use block allocator instead of garbage collection", "<size>"},
+     "use block allocator with size instead of garbage collection",
+     "<size in Kb>"},
     {"aot-functions", 'a', "compile all functions to machine code", ""},
     {"memory-usage", 'm',
      "display the memory usage of parsing, compilation and the virtual "
@@ -298,24 +299,22 @@ int main(int argc, char **argv) {
            s.allocated / 1024.0, percent);
   }
 
-  // TODO: fill this with the value of --block-allocator
-  Allocator vm_alloc = {0};
+  // TODO: replace this with default gc
+  Allocator *vm_alloc = &pipeline_allocator;
   if (a.block_allocator > 0) {
+    a.block_allocator *= 1024;
     VERBOSE_PUTS(
         "vm: got --block-allocator, using bump allocator with size %zu",
         a.block_allocator);
-    vm_alloc = (Allocator){
-        .init = bump_init,
-        .request = bump_request,
-        .destroy = bump_destroy,
-        .reset = bump_reset,
-        .stats = bump_stats,
-    };
-  } else {
-    // TODO: replace this with default gc
-    vm_alloc = pipeline_allocator;
+    vm_alloc->init = bump_init;
+    vm_alloc->request = bump_request;
+    vm_alloc->destroy = bump_destroy;
+    vm_alloc->reset = bump_reset;
+    vm_alloc->stats = bump_stats;
+
+    vm_alloc->ctx = vm_alloc->init(a.block_allocator);
   }
-  int runtime_code = Vm_run(&c.vm, &vm_alloc);
+  int runtime_code = Vm_run(&c.vm, vm_alloc);
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
 
 #if DEBUG
@@ -330,7 +329,6 @@ int main(int argc, char **argv) {
   VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");
 
   Vm_destroy(&c.vm);
-
   VERBOSE_PUTS("vm::Vm_destroy: teared vm down");
 
   if (a.run == NULL) {

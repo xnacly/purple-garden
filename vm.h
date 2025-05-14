@@ -7,8 +7,7 @@
 
 #define REGISTERS 128
 #define CALL_ARGUMENT_STACK 256
-// TODO: make this work dynamically via gc
-#define VARIABLE_TABLE_SIZE 1024
+#define VARIABLE_TABLE_SIZE 256
 #define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
 
 #define DIS(op, arg)                                                           \
@@ -126,13 +125,15 @@ typedef uint32_t byte;
 // since lambdas are pure there is no way to interact with the previous frame
 // inside of a lambda, the pointer is kept to allow the runtime to restore the
 // scope state to its state before entering the lambda
+//
+// WARNING: do not stack allocate, since variable_table can be huge
 typedef struct Frame {
   struct Frame *prev;
   // returning out of scope, we need to jump back to the callsite of the
   // function
   size_t return_to_bytecode;
   // stores Values by their hash, serving as a variable table
-  Value *variable_table;
+  Value variable_table[VARIABLE_TABLE_SIZE];
 } Frame;
 
 typedef struct {

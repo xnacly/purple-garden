@@ -72,8 +72,6 @@ void Value_debug(const Value *v) {
 int Vm_run(Vm *vm, Allocator *alloc) {
   vm->arg_count = 1;
   Frame *f = alloc->request(alloc->ctx, sizeof(Frame));
-  f->variable_table =
-      alloc->request(alloc->ctx, sizeof(Value) * VARIABLE_TABLE_SIZE);
   vm->frame = f;
 #if DEBUG
   puts("================== GLOBAL ==================");
@@ -370,8 +368,6 @@ int Vm_run(Vm *vm, Allocator *alloc) {
     case OP_CALL: {
       // TODO: reuse frames allocated in an arena
       Frame *new_frame = alloc->request(alloc->ctx, sizeof(Frame));
-      new_frame->variable_table =
-          alloc->request(alloc->ctx, sizeof(Value) * VARIABLE_TABLE_SIZE);
       new_frame->prev = vm->frame;
       new_frame->return_to_bytecode = vm->pc;
       vm->frame = new_frame;
