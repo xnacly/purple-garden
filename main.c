@@ -1,9 +1,10 @@
-#include <getopt.h>
+// TODO: split this up into a DEBUG and a performance entry point
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 
+#include "6cl/6cl.h"
 #include "cc.h"
 #include "common.h"
 #include "io.h"
@@ -36,158 +37,99 @@
   } while (0)
 
 typedef struct {
-  // options - int because getopt has no bool support
-
-  // use block allocator instead of garbage collection
   size_t block_allocator;
-  // compile all functions to machine code
-  int aot_functions;
-  // readable bytecode representation with labels, globals and comments
-  int disassemble;
-  // display the memory usage of parsing, compilation and the virtual machine
-  int memory_usage;
-
-  // executes the argument as if an input file was given
+  bool aot_functions;
+  bool disassemble;
+  bool memory_usage;
   char *run;
-
-  // verbose logging
-  int verbose;
-
-  // options in which we exit after toggle
+  bool verbose;
   int version;
-  int help;
-
-  // entry point - last argument thats not an option
   char *filename;
 } Args;
 
-typedef struct {
-  const char *name_long;
-  const char name_short;
-  const char *description;
-  const char *arg_name;
-} cli_option;
-
-// WARN: DO NOT REORDER THIS - will result in option handling issues
-static const cli_option options[] = {
-    {"version", 'v', "display version information", ""},
-    {"help", 'h', "extended usage information", ""},
-    {"disassemble", 'd',
-     "readable bytecode representation with labels, globals and comments", ""},
-    {"block-allocator", 'b',
-     "use block allocator with size instead of garbage collection",
-     "<size in Kb>"},
-    {"aot-functions", 'a', "compile all functions to machine code", ""},
-    {"memory-usage", 'm',
-     "display the memory usage of parsing, compilation and the virtual "
-     "machine",
-     ""},
-    {"verbose", 'V', "verbose logging", ""},
-    {"run", 'r', "executes the argument as if an input file was given",
-     "<input>"},
-};
-
-void usage() {
-  Str prefix = STRING("usage: purple_garden");
-  printf("%.*s ", (int)prefix.len, prefix.p);
-  size_t len = sizeof(options) / sizeof(cli_option);
-  for (size_t i = 0; i < len; i++) {
-    const char *equal_or_not = options[i].arg_name[0] == 0 ? "" : "=";
-    const char *name_or_not =
-        options[i].arg_name[0] == 0 ? "" : options[i].arg_name;
-    printf("[-%c%s | --%s%s%s] ", options[i].name_short, name_or_not,
-           options[i].name_long, equal_or_not, name_or_not);
-    if ((i + 1) % 2 == 0 && i + 1 < len) {
-      printf("\n%*.s ", (int)prefix.len, "");
-    }
-  }
-  printf("<file.garden>\n");
-}
-
-// TODO: replace this shit with `6cl` - the purple garden and 6wm arguments
-// parser
 Args Args_parse(int argc, char **argv) {
-  Args a = (Args){0};
-  // MUST be in sync with options, otherwise this will not work as intended
-  struct option long_options[] = {
-      {options[0].name_long, no_argument, &a.version, 1},
-      {options[1].name_long, no_argument, &a.help, 1},
-      {options[2].name_long, no_argument, &a.disassemble, 1},
-      {options[3].name_long, required_argument, 0, 'b'},
-      {options[4].name_long, no_argument, &a.aot_functions, 1},
-      {options[5].name_long, no_argument, &a.memory_usage, 1},
-      {options[6].name_long, no_argument, &a.verbose, 1},
-      {options[7].name_long, required_argument, 0, 'r'},
-      {0, 0, 0, 0},
+  enum {
+    __VERSION,
+    __DISASSEMBLE,
+    __BLOCK_ALLOC,
+    __AOT,
+    __MEMORY_USAGE,
+    __VERBOSE,
+    __RUN,
   };
 
-  int opt;
-  while ((opt = getopt_long(argc, argv, "vhdb:amVr:", long_options, NULL)) !=
-         -1) {
-    switch (opt) {
-    case 'v':
-      a.version = 1;
-      break;
-    case 'V':
-      a.verbose = 1;
-      break;
-    case 'h':
-      a.help = 1;
-      break;
-    case 'd':
-      a.disassemble = 1;
-      break;
-    case 'r':
-      a.run = optarg;
-      break;
-    case 'b':
-      char *endptr;
-      size_t block_size = strtol(optarg, &endptr, 10);
-      ASSERT(endptr != optarg, "args: Failed to parse number from: %s", optarg);
-      a.block_allocator = block_size;
-      break;
-    case 'a':
-      a.aot_functions = 1;
-      break;
-    case 'm':
-      a.memory_usage = 1;
-      break;
-    case 0:
-      break;
-    default:
-      usage();
-      exit(EXIT_FAILURE);
-    }
+  SixFlag options[] = {
+      [__VERSION] = {.name = "version",
+                     .type = SIX_BOOL,
+                     .b = false,
+                     .short_name = 'v',
+                     .description = "display version information"},
+      [__DISASSEMBLE] =
+          {.name = "disassemble",
+           .short_name = 'd',
+           .type = SIX_BOOL,
+           .b = false,
+           .description =
+               "readable bytecode representation with labels, globals "
+               "and comments"},
+      [__BLOCK_ALLOC] =
+          {.name = "block-allocator",
+           .short_name = 'b',
+           .type = SIX_LONG,
+           .description =
+               "use block allocator with size instead of garbage collection"},
+      [__AOT] = {.name = "aot-functions",
+                 .short_name = 'a',
+                 .b = false,
+                 .type = SIX_BOOL,
+                 .description = "compile all functions to machine code"},
+      [__MEMORY_USAGE] = {.name = "memory-usage",
+                          .short_name = 'm',
+                          .b = false,
+                          .type = SIX_BOOL,
+                          .description = "display the memory usage of parsing, "
+                                         "compilation and the virtual "
+                                         "machine"},
+      [__VERBOSE] = {.name = "verbose",
+                     .short_name = 'V',
+                     .b = false,
+                     .type = SIX_BOOL,
+                     .description = "verbose logging"},
+      [__RUN] = {.name = "run",
+                 .short_name = 'r',
+                 .s = "",
+                 .type = SIX_STR,
+                 .description =
+                     "executes the argument as if an input file was given"},
+  };
+  Args a = (Args){0};
+  Six s = {
+      .flags = options,
+      .flag_count = sizeof(options) / sizeof(options[0]),
+      .name_for_rest_arguments = "<file.garden>",
+  };
+  SixParse(&s, argc, argv);
+  if (s.rest_count) {
+    a.filename = s.rest[0];
   }
-
-  if (optind < argc) {
-    a.filename = argv[optind];
-  }
+  a.block_allocator = s.flags[__BLOCK_ALLOC].l;
+  a.aot_functions = s.flags[__AOT].b;
+  a.disassemble = s.flags[__DISASSEMBLE].b;
+  a.memory_usage = s.flags[__MEMORY_USAGE].b;
+  a.run = s.flags[__RUN].s;
+  a.verbose = s.flags[__VERBOSE].b;
+  a.version = s.flags[__VERSION].b;
 
   // command handling
-  if (UNLIKELY(a.version)) {
+  if (a.version) {
     printf("purple_garden: %s-%s-%s\n", CTX, VERSION, COMMIT);
     if (UNLIKELY(a.verbose)) {
       puts(COMMIT_MSG);
     }
     exit(EXIT_SUCCESS);
-  } else if (UNLIKELY(a.help)) {
-    usage();
-    size_t len = sizeof(options) / sizeof(cli_option);
-    printf("\nOptions:\n");
-    for (size_t i = 0; i < len; i++) {
-      const char *equal_or_not = options[i].arg_name[0] == 0 ? "" : "=";
-      const char *name_or_not =
-          options[i].arg_name[0] == 0 ? "" : options[i].arg_name;
-      printf("\t-%c%s%s, --%s%s%s\n\t\t%s\n\n", options[i].name_short,
-             equal_or_not, name_or_not, options[i].name_long, equal_or_not,
-             name_or_not, options[i].description);
-    }
-    exit(EXIT_SUCCESS);
   }
 
-  if (UNLIKELY(a.filename == NULL && a.run == NULL)) {
-    usage();
+  if (a.filename == NULL && (a.run == NULL || a.run[0] == 0)) {
     fprintf(stderr, "error: Missing a file? try `-h/--help`\n");
     exit(EXIT_FAILURE);
   };
@@ -198,13 +140,14 @@ Args Args_parse(int argc, char **argv) {
 int main(int argc, char **argv) {
   struct timeval start_time, end_time;
   Args a = Args_parse(argc, argv);
+
   if (UNLIKELY(a.verbose)) {
     gettimeofday(&start_time, NULL);
   }
   VERBOSE_PUTS("main::Args_parse: Parsed arguments");
 
   Str input;
-  if (a.run != NULL) {
+  if (a.run != NULL && a.run[0] != 0) {
     input = (Str){.p = a.run, .len = strlen(a.run)};
   } else {
     input = IO_read_file_to_string(a.filename);

@@ -44,14 +44,14 @@ run:
 
 verbose:
 	$(CC) -g3 $(FLAGS) $(RELEASE_FLAGS) $(FILES) ./main.c -o purple_garden_verbose
-	./purple_garden_verbose -V $(PG)
+	./purple_garden_verbose +V $(PG)
 
 release:
 	$(CC) -g3 $(FLAGS) $(RELEASE_FLAGS) -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"' $(FILES) ./main.c -o purple_garden
 
 bench:
 	$(CC) $(FLAGS) $(RELEASE_FLAGS) -DCOMMIT='"BENCH"' $(FILES) ./main.c -o bench
-	./bench -V $(PG)
+	./bench +V $(PG)
 
 test:
 	$(CC) $(FLAGS) -g3 -fsanitize=address,undefined -DDEBUG=0 $(TEST_FILES) $(FILES) -o ./tests/test
