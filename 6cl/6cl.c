@@ -252,7 +252,7 @@ static int process_argument(SixFlag *f, size_t cur, size_t argc, char **argv) {
     char *tmp = argv[cur + 1];
     char *endptr = NULL;
     int errno = 0;
-    long val = strtof(tmp, &endptr);
+    float val = strtof(tmp, &endptr);
 
     if (endptr == tmp || *endptr != '\0') {
       fprintf(stderr, "Invalid FLOAT for option '%s/%c': '%s'\n", f->name,
@@ -261,7 +261,7 @@ static int process_argument(SixFlag *f, size_t cur, size_t argc, char **argv) {
     }
 
     if (val < FLT_MIN || val > FLT_MAX) {
-      fprintf(stderr, "FLOAT out of range for option '%s/%c': %ld\n", f->name,
+      fprintf(stderr, "FLOAT out of range for option '%s/%c': %g\n", f->name,
               f->short_name, val);
       return -1;
     }
@@ -278,7 +278,7 @@ static int process_argument(SixFlag *f, size_t cur, size_t argc, char **argv) {
     char *tmp = argv[cur + 1];
     char *endptr = NULL;
     int errno = 0;
-    long val = strtod(tmp, &endptr);
+    double val = strtod(tmp, &endptr);
 
     if (endptr == tmp || *endptr != '\0') {
       fprintf(stderr, "Invalid DOUBLE for option '%s/%c': '%s'\n", f->name,
@@ -287,7 +287,7 @@ static int process_argument(SixFlag *f, size_t cur, size_t argc, char **argv) {
     }
 
     if (val < FLT_MIN || val > FLT_MAX) {
-      fprintf(stderr, "DOUBLE out of range for option '%s/%c': %ld\n", f->name,
+      fprintf(stderr, "DOUBLE out of range for option '%s/%c': %g\n", f->name,
               f->short_name, val);
       return -1;
     }
