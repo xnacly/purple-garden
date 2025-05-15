@@ -32,7 +32,7 @@ RELEASE_FLAGS := -O3 \
 
 COMMIT := $(shell git rev-parse --short HEAD)
 COMMIT_MSG := $(shell git log -1 --pretty=format:'hash=`%H`\nauthor=`%an`\nauthor_email=`%ae`\ncommit_date=`%cd`\ncommit_msg=`%s`')
-FILES := $(shell find . -maxdepth 1 -name "*.c" ! -name "main.c")
+FILES := $(shell find . -name "*.c" ! -name "main.c" ! -path "./tests/test.c")
 TEST_FILES := $(shell find ./tests -name "*.c")
 PG := ./examples/hello-world.garden
 
