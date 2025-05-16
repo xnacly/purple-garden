@@ -117,6 +117,10 @@ typedef enum {
   OP_JMP,
 } VM_OP;
 
+#define VM_ERR(fmt, ...)                                                       \
+  fprintf(stderr, "[VM] ERROR: " fmt "\n", ##__VA_ARGS__);                     \
+  goto vm_end;
+
 extern Str OP_MAP[];
 
 typedef uint32_t byte;
@@ -162,6 +166,5 @@ typedef struct {
 
 int Vm_run(Vm *vm, Allocator *alloc);
 void Vm_destroy(Vm *vm);
-void Value_debug(const Value *v);
 
 #endif

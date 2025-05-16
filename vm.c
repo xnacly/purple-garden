@@ -14,61 +14,6 @@ Str OP_MAP[256] = {[OP_LOAD] = STRING("LOAD"), [OP_STORE] = STRING("STORE"),
                    [OP_RET] = STRING("RET"),   [OP_CALL] = STRING("CALL"),
                    [OP_JMP] = STRING("JMP")};
 
-Str VALUE_TYPE_MAP[] = {
-    [V_OPTION] = STRING("Option("), [V_STR] = STRING("Str"),
-    [V_INT] = STRING("Int"),        [V_DOUBLE] = STRING("Double"),
-    [V_TRUE] = STRING("True"),      [V_FALSE] = STRING("False"),
-    [V_ARRAY] = STRING("Array"),
-};
-
-#define VM_ERR(fmt, ...)                                                       \
-  fprintf(stderr, "[VM] ERROR: " fmt "\n", ##__VA_ARGS__);                     \
-  goto vm_end;
-
-void Value_debug(const Value *v) {
-  Str_debug(&VALUE_TYPE_MAP[v->type]);
-  switch (v->type) {
-  case V_OPTION: {
-    if (v->option.is_some) {
-      printf("Some(");
-      Value_debug(v->option.value);
-      printf(")");
-    } else {
-      printf("None");
-    }
-    putc(')', stdout);
-    break;
-  }
-  case V_TRUE:
-  case V_FALSE:
-    break;
-  case V_STR:
-    printf("(`");
-    Str_debug(&v->string);
-    printf("`)");
-    break;
-  case V_DOUBLE:
-    printf("(%g)", v->floating);
-    break;
-  case V_INT:
-    printf("(%ld)", v->integer);
-    break;
-  case V_UNDEFINED:
-    printf("undefined");
-    break;
-  case V_ARRAY: {
-    printf("[");
-    for (size_t i = 0; i < v->array.len; i++) {
-      Value_debug(&v->array.value[i]);
-    }
-    printf("]");
-    break;
-  };
-  default:
-    printf("<unkown>");
-  }
-}
-
 int Vm_run(Vm *vm, Allocator *alloc) {
   vm->arg_count = 1;
   Frame *f = alloc->request(alloc->ctx, sizeof(Frame));
@@ -366,7 +311,6 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       break;
     }
     case OP_CALL: {
-      // TODO: reuse frames allocated in an arena
       Frame *new_frame = alloc->request(alloc->ctx, sizeof(Frame));
       new_frame->prev = vm->frame;
       new_frame->return_to_bytecode = vm->pc;
@@ -376,7 +320,6 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       break;
     }
     case OP_RET: {
-      // TODO: move no longer used frames to arena as free
       if (vm->frame->prev) {
         vm->pc = vm->frame->return_to_bytecode;
         vm->frame = vm->frame->prev;

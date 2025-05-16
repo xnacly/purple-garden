@@ -70,6 +70,9 @@ typedef struct Value {
   };
 } Value;
 
+bool Value_cmp(const Value *a, const Value *b);
+void Value_debug(const Value *v);
+
 #define SOME(val)                                                              \
   (Option) { .is_some = true, .some = val }
 
@@ -77,7 +80,5 @@ typedef struct Value {
   (Value) {                                                                    \
     .type = V_OPTION, .option = (struct Option) { .is_some = false }           \
   }
-
-bool Value_cmp(Value *a, Value *b);
 
 #endif
