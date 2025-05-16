@@ -14,7 +14,10 @@ static double _fabs(double x) { return x < 0 ? -x : x; }
 // Value_cmp compares two values in a shallow way, is used for OP_EQ and in
 // tests.
 //
-// Edgecase: V_LIST & V_LIST is false, because we do a shallow compare
+// Edgecases:
+// - V_LIST & V_LIST is false, because we do a shallow compare
+// - V_OPTION(Some(A)) & V_OPTION(Some(B)) even with matching A and B is false,
+// since we do not compare inner
 bool Value_cmp(const Value *a, const Value *b) {
   if (a->type != b->type) {
     return false;
@@ -32,6 +35,8 @@ bool Value_cmp(const Value *a, const Value *b) {
   case V_TRUE:
   case V_FALSE:
     return true;
+  case V_OPTION:
+    return !(a->option.is_some || b->option.is_some);
   case V_ARRAY:
   default:
     // lists arent really the same, this is not a deep equal
