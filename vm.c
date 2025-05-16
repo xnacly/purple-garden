@@ -5,14 +5,15 @@
 #include "strings.h"
 #include <stdint.h>
 
-Str OP_MAP[256] = {[OP_LOAD] = STRING("LOAD"), [OP_STORE] = STRING("STORE"),
-                   [OP_ADD] = STRING("ADD"),   [OP_SUB] = STRING("SUB"),
-                   [OP_MUL] = STRING("MUL"),   [OP_DIV] = STRING("DIV"),
-                   [OP_POP] = STRING("POP"),   [OP_PUSH] = STRING("PUSH"),
-                   [OP_VAR] = STRING("VAR"),   [OP_LOADV] = STRING("LOADV"),
-                   [OP_ARGS] = STRING("ARGS"), [OP_BUILTIN] = STRING("BUILTIN"),
-                   [OP_RET] = STRING("RET"),   [OP_CALL] = STRING("CALL"),
-                   [OP_JMP] = STRING("JMP")};
+Str OP_MAP[256] = {
+    [OP_LOAD] = STRING("LOAD"),   [OP_STORE] = STRING("STORE"),
+    [OP_ADD] = STRING("ADD"),     [OP_SUB] = STRING("SUB"),
+    [OP_MUL] = STRING("MUL"),     [OP_DIV] = STRING("DIV"),
+    [OP_POP] = STRING("POP"),     [OP_PUSH] = STRING("PUSH"),
+    [OP_VAR] = STRING("VAR"),     [OP_LOADV] = STRING("LOADV"),
+    [OP_ARGS] = STRING("ARGS"),   [OP_BUILTIN] = STRING("BUILTIN"),
+    [OP_LEAVE] = STRING("LEAVE"), [OP_CALL] = STRING("CALL"),
+    [OP_JMP] = STRING("JMP")};
 
 int Vm_run(Vm *vm, Allocator *alloc) {
   vm->arg_count = 1;
@@ -319,7 +320,7 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       vm->arg_count = 1;
       break;
     }
-    case OP_RET: {
+    case OP_LEAVE: {
       if (vm->frame->prev) {
         vm->pc = vm->frame->return_to_bytecode;
         vm->frame = vm->frame->prev;

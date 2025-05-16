@@ -237,7 +237,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       }
 
       vm->bytecode[jump_op_index + 1] = vm->bytecode_len;
-      BC(OP_RET, 0);
+      BC(OP_LEAVE, 0);
       break;
     }
     case COMPILE_BUILTIN_LET: { // (@len <var-name> <var-value>)

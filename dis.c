@@ -44,7 +44,7 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
 
       // dont print the argument if its unused in the vm
       switch (op) {
-      case OP_RET:
+      case OP_LEAVE:
         puts("");
       case OP_POP:
         break;

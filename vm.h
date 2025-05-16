@@ -100,8 +100,8 @@ typedef enum {
 
   // OP_RET rANY
   //
-  // returns r0 from the current scope
-  OP_RET,
+  // Ends a scope
+  OP_LEAVE,
 
   // OP_CALL ADDR
   //
