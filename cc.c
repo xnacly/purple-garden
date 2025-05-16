@@ -322,6 +322,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
 
 CompileOutput cc(Allocator *alloc, Node **nodes, size_t size) {
   // runtime functions
+  runtime_builtin_hashes[Str_hash(&STRING("assert")) & MAX_BUILTIN_SIZE_MASK] =
+      BUILTIN_ASSERT;
   runtime_builtin_hashes[Str_hash(&STRING("println")) & MAX_BUILTIN_SIZE_MASK] =
       BUILTIN_PRINTLN;
   runtime_builtin_hashes[Str_hash(&STRING("print")) & MAX_BUILTIN_SIZE_MASK] =

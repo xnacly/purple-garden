@@ -114,16 +114,29 @@ Value builtin_type(const Value *arg, size_t count) {
   return (Value){.type = V_STR, .string = s};
 }
 
+Value builtin_assert(const Value *arg, size_t count) {
+  ASSERT(count == 2, "@assert: can only compare 2 arguments, got %zu", count);
+  const Value *lhs = &arg[0];
+  const Value *rhs = &arg[1];
+  if (!Value_cmp(lhs, rhs)) {
+    printf("@assert: ");
+    Value_debug(lhs);
+    printf(" != ");
+    Value_debug(rhs);
+    puts("");
+    ASSERT(0, "Assertion failed");
+  }
+  return NONE;
+}
+
 builtin_function BUILTIN_MAP[] = {
-    [BUILTIN_PRINTLN] = &builtin_println,
-    [BUILTIN_PRINT] = &builtin_print,
+    [BUILTIN_ASSERT] = &builtin_assert, [BUILTIN_PRINTLN] = &builtin_println,
+    [BUILTIN_PRINT] = &builtin_print,   [BUILTIN_TYPE] = &builtin_type,
     [BUILTIN_LEN] = &builtin_len,
-    [BUILTIN_TYPE] = &builtin_type,
 };
 
 Str BUILTIN_NAME_MAP[] = {
-    [BUILTIN_PRINTLN] = STRING("println"),
-    [BUILTIN_PRINT] = STRING("print"),
+    [BUILTIN_ASSERT] = STRING("assert"), [BUILTIN_PRINTLN] = STRING("println"),
+    [BUILTIN_PRINT] = STRING("print"),   [BUILTIN_TYPE] = STRING("type"),
     [BUILTIN_LEN] = STRING("len"),
-    [BUILTIN_TYPE] = STRING("type"),
 };
