@@ -1,5 +1,7 @@
 #include "builtins.h"
 #include "cc.h"
+#include "common.h"
+#include "strings.h"
 
 void disassemble(const Vm *vm, const Ctx *ctx) {
   puts("; vim: filetype=asm");
@@ -30,7 +32,8 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
             if (location != 0) {
               puts("");
             }
-            printf("\n__0x%06zX[%04zX]:", i, j);
+            printf("\n__0x%06zX[%04zX]: ", i, j);
+            Str_debug(&ctx->function_hash_to_function_name[j]);
           }
         }
       }
@@ -62,12 +65,28 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
         printf(": ");
         Value_debug(&vm->globals[arg]);
         break;
+      case OP_LOADV:
+        printf(": $");
+        for (size_t j = 0; j < vm->global_len; j++) {
+          Value *v = &vm->globals[j];
+          if (v->type == V_STR && (v->string.hash & GLOBAL_MASK) == arg) {
+            Str_debug(&v->string);
+          }
+        }
+        break;
       case OP_BUILTIN:
         printf(": <@%.*s>", (int)BUILTIN_NAME_MAP[arg].len,
                BUILTIN_NAME_MAP[arg].p);
         break;
       case OP_CALL: {
-        printf(": <%04zX>", arg);
+        for (size_t j = 0; j < MAX_BUILTIN_SIZE; j++) {
+          size_t location = ctx->function_hash_to_bytecode_index[j];
+          if (location == arg) {
+            printf(": <");
+            Str_debug(&ctx->function_hash_to_function_name[j]);
+            printf(">");
+          }
+        }
         break;
       }
       default:

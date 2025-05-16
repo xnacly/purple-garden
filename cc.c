@@ -141,6 +141,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       Str *name = &n->children[0]->token->string;
       size_t hash = name->hash & MAX_BUILTIN_SIZE_MASK;
       ctx->function_hash_to_bytecode_index[hash] = vm->bytecode_len;
+      ctx->function_hash_to_function_name[hash] = n->children[0]->token->string;
 
       // this is the worst hack i have ever written, this is used to jump over
       // the bytecode of a function (header with args setup and body), so we
@@ -365,6 +366,8 @@ CompileOutput cc(Allocator *alloc, Node **nodes, size_t size) {
       // set this to -1
       .function_hash_to_bytecode_index =
           alloc->request(alloc->ctx, sizeof(size_t) * MAX_BUILTIN_SIZE),
+      .function_hash_to_function_name =
+          alloc->request(alloc->ctx, sizeof(Str) * MAX_BUILTIN_SIZE),
   };
 
 #pragma GCC unroll 64

@@ -28,6 +28,7 @@ typedef struct Ctx {
   size_t *global_hash_buckets;
   size_t register_allocated_count;
   int *function_hash_to_bytecode_index;
+  Str *function_hash_to_function_name;
 } Ctx;
 
 typedef struct {
