@@ -18,7 +18,10 @@ typedef struct {
   (Value) { __VA_ARGS__ }
 
 #define CASE(in, r0)                                                           \
-  { .input = STRING(#in "\0"), .expected_r0 = r0, }
+  {                                                                            \
+      .input = STRING(#in "\0"),                                               \
+      .expected_r0 = r0,                                                       \
+  }
 
 int main() {
   Case cases[] = {
@@ -61,12 +64,22 @@ int main() {
     CASE((/ 6.0 2), VAL(.type = V_DOUBLE, .floating = 3)),
     CASE((/ 6 2.0), VAL(.type = V_DOUBLE, .floating = 3)),
 
-    // builtins:
     CASE((@len "hello"), VAL(.type = V_INT, .integer = 5)),
     // checking if string interning works
     CASE((@len "hello")(@len "hello"), VAL(.type = V_INT, .integer = 5)),
     CASE((@len ""), VAL(.type = V_INT, .integer = 0)),
     CASE((@len "a"), VAL(.type = V_INT, .integer = 1)),
+
+    CASE((@assert 1 1), VAL(.type = V_OPTION, .option = {.is_some = false})),
+    CASE((@assert "abc"
+                  "abc"),
+         VAL(.type = V_OPTION, .option = {.is_some = false})),
+    CASE((@assert 3.1415 3.1415),
+         VAL(.type = V_OPTION, .option = {.is_some = false})),
+    CASE((@assert true true),
+         VAL(.type = V_OPTION, .option = {.is_some = false})),
+    CASE((@assert false false),
+         VAL(.type = V_OPTION, .option = {.is_some = false})),
 
     // variables
     CASE((@let name "user"), VAL(.type = V_STR, .string = STRING("name"))),

@@ -82,7 +82,6 @@ Value builtin_len(const Value *arg, size_t count) {
     fputs("builtin_len only strings and lists have a length", stderr);
     exit(EXIT_FAILURE);
   }
-  return NONE;
 }
 
 Value builtin_type(const Value *arg, size_t count) {
