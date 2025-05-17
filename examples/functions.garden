@@ -13,3 +13,13 @@
 
 (@function greeting [greetee] (@println "hello world to:" greetee))
 (greeting "user")
+
+;; trail calls
+(@function inc [x] (+ x 1))
+(@function call1 [x] (inc x))
+(@function call2 [x] (call1 x))
+(@function call3 [x] (call2 x))
+(@function call4 [x] (call3 x))
+(@function call5 [x] (call4 x))
+
+(@println (call5 0))
