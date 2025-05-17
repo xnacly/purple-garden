@@ -261,12 +261,21 @@ int main(int argc, char **argv) {
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
 
 #if DEBUG
-  puts("================== MEMORY ==================");
-  Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
-  double percent = (s.current * 100) / (double)s.allocated;
-  printf("cc: %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
-         s.allocated / 1024.0, percent);
+  {
+    puts("================== MEMORY ==================");
+    Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
+    double percent = (s.current * 100) / (double)s.allocated;
+    printf("cc: %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
+           s.allocated / 1024.0, percent);
+  }
 #endif
+
+  if (UNLIKELY(a.memory_usage)) {
+    Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
+    double percent = (s.current * 100) / (double)s.allocated;
+    printf("vm: %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
+           s.allocated / 1024.0, percent);
+  }
 
   pipeline_allocator.destroy(pipeline_allocator.ctx);
   VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");
