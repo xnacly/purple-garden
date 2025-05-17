@@ -15,10 +15,57 @@ Str OP_MAP[256] = {
     [OP_LEAVE] = STRING("LEAVE"), [OP_CALL] = STRING("CALL"),
     [OP_JMP] = STRING("JMP")};
 
+// FrameFreeList works by caching a list of Frames so we don't have to interact
+// with the heap for the first N Frames, but instead use the preallocated
+// frames. On entering a scope, pop a frame and use it, on leaving a scope,
+// clear the frame and return it.
+typedef struct {
+  Frame *head;
+  Allocator *alloc;
+} FrameFreeList;
+
+void freelist_preallocate(FrameFreeList *fl) {
+  // PERF: maybe 256 is too many, but prefetching a recursion depth can have
+  // some positive effects on the runtime performance
+  for (size_t i = 0; i < 256; i++) {
+    Frame *frame = fl->alloc->request(fl->alloc->ctx, sizeof(Frame));
+    frame->prev = fl->head;
+    frame->return_to_bytecode = 0;
+    fl->head = frame;
+  }
+}
+
+#if DEBUG
+static size_t frame_count = 1;
+#endif
+
+void freelist_push(FrameFreeList *fl, Frame *frame) {
+#if DEBUG
+  printf("[VM]: exiting frame #%zu\n", frame_count--);
+#endif
+  frame->prev = fl->head;
+  memset(frame->variable_table, 0, sizeof(frame->variable_table));
+  frame->return_to_bytecode = 0;
+  fl->head = frame;
+}
+
+Frame *freelist_pop(FrameFreeList *fl) {
+#if DEBUG
+  printf("[VM]: entering frame #%zu\n", frame_count++);
+#endif
+  if (!fl->head)
+    return fl->alloc->request(fl->alloc->ctx, sizeof(Frame));
+  Frame *f = fl->head;
+  fl->head = f->prev;
+  f->prev = NULL;
+  return f;
+}
+
 int Vm_run(Vm *vm, Allocator *alloc) {
+  FrameFreeList *fl = &(FrameFreeList){.alloc = alloc};
+  freelist_preallocate(fl);
   vm->arg_count = 1;
-  Frame *f = alloc->request(alloc->ctx, sizeof(Frame));
-  vm->frame = f;
+  vm->frame = freelist_pop(fl);
 #if DEBUG
   puts("================== GLOBAL ==================");
   for (size_t i = 0; i < vm->global_len; i++) {
@@ -312,19 +359,21 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       break;
     }
     case OP_CALL: {
-      Frame *new_frame = alloc->request(alloc->ctx, sizeof(Frame));
-      new_frame->prev = vm->frame;
-      new_frame->return_to_bytecode = vm->pc;
-      vm->frame = new_frame;
+      Frame *f = freelist_pop(fl);
+      f->prev = vm->frame;
+      f->return_to_bytecode = vm->pc;
+      vm->frame = f;
       vm->pc = arg;
       vm->arg_count = 1;
       break;
     }
     case OP_LEAVE: {
+      Frame *old = vm->frame;
       if (vm->frame->prev) {
         vm->pc = vm->frame->return_to_bytecode;
         vm->frame = vm->frame->prev;
       }
+      freelist_push(fl, old);
       break;
     }
     case OP_JMP: {
