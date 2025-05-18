@@ -114,17 +114,10 @@ Value builtin_type(const Value *arg, size_t count) {
 }
 
 Value builtin_assert(const Value *arg, size_t count) {
-  ASSERT(count == 2, "@assert: can only compare 2 arguments, got %zu", count);
-  const Value *lhs = &arg[0];
-  const Value *rhs = &arg[1];
-  if (!Value_cmp(lhs, rhs)) {
-    printf("@assert: ");
-    Value_debug(lhs);
-    printf(" != ");
-    Value_debug(rhs);
-    puts("");
-    ASSERT(0, "Assertion failed");
-  }
+  ASSERT(count == 1, "@assert: can only assert 1 argument to true, got %zu",
+         count);
+  ASSERT(arg[0].type == V_TRUE,
+         "@assert: assertion failed, value was not true");
   return NONE;
 }
 
