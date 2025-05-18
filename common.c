@@ -1,7 +1,7 @@
 #include "common.h"
 #include <string.h>
 
-#define PREC 1e-7
+#define PREC 1e-9
 
 Str VALUE_TYPE_MAP[] = {
     [V_OPTION] = STRING("Option("), [V_STR] = STRING("Str"),
@@ -81,13 +81,10 @@ void Value_debug(const Value *v) {
   case V_INT:
     printf("(%ld)", v->integer);
     break;
-  case V_UNDEFINED:
-    printf("undefined");
-    break;
   case V_ARRAY: {
     printf("[");
     for (size_t i = 0; i < v->array.len; i++) {
-      Value_debug(&v->array.value[i]);
+      Value_debug(v->array.value[i]);
     }
     printf("]");
     break;

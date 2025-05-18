@@ -49,6 +49,13 @@ void freelist_push(FrameFreeList *fl, Frame *frame) {
   fl->head = frame;
 }
 
+#define NEW(...)                                                               \
+  ({                                                                           \
+    Value *__v = alloc->request(alloc->ctx, sizeof(Value));                    \
+    *__v = (Value)__VA_ARGS__;                                                 \
+    __v;                                                                       \
+  })
+
 Frame *freelist_pop(FrameFreeList *fl) {
 #if DEBUG
   printf("[VM]: entering frame #%zu\n", frame_count++);
@@ -70,7 +77,7 @@ int Vm_run(Vm *vm, Allocator *alloc) {
   puts("================== GLOBAL ==================");
   for (size_t i = 0; i < vm->global_len; i++) {
     printf("VM[glob%zu/%zu] ", i + 1, (size_t)vm->global_len);
-    Value_debug(&vm->globals[i]);
+    Value_debug(vm->globals[i]);
     puts("");
   }
   puts("================== VM OPS ==================");
@@ -87,15 +94,15 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       // bounds checking and checking for variable validity is performed at
       // compile time, but we still have to check if the variable is available
       // in the current scope...
-      Value v = vm->frame->variable_table[arg & VARIABLE_TABLE_SIZE_MASK];
-      if (v.type == V_UNDEFINED) {
-        Value possible_ident_name = vm->globals[arg & GLOBAL_MASK];
+      Value *v = vm->frame->variable_table[arg & VARIABLE_TABLE_SIZE_MASK];
+      if (v == NULL) {
+        Value *possible_ident_name = vm->globals[arg & GLOBAL_MASK];
         // this is for when we know the identifier because we interned it
         // already
-        if (possible_ident_name.type != V_UNDEFINED) {
+        if (possible_ident_name != NULL) {
           VM_ERR("Undefined variable `%.*s`",
-                 (int)possible_ident_name.string.len,
-                 possible_ident_name.string.p);
+                 (int)possible_ident_name->string.len,
+                 possible_ident_name->string.p);
         } else {
           // this is for when we dont know the identifier
           VM_ERR("Undefined variable with hash %i", arg);
@@ -108,25 +115,25 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      vm->frame->variable_table[vm->registers[0].string.hash &
+      vm->frame->variable_table[vm->registers[0]->string.hash &
                                 VARIABLE_TABLE_SIZE_MASK] = vm->registers[arg];
       break;
     case OP_ADD: {
-      Value *left = &vm->registers[0];
-      Value *right = &vm->registers[arg];
+      Value *left = vm->registers[0];
+      Value *right = vm->registers[arg];
       switch (left->type) {
       case V_INT:
         switch (right->type) {
         case V_INT:
           // avoid copy here, write directly into register, possible here,
           // since order is irrelevant
-          vm->registers[0].integer += right->integer;
+          vm->registers[0]->integer += right->integer;
           break;
         case V_DOUBLE:
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_DOUBLE,
               .floating = (double)left->integer + right->floating,
-          };
+          });
           break;
         default:
           VM_ERR("VM[+] Incompatible types %.*s and %.*s",
@@ -139,15 +146,15 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       case V_DOUBLE:
         switch (right->type) {
         case V_INT:
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_DOUBLE,
               .floating = left->floating + (double)right->integer,
-          };
+          });
           break;
         case V_DOUBLE:
           // avoid copy here, write directly into register, possible here,
           // since order is irrelevant
-          vm->registers[0].floating += right->floating;
+          vm->registers[0]->floating += right->floating;
           break;
         default:
           VM_ERR("VM[+] Incompatible types %.*s and %.*s",
@@ -166,22 +173,22 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       break;
     }
     case OP_SUB: {
-      Value *a = &vm->registers[0];
-      Value *b = &vm->registers[arg];
+      Value *a = vm->registers[0];
+      Value *b = vm->registers[arg];
       switch (a->type) {
       case V_INT:
         switch (b->type) {
         case V_INT:
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_INT,
               .integer = b->integer - a->integer,
-          };
+          });
           break;
         case V_DOUBLE:
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_DOUBLE,
               .floating = b->floating - (double)a->integer,
-          };
+          });
           break;
         default:
           VM_ERR("VM[-] Incompatible types %.*s and %.*s",
@@ -192,18 +199,18 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       case V_DOUBLE:
         switch (b->type) {
         case V_INT:
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_DOUBLE,
               .floating = (double)b->integer - a->floating,
-          };
+          });
           break;
         case V_DOUBLE:
           // avoid copy here, write directly into register, possible here,
           // since order is irrelevant
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_DOUBLE,
               .floating = b->floating - a->floating,
-          };
+          });
           break;
         default:
           VM_ERR("VM[-] Incompatible types %.*s and %.*s",
@@ -220,21 +227,21 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       break;
     }
     case OP_MUL: {
-      Value *left = &vm->registers[0];
-      Value *right = &vm->registers[arg];
+      Value *left = vm->registers[0];
+      Value *right = vm->registers[arg];
       switch (left->type) {
       case V_INT:
         switch (right->type) {
         case V_INT:
           // avoid copy here, write directly into register, possible here,
           // since order is irrelevant
-          vm->registers[0].integer *= right->integer;
+          vm->registers[0]->integer *= right->integer;
           break;
         case V_DOUBLE:
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_DOUBLE,
               .floating = (double)left->integer * right->floating,
-          };
+          });
           break;
         default:
           VM_ERR("VM[*] Incompatible types %.*s and %.*s",
@@ -247,15 +254,15 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       case V_DOUBLE:
         switch (right->type) {
         case V_INT:
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_DOUBLE,
               .floating = left->floating * (double)right->integer,
-          };
+          });
           break;
         case V_DOUBLE:
           // avoid copy here, write directly into register, possible here,
           // since order is irrelevant
-          vm->registers[0].floating *= right->floating;
+          vm->registers[0]->floating *= right->floating;
           break;
         default:
           VM_ERR("VM[*] Incompatible types %.*s and %.*s",
@@ -274,22 +281,22 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       break;
     }
     case OP_DIV: {
-      Value *a = &vm->registers[0];
-      Value *b = &vm->registers[arg];
+      Value *a = vm->registers[0];
+      Value *b = vm->registers[arg];
       switch (a->type) {
       case V_INT:
         switch (b->type) {
         case V_INT:
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_INT,
               .integer = b->integer / a->integer,
-          };
+          });
           break;
         case V_DOUBLE:
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_DOUBLE,
               .floating = b->floating / (double)a->integer,
-          };
+          });
           break;
         default:
           VM_ERR("VM[/] Incompatible types %.*s and %.*s",
@@ -300,18 +307,18 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       case V_DOUBLE:
         switch (b->type) {
         case V_INT:
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_DOUBLE,
               .floating = (double)b->integer / a->floating,
-          };
+          });
           break;
         case V_DOUBLE:
           // avoid copy here, write directly into register, possible here,
           // since order is irrelevant
-          vm->registers[0] = (Value){
+          vm->registers[0] = NEW({
               .type = V_DOUBLE,
               .floating = b->floating / a->floating,
-          };
+          });
           break;
         default:
           VM_ERR("VM[/] Incompatible types %.*s and %.*s",
@@ -328,9 +335,9 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       break;
     }
     case OP_EQ: {
-      vm->registers[0] = (Value){
-          .type = Value_cmp(&vm->registers[0], &vm->registers[arg]) ? V_TRUE
-                                                                    : V_FALSE};
+      vm->registers[0] = Value_cmp(vm->registers[0], vm->registers[arg])
+                             ? vm->globals[1]
+                             : vm->globals[0];
       break;
     }
     case OP_ARGS:
@@ -349,16 +356,18 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       // at this point all builtins are just syscalls into an array of function
       // pointers
       if (vm->arg_count == 1) {
-        vm->registers[0] = BUILTIN_MAP[arg](&vm->registers[0], 1);
+        const Value *t = vm->registers[0];
+        vm->registers[0] = BUILTIN_MAP[arg]((const Value **)&t, 1, alloc);
       } else {
-        Value v[vm->arg_count];
+        const Value *v[vm->arg_count];
         for (int i = vm->arg_count - 1; i > 0; i--) {
           ASSERT(vm->stack_cur != 0,
                  "No element in argument stack, failed to pop");
           v[i - 1] = vm->stack[--vm->stack_cur];
         }
         v[vm->arg_count - 1] = vm->registers[0];
-        vm->registers[0] = BUILTIN_MAP[arg](v, vm->arg_count);
+        vm->registers[0] =
+            BUILTIN_MAP[arg]((const Value **)&v, vm->arg_count, alloc);
       }
 
       vm->arg_count = 1;
@@ -391,16 +400,36 @@ int Vm_run(Vm *vm, Allocator *alloc) {
              OP_MAP[op].p)
     }
 #if DEBUG
-    DIS(op, arg)
+    printf("VM[%06zu][%-8.*s][%10lu]: {.registers=[", vm->pc,
+           (int)OP_MAP[(op)].len, OP_MAP[(op)].p, (size_t)arg);
+    for (size_t i = 0; i < 128; i++) {
+      printf(" ");
+      if (vm->registers[i] == NULL)
+        break;
+      Value_debug(vm->registers[i]);
+    }
+    printf("]");
+    if (vm->stack_cur) {
+      printf(",.stack=[");
+    }
+    for (size_t i = 0; i < vm->stack_cur; i++) {
+      printf(" ");
+      Value_debug(vm->stack[i]);
+    }
+    if (vm->stack_cur) {
+      printf(" ]");
+    }
+    printf("}\n");
 #endif
     vm->pc += 2;
   }
 #if DEBUG
   puts("==================  REGS  ==================");
-#define REGISTER_PRINT_COUNT 3
-  for (size_t i = 0; i < REGISTER_PRINT_COUNT; i++) {
+  for (size_t i = 0;; i++) {
+    if (vm->registers[i] == NULL)
+      break;
     printf("VM[r%zu]: ", i);
-    Value_debug(&vm->registers[i]);
+    Value_debug(vm->registers[i]);
     puts("");
   }
 #endif

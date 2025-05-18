@@ -10,28 +10,6 @@
 #define VARIABLE_TABLE_SIZE 256
 #define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
 
-#define DIS(op, arg)                                                           \
-  printf("VM[%06zu][%-8.*s][%10lu]: {.registers=[", vm->pc,                    \
-         (int)OP_MAP[(op)].len, OP_MAP[(op)].p, (size_t)arg);                  \
-  for (size_t i = 0; i < REGISTERS; i++) {                                     \
-    printf(" ");                                                               \
-    if (vm->registers[i].type == V_UNDEFINED)                                  \
-      break;                                                                   \
-    Value_debug(&vm->registers[i]);                                            \
-  }                                                                            \
-  printf("]");                                                                 \
-  if (vm->stack_cur) {                                                         \
-    printf(",.stack=[");                                                       \
-  }                                                                            \
-  for (size_t i = 0; i < vm->stack_cur; i++) {                                 \
-    printf(" ");                                                               \
-    Value_debug(&vm->stack[i]);                                                \
-  }                                                                            \
-  if (vm->stack_cur) {                                                         \
-    printf(" ]");                                                              \
-  }                                                                            \
-  printf("}\n");
-
 typedef enum {
   // LOAD rANY
   //
@@ -142,18 +120,18 @@ typedef struct Frame {
   // function
   size_t return_to_bytecode;
   // stores Values by their hash, serving as a variable table
-  Value variable_table[VARIABLE_TABLE_SIZE];
+  Value *variable_table[VARIABLE_TABLE_SIZE];
 } Frame;
 
 typedef struct {
   uint32_t global_len;
   // globals represents the global pool created by the bytecode compiler
-  Value *globals;
+  Value **globals;
   uint64_t bytecode_len;
   byte *bytecode;
   // current position in the bytecode
   size_t pc;
-  Value registers[REGISTERS + 1];
+  Value *registers[REGISTERS + 1];
   // frame stores variables of the current scope, meta data and other required
   // data
   Frame *frame;
@@ -161,7 +139,7 @@ typedef struct {
   // than one arguments are passed to a function these are pushed to the stack,
   // except the last one, which is in r0 either way, so we just take it from
   // there
-  Value stack[CALL_ARGUMENT_STACK];
+  Value *stack[CALL_ARGUMENT_STACK];
   // stack_cur stores how many elements there currently are in the stack
   size_t stack_cur;
   // arg_count enables the vm to know how many register values it needs to pop

@@ -2,6 +2,7 @@
 #define BUILTINS_H
 
 #include "common.h"
+#include "mem.h"
 
 typedef enum {
   BUILTIN_UNKOWN,
@@ -18,7 +19,8 @@ typedef enum {
 // `BUILTIN_MAP` via its enum value
 // `{[BUILTIN_<name>] = &builtin_<name> }`. The argument Value is constant,
 // because all builtins are pure.
-typedef Value (*builtin_function)(const Value *args, size_t count);
+typedef Value *(*builtin_function)(const Value **args, size_t count,
+                                   Allocator *alloc);
 extern builtin_function BUILTIN_MAP[];
 extern Str BUILTIN_NAME_MAP[];
 #endif

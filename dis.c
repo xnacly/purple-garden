@@ -10,7 +10,7 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
   if (vm->global_len > 0) {
     printf("__globals:\n\t");
     for (size_t i = 0; i < vm->global_len; i++) {
-      Value *v = &vm->globals[i];
+      Value *v = vm->globals[i];
       Value_debug(v);
       printf("; {idx=%zu", i);
       if (v->type == V_STR) {
@@ -63,12 +63,12 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
       switch (op) {
       case OP_LOAD:
         printf(": ");
-        Value_debug(&vm->globals[arg]);
+        Value_debug(vm->globals[arg]);
         break;
       case OP_LOADV:
         printf(": $");
         for (size_t j = 0; j < vm->global_len; j++) {
-          Value *v = &vm->globals[j];
+          Value *v = vm->globals[j];
           if (v->type == V_STR && (v->string.hash & GLOBAL_MASK) == arg) {
             Str_debug(&v->string);
           }

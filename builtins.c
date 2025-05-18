@@ -1,12 +1,15 @@
 #include "builtins.h"
 #include "common.h"
 
-static void print_value(const Value v) {
-  switch (v.type) {
+static Value *NONE =
+    &(Value){.type = V_OPTION, .option = (struct Option){.is_some = false}};
+
+static void print_value(const Value *v) {
+  switch (v->type) {
   case V_OPTION: {
-    if (v.option.is_some) {
+    if (v->option.is_some) {
       printf("Some(");
-      print_value(*v.option.value);
+      print_value(v->option.value);
       putc(')', stdout);
     } else {
       printf("None");
@@ -14,13 +17,13 @@ static void print_value(const Value v) {
     break;
   }
   case V_STR:
-    Str_debug(&v.string);
+    Str_debug(&v->string);
     break;
   case V_DOUBLE:
-    printf("%g", v.floating);
+    printf("%g", v->floating);
     break;
   case V_INT:
-    printf("%ld", v.integer);
+    printf("%ld", v->integer);
     break;
   case V_TRUE:
     printf("true");
@@ -30,23 +33,20 @@ static void print_value(const Value v) {
     break;
   case V_ARRAY:
     printf("[");
-    for (size_t i = 0; i < v.array.len; i++) {
-      print_value(v.array.value[i]);
-      if (i + 1 <= v.array.len) {
+    for (size_t i = 0; i < v->array.len; i++) {
+      print_value(v->array.value[i]);
+      if (i + 1 < v->array.len) {
         printf(", ");
       }
     }
     printf("]");
-    break;
-  case V_UNDEFINED:
-    printf("undefined");
     break;
   default:
   }
 }
 
 // print works the same as println but without the newline
-Value builtin_print(const Value *arg, size_t count) {
+Value *builtin_print(const Value **arg, size_t count, Allocator *alloc) {
   if (count == 1) {
     print_value(arg[0]);
   } else {
@@ -60,8 +60,8 @@ Value builtin_print(const Value *arg, size_t count) {
 
 // println outputs its argument to stdout, joined with ' ' and postfixed with a
 // newline
-Value builtin_println(const Value *arg, size_t count) {
-  builtin_print(arg, count);
+Value *builtin_println(const Value **arg, size_t count, Allocator *alloc) {
+  builtin_print(arg, count, alloc);
   putc('\n', stdout);
   return NONE;
 }
@@ -71,26 +71,29 @@ Value builtin_println(const Value *arg, size_t count) {
 // - for V_STRING: string length
 // - for V_LIST: amount of children in list
 // - else None
-Value builtin_len(const Value *arg, size_t count) {
+Value *builtin_len(const Value **arg, size_t count, Allocator *alloc) {
   ASSERT(count == 1, "len only works for a singular argument")
-  const Value *a = &arg[0];
+  const Value *a = arg[0];
   if (a->type == V_STR) {
-    return (Value){.type = V_INT, .integer = a->string.len};
+    Value *v = alloc->request(alloc->ctx, sizeof(Value));
+    v->type = V_INT;
+    v->integer = a->string.len;
+    return v;
   } else if (a->type == V_ARRAY) {
-    return (Value){.type = V_INT, .integer = a->array.len};
+    Value *v = alloc->request(alloc->ctx, sizeof(Value));
+    v->type = V_INT;
+    v->integer = a->array.len;
+    return v;
   } else {
     fputs("builtin_len only strings and lists have a length", stderr);
     exit(EXIT_FAILURE);
   }
 }
 
-Value builtin_type(const Value *arg, size_t count) {
+Value *builtin_type(const Value **arg, size_t count, Allocator *alloc) {
   ASSERT(count == 1, "type only accepts one argument")
   Str s;
-  switch (arg->type) {
-  case V_UNDEFINED:
-    s = STRING("undefined");
-    break;
+  switch (arg[0]->type) {
   case V_OPTION:
     s = STRING("option");
     break;
@@ -110,13 +113,17 @@ Value builtin_type(const Value *arg, size_t count) {
     break;
   default:
   }
-  return (Value){.type = V_STR, .string = s};
+
+  Value *v = alloc->request(alloc->ctx, sizeof(Value));
+  v->type = V_STR;
+  v->string = s;
+  return v;
 }
 
-Value builtin_assert(const Value *arg, size_t count) {
+Value *builtin_assert(const Value **arg, size_t count, Allocator *alloc) {
   ASSERT(count == 1, "@assert: can only assert 1 argument to true, got %zu",
          count);
-  ASSERT(arg[0].type == V_TRUE,
+  ASSERT(arg[0]->type == V_TRUE,
          "@assert: assertion failed, value was not true");
   return NONE;
 }

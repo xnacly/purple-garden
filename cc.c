@@ -12,26 +12,37 @@
 
 // token_to_value converts tokens, such as strings, boolean and numbers to
 // runtime values
-static Value token_to_value(Token t) {
-  switch (t.type) {
+static Value *token_to_value(Token *t, Allocator *a) {
+  Value *v = a->request(a->ctx, sizeof(Value));
+  switch (t->type) {
   case T_STRING:
   case T_IDENT:
-    return (Value){.type = V_STR, .string = t.string};
+    v->type = V_STR;
+    v->string = t->string;
+    break;
   case T_TRUE:
-    return (Value){.type = V_TRUE};
+    v->type = V_TRUE;
+    break;
   case T_FALSE:
-    return (Value){.type = V_FALSE};
+    v->type = V_FALSE;
+    break;
   case T_INTEGER:
-    return (Value){.type = V_INT, .integer = t.integer};
+    v->type = V_INT;
+    v->integer = t->integer;
+    break;
   case T_DOUBLE:
-    return (Value){.type = V_DOUBLE, .floating = t.floating};
+    v->type = V_DOUBLE;
+    v->floating = t->floating;
+    break;
+  case T_BRAKET_LEFT: // TODO: think about lists
+    v->type = V_ARRAY;
+    v->array = (struct Array){.len = 0};
+    break;
   default:
-    // TODO: think about lists and options
     ASSERT(0, "Unsupported value for this")
-    return (Value){
-        .type = V_UNDEFINED,
-    };
+    break;
   }
+  return v;
 }
 
 static size_t Ctx_allocate_register(Ctx *ctx) {
@@ -58,8 +69,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
              "cc: out of global space, what the fuck are you doing (there is "
              "space "
              "for 256k globals)");
-      vm->globals[vm->global_len] =
-          (Value){.type = V_ARRAY, .array = {.len = 0}};
+      vm->globals[vm->global_len] = token_to_value(n->token, alloc);
       BC(OP_LOAD, vm->global_len++)
     } else {
       TODO("N_ARRAY#real arrays")
@@ -85,7 +95,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
                "space "
                "for 256k globals)");
         ctx->global_hash_buckets[hash] = vm->global_len + 1;
-        vm->globals[vm->global_len++] = token_to_value(*n->token);
+        vm->globals[vm->global_len++] = token_to_value(n->token, alloc);
       }
       BC(OP_LOAD, expected_index)
     } else {
@@ -93,7 +103,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
              "cc: out of global space, what the fuck are you doing (there is "
              "space "
              "for 256k globals)");
-      vm->globals[vm->global_len] = token_to_value(*n->token);
+      vm->globals[vm->global_len] = token_to_value(n->token, alloc);
       BC(OP_LOAD, vm->global_len++)
     }
     break;
@@ -188,8 +198,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
                  "is space for 256k globals)");
           // stored +1 to distinguish unset (0) from index 0
           ctx->global_hash_buckets[param_hash] = vm->global_len + 1;
-          vm->globals[vm->global_len++] =
-              (Value){.type = V_STR, .string = param->token->string};
+          vm->globals[vm->global_len++] = token_to_value(param->token, alloc);
         }
 
         BC(OP_LOAD, expected_index);
@@ -220,8 +229,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
                    "cc: out of global space, what the fuck are you doing "
                    "(there is space for 256k globals)");
             ctx->global_hash_buckets[param_hash] = vm->global_len + 1;
-            vm->globals[vm->global_len++] =
-                (Value){.type = V_STR, .string = param->token->string};
+            vm->globals[vm->global_len++] = token_to_value(param->token, alloc);
           }
 
           BC(OP_LOAD, expected_index);
@@ -261,8 +269,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
                "space "
                "for 256k globals)");
         ctx->global_hash_buckets[hash] = vm->global_len + 1;
-        vm->globals[vm->global_len++] =
-            (Value){.type = V_STR, .string = ident->string};
+        vm->globals[vm->global_len++] = token_to_value(ident, alloc);
       }
       BC(OP_LOAD, expected_index);
       BC(OP_VAR, r);
@@ -321,6 +328,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   }
 }
 
+static Value *INTERNED_TRUE = &(Value){.type = V_TRUE};
+static Value *INTERNED_FALSE = &(Value){.type = V_FALSE};
+
 CompileOutput cc(Allocator *alloc, Node **nodes, size_t size) {
   // runtime functions
   runtime_builtin_hashes[Str_hash(&STRING("assert")) & MAX_BUILTIN_SIZE_MASK] =
@@ -346,15 +356,15 @@ CompileOutput cc(Allocator *alloc, Node **nodes, size_t size) {
       .pc = 0,
       .bytecode = NULL,
       .globals = NULL,
-      .stack = {{0}},
+      .stack = {},
       .stack_cur = 0,
   };
 
   // main bytecode buffer
   vm.bytecode = alloc->request(alloc->ctx, (sizeof(byte) * BYTECODE_SIZE));
-  vm.globals = alloc->request(alloc->ctx, (sizeof(Value) * GLOBAL_SIZE));
-  vm.globals[0] = (Value){.type = V_FALSE};
-  vm.globals[1] = (Value){.type = V_TRUE};
+  vm.globals = alloc->request(alloc->ctx, (sizeof(Value *) * GLOBAL_SIZE));
+  vm.globals[0] = INTERNED_FALSE;
+  vm.globals[1] = INTERNED_TRUE;
   vm.global_len += 2;
 
   // specifically set size 1 to keep r0 the temporary register reserved

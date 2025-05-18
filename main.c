@@ -245,10 +245,10 @@ int main(int argc, char **argv) {
   // TODO: replace this with default gc
   Allocator *vm_alloc = &pipeline_allocator;
   if (a.block_allocator > 0) {
-    a.block_allocator *= 1024;
     VERBOSE_PUTS(
-        "vm: got --block-allocator, using bump allocator with size %zu",
-        a.block_allocator);
+        "vm: got --block-allocator, using bump allocator with size %zuB/%zuKB",
+        a.block_allocator * 1024, a.block_allocator);
+    a.block_allocator *= 1024;
     vm_alloc->init = bump_init;
     vm_alloc->request = bump_request;
     vm_alloc->destroy = bump_destroy;

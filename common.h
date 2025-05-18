@@ -35,7 +35,6 @@
 #include "strings.h"
 
 typedef enum {
-  V_UNDEFINED,
   V_OPTION,
   V_STR,
   V_DOUBLE,
@@ -56,10 +55,10 @@ typedef struct Value {
     Str string;
     double floating;
     int64_t integer;
-    struct {
+    struct Array {
       size_t len;
       // holds members of the array
-      struct Value *value;
+      struct Value **value;
     } array;
 
     struct Option {
@@ -75,10 +74,5 @@ void Value_debug(const Value *v);
 
 #define SOME(val)                                                              \
   (Option) { .is_some = true, .some = val }
-
-#define NONE                                                                   \
-  (Value) {                                                                    \
-    .type = V_OPTION, .option = (struct Option) { .is_some = false }           \
-  }
 
 #endif
