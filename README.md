@@ -63,8 +63,9 @@ make
 #         PUSH 0
 #         LOAD 3: Str(`World`)
 #         ARGS 2
-#         BUILTIN 1: <@println>
-# cc: 319496.31KB of 598016.00KB used (53.426048%)
+#         BUILTIN 2: <@println>
+# cc: 221216.38KB of 598016.00KB used (36.991715%)
+# [VM]: entering frame #1
 # ================== GLOBAL ==================
 # VM[glob1/4] False
 # VM[glob2/4] True
@@ -76,13 +77,12 @@ make
 # VM[000004][LOAD    ][         3]: {.registers=[ Str(`World`) ],.stack=[ Str(`Hello`) ]}
 # VM[000006][ARGS    ][         2]: {.registers=[ Str(`World`) ],.stack=[ Str(`Hello`) ]}
 # Hello World
-# VM[000008][BUILTIN ][         1]: {.registers=[ Option(None) ]}
+# VM[000008][BUILTIN ][         2]: {.registers=[ Option(None) ]}
 # ==================  REGS  ==================
 # VM[r0]: Option(None)
-# VM[r1]: undefined
-# VM[r2]: undefined
 # ================== MEMORY ==================
-# cc: 319528.34KB of 598016.00KB used (53.431402%
+# cc: 221732.38KB of 598016.00KB used (37.078000%)
+# vm: 221732.38KB of 598016.00KB used (37.078000%)
 
 # provide a custom file to execute
 make PG=examples/ops.garden
@@ -95,66 +95,90 @@ make PG=examples/ops.garden
 ```sh
 $ make release
 ./purple_garden
-# usage: purple_garden [-v | --version] [-h | --help]
-#                      [-d | --disassemble] [-b<size> | --block-allocator=<size>]
-#                      [-a | --aot-functions] [-m | --memory-usage]
-#                      [-V | --verbose] [-r<input> | --run=<input>] <file.garden>
 # error: Missing a file? try `-h/--help`
 $ ./purple_garden -h
-# usage: purple_garden [-v | --version] [-h | --help]
-#                      [-d | --disassemble] [-b<size> | --block-allocator=<size>]
-#                      [-a | --aot-functions] [-m | --memory-usage]
-#                      [-V | --verbose] [-r<input> | --run=<input>] <file.garden>
+# usage ./purple_garden: [ +v / +version] [ +d / +disassemble]
+#                        [ +b / +block-allocator <long=0>] [ +a / +aot-functions]
+#                        [ +m / +memory-usage] [ +V / +verbose]
+#                        [ +r / +run <string=``>]
+#                        [ +h / +help] <file.garden>
 # 
-# Options:
-#         -v, --version
+# Option:
+#           +v / +version
 #                 display version information
 # 
-#         -h, --help
-#                 extended usage information
-# 
-#         -d, --disassemble
+#           +d / +disassemble
 #                 readable bytecode representation with labels, globals and comments
 # 
-#         -b=<size>, --block-allocator=<size>
-#                 use block allocator instead of garbage collection
+#           +b / +block-allocator <long=0>
+#                 use block allocator with size instead of garbage collection
 # 
-#         -a, --aot-functions
+#           +a / +aot-functions
 #                 compile all functions to machine code
 # 
-#         -m, --memory-usage
+#           +m / +memory-usage
 #                 display the memory usage of parsing, compilation and the virtual machine
 # 
-#         -V, --verbose
+#           +V / +verbose
 #                 verbose logging
 # 
-#         -r=<input>, --run=<input>
+#           +r / +run <string=``>
 #                 executes the argument as if an input file was given
+# 
+#           +h / +help
+#                 help page and usage
+# 
+# Examples:
+#         ./purple_garden +v +d \
+#                         +b 0 +a \
+#                         +m +V \
+#                         +r ""
+# 
+#         ./purple_garden +version +disassemble \
+#                         +block-allocator 0 +aot-functions \
+#                         +memory-usage +verbose \
+#                         +run ""
 ```
 
 ### Running tests
 
 ```sh
 $ make test
-# [+][PASS][Case 1/18] in=`3.1415`
-# [+][PASS][Case 2/18] in=`.1415`
-# [+][PASS][Case 3/18] in=`"string"`
-# [+][PASS][Case 4/18] in=`true false`
-# [+][PASS][Case 5/18] in=`true false true false`
-# [+][PASS][Case 6/18] in=`"hello"`
-# [+][PASS][Case 7/18] in=`(+2 2)`
-# [+][PASS][Case 8/18] in=`(-5 3)`
-# [+][PASS][Case 9/18] in=`(*3 4)`
-# [+][PASS][Case 10/18] in=`(/ 6 2)`
-# [+][PASS][Case 11/18] in=`(+1(-2 1))`
-# [+][PASS][Case 12/18] in=`(@len "hello")`
-# [+][PASS][Case 13/18] in=`(@len "hello")(@len "hello")`
-# [+][PASS][Case 14/18] in=`(@len "")`
-# [+][PASS][Case 15/18] in=`(@len "a")`
-# [+][PASS][Case 16/18] in=`(@let name "user")`
-# [+][PASS][Case 17/18] in=`(@let name "user")name`
-# [+][PASS][Case 18/18] in=`(@let age 25)age`
-# 18 of 18 passed, 0 failed
+# [+][PASS][Case 1/34] in=`3.1415`
+# [+][PASS][Case 2/34] in=`.1415`
+# [+][PASS][Case 3/34] in=`"string"`
+# [+][PASS][Case 4/34] in=`true false`
+# [+][PASS][Case 5/34] in=`true false true false`
+# [+][PASS][Case 6/34] in=`"hello"`
+# [+][PASS][Case 7/34] in=`(+2 2)`
+# [+][PASS][Case 8/34] in=`(-5 3)`
+# [+][PASS][Case 9/34] in=`(*3 4)`
+# [+][PASS][Case 10/34] in=`(/ 6 2)`
+# [+][PASS][Case 11/34] in=`(+1(-2 1))`
+# [+][PASS][Case 12/34] in=`(+2.0 2)`
+# [+][PASS][Case 13/34] in=`(+2 2.0)`
+# [+][PASS][Case 14/34] in=`(-5.0 3)`
+# [+][PASS][Case 15/34] in=`(-5 3.0)`
+# [+][PASS][Case 16/34] in=`(*3.0 4)`
+# [+][PASS][Case 17/34] in=`(*3 4.0)`
+# [+][PASS][Case 18/34] in=`(/ 6.0 2)`
+# [+][PASS][Case 19/34] in=`(/ 6 2.0)`
+# [+][PASS][Case 20/34] in=`(@len "hello")`
+# [+][PASS][Case 21/34] in=`(@len "hello")(@len "hello")`
+# [+][PASS][Case 22/34] in=`(@len "")`
+# [+][PASS][Case 23/34] in=`(@len "a")`
+# [+][PASS][Case 24/34] in=`(= 1 1)`
+# [+][PASS][Case 25/34] in=`(= "abc" "abc")`
+# [+][PASS][Case 26/34] in=`(= 3.1415 3.1415)`
+# [+][PASS][Case 27/34] in=`(= true true)`
+# [+][PASS][Case 28/34] in=`(= false false)`
+# [+][PASS][Case 29/34] in=`(@assert true)`
+# [+][PASS][Case 30/34] in=`(@let name "user")`
+# [+][PASS][Case 31/34] in=`(@let name "user")name`
+# [+][PASS][Case 32/34] in=`(@let age 25)age`
+# [+][PASS][Case 33/34] in=`(@function ret[arg] arg)(ret 25)`
+# [+][PASS][Case 34/34] in=`(@function add25[arg](+arg 25))(add25 25)`
+# 34 of 34 passed, 0 failed
 ```
 
 
@@ -169,15 +193,15 @@ Tests are located in `tests/test.c` and a test is declared via the `CASE` macro:
 ### Disassembling bytecode
 
 ```sh
-./purple_garden --disassemble <file.garden>
+./purple_garden +disassemble <file.garden>
 ```
 
 For readable bytecode representation with labels, globals and comments.
 
-> `--disassemble` is enabled by default when in debug builds via `-DDEBUG=1`
+> `+disassemble` is enabled by default when in debug builds via `-DDEBUG=1`
 
 ```sh
-$ ./purple_garden --disassemble examples/hello-world.garden
+$ ./purple_garden +disassemble examples/hello-world.garden
 # [...] omitted - see below
 # Hello World
 ```
@@ -196,7 +220,51 @@ __entry:
         PUSH 0
         LOAD 3: Str(`World`)
         ARGS 2
-        BUILTIN 1: <@println>
+        BUILTIN 2: <@println>
+```
+
+Or of course the benchmark example:
+
+```asm
+__globals:
+        False; {idx=0}
+        True; {idx=1}
+        Str(`b`); {idx=2,hash=798181}
+        Str(`a`); {idx=3,hash=796972}
+        Double(2.5); {idx=4}
+
+__entry:
+__0x000000[00B2]: comparer
+        JMP 26
+        STORE 1
+        LOAD 2: Str(`b`)
+        VAR 1
+        POP
+        STORE 1
+        LOAD 3: Str(`a`)
+        VAR 1
+        LOADV 796972: $a
+        STORE 1
+        LOADV 798181: $b
+        EQ 1
+        BUILTIN 1: <@assert>
+        LEAVE
+
+
+__0x00001C[0047]: inc
+        JMP 46
+        STORE 1
+        LOAD 3: Str(`a`)
+        VAR 1
+        LOADV 796972: $a
+        PUSH 0
+        LOADV 796972: $a
+        ARGS 2
+        CALL 0: <comparer>
+        LEAVE
+
+        LOAD 4: Double(2.5)
+        CALL 28: <inc>
 ```
 
 The disassembler attempts to display as much information as possible:
@@ -207,6 +275,7 @@ The disassembler attempts to display as much information as possible:
 - global pool values for certain bytecode operators: ```global=Str(`Hello World`)```
 - names for builtin calls: `builtin=@println`
 - labels for function definitions `<function>:` and branching `if:`, `then:`, `match:`, `default:`
+- names for arguments, functions and variabels
 
 ### Benchmarks
 
@@ -214,18 +283,18 @@ For benchmarking, remember to create a large sample size via the purple garden s
 
 ```sh
 $ wc -l examples/bench.garden
-# 250001 examples/bench.garden
+# 250003 examples/bench.garden
 ```
 
-> This benchmark example is for optimizing `builtin_len`/`@len` calls and atom
-> interning:
+> This benchmark example is for optimizing tail calls and builtin dispatch:
 
 ```racket
-(@len "hello world")
-(@len "hello world")
-(@len "hello world")
-(@len "hello world")
-(@len "hello world")
+(@function comparer [a b] (@assert (= a b)))
+(@function inc [a] (comparer a a))
+(inc 2.5)
+(inc 2.5)
+(inc 2.5)
+(inc 2.5)
 ; [...]
 ```
 
@@ -236,22 +305,22 @@ notated between `[` and `]`.
 # built in time measurements
 $ make bench PG=examples/bench.garden
 # [    0.0000ms] main::Args_parse: Parsed arguments
-# [    0.0090ms] io::IO_read_file_to_string: mmaped input of size=5250021B
-# [    0.0060ms] mem::init: Allocated memory block of size=934503738B
-# [    8.0280ms] lexer::Lexer_all: lexed tokens count=1000005
-# [   11.0570ms] parser::Parser_next created AST with node_count=250001
-# [    5.5750ms] cc::cc: Flattened AST to byte code/global pool length=1000004/3
-# [    2.0680ms] vm::Vm_run: executed byte code
-# [    0.4370ms] mem::Allocator::destroy: Deallocated memory space
-# [    0.0010ms] vm::Vm_destroy: teared vm down
-# [    0.3130ms] munmap: unmapped input
+# [    0.0110ms] io::IO_read_file_to_string: mmaped input of size=2500090B
+# [    0.0040ms] mem::init: Allocated memory block of size=612368384B
+# [   13.5170ms] lexer::Lexer_all: lexed tokens count=1000033
+# [    8.2350ms] parser::Parser_next created AST with node_count=250003
+# [    6.8260ms] cc::cc: Flattened AST to byte code/global pool length=1000052/250005
+# [   20.5990ms] vm::Vm_run: executed byte code
+# [    0.4510ms] mem::Allocator::destroy: Deallocated memory space
+# [    0.0000ms] vm::Vm_destroy: teared vm down
+# [    0.0000ms] munmap: unmapped input
 
 # or hyperfine
 $ make release
 $ hyperfine "./purple_garden examples/bench.garden"
 # Benchmark 1: ./purple_garden examples/bench.garden
-#   Time (mean ± σ):      28.3 ms ±   0.5 ms    [User: 19.7 ms, System: 8.3 ms]
-#   Range (min … max):    27.3 ms …  30.7 ms    101 runs
+#   Time (mean ± σ):      49.0 ms ±   0.8 ms    [User: 40.5 ms, System: 7.9 ms]
+#   Range (min … max):    48.0 ms …  52.6 ms    60 runs
 ```
 
 ### Profiling
@@ -291,7 +360,8 @@ $ hotspot
   - [x] println
   - [x] print
   - [x] len
-  - [ ] hash
+  - [x] type
+  - [x] assert
 
 ## Optimisations
 
@@ -317,13 +387,17 @@ $ hotspot
 - [x] `cc`: single instances for `true` and `false` in the global pool
 - [x] `cc`: hash known identifiers and strings at compile time
 - [x] `cc`: fast path for `ADD,SUB,MUL,DIV` with one child and a fast path for two children
-- [ ] `jit`: native compile functions before enterning the runtime, enabled via `--aot-functions`
+- [x] `cc`, `vm`: operate only on references, not values
+- [x] `vm`: frame free list to make entering and leaving scopes as fast as possible
+- [x] `vm`: preallocate 256 frames for even faster scope interaction
+- [x] `vm`: `EQ` fastpath for checking if lhs and rhs point to the same memory region
+- [ ] `jit`: native compile functions before enterning the runtime, enabled via `+aot-functions`
 - [ ] `cc`: multiple string concatinations should use a shared buffer and only allocate on string usage
 - [ ] `vm`: trail call optimisation
 - [ ] `vm`: merge smaller bytecode ops often used together into new ops
-- [ ] `vm`: lock I/O for the whole program execution for faster performance via `--lock-io`
-- [ ] `cc`: cache bytecode and global pool to omit frontend, disable via `--no-cache`
-- [ ] `gc`: mark and sweep garbage collection via `--gc-marksweep`
-- [ ] `gc`: generational garbage collection via `--gc-gen`
-- [ ] `gc`: reference counting via `--gc-rc`
-- [ ] `gc`: allow for bump/block allocator with `--alloc-block`
+- [ ] `vm`: lock I/O for the whole program execution for faster performance via `+lock-io`
+- [ ] `cc`: cache bytecode and global pool to omit frontend, disable via `+no-cache`
+- [ ] `gc`: mark and sweep garbage collection via `+gc-marksweep`
+- [ ] `gc`: generational garbage collection via `+gc-gen`
+- [ ] `gc`: reference counting via `+gc-rc`
+- [x] `gc`: allow for bump/block allocator with `+block-allocator`
