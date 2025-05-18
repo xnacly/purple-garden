@@ -1,4 +1,5 @@
 #include "common.h"
+#include <string.h>
 
 #define PREC 1e-7
 
@@ -9,8 +10,6 @@ Str VALUE_TYPE_MAP[] = {
     [V_ARRAY] = STRING("Array"),
 };
 
-static double _fabs(double x) { return x < 0 ? -x : x; }
-
 // Value_cmp compares two values in a shallow way, is used for OP_EQ and in
 // tests.
 //
@@ -19,6 +18,11 @@ static double _fabs(double x) { return x < 0 ? -x : x; }
 // - V_OPTION(Some(A)) & V_OPTION(Some(B)) even with matching A and B is false,
 // since we do not compare inner
 bool Value_cmp(const Value *a, const Value *b) {
+  // fastpath if value pointers are equal
+  if (a == b) {
+    return true;
+  }
+
   if (a->type != b->type) {
     return false;
   }
@@ -27,9 +31,14 @@ bool Value_cmp(const Value *a, const Value *b) {
   case V_STR:
     return Str_eq(&a->string, &b->string);
   case V_DOUBLE:
-    // comparing doubles by subtracting them and comparing the result to an
-    // epsilon is okay id say
-    return _fabs(a->floating - b->floating) < PREC;
+    // PERF: can potentially be faster, since we omit need a function call, in
+    // practice i havent seen any impact over the following construct. if
+    //
+    // (memcmp(&a->floating, &b->floating, sizeof(double)) == 0)
+    //   return true;
+
+    double diff = a->floating - b->floating;
+    return (diff < PREC && diff > -PREC);
   case V_INT:
     return a->integer == b->integer;
   case V_TRUE:
