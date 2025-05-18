@@ -6,14 +6,14 @@
 #include <stdint.h>
 
 Str OP_MAP[256] = {
-    [OP_LOAD] = STRING("LOAD"),   [OP_STORE] = STRING("STORE"),
-    [OP_ADD] = STRING("ADD"),     [OP_SUB] = STRING("SUB"),
-    [OP_MUL] = STRING("MUL"),     [OP_DIV] = STRING("DIV"),
-    [OP_POP] = STRING("POP"),     [OP_PUSH] = STRING("PUSH"),
-    [OP_VAR] = STRING("VAR"),     [OP_LOADV] = STRING("LOADV"),
-    [OP_ARGS] = STRING("ARGS"),   [OP_BUILTIN] = STRING("BUILTIN"),
-    [OP_LEAVE] = STRING("LEAVE"), [OP_CALL] = STRING("CALL"),
-    [OP_JMP] = STRING("JMP")};
+    [OP_LOAD] = STRING("LOAD"),       [OP_STORE] = STRING("STORE"),
+    [OP_ADD] = STRING("ADD"),         [OP_SUB] = STRING("SUB"),
+    [OP_MUL] = STRING("MUL"),         [OP_DIV] = STRING("DIV"),
+    [OP_EQ] = STRING("EQ"),           [OP_POP] = STRING("POP"),
+    [OP_PUSH] = STRING("PUSH"),       [OP_VAR] = STRING("VAR"),
+    [OP_LOADV] = STRING("LOADV"),     [OP_ARGS] = STRING("ARGS"),
+    [OP_BUILTIN] = STRING("BUILTIN"), [OP_LEAVE] = STRING("LEAVE"),
+    [OP_CALL] = STRING("CALL"),       [OP_JMP] = STRING("JMP")};
 
 // FrameFreeList works by caching a list of Frames so we don't have to interact
 // with the heap for the first N Frames, but instead use the preallocated
@@ -325,6 +325,12 @@ int Vm_run(Vm *vm, Allocator *alloc) {
                (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
                (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
       }
+      break;
+    }
+    case OP_EQ: {
+      vm->registers[0] = (Value){
+          .type = Value_cmp(&vm->registers[0], &vm->registers[arg]) ? V_TRUE
+                                                                    : V_FALSE};
       break;
     }
     case OP_ARGS:

@@ -70,16 +70,15 @@ int main() {
     CASE((@len ""), VAL(.type = V_INT, .integer = 0)),
     CASE((@len "a"), VAL(.type = V_INT, .integer = 1)),
 
-    CASE((@assert 1 1), VAL(.type = V_OPTION, .option = {.is_some = false})),
-    CASE((@assert "abc"
-                  "abc"),
-         VAL(.type = V_OPTION, .option = {.is_some = false})),
-    CASE((@assert 3.1415 3.1415),
-         VAL(.type = V_OPTION, .option = {.is_some = false})),
-    CASE((@assert true true),
-         VAL(.type = V_OPTION, .option = {.is_some = false})),
-    CASE((@assert false false),
-         VAL(.type = V_OPTION, .option = {.is_some = false})),
+    CASE((= 1 1), VAL(.type = V_TRUE)),
+    CASE((= "abc"
+            "abc"),
+         VAL(.type = V_TRUE)),
+    CASE((= 3.1415 3.1415), VAL(.type = V_TRUE)),
+    CASE((= true true), VAL(.type = V_TRUE)),
+    CASE((= false false), VAL(.type = V_TRUE)),
+
+    CASE((@assert true), VAL(.type = V_OPTION, .option = {.is_some = false})),
 
     // variables
     CASE((@let name "user"), VAL(.type = V_STR, .string = STRING("name"))),

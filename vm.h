@@ -64,6 +64,11 @@ typedef enum {
   // divide Value at rANY with r0, store result in r0
   OP_DIV = 5,
 
+  // OP_EQ rANY
+  //
+  // compares value at r0 and rANY via Value_cmp
+  OP_EQ = 6,
+
   // TODO: possibly optimisable by adding a OP_PUSHG for directly pushing a
   // global atom by its index into the vm arg stack
 

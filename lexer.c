@@ -22,6 +22,7 @@ Str TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
                         [T_MINUS] = STRING("T_MINUS"),
                         [T_ASTERISKS] = STRING("T_ASTERISKS"),
                         [T_SLASH] = STRING("T_SLASH"),
+                        [T_EQUAL] = STRING("T_EQUAL"),
                         [T_EOF] = STRING("T_EOF")};
 
 #if DEBUG
@@ -78,22 +79,34 @@ Token *INTERN_ASTERISKS = &(Token){.type = T_ASTERISKS};
 Token *INTERN_SLASH = &(Token){.type = T_SLASH};
 Token *INTERN_FALSE = &(Token){.type = T_FALSE};
 Token *INTERN_TRUE = &(Token){.type = T_TRUE};
+Token *INTERN_EQUAL = &(Token){.type = T_EQUAL};
 Token *INTERN_EOF = &(Token){.type = T_EOF};
 
 size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
   ASSERT(out != NULL, "Failed to allocate token list");
   size_t count = 0;
   static void *jump_table[256] = {
-      ['('] = &&delimitor_left, [')'] = &&delimitor_right,
-      ['['] = &&braket_left,    [']'] = &&braket_right,
-      ['@'] = &&builtin,        ['+'] = &&plus,
-      ['-'] = &&minus,          ['/'] = &&slash,
-      ['*'] = &&asterisks,      [' '] = &&whitespace,
-      ['\t'] = &&whitespace,    ['\n'] = &&whitespace,
-      [';'] = &&comment,        ['.'] = &&number,
-      ['0' ... '9'] = &&number, ['a' ... 'z'] = &&ident,
-      ['A' ... 'Z'] = &&ident,  ['_'] = &&ident,
-      ['"'] = &&string,         [0] = &&end,
+      ['('] = &&delimitor_left,
+      [')'] = &&delimitor_right,
+      ['['] = &&braket_left,
+      [']'] = &&braket_right,
+      ['@'] = &&builtin,
+      ['+'] = &&plus,
+      ['-'] = &&minus,
+      ['/'] = &&slash,
+      ['*'] = &&asterisks,
+      ['='] = &&equal,
+      [' '] = &&whitespace,
+      ['\t'] = &&whitespace,
+      ['\n'] = &&whitespace,
+      [';'] = &&comment,
+      ['.'] = &&number,
+      ['0' ... '9'] = &&number,
+      ['a' ... 'z'] = &&ident,
+      ['A' ... 'Z'] = &&ident,
+      ['_'] = &&ident,
+      ['"'] = &&string,
+      [0] = &&end,
   };
 
 #define JUMP_TARGET                                                            \
@@ -166,6 +179,11 @@ minus:
 
 slash:
   out[count++] = INTERN_SLASH;
+  l->pos++;
+  JUMP_TARGET;
+
+equal:
+  out[count++] = INTERN_EQUAL;
   l->pos++;
   JUMP_TARGET;
 

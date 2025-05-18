@@ -14,6 +14,8 @@ typedef enum {
   T_MINUS = 3,
   T_ASTERISKS = 4,
   T_SLASH = 5,
+  // =
+  T_EQUAL = 6,
   // )
   T_DELIMITOR_RIGHT,
   // [

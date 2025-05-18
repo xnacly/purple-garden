@@ -120,6 +120,7 @@ begin: {
   case T_MINUS:
   case T_ASTERISKS:
   case T_SLASH:
+  case T_EQUAL:
     n->type = N_BIN;
     advance(p);
     break;

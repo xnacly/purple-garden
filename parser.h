@@ -22,7 +22,7 @@ typedef enum {
   N_LIST,
   // builtins, like @println, @len, @let, @function, etc
   N_BUILTIN,
-  // operator, like +-*/%
+  // operator, like +-*/%=
   N_BIN,
   // function call
   N_CALL,
