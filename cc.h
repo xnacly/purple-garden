@@ -45,4 +45,7 @@ CompileOutput cc(Allocator *alloc, Node **nodes, size_t size);
 // and comments as a heap allocated string
 void disassemble(const Vm *vm, const Ctx *ctx);
 
+// stats displays some statistics for the virtual machine
+void stats(const Vm *vm);
+
 #endif

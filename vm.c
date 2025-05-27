@@ -74,13 +74,11 @@ int Vm_run(Vm *vm, Allocator *alloc) {
   vm->arg_count = 1;
   vm->frame = freelist_pop(fl);
 #if DEBUG
-  puts("================== GLOBAL ==================");
   for (size_t i = 0; i < vm->global_len; i++) {
     printf("VM[glob%zu/%zu] ", i + 1, (size_t)vm->global_len);
     Value_debug(vm->globals[i]);
     puts("");
   }
-  puts("================== VM OPS ==================");
 #endif
   while (vm->pc < vm->bytecode_len) {
     VM_OP op = vm->bytecode[vm->pc];
@@ -424,7 +422,6 @@ int Vm_run(Vm *vm, Allocator *alloc) {
     vm->pc += 2;
   }
 #if DEBUG
-  puts("==================  REGS  ==================");
   for (size_t i = 0;; i++) {
     if (vm->registers[i] == NULL)
       break;

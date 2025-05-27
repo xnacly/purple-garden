@@ -43,6 +43,7 @@ typedef struct {
   bool memory_usage;
   char *run;
   bool verbose;
+  bool stats;
   int version;
   char *filename;
 } Args;
@@ -55,6 +56,7 @@ Args Args_parse(int argc, char **argv) {
     __AOT,
     __MEMORY_USAGE,
     __VERBOSE,
+    __STATS,
     __RUN,
   };
 
@@ -95,6 +97,11 @@ Args Args_parse(int argc, char **argv) {
                      .b = false,
                      .type = SIX_BOOL,
                      .description = "verbose logging"},
+      [__STATS] = {.name = "stats",
+                   .short_name = 's',
+                   .b = false,
+                   .type = SIX_BOOL,
+                   .description = "show statistics"},
       [__RUN] = {.name = "run",
                  .short_name = 'r',
                  .s = "",
@@ -118,6 +125,7 @@ Args Args_parse(int argc, char **argv) {
   a.memory_usage = s.flags[__MEMORY_USAGE].b;
   a.run = s.flags[__RUN].s;
   a.verbose = s.flags[__VERBOSE].b;
+  a.stats = s.flags[__STATS].b;
   a.version = s.flags[__VERSION].b;
 
   // command handling
@@ -154,11 +162,12 @@ int main(int argc, char **argv) {
     VERBOSE_PUTS("io::IO_read_file_to_string: mmaped input of size=%zuB",
                  input.len);
   }
+
 #if DEBUG
-  puts("================== INPUTS ==================");
   Str_debug(&input);
-  a.disassemble = 1;
-  a.memory_usage = 1;
+  a.disassemble = true;
+  a.memory_usage = true;
+  a.stats = true;
 #endif
 
   // this allocator stores both nodes, bytecode and the global pool of the vm,
@@ -185,9 +194,6 @@ int main(int argc, char **argv) {
   Lexer l = Lexer_new(input);
   Token **tokens = pipeline_allocator.request(
       pipeline_allocator.ctx, file_size_or_min * sizeof(Token *));
-#if DEBUG
-  puts("================== TOKENS ==================");
-#endif
   size_t count = Lexer_all(&l, &pipeline_allocator, tokens);
 #if DEBUG
   for (size_t i = 0; i < count; i++) {
@@ -199,15 +205,12 @@ int main(int argc, char **argv) {
   if (UNLIKELY(a.memory_usage)) {
     Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
     double percent = (s.current * 100) / (double)s.allocated;
-    printf("lex: %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
+    printf("lex : %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
   }
   Parser p = Parser_new(&pipeline_allocator, tokens);
   size_t node_count = file_size_or_min * sizeof(Node *) / 4;
   Node **nodes = pipeline_allocator.request(pipeline_allocator.ctx, node_count);
-#if DEBUG
-  puts("================== ASTREE ==================");
-#endif
   node_count = Parser_all(nodes, &p, node_count);
 #if DEBUG
   for (size_t i = 0; i < node_count; i++) {
@@ -220,15 +223,12 @@ int main(int argc, char **argv) {
   if (UNLIKELY(a.memory_usage)) {
     Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
     double percent = (s.current * 100) / (double)s.allocated;
-    printf("parse: %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
+    printf("ast : %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
   }
   CompileOutput c = cc(&pipeline_allocator, nodes, node_count);
   VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu",
                c.vm.bytecode_len, (size_t)c.vm.global_len);
-#if DEBUG
-  puts("================== DISASM ==================");
-#endif
 
   if (UNLIKELY(a.disassemble)) {
     disassemble(&c.vm, &c.ctx);
@@ -238,7 +238,7 @@ int main(int argc, char **argv) {
   if (UNLIKELY(a.memory_usage)) {
     Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
     double percent = (s.current * 100) / (double)s.allocated;
-    printf("cc: %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
+    printf("cc  : %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
   }
 
@@ -260,21 +260,15 @@ int main(int argc, char **argv) {
   int runtime_code = Vm_run(&c.vm, vm_alloc);
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
 
-#if DEBUG
-  {
-    puts("================== MEMORY ==================");
-    Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
-    double percent = (s.current * 100) / (double)s.allocated;
-    printf("cc: %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
-           s.allocated / 1024.0, percent);
-  }
-#endif
-
   if (UNLIKELY(a.memory_usage)) {
     Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
     double percent = (s.current * 100) / (double)s.allocated;
-    printf("vm: %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
+    printf("vm  : %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
+  }
+
+  if (a.stats) {
+    stats(&c.vm);
   }
 
   pipeline_allocator.destroy(pipeline_allocator.ctx);

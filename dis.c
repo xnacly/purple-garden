@@ -4,9 +4,6 @@
 #include "strings.h"
 
 void disassemble(const Vm *vm, const Ctx *ctx) {
-  puts("; vim: filetype=asm");
-  printf("; Vm {global=%u/%d, bytecode=%zu/%d}\n", vm->global_len, GLOBAL_SIZE,
-         vm->bytecode_len, BYTECODE_SIZE);
   if (vm->global_len > 0) {
     printf("__globals:\n\t");
     for (size_t i = 0; i < vm->global_len; i++) {

@@ -34,6 +34,8 @@
 
 #include "strings.h"
 
+typedef uint32_t byte;
+
 typedef enum {
   V_OPTION,
   V_STR,

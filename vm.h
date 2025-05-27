@@ -106,8 +106,6 @@ typedef enum {
 
 extern Str OP_MAP[];
 
-typedef uint32_t byte;
-
 // A frame represents a Scope, a new scope is created upon entering a lambda -
 // since lambdas are pure there is no way to interact with the previous frame
 // inside of a lambda, the pointer is kept to allow the runtime to restore the
