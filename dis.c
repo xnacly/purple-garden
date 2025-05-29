@@ -3,6 +3,12 @@
 #include "common.h"
 #include "strings.h"
 
+// TODO: switch cc to emit these and the disassembler to use them
+typedef struct {
+  size_t at;
+  const char *comments;
+} Annotation;
+
 void disassemble(const Vm *vm, const Ctx *ctx) {
   if (vm->global_len > 0) {
     printf("__globals:\n\t");

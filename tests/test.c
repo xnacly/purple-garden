@@ -90,6 +90,7 @@ int main() {
     CASE((@function add25[arg](+arg 25))(add25 25),
          VAL(.type = V_INT, .integer = 50)),
   };
+
   size_t passed = 0;
   size_t failed = 0;
   size_t len = sizeof(cases) / sizeof(Case);

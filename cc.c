@@ -135,6 +135,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   }
   case N_BUILTIN: {
     if (!n->children_length) {
+      // TODO: is this really what we want? What about an empty println, this
+      // should just call puts
+      //
       // skip generating bytecode for empty builtin invocations
       return;
     }
@@ -166,7 +169,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
 
       // Calling convention overview:
       //
-      // parameters=[a b c]; arguments=[0 1 2]
+      // parameters=[a b c]
+      // arguments=[0 1 2]
       // stack=[0 1]
       //
       // r0 = c
