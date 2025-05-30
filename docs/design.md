@@ -1,7 +1,7 @@
 ## Virtual Machine and Compiler Design
 
 > Most of these examples and debugging output can be accessed via
-> `--disassemble` or builing and running purple garden in debug mode via
+> `+disassemble` or builing and running purple garden in debug mode via
 > `-DDEBUG=1` (a simple `make` runs the debug target)
 
 ### Calling conventions
@@ -84,17 +84,17 @@ __globals:
         True; {idx=1}
         Str(`Hello`); {idx=2,hash=1847627}
         Str(`World`); {idx=3,hash=2157875}
-        Number(3.141500); {idx=4}
-        Number(127.000000); {idx=5}
+        Double(3.1415); {idx=4}
+        Int(127); {idx=5}
 
 __entry:
         LOAD 2: Str(`Hello`)
         PUSH 0
         LOAD 3: Str(`World`)
         PUSH 0
-        LOAD 4: Number(3.141500)
+        LOAD 4: Double(3.1415)
         PUSH 0
-        LOAD 5: Number(127.000000)
+        LOAD 5: Int(127)
         ARGS 4
-        BUILTIN 1: <@println>
+        BUILTIN 2: <@println>
 ```
