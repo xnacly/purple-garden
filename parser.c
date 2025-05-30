@@ -5,8 +5,8 @@
 #include <stdlib.h>
 #include <sys/cdefs.h>
 
-#define NODE_CAP_GROW 1.75
-#define NODE_INITIAL_CHILD_SIZE 2
+#define NODE_CAP_GROW 2
+#define NODE_INITIAL_CHILD_SIZE 8
 
 Parser Parser_new(Allocator *alloc, Token **t) {
   return (Parser){
@@ -39,11 +39,13 @@ static void consume(Parser *p, TokenType tt) {
 // added to n->children
 static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
   if (n->children_length + 1 >= n->children_cap) {
-    // growing array
     size_t new = n->children_cap *NODE_CAP_GROW;
+    new = new < NODE_INITIAL_CHILD_SIZE ? NODE_INITIAL_CHILD_SIZE : new;
     Node **old = n->children;
     n->children = alloc->request(alloc->ctx, sizeof(Node *) * new);
-    memcpy(n->children, old, sizeof(Node *) * n->children_length);
+    if (old != NULL) {
+      memcpy(n->children, old, sizeof(Node *) * n->children_length);
+    }
     n->children_cap = new;
   }
 
@@ -53,7 +55,7 @@ static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
 size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
   // stack keeps the list(s) we are in, the last element is always the current
   // list, the first (0) is root
-  Node *stack[256];
+  Node *stack[256] = {0};
   stack[0] = &(Node){
       .type = N_UNKNOWN,
       .children = nodes,
@@ -62,10 +64,10 @@ size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
   size_t stack_top = 0;
 
   static void *jump_table[256] = {
-      [T_DELIMITOR_LEFT] = &&begin,
-      [T_DELIMITOR_RIGHT] = &&end,
-      [T_BRAKET_LEFT] = &&arr_left,
-      [T_BRAKET_RIGHT] = &&arr_right,
+      [T_DELIMITOR_LEFT] = &&stmt_begin,
+      [T_DELIMITOR_RIGHT] = &&stmt_end,
+      [T_BRAKET_LEFT] = &&arr_start,
+      [T_BRAKET_RIGHT] = &&arr_end,
       [T_STRING] = &&atom,
       [T_TRUE] = &&atom,
       [T_FALSE] = &&atom,
@@ -77,10 +79,10 @@ size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
 
 #define JUMP_NEXT                                                              \
   do {                                                                         \
-    TokenType type = p->cur->type;                                             \
-    void *target = jump_table[type];                                           \
+    void *target = jump_table[p->cur->type];                                   \
     ASSERT(target != NULL, "Unknown token type in parser: '%.*s'",             \
-           (int)TOKEN_TYPE_MAP[type].len, TOKEN_TYPE_MAP[type].p);             \
+           (int)TOKEN_TYPE_MAP[p->cur->type].len,                              \
+           TOKEN_TYPE_MAP[p->cur->type].p);                                    \
     goto *target;                                                              \
   } while (0)
 
@@ -104,11 +106,10 @@ ident: {
   JUMP_NEXT;
 }
 
-begin: {
+stmt_begin: {
   Node *n = p->alloc->request(p->alloc->ctx, sizeof(Node));
-  n->children_length = 0, n->children_cap = NODE_INITIAL_CHILD_SIZE,
-  n->children =
-      p->alloc->request(p->alloc->ctx, NODE_INITIAL_CHILD_SIZE * sizeof(Node)),
+  n->children_length = 0;
+  n->children_cap = 0;
   consume(p, T_DELIMITOR_LEFT);
   n->token = p->cur;
   switch (p->cur->type) {
@@ -137,7 +138,7 @@ begin: {
   JUMP_NEXT;
 }
 
-end: {
+stmt_end: {
   consume(p, T_DELIMITOR_RIGHT);
   Node *prev = stack[stack_top];
   stack_top--;
@@ -145,11 +146,10 @@ end: {
   JUMP_NEXT;
 }
 
-arr_left: {
+arr_start: {
   Node *n = p->alloc->request(p->alloc->ctx, sizeof(Node));
-  n->children_cap = NODE_INITIAL_CHILD_SIZE;
-  n->children =
-      p->alloc->request(p->alloc->ctx, NODE_INITIAL_CHILD_SIZE * sizeof(Node));
+  n->children_length = 0;
+  n->children_cap = 0;
   n->type = N_ARRAY;
   consume(p, T_BRAKET_LEFT);
   stack_top++;
@@ -157,7 +157,7 @@ arr_left: {
   JUMP_NEXT;
 }
 
-arr_right: {
+arr_end: {
   consume(p, T_BRAKET_RIGHT);
   Node *prev = stack[stack_top];
   stack_top--;

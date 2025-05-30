@@ -245,6 +245,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       // compiling the body, returning a value is free since its just in r0
       if (n->children_length > 2) {
         for (size_t i = 2; i < n->children_length; i++) {
+          // PERF: if last Node is N_CALL think about reusing call frames
           compile(alloc, vm, ctx, n->children[i]);
         }
       }
