@@ -1,26 +1,14 @@
-#ifndef BUILTINS_H
-#define BUILTINS_H
+#pragma once
 
 #include "common.h"
 #include "mem.h"
 
-typedef enum {
-  BUILTIN_UNKOWN,
-  BUILTIN_ASSERT,
-  BUILTIN_PRINTLN,
-  BUILTIN_PRINT,
-  BUILTIN_TYPE,
-  BUILTIN_LEN,
-} Builtin;
-
-// each builtin must be defined in this header file both inside the enum below
-// (`BUILTIN_<name>`) and as a signature
-// `Value builtin_<name>(const Value args)`, it also needs to be added to
-// `BUILTIN_MAP` via its enum value
-// `{[BUILTIN_<name>] = &builtin_<name> }`. The argument Value is constant,
-// because all builtins are pure.
+// Represents the type signature for a builtin function
 typedef Value *(*builtin_function)(const Value **args, size_t count,
                                    Allocator *alloc);
-extern builtin_function BUILTIN_MAP[];
-extern Str BUILTIN_NAME_MAP[];
-#endif
+
+Value *builtin_print(const Value **arg, size_t count, Allocator *alloc);
+Value *builtin_println(const Value **arg, size_t count, Allocator *alloc);
+Value *builtin_len(const Value **arg, size_t count, Allocator *alloc);
+Value *builtin_type(const Value **arg, size_t count, Allocator *alloc);
+Value *builtin_assert(const Value **arg, size_t count, Allocator *alloc);

@@ -1,9 +1,38 @@
 #include "vm.h"
-#include "builtins.h"
 #include "common.h"
 #include "mem.h"
 #include "strings.h"
 #include <stdint.h>
+
+void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
+  vm->builtins[Str_hash(&name) & MAX_BUILTIN_SIZE_MASK] = bf;
+}
+
+Vm Vm_new(Allocator *alloc) {
+  Vm vm = {
+      .global_len = 0,
+      .bytecode_len = 0,
+      .pc = 0,
+      .bytecode = NULL,
+      .globals = NULL,
+      .stack = {},
+      .stack_cur = 0,
+  };
+
+  vm.bytecode = alloc->request(alloc->ctx, (sizeof(byte) * BYTECODE_SIZE));
+  vm.globals = alloc->request(alloc->ctx, (sizeof(Value *) * GLOBAL_SIZE));
+  vm.globals[0] = INTERNED_FALSE;
+  vm.globals[1] = INTERNED_TRUE;
+  vm.global_len = 2;
+
+  Vm_register_builtin(&vm, builtin_print, STRING("print"));
+  Vm_register_builtin(&vm, builtin_println, STRING("println"));
+  Vm_register_builtin(&vm, builtin_len, STRING("len"));
+  Vm_register_builtin(&vm, builtin_type, STRING("type"));
+  Vm_register_builtin(&vm, builtin_assert, STRING("assert"));
+
+  return vm;
+}
 
 Str OP_MAP[256] = {
     [OP_LOAD] = STRING("LOAD"),       [OP_STORE] = STRING("STORE"),
@@ -355,7 +384,7 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       // pointers
       if (vm->arg_count == 1) {
         const Value *t = vm->registers[0];
-        vm->registers[0] = BUILTIN_MAP[arg]((const Value **)&t, 1, alloc);
+        vm->registers[0] = vm->builtins[arg]((const Value **)&t, 1, alloc);
       } else {
         const Value *v[vm->arg_count];
         for (int i = vm->arg_count - 1; i > 0; i--) {
@@ -365,7 +394,7 @@ int Vm_run(Vm *vm, Allocator *alloc) {
         }
         v[vm->arg_count - 1] = vm->registers[0];
         vm->registers[0] =
-            BUILTIN_MAP[arg]((const Value **)&v, vm->arg_count, alloc);
+            vm->builtins[arg]((const Value **)&v, vm->arg_count, alloc);
       }
 
       vm->arg_count = 1;

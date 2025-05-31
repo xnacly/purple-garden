@@ -35,7 +35,7 @@ void stats(const Vm *vm) {
     uint8_t op = ops[i].opcode;
     size_t count = ops[i].count;
     double percent = 100.0 * count / total;
-    printf("\t%-10.*s: %-10zu (%05.2f%%)\n", (int)OP_MAP[op].len, OP_MAP[op].p,
+    printf("%-10.*s: %-10zu (%05.2f%%)\n", (int)OP_MAP[op].len, OP_MAP[op].p,
            count, percent);
   }
 }

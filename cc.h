@@ -1,5 +1,4 @@
-#ifndef PGCC_H
-#define PGCC_H
+#pragma once
 
 #include "vm.h"
 
@@ -15,10 +14,9 @@
          "space for 4MB of bytecode)");
 
 #define GROW_FACTOR 2
-#define MAX_BUILTIN_SIZE 1024
-#define MAX_BUILTIN_SIZE_MASK (MAX_BUILTIN_SIZE - 1)
 
 typedef enum {
+  COMPILE_BUILTIN_UNKNOWN = 0,
   COMPILE_BUILTIN_LET = 256,
   COMPILE_BUILTIN_FUNCTION,
 } COMPILE_BUILTIN;
@@ -31,15 +29,10 @@ typedef struct Ctx {
   Str *function_hash_to_function_name;
 } Ctx;
 
-typedef struct {
-  Vm vm;
-  Ctx ctx;
-} CompileOutput;
-
 // cc requests a Node from parser::Parser_next compiles said Node and its
 // children to populate the Vm, its global pool, its bytecode and do all prep
 // the runtime requires
-CompileOutput cc(Allocator *alloc, Node **nodes, size_t size);
+Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size);
 
 // disassemble prints a readable bytecode representation with labels, globals
 // and comments as a heap allocated string
@@ -47,5 +40,3 @@ void disassemble(const Vm *vm, const Ctx *ctx);
 
 // stats displays some statistics for the virtual machine
 void stats(const Vm *vm);
-
-#endif

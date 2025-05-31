@@ -1,8 +1,6 @@
 #include "builtins.h"
 #include "common.h"
-
-static Value *NONE =
-    &(Value){.type = V_OPTION, .option = (struct Option){.is_some = false}};
+#include "vm.h"
 
 static void print_value(const Value *v) {
   switch (v->type) {
@@ -55,7 +53,7 @@ Value *builtin_print(const Value **arg, size_t count, Allocator *alloc) {
       putc(' ', stdout);
     }
   }
-  return NONE;
+  return INTERNED_NONE;
 }
 
 // println outputs its argument to stdout, joined with ' ' and postfixed with a
@@ -63,7 +61,7 @@ Value *builtin_print(const Value **arg, size_t count, Allocator *alloc) {
 Value *builtin_println(const Value **arg, size_t count, Allocator *alloc) {
   builtin_print(arg, count, alloc);
   putc('\n', stdout);
-  return NONE;
+  return INTERNED_NONE;
 }
 
 // len returns the value of its argument:
@@ -125,17 +123,5 @@ Value *builtin_assert(const Value **arg, size_t count, Allocator *alloc) {
          count);
   ASSERT(arg[0]->type == V_TRUE,
          "@assert: assertion failed, value was not true");
-  return NONE;
+  return INTERNED_NONE;
 }
-
-builtin_function BUILTIN_MAP[] = {
-    [BUILTIN_ASSERT] = &builtin_assert, [BUILTIN_PRINTLN] = &builtin_println,
-    [BUILTIN_PRINT] = &builtin_print,   [BUILTIN_TYPE] = &builtin_type,
-    [BUILTIN_LEN] = &builtin_len,
-};
-
-Str BUILTIN_NAME_MAP[] = {
-    [BUILTIN_ASSERT] = STRING("assert"), [BUILTIN_PRINTLN] = STRING("println"),
-    [BUILTIN_PRINT] = STRING("print"),   [BUILTIN_TYPE] = STRING("type"),
-    [BUILTIN_LEN] = STRING("len"),
-};

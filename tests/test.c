@@ -120,8 +120,9 @@ int main() {
     size_t node_count = MIN_MEM * sizeof(Node *) / 4;
     Node **nodes = alloc.request(alloc.ctx, node_count);
     node_count = Parser_all(nodes, &p, node_count);
-    CompileOutput out = cc(&alloc, nodes, node_count);
-    Vm *vm = &out.vm;
+    Vm _vm = Vm_new(&alloc);
+    Vm *vm = &_vm;
+    Ctx ctx = cc(vm, &alloc, nodes, node_count);
 
     bool error = false;
     Vm_run(vm, &alloc);
@@ -135,7 +136,7 @@ int main() {
       Value_debug(vm->registers[0]);
       puts("");
 #if PRINT_DISASM_ON_ERR
-      disassemble(vm, &out.ctx);
+      disassemble(vm, &ctx);
 #endif
       error = true;
     }

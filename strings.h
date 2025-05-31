@@ -1,5 +1,4 @@
-#ifndef STRINGS_H
-#define STRINGS_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -50,5 +49,3 @@ size_t Str_hash(const Str *str);
 int64_t Str_to_int64_t(const Str *str);
 
 double Str_to_double(const Str *str);
-
-#endif

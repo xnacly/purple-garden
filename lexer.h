@@ -1,5 +1,4 @@
-#ifndef LEXER_H
-#define LEXER_H
+#pragma once
 
 #include "common.h"
 #include "mem.h"
@@ -66,5 +65,3 @@ typedef struct {
 Lexer Lexer_new(Str input);
 Token Lexer_next(Lexer *l);
 size_t Lexer_all(Lexer *l, Allocator *a, Token **out);
-
-#endif

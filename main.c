@@ -226,12 +226,13 @@ int main(int argc, char **argv) {
     printf("ast : %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
   }
-  CompileOutput c = cc(&pipeline_allocator, nodes, node_count);
+  Vm vm = Vm_new(&pipeline_allocator);
+  Ctx ctx = cc(&vm, &pipeline_allocator, nodes, node_count);
   VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu",
-               c.vm.bytecode_len, (size_t)c.vm.global_len);
+               vm.bytecode_len, (size_t)vm.global_len);
 
   if (UNLIKELY(a.disassemble)) {
-    disassemble(&c.vm, &c.ctx);
+    disassemble(&vm, &ctx);
     puts("");
   }
 
@@ -257,7 +258,7 @@ int main(int argc, char **argv) {
 
     vm_alloc->ctx = vm_alloc->init(a.block_allocator);
   }
-  int runtime_code = Vm_run(&c.vm, vm_alloc);
+  int runtime_code = Vm_run(&vm, vm_alloc);
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
 
   if (UNLIKELY(a.memory_usage)) {
@@ -268,13 +269,13 @@ int main(int argc, char **argv) {
   }
 
   if (a.stats) {
-    stats(&c.vm);
+    stats(&vm);
   }
 
   pipeline_allocator.destroy(pipeline_allocator.ctx);
   VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");
 
-  Vm_destroy(&c.vm);
+  Vm_destroy(&vm);
   VERBOSE_PUTS("vm::Vm_destroy: teared vm down");
 
   if (a.run == NULL) {

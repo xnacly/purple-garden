@@ -1,6 +1,7 @@
-#ifndef VM_H
-#define VM_H
+#pragma once
 
+#include "builtins.h"
+#include "common.h"
 #include "parser.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -9,6 +10,11 @@
 #define CALL_ARGUMENT_STACK 256
 #define VARIABLE_TABLE_SIZE 256
 #define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
+
+static Value *INTERNED_TRUE = &(Value){.type = V_TRUE};
+static Value *INTERNED_FALSE = &(Value){.type = V_FALSE};
+static Value *INTERNED_NONE =
+    &(Value){.type = V_OPTION, .option = (struct Option){.is_some = false}};
 
 typedef enum {
   // LOAD rANY
@@ -143,9 +149,11 @@ typedef struct {
   // arg_count enables the vm to know how many register values it needs to pop
   // off the stack and pass to the function called via CALL or BUILTIN
   size_t arg_count;
+
+  builtin_function builtins[MAX_BUILTIN_SIZE];
 } Vm;
 
+Vm Vm_new(Allocator *alloc);
+void Vm_register_builtin(Vm *vm, builtin_function bf, Str name);
 int Vm_run(Vm *vm, Allocator *alloc);
 void Vm_destroy(Vm *vm);
-
-#endif

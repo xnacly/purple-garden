@@ -1,5 +1,4 @@
-#ifndef COMMON_H
-#define COMMON_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -16,6 +15,8 @@
 
 #define BYTECODE_SIZE (4 * 1024 * 1024)
 #define GLOBAL_SIZE 4 * 1024 * 1024
+#define MAX_BUILTIN_SIZE 1024
+#define MAX_BUILTIN_SIZE_MASK (MAX_BUILTIN_SIZE - 1)
 
 #define UNLIKELY(condition) __builtin_expect(condition, 0)
 #define ASSERT(EXP, fmt, ...)                                                  \
@@ -76,5 +77,3 @@ void Value_debug(const Value *v);
 
 #define SOME(val)                                                              \
   (Option) { .is_some = true, .some = val }
-
-#endif

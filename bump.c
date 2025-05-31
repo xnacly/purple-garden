@@ -5,7 +5,6 @@
 #include <unistd.h>
 
 void *bump_init(size_t size) {
-  // Page-align the requested size
   long page_size = sysconf(_SC_PAGESIZE);
   size = (size + page_size - 1) & ~(page_size - 1);
 
@@ -13,7 +12,7 @@ void *bump_init(size_t size) {
                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT(b != MAP_FAILED, "failed to mmap allocator buffer");
 
-  BumpCtx *ctx = malloc(sizeof(BumpCtx)); // still malloc'd for simplicity
+  BumpCtx *ctx = malloc(sizeof(BumpCtx));
   ASSERT(ctx != NULL, "failed to allocate allocator context");
   ctx->len = size;
   ctx->pos = 0;

@@ -1,5 +1,4 @@
-#ifndef PARSER_H
-#define PARSER_H
+#pragma once
 
 #include "lexer.h"
 #include "mem.h"
@@ -53,5 +52,3 @@ Parser Parser_new(Allocator *alloc, Token **t);
 Node Parser_next(Parser *p);
 size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes);
 void Node_debug(Node *n, size_t depth);
-
-#endif

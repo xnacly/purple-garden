@@ -78,8 +78,7 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
         }
         break;
       case OP_BUILTIN:
-        printf(": <@%.*s>", (int)BUILTIN_NAME_MAP[arg].len,
-               BUILTIN_NAME_MAP[arg].p);
+        printf(": <@builtin>");
         break;
       case OP_CALL: {
         for (size_t j = 0; j < MAX_BUILTIN_SIZE; j++) {
