@@ -79,7 +79,7 @@ int main() {
     CASE((= true false), VAL(.type = V_FALSE)),
     CASE((= false false), VAL(.type = V_TRUE)),
 
-    CASE((@assert true), VAL(.type = V_OPTION, .option = {.is_some = false})),
+    CASE((@assert true), VAL(.type = V_TRUE)),
 
     // variables
     CASE((@let name "user"), VAL(.type = V_STR, .string = STRING("name"))),
