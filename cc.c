@@ -306,12 +306,14 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       } else {
         for (size_t i = 0; i < n->children_length; i++) {
           compile(alloc, vm, ctx, n->children[i]);
-          // same optimisation as for user defined function calls in N_CALL
-          // compilation
-          if (vm->bytecode[vm->bytecode_len - 2] == OP_LOAD) {
-            vm->bytecode[vm->bytecode_len - 2] = OP_PUSHG;
-          } else {
-            BC(OP_PUSH, 0)
+          if (i < n->children_length - 1) {
+            // same optimisation as for user defined function calls in N_CALL
+            // compilation
+            if (vm->bytecode[vm->bytecode_len - 2] == OP_LOAD) {
+              vm->bytecode[vm->bytecode_len - 2] = OP_PUSHG;
+            } else {
+              BC(OP_PUSH, 0)
+            }
           }
         }
 
