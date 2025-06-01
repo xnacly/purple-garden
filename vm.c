@@ -371,9 +371,14 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       break;
     }
     case OP_EQ: {
-      vm->registers[0] = Value_cmp(vm->registers[0], vm->registers[arg])
-                             ? vm->globals[1]
-                             : vm->globals[0];
+      // pointer comparison fast path
+      if (vm->registers[0] == vm->registers[arg]) {
+        vm->registers[0] = vm->globals[1];
+      } else {
+        vm->registers[0] = Value_cmp(vm->registers[0], vm->registers[arg])
+                               ? vm->globals[1]
+                               : vm->globals[0];
+      }
       break;
     }
     case OP_ARGS:
