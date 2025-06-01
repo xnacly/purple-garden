@@ -74,6 +74,7 @@ typedef struct Value {
 
 bool Value_cmp(const Value *a, const Value *b);
 void Value_debug(const Value *v);
+double Value_as_double(const Value *v);
 
 #define SOME(val)                                                              \
   (Option) { .is_some = true, .some = val }

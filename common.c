@@ -17,7 +17,7 @@ Str VALUE_TYPE_MAP[] = {
 // - V_LIST & V_LIST is false, because we do a shallow compare
 // - V_OPTION(Some(A)) & V_OPTION(Some(B)) even with matching A and B is false,
 // since we do not compare inner
-bool Value_cmp(const Value *a, const Value *b) {
+inline bool Value_cmp(const Value *a, const Value *b) {
   // fastpath if value pointers are equal
   if (a == b) {
     return true;
@@ -90,6 +90,16 @@ void Value_debug(const Value *v) {
   };
   default:
     printf("<unkown>");
+  }
+}
+
+inline double Value_as_double(const Value *v) {
+  if (v->type == V_DOUBLE) {
+    return v->floating;
+  } else if (v->type == V_INT) {
+    return (double)v->integer;
+  } else {
+    ASSERT(0, "Value is neither double nor int, cant convert to double")
   }
 }
 

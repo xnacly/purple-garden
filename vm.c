@@ -66,7 +66,6 @@ void freelist_preallocate(FrameFreeList *fl) {
   for (size_t i = 0; i < 256; i++) {
     Frame *frame = fl->alloc->request(fl->alloc->ctx, sizeof(Frame));
     frame->prev = fl->head;
-    frame->return_to_bytecode = 0;
     fl->head = frame;
   }
 }
@@ -159,216 +158,92 @@ int Vm_run(Vm *vm, Allocator *alloc) {
     case OP_ADD: {
       Value *left = vm->registers[0];
       Value *right = vm->registers[arg];
-      switch (left->type) {
-      case V_INT:
-        switch (right->type) {
-        case V_INT:
-          // avoid copy here, write directly into register, possible here,
-          // since order is irrelevant
-          vm->registers[0]->integer += right->integer;
-          break;
-        case V_DOUBLE:
-          vm->registers[0] = NEW({
-              .type = V_DOUBLE,
-              .floating = (double)left->integer + right->floating,
-          });
-          break;
-        default:
+      if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
+        vm->registers[0] = NEW({
+            .type = V_DOUBLE,
+            .floating = Value_as_double(left) + Value_as_double(right),
+        });
+      } else {
+        if (!(left->type == V_INT && right->type == V_INT)) {
           VM_ERR("VM[+] Incompatible types %.*s and %.*s",
                  (int)VALUE_TYPE_MAP[left->type].len,
                  VALUE_TYPE_MAP[left->type].p,
                  (int)VALUE_TYPE_MAP[right->type].len,
                  VALUE_TYPE_MAP[right->type].p)
         }
-        break;
-      case V_DOUBLE:
-        switch (right->type) {
-        case V_INT:
-          vm->registers[0] = NEW({
-              .type = V_DOUBLE,
-              .floating = left->floating + (double)right->integer,
-          });
-          break;
-        case V_DOUBLE:
-          // avoid copy here, write directly into register, possible here,
-          // since order is irrelevant
-          vm->registers[0]->floating += right->floating;
-          break;
-        default:
-          VM_ERR("VM[+] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[left->type].len,
-                 VALUE_TYPE_MAP[left->type].p,
-                 (int)VALUE_TYPE_MAP[right->type].len,
-                 VALUE_TYPE_MAP[right->type].p)
-        }
-        break;
-      default:
-        VM_ERR(
-            "VM[+] Incompatible types %.*s and %.*s",
-            (int)VALUE_TYPE_MAP[left->type].len, VALUE_TYPE_MAP[left->type].p,
-            (int)VALUE_TYPE_MAP[right->type].len, VALUE_TYPE_MAP[right->type].p)
+        vm->registers[0] = NEW({
+            .type = V_INT,
+            .integer = left->integer + right->integer,
+        });
       }
       break;
     }
     case OP_SUB: {
-      Value *a = vm->registers[0];
-      Value *b = vm->registers[arg];
-      switch (a->type) {
-      case V_INT:
-        switch (b->type) {
-        case V_INT:
-          vm->registers[0] = NEW({
-              .type = V_INT,
-              .integer = b->integer - a->integer,
-          });
-          break;
-        case V_DOUBLE:
-          vm->registers[0] = NEW({
-              .type = V_DOUBLE,
-              .floating = b->floating - (double)a->integer,
-          });
-          break;
-        default:
+      Value *left = vm->registers[0];
+      Value *right = vm->registers[arg];
+      if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
+        vm->registers[0] = NEW({
+            .type = V_DOUBLE,
+            .floating = Value_as_double(right) - Value_as_double(left),
+        });
+      } else {
+        if (!(left->type == V_INT && right->type == V_INT)) {
           VM_ERR("VM[-] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
-                 (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
+                 (int)VALUE_TYPE_MAP[left->type].len,
+                 VALUE_TYPE_MAP[left->type].p,
+                 (int)VALUE_TYPE_MAP[right->type].len,
+                 VALUE_TYPE_MAP[right->type].p)
         }
-        break;
-      case V_DOUBLE:
-        switch (b->type) {
-        case V_INT:
-          vm->registers[0] = NEW({
-              .type = V_DOUBLE,
-              .floating = (double)b->integer - a->floating,
-          });
-          break;
-        case V_DOUBLE:
-          // avoid copy here, write directly into register, possible here,
-          // since order is irrelevant
-          vm->registers[0] = NEW({
-              .type = V_DOUBLE,
-              .floating = b->floating - a->floating,
-          });
-          break;
-        default:
-          VM_ERR("VM[-] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
-                 (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
-        }
-        break;
-        break;
-      default:
-        VM_ERR("VM[-] Incompatible types %.*s and %.*s",
-               (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
-               (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
+        vm->registers[0] = NEW({
+            .type = V_INT,
+            .integer = right->integer - left->integer,
+        });
       }
       break;
     }
     case OP_MUL: {
       Value *left = vm->registers[0];
       Value *right = vm->registers[arg];
-      switch (left->type) {
-      case V_INT:
-        switch (right->type) {
-        case V_INT:
-          // avoid copy here, write directly into register, possible here,
-          // since order is irrelevant
-          vm->registers[0]->integer *= right->integer;
-          break;
-        case V_DOUBLE:
-          vm->registers[0] = NEW({
-              .type = V_DOUBLE,
-              .floating = (double)left->integer * right->floating,
-          });
-          break;
-        default:
+      if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
+        vm->registers[0] = NEW({
+            .type = V_DOUBLE,
+            .floating = Value_as_double(left) * Value_as_double(right),
+        });
+      } else {
+        if (!(left->type == V_INT && right->type == V_INT)) {
           VM_ERR("VM[*] Incompatible types %.*s and %.*s",
                  (int)VALUE_TYPE_MAP[left->type].len,
                  VALUE_TYPE_MAP[left->type].p,
                  (int)VALUE_TYPE_MAP[right->type].len,
                  VALUE_TYPE_MAP[right->type].p)
         }
-        break;
-      case V_DOUBLE:
-        switch (right->type) {
-        case V_INT:
-          vm->registers[0] = NEW({
-              .type = V_DOUBLE,
-              .floating = left->floating * (double)right->integer,
-          });
-          break;
-        case V_DOUBLE:
-          // avoid copy here, write directly into register, possible here,
-          // since order is irrelevant
-          vm->registers[0]->floating *= right->floating;
-          break;
-        default:
-          VM_ERR("VM[*] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[left->type].len,
-                 VALUE_TYPE_MAP[left->type].p,
-                 (int)VALUE_TYPE_MAP[right->type].len,
-                 VALUE_TYPE_MAP[right->type].p)
-        }
-        break;
-      default:
-        VM_ERR(
-            "VM[*] Incompatible types %.*s and %.*s",
-            (int)VALUE_TYPE_MAP[left->type].len, VALUE_TYPE_MAP[left->type].p,
-            (int)VALUE_TYPE_MAP[right->type].len, VALUE_TYPE_MAP[right->type].p)
+        vm->registers[0] = NEW({
+            .type = V_INT,
+            .integer = left->integer * right->integer,
+        });
       }
       break;
     }
     case OP_DIV: {
-      Value *a = vm->registers[0];
-      Value *b = vm->registers[arg];
-      switch (a->type) {
-      case V_INT:
-        switch (b->type) {
-        case V_INT:
-          vm->registers[0] = NEW({
-              .type = V_INT,
-              .integer = b->integer / a->integer,
-          });
-          break;
-        case V_DOUBLE:
-          vm->registers[0] = NEW({
-              .type = V_DOUBLE,
-              .floating = b->floating / (double)a->integer,
-          });
-          break;
-        default:
+      Value *left = vm->registers[0];
+      Value *right = vm->registers[arg];
+      if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
+        vm->registers[0] = NEW({
+            .type = V_DOUBLE,
+            .floating = Value_as_double(right) / Value_as_double(left),
+        });
+      } else {
+        if (!(left->type == V_INT && right->type == V_INT)) {
           VM_ERR("VM[/] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
-                 (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
+                 (int)VALUE_TYPE_MAP[left->type].len,
+                 VALUE_TYPE_MAP[left->type].p,
+                 (int)VALUE_TYPE_MAP[right->type].len,
+                 VALUE_TYPE_MAP[right->type].p)
         }
-        break;
-      case V_DOUBLE:
-        switch (b->type) {
-        case V_INT:
-          vm->registers[0] = NEW({
-              .type = V_DOUBLE,
-              .floating = (double)b->integer / a->floating,
-          });
-          break;
-        case V_DOUBLE:
-          // avoid copy here, write directly into register, possible here,
-          // since order is irrelevant
-          vm->registers[0] = NEW({
-              .type = V_DOUBLE,
-              .floating = b->floating / a->floating,
-          });
-          break;
-        default:
-          VM_ERR("VM[/] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
-                 (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
-        }
-        break;
-        break;
-      default:
-        VM_ERR("VM[/] Incompatible types %.*s and %.*s",
-               (int)VALUE_TYPE_MAP[a->type].len, VALUE_TYPE_MAP[a->type].p,
-               (int)VALUE_TYPE_MAP[b->type].len, VALUE_TYPE_MAP[b->type].p)
+        vm->registers[0] = NEW({
+            .type = V_INT,
+            .integer = right->integer / left->integer,
+        });
       }
       break;
     }
