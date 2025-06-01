@@ -389,28 +389,30 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       vm->registers[0] = vm->stack[--vm->stack_cur];
       break;
     case OP_PUSH:
+      // TODO: move this check to cc.c by keeping track of the stack depth in
+      // Ctx, removes a branch -> shaves around 1-2ms (2-4% runtime)
       ASSERT(vm->stack_cur < CALL_ARGUMENT_STACK,
              "Out of argument stack space: %d", CALL_ARGUMENT_STACK)
       vm->stack[vm->stack_cur++] = vm->registers[0];
       break;
+    case OP_PUSHG:
+      // TODO: move this check to cc.c by keeping track of the stack depth in
+      // Ctx, removes a branch -> shaves around 1-2ms (2-4% runtime)
+      ASSERT(vm->stack_cur < CALL_ARGUMENT_STACK,
+             "Out of argument stack space: %d", CALL_ARGUMENT_STACK)
+      vm->stack[vm->stack_cur++] = vm->globals[arg];
+      break;
     case OP_BUILTIN: {
       // at this point all builtins are just syscalls into an array of function
       // pointers
-      if (vm->arg_count == 1) {
-        const Value *t = vm->registers[0];
-        vm->registers[0] = vm->builtins[arg]((const Value **)&t, 1, alloc);
-      } else {
-        const Value *v[vm->arg_count];
-        for (int i = vm->arg_count - 1; i > 0; i--) {
-          ASSERT(vm->stack_cur != 0,
-                 "No element in argument stack, failed to pop");
-          v[i - 1] = vm->stack[--vm->stack_cur];
-        }
-        v[vm->arg_count - 1] = vm->registers[0];
-        vm->registers[0] =
-            vm->builtins[arg]((const Value **)&v, vm->arg_count, alloc);
+      const Value *args[vm->arg_count];
+      for (int i = vm->arg_count - 1; i > 0; i--) {
+        ASSERT(vm->stack_cur != 0,
+               "No element in argument stack, failed to pop");
+        args[i - 1] = vm->stack[--vm->stack_cur];
       }
-
+      args[vm->arg_count - 1] = vm->registers[0];
+      vm->registers[0] = vm->builtins[arg](args, vm->arg_count, alloc);
       vm->arg_count = 1;
       break;
     }
