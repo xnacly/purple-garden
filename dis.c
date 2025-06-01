@@ -1,7 +1,7 @@
-#include "builtins.h"
 #include "cc.h"
 #include "common.h"
 #include "strings.h"
+#include "vm.h"
 
 // TODO: switch cc to emit these and the disassembler to use them
 typedef struct {

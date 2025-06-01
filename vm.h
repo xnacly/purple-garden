@@ -157,7 +157,10 @@ typedef struct {
   // off the stack and pass to the function called via CALL or BUILTIN
   size_t arg_count;
 
-  builtin_function builtins[MAX_BUILTIN_SIZE];
+  builtin_function *builtins;
+#if DEBUG
+  size_t instruction_counter[256];
+#endif
 } Vm;
 
 Vm Vm_new(Allocator *alloc);

@@ -118,6 +118,10 @@ int Vm_run(Vm *vm, Allocator *alloc) {
     VM_OP op = vm->bytecode[vm->pc];
     uint32_t arg = vm->bytecode[vm->pc + 1];
 
+#if DEBUG
+    vm->instruction_counter[op]++;
+#endif
+
     switch (op) {
     case OP_LOAD:
       vm->registers[0] = vm->globals[arg];

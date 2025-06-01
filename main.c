@@ -269,7 +269,7 @@ int main(int argc, char **argv) {
   }
 
   if (a.stats) {
-    stats(&vm);
+    bytecode_stats(&vm);
   }
 
   pipeline_allocator.destroy(pipeline_allocator.ctx);
