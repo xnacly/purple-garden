@@ -76,6 +76,7 @@ int main() {
          VAL(.type = V_TRUE)),
     CASE((= 3.1415 3.1415), VAL(.type = V_TRUE)),
     CASE((= true true), VAL(.type = V_TRUE)),
+    CASE((= true false), VAL(.type = V_FALSE)),
     CASE((= false false), VAL(.type = V_TRUE)),
 
     CASE((@assert true), VAL(.type = V_OPTION, .option = {.is_some = false})),

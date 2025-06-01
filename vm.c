@@ -4,6 +4,8 @@
 #include "strings.h"
 #include <stdint.h>
 
+static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
+
 void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
   vm->builtins[Str_hash(&name) & MAX_BUILTIN_SIZE_MASK] = bf;
 }
@@ -420,6 +422,12 @@ int Vm_run(Vm *vm, Allocator *alloc) {
     }
     case OP_JMP: {
       vm->pc = arg;
+      break;
+    }
+    case OP_ASSERT: {
+      if (vm->registers[0]->type != V_TRUE) {
+        VM_ERR("Assertion failed, value is not true")
+      }
       break;
     }
     default:

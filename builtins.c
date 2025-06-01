@@ -117,11 +117,3 @@ Value *builtin_type(const Value **arg, size_t count, Allocator *alloc) {
   v->string = s;
   return v;
 }
-
-Value *builtin_assert(const Value **arg, size_t count, Allocator *alloc) {
-  ASSERT(count == 1, "@assert: can only assert 1 argument to true, got %zu",
-         count);
-  ASSERT(arg[0]->type == V_TRUE,
-         "@assert: assertion failed, value was not true");
-  return INTERNED_NONE;
-}

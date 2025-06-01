@@ -147,6 +147,13 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     // compile time "pseudo" builtins
     if (b != 0) {
       switch (b) {
+      case COMPILE_BUILTIN_ASSERT: { // (@assert <s-expr>)
+        for (size_t i = 0; i < n->children_length; i++) {
+          compile(alloc, vm, ctx, n->children[i]);
+        }
+        BC(OP_ASSERT, 0);
+        break;
+      };
       case COMPILE_BUILTIN_FUNCTION: { // (@function <name> [<args>] <body>)
         ASSERT(n->children_length >= 2,
                "@function expects <name> [<arguments>] [body]");
@@ -349,6 +356,8 @@ Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size) {
       COMPILE_BUILTIN_LET;
   runtime_builtin_hashes[Str_hash(&STRING("function")) &
                          MAX_BUILTIN_SIZE_MASK] = COMPILE_BUILTIN_FUNCTION;
+  runtime_builtin_hashes[Str_hash(&STRING("assert")) & MAX_BUILTIN_SIZE_MASK] =
+      COMPILE_BUILTIN_ASSERT;
 
   // specifically set size 1 to keep r0 the temporary register reserved
   Ctx ctx = {

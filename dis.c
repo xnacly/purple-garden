@@ -53,6 +53,7 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
       case OP_LEAVE:
         puts("");
       case OP_POP:
+      case OP_ASSERT:
         break;
 #if DISASSEMBLE_INCLUDE_POSITIONS
       case OP_JMP:

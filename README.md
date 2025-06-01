@@ -361,7 +361,7 @@ $ hotspot
   - [x] print
   - [x] len
   - [x] type
-  - [x] assert
+  - [x] assert (interpreter intrinsic)
 
 ## Optimisations
 
