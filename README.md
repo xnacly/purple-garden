@@ -395,6 +395,7 @@ $ hotspot
 - [ ] `cc`: multiple string concatinations should use a shared buffer and only allocate on string usage
 - [ ] `vm`: trail call optimisation
 - [ ] `vm`: merge smaller bytecode ops often used together into new ops
+    - [x] `vm`: merge `LOAD` and `PUSH` consecutively into `PUSHG`
 - [ ] `vm`: lock I/O for the whole program execution for faster performance via `+lock-io`
 - [ ] `cc`: cache bytecode and global pool to omit frontend, disable via `+no-cache`
 - [ ] `gc`: mark and sweep garbage collection via `+gc-marksweep`

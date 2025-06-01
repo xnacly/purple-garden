@@ -21,30 +21,33 @@ Vm Vm_new(Allocator *alloc) {
       .stack_cur = 0,
   };
 
+  vm.builtins = BUILTIN_MAP;
   vm.bytecode = alloc->request(alloc->ctx, (sizeof(byte) * BYTECODE_SIZE));
   vm.globals = alloc->request(alloc->ctx, (sizeof(Value *) * GLOBAL_SIZE));
   vm.globals[0] = INTERNED_FALSE;
   vm.globals[1] = INTERNED_TRUE;
-  vm.global_len = 2;
+  vm.globals[2] = INTERNED_NONE;
+  vm.global_len = 3;
 
   Vm_register_builtin(&vm, builtin_print, STRING("print"));
   Vm_register_builtin(&vm, builtin_println, STRING("println"));
   Vm_register_builtin(&vm, builtin_len, STRING("len"));
   Vm_register_builtin(&vm, builtin_type, STRING("type"));
-  Vm_register_builtin(&vm, builtin_assert, STRING("assert"));
 
   return vm;
 }
 
 Str OP_MAP[256] = {
-    [OP_LOAD] = STRING("LOAD"),       [OP_STORE] = STRING("STORE"),
-    [OP_ADD] = STRING("ADD"),         [OP_SUB] = STRING("SUB"),
-    [OP_MUL] = STRING("MUL"),         [OP_DIV] = STRING("DIV"),
-    [OP_EQ] = STRING("EQ"),           [OP_POP] = STRING("POP"),
-    [OP_PUSH] = STRING("PUSH"),       [OP_VAR] = STRING("VAR"),
-    [OP_LOADV] = STRING("LOADV"),     [OP_ARGS] = STRING("ARGS"),
-    [OP_BUILTIN] = STRING("BUILTIN"), [OP_LEAVE] = STRING("LEAVE"),
-    [OP_CALL] = STRING("CALL"),       [OP_JMP] = STRING("JMP")};
+    [OP_LOAD] = STRING("LOAD"),   [OP_STORE] = STRING("STORE"),
+    [OP_ADD] = STRING("ADD"),     [OP_SUB] = STRING("SUB"),
+    [OP_MUL] = STRING("MUL"),     [OP_DIV] = STRING("DIV"),
+    [OP_EQ] = STRING("EQ"),       [OP_POP] = STRING("POP"),
+    [OP_PUSH] = STRING("PUSH"),   [OP_PUSHG] = STRING("PUSHG"),
+    [OP_VAR] = STRING("VAR"),     [OP_LOADV] = STRING("LOADV"),
+    [OP_ARGS] = STRING("ARGS"),   [OP_BUILTIN] = STRING("BUILTIN"),
+    [OP_LEAVE] = STRING("LEAVE"), [OP_CALL] = STRING("CALL"),
+    [OP_JMP] = STRING("JMP"),     [OP_ASSERT] = STRING("ASSERT"),
+};
 
 // FrameFreeList works by caching a list of Frames so we don't have to interact
 // with the heap for the first N Frames, but instead use the preallocated

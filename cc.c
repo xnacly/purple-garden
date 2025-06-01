@@ -306,7 +306,11 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       } else {
         for (size_t i = 0; i < n->children_length; i++) {
           compile(alloc, vm, ctx, n->children[i]);
-          if (i < n->children_length - 1) {
+          // same optimisation as for user defined function calls in N_CALL
+          // compilation
+          if (vm->bytecode[vm->bytecode_len - 2] == OP_LOAD) {
+            vm->bytecode[vm->bytecode_len - 2] = OP_PUSHG;
+          } else {
             BC(OP_PUSH, 0)
           }
         }
@@ -330,7 +334,27 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       for (size_t i = 0; i < n->children_length; i++) {
         compile(alloc, vm, ctx, n->children[i]);
         if (i < n->children_length - 1) {
-          BC(OP_PUSH, 0)
+          // optimization by merging OP_LOAD and a directly following OP_PUSH
+          // into a single instruction, before calling something like (f true
+          // false) would produce 10 instructions:
+          //
+          // LOAD 1: True
+          // PUSH 0
+          // LOAD 1: True
+          // ARGS 2
+          // CALL 0: <f>
+          //
+          // This change reduces the instructions by 2 from 10 to 8:
+          //
+          // PUSHG 1
+          // LOAD 0: False
+          // ARGS 2
+          // CALL 0: <f>
+          if (vm->bytecode[vm->bytecode_len - 2] == OP_LOAD) {
+            vm->bytecode[vm->bytecode_len - 2] = OP_PUSHG;
+          } else {
+            BC(OP_PUSH, 0)
+          }
         }
       }
 

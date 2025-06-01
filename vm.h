@@ -53,13 +53,15 @@ typedef enum {
   // compares value at r0 and rANY via Value_cmp
   OP_EQ = 6,
 
-  // TODO: possibly optimisable by adding a OP_PUSHG for directly pushing a
-  // global atom by its index into the vm arg stack
-
   // OP_PUSH rANY
   //
   // pushes the value in rANY to the stack
   OP_PUSH,
+
+  // OP_PUSHG gANY
+  //
+  // pushes a value from the global pool to the stack
+  OP_PUSHG,
 
   // OP_POP rANY
   //
