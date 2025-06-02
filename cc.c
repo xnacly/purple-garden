@@ -134,13 +134,13 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     break;
   }
   case N_BUILTIN: {
-    if (!n->children_length) {
+    /*if (!n->children_length) {
       // TODO: is this really what we want? What about an empty println, this
       // should just call puts
       //
       // skip generating bytecode for empty builtin invocations
       return;
-    }
+    }*/
 
     Str *s = &n->token->string;
     int b = runtime_builtin_hashes[s->hash & MAX_BUILTIN_SIZE_MASK];

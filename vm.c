@@ -33,6 +33,8 @@ Vm Vm_new(Allocator *alloc) {
   Vm_register_builtin(&vm, builtin_println, STRING("println"));
   Vm_register_builtin(&vm, builtin_len, STRING("len"));
   Vm_register_builtin(&vm, builtin_type, STRING("type"));
+  Vm_register_builtin(&vm, builtin_Some, STRING("Some"));
+  Vm_register_builtin(&vm, builtin_None, STRING("None"));
 
   return vm;
 }
@@ -403,16 +405,20 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       vm->stack[vm->stack_cur++] = vm->globals[arg];
       break;
     case OP_BUILTIN: {
-      // at this point all builtins are just syscalls into an array of function
-      // pointers
-      const Value *args[vm->arg_count];
-      for (int i = vm->arg_count - 1; i > 0; i--) {
-        ASSERT(vm->stack_cur != 0,
-               "No element in argument stack, failed to pop");
-        args[i - 1] = vm->stack[--vm->stack_cur];
+      if (!vm->arg_count) {
+        vm->registers[0] = vm->builtins[arg](NULL, 0, alloc);
+      } else {
+        // at this point all builtins are just syscalls into an array of
+        // function pointers
+        const Value *args[vm->arg_count];
+        for (int i = vm->arg_count - 1; i > 0; i--) {
+          ASSERT(vm->stack_cur != 0,
+                 "No element in argument stack, failed to pop");
+          args[i - 1] = vm->stack[--vm->stack_cur];
+        }
+        args[vm->arg_count - 1] = vm->registers[0];
+        vm->registers[0] = vm->builtins[arg](args, vm->arg_count, alloc);
       }
-      args[vm->arg_count - 1] = vm->registers[0];
-      vm->registers[0] = vm->builtins[arg](args, vm->arg_count, alloc);
       vm->arg_count = 1;
       break;
     }

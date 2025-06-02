@@ -117,3 +117,16 @@ Value *builtin_type(const Value **arg, size_t count, Allocator *alloc) {
   v->string = s;
   return v;
 }
+
+Value *builtin_Some(const Value **arg, size_t count, Allocator *alloc) {
+  ASSERT(count == 1, "Some: expected 1 argument, got %zu", count)
+  Value *v = alloc->request(alloc->ctx, sizeof(Value));
+  v->type = V_OPTION;
+  v->option.value = arg[0];
+  v->option.is_some = true;
+  return v;
+}
+
+Value *builtin_None(const Value **arg, size_t count, Allocator *alloc) {
+  return INTERNED_NONE;
+}
