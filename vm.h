@@ -96,10 +96,10 @@ typedef enum {
 
   // OP_CALL ADDR
   //
-  // 1 enters a new stackframe, stores the last vm->pc in
+  // 1: enters a new stackframe, stores the last vm->pc in
   // Frame.return_to_bytecode
   //
-  // 2 jumps to ADDR
+  // 2: jumps to ADDR
   OP_CALL,
 
   // OP_JMP bc
