@@ -66,9 +66,6 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
 
       switch (op) {
       case OP_PUSHG:
-        printf(": ");
-        Value_debug(vm->globals[arg]);
-        break;
       case OP_LOAD:
         printf(": ");
         Value_debug(vm->globals[arg]);

@@ -34,7 +34,7 @@ Vm Vm_new(Allocator *alloc) {
   Vm_register_builtin(&vm, builtin_len, STRING("len"));
   Vm_register_builtin(&vm, builtin_type, STRING("type"));
   Vm_register_builtin(&vm, builtin_Some, STRING("Some"));
-  Vm_register_builtin(&vm, builtin_None, STRING("None"));
+  // Vm_register_builtin(&vm, builtin_None, STRING("None"));
 
   return vm;
 }

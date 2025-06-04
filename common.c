@@ -4,9 +4,9 @@
 #define PREC 1e-9
 
 Str VALUE_TYPE_MAP[] = {
-    [V_OPTION] = STRING("Option("), [V_STR] = STRING("Str"),
-    [V_INT] = STRING("Int"),        [V_DOUBLE] = STRING("Double"),
-    [V_TRUE] = STRING("True"),      [V_FALSE] = STRING("False"),
+    [V_OPTION] = STRING("Option::"), [V_STR] = STRING("Str"),
+    [V_INT] = STRING("Int"),         [V_DOUBLE] = STRING("Double"),
+    [V_TRUE] = STRING("True"),       [V_FALSE] = STRING("False"),
     [V_ARRAY] = STRING("Array"),
 };
 
@@ -64,7 +64,6 @@ void Value_debug(const Value *v) {
     } else {
       printf("None");
     }
-    putc(')', stdout);
     break;
   }
   case V_TRUE:

@@ -154,6 +154,11 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         BC(OP_ASSERT, 0);
         break;
       };
+      case COMPILE_BUILTIN_NONE: { // (@None)
+        // global idx 2 is Option::None
+        BC(OP_LOAD, 2);
+        break;
+      }
       case COMPILE_BUILTIN_FUNCTION: { // (@function <name> [<args>] <body>)
         ASSERT(n->children_length >= 2,
                "@function expects <name> [<arguments>] [body]");
@@ -384,6 +389,8 @@ Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size) {
                          MAX_BUILTIN_SIZE_MASK] = COMPILE_BUILTIN_FUNCTION;
   runtime_builtin_hashes[Str_hash(&STRING("assert")) & MAX_BUILTIN_SIZE_MASK] =
       COMPILE_BUILTIN_ASSERT;
+  runtime_builtin_hashes[Str_hash(&STRING("None")) & MAX_BUILTIN_SIZE_MASK] =
+      COMPILE_BUILTIN_NONE;
 
   // specifically set size 1 to keep r0 the temporary register reserved
   Ctx ctx = {
