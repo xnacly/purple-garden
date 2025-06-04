@@ -1,7 +1,4 @@
 # binaries
-purple_garden
-purple_garden_debug
-purple_garden_verbose
-tests/test
-bench
+build/*
+# benchmarking
 examples/bench.*
