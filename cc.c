@@ -34,10 +34,6 @@ inline static Value *token_to_value(Token *t, Allocator *a) {
     v->type = V_DOUBLE;
     v->floating = t->floating;
     break;
-  case T_BRAKET_LEFT: // TODO: think about lists
-    v->type = V_ARRAY;
-    v->array = (struct Array){.len = 0};
-    break;
   default:
     ASSERT(0, "Unsupported value for this")
     break;
@@ -69,7 +65,10 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
              "cc: out of global space, what the fuck are you doing (there is "
              "space "
              "for 256k globals)");
-      vm->globals[vm->global_len] = token_to_value(n->token, alloc);
+      Value *v = alloc->request(alloc->ctx, sizeof(Value));
+      v->type = V_ARRAY;
+      v->array = (struct Array){.len = 0};
+      vm->globals[vm->global_len] = v;
       BC(OP_LOAD, vm->global_len++)
     } else {
       TODO("N_ARRAY#real arrays")
