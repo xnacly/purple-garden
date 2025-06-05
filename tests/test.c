@@ -23,6 +23,45 @@ typedef struct {
       .expected_r0 = r0,                                                       \
   }
 
+// stolen from common.(c|h) and adapted
+bool Value_cmp_deep(const Value *a, const Value *b) {
+  // fastpath if value pointers are equal
+  if (a == b) {
+    return true;
+  }
+
+  if (a->type != b->type) {
+    return false;
+  }
+
+  switch (a->type) {
+  case V_STR:
+    return Str_eq(&a->string, &b->string);
+  case V_DOUBLE:
+    double diff = a->floating - b->floating;
+#define PREC 1e-9
+    return (diff < PREC && diff > -PREC);
+  case V_INT:
+    return a->integer == b->integer;
+  case V_TRUE:
+  case V_FALSE:
+    return true;
+  case V_OPTION:
+    if (a->option.is_some && b->option.is_some) {
+      return Value_cmp_deep(a->option.value, a->option.value);
+    } else if (!a->option.is_some && !b->option.is_some) {
+      return true;
+    } else {
+      return false;
+    }
+  case V_ARRAY:
+    // TODO: implement deep array comparison
+  default:
+    // lists arent really the same, this is not a deep equal
+    return false;
+  }
+}
+
 int main() {
   Case cases[] = {
     // atoms:
@@ -79,8 +118,6 @@ int main() {
     CASE((= true false), VAL(.type = V_FALSE)),
     CASE((= false false), VAL(.type = V_TRUE)),
 
-    CASE((@assert true), VAL(.type = V_TRUE)),
-
     // variables
     CASE((@let name "user"), VAL(.type = V_STR, .string = STRING("name"))),
     CASE((@let name "user")name, VAL(.type = V_STR, .string = STRING("user"))),
@@ -90,6 +127,16 @@ int main() {
     CASE((@function ret[arg] arg)(ret 25), VAL(.type = V_INT, .integer = 25)),
     CASE((@function add25[arg](+arg 25))(add25 25),
          VAL(.type = V_INT, .integer = 50)),
+
+    // builtins
+    CASE((@assert true), VAL(.type = V_TRUE)),
+    CASE((@None), VAL(.type = V_OPTION, .option = {.is_some = false})),
+    CASE((@Some true),
+         VAL(.type = V_OPTION,
+             .option = {.is_some = true, .value = INTERNED_TRUE})),
+    CASE((@Some false),
+         VAL(.type = V_OPTION,
+             .option = {.is_some = true, .value = INTERNED_FALSE})),
   };
 
   size_t passed = 0;
@@ -127,7 +174,7 @@ int main() {
 
     bool error = false;
     Vm_run(vm, &alloc);
-    if (!Value_cmp(vm->registers[0], &c.expected_r0)) {
+    if (!Value_cmp_deep(vm->registers[0], &c.expected_r0)) {
       printf("\tbad value at r0: want=%s got=%s",
              VALUE_TYPE_MAP[c.expected_r0.type].p,
              VALUE_TYPE_MAP[vm->registers[0]->type].p);
@@ -153,7 +200,7 @@ int main() {
     Vm_destroy(vm);
   }
 
-  printf("%zu of %zu passed, %zu failed\n", passed, len, failed);
+  printf("[=] %zu/%zu passed, %zu failed\n", passed, len, failed);
 
   return failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

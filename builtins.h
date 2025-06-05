@@ -12,6 +12,4 @@ Value *builtin_println(const Value **arg, size_t count, Allocator *alloc);
 Value *builtin_len(const Value **arg, size_t count, Allocator *alloc);
 Value *builtin_type(const Value **arg, size_t count, Allocator *alloc);
 
-// make this a compiler intrinsic, not a builtin
 Value *builtin_Some(const Value **arg, size_t count, Allocator *alloc);
-Value *builtin_None(const Value **arg, size_t count, Allocator *alloc);

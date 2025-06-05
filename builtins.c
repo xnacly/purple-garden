@@ -126,7 +126,3 @@ Value *builtin_Some(const Value **arg, size_t count, Allocator *alloc) {
   v->option.is_some = true;
   return v;
 }
-
-Value *builtin_None(const Value **arg, size_t count, Allocator *alloc) {
-  return INTERNED_NONE;
-}
