@@ -166,6 +166,7 @@ arr_end: {
 }
 
 eof:
+  ASSERT(!stack_top, "Missing closing delimitor");
   return stack[0]->children_length;
 }
 
