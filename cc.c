@@ -12,7 +12,7 @@
 
 // token_to_value converts tokens, such as strings, boolean and numbers to
 // runtime values
-static Value *token_to_value(Token *t, Allocator *a) {
+inline static Value *token_to_value(Token *t, Allocator *a) {
   Value *v = a->request(a->ctx, sizeof(Value));
   switch (t->type) {
   case T_STRING:
