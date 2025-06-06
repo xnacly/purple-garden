@@ -13,7 +13,7 @@ char Str_get(const Str *str, size_t index) {
 Str Str_from(const char *s) {
   return (Str){
       .len = strlen(s),
-      .p = s,
+      .p = (const uint8_t *)s,
   };
 }
 
@@ -68,7 +68,7 @@ int64_t Str_to_int64_t(const Str *str) {
 double Str_to_double(const Str *str) {
   ASSERT(str->len > 0, "Can't convert empty string into double");
 
-  const char *p = str->p;
+  const char *p = (const char *)str->p;
   size_t len = str->len;
 
   uint64_t mantissa = 0;

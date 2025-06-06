@@ -2,13 +2,12 @@
 
 #include <stddef.h>
 #include <stdint.h>
-
 // str is a simple stack allocated wrapper around C char arrays, providing
 // constant time length access and zero allocation+copy interactions for all
 // methods except Str_to
 typedef struct {
   // store the pointer to the underlying char
-  const char *p;
+  const uint8_t *p;
   // hash of the input, do not expect it to be filled, has to be computed via
   // Str_hash or inline in the lexer
   uint64_t hash;
@@ -20,7 +19,7 @@ typedef struct {
 #define FNV_PRIME 0x01000193
 #define GLOBAL_MASK (GLOBAL_SIZE - 1)
 
-#define STRING(str) ((Str){.len = sizeof(str) - 1, .p = str})
+#define STRING(str) ((Str){.len = sizeof(str) - 1, .p = (const uint8_t *)str})
 #define STRING_EMPTY ((Str){.len = 0, .p = NULL})
 
 // Str_get enables accessing a character at a position of a string with
