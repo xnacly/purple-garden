@@ -22,7 +22,7 @@ Vm Vm_new(Allocator *alloc) {
   };
 
   vm.builtins = BUILTIN_MAP;
-  vm.bytecode = alloc->request(alloc->ctx, (sizeof(byte) * BYTECODE_SIZE));
+  vm.bytecode = alloc->request(alloc->ctx, (sizeof(uint32_t) * BYTECODE_SIZE));
   vm.globals = alloc->request(alloc->ctx, (sizeof(Value *) * GLOBAL_SIZE));
   vm.globals[0] = INTERNED_FALSE;
   vm.globals[1] = INTERNED_TRUE;

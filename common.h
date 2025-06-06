@@ -35,8 +35,6 @@
 
 #include "strings.h"
 
-typedef uint32_t byte;
-
 typedef enum {
   V_OPTION,
   V_STR,
@@ -67,7 +65,7 @@ typedef struct Value {
     struct Option {
       bool is_some;
       // holds some
-      struct Value *value;
+      const struct Value *value;
     } option;
   };
 } Value;

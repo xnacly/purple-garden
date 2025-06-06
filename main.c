@@ -41,7 +41,7 @@ typedef struct {
   bool aot_functions;
   bool disassemble;
   bool memory_usage;
-  char *run;
+  const char *run;
   bool verbose;
   bool stats;
   int version;
@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
 
   Str input;
   if (a.run != NULL && a.run[0] != 0) {
-    input = (Str){.p = a.run, .len = strlen(a.run)};
+    input = (Str){.p = (const uint8_t *)a.run, .len = strlen(a.run)};
   } else {
     input = IO_read_file_to_string(a.filename);
     VERBOSE_PUTS("io::IO_read_file_to_string: mmaped input of size=%zuB",
@@ -279,7 +279,7 @@ int main(int argc, char **argv) {
   VERBOSE_PUTS("vm::Vm_destroy: teared vm down");
 
   if (a.run == NULL) {
-    munmap(input.p, input.len);
+    munmap((void *)input.p, input.len);
   }
   VERBOSE_PUTS("munmap: unmapped input");
 

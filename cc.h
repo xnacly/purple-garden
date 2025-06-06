@@ -29,6 +29,8 @@ typedef struct Ctx {
   size_t register_allocated_count;
   int *function_hash_to_bytecode_index;
   Str *function_hash_to_function_name;
+  // TODO:keep track of function sizes to remove calls to empty functions and
+  // their def
 } Ctx;
 
 // cc requests a Node from parser::Parser_next compiles said Node and its

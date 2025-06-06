@@ -17,14 +17,14 @@ typedef struct {
 
 #include <stdio.h>
 
-static char *SIX_FLAG_TYPE_TO_MAP[] = {
+static const char *SIX_FLAG_TYPE_TO_MAP[] = {
     [SIX_STR] = "string",    [SIX_BOOL] = "bool", [SIX_CHAR] = "char",
     [SIX_INT] = "int",       [SIX_LONG] = "long", [SIX_FLOAT] = "float",
     [SIX_DOUBLE] = "double",
 };
 
 void print_flag(SixFlag *f, bool long_option) {
-  char *pre_and_postfix = "[]";
+  const char *pre_and_postfix = "[]";
   if (long_option) {
     putc('\t', stdout);
     pre_and_postfix = "  ";

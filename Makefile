@@ -5,10 +5,10 @@ FLAGS := -std=c23 \
         -fno-common -Winit-self -Wfloat-equal -Wundef -Wshadow \
         -Wpointer-arith -Wcast-align -Wstrict-prototypes \
         -Wstrict-overflow=5 -Wwrite-strings -Waggregate-return \
-        -Wcast-qual -Wswitch-default -Wunreachable-code \
-        -Wno-discarded-qualifiers -Wno-unused-parameter \
+        -Wno-cast-qual -Wswitch-default -Wunreachable-code \
+        -Wno-ignored-qualifiers -Wno-unused-parameter \
         -Wno-unused-function -Wno-unused-variable -Wno-aggregate-return \
-        -lm
+		-Wno-unused-command-line-argument -lm
 
 RELEASE_FLAGS := -O3 -flto -fno-semantic-interposition \
                  -fno-asynchronous-unwind-tables -march=native

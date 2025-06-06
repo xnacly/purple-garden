@@ -139,7 +139,7 @@ typedef struct {
   // globals represents the global pool created by the bytecode compiler
   Value **globals;
   uint64_t bytecode_len;
-  byte *bytecode;
+  uint32_t *bytecode;
   // current position in the bytecode
   size_t pc;
   Value *registers[REGISTERS + 1];

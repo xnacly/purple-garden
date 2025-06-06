@@ -43,7 +43,7 @@ typedef struct {
   // for the option, or with the default value thats already set.
   union {
     // string value
-    char *s;
+    const char *s;
     // boolean value
     bool b;
     // char value

@@ -20,11 +20,10 @@ Str IO_read_file_to_string(char *path) {
   long length = s.st_size;
   if (length < 0) {
     close(fd);
-    // TODO: should we really assert here?
     ASSERT(length > 0, "input is empty")
   }
   char *buffer = mmap(NULL, length, PROT_READ, MAP_PRIVATE, fd, 0);
   ASSERT(close(fd) == 0, "failed to close file");
   ASSERT(buffer != MAP_FAILED, "failed to mmap input")
-  return (Str){.len = length, .p = buffer};
+  return (Str){.len = length, .p = (const uint8_t *)buffer};
 }
