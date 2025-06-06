@@ -11,12 +11,12 @@ typedef struct {
   size_t len;
   size_t cap;
   Allocator *alloc;
-  byte *buffer;
+  uint8_t *buffer;
 } Builder;
 
 Builder Builder_new(Allocator *alloc, size_t size);
-void Builder_append_str(Builder *builder, Str s);
+void Builder_append_Str(Builder *builder, Str s);
 void Builder_append_char(Builder *builder, char c);
-void Builder_append_byte(Builder *builder, byte b);
-Str Builder_to_str(Builder *builder);
-char *Builder_to_cstr(Builder *builder);
+void Builder_append_byte(Builder *builder, uint8_t b);
+Str Builder_as_str(const Builder *builder);
+const char *Builder_to_cstr(const Builder *builder);
