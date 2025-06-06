@@ -43,7 +43,7 @@ static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
     new = new < NODE_INITIAL_CHILD_SIZE ? NODE_INITIAL_CHILD_SIZE : new;
     Node **old = n->children;
     n->children = alloc->request(alloc->ctx, sizeof(Node *) * new);
-    if (old != NULL) {
+    if (n->children != NULL) {
       memcpy(n->children, old, sizeof(Node *) * n->children_length);
     }
     n->children_cap = new;
@@ -80,9 +80,6 @@ size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
 #define JUMP_NEXT                                                              \
   do {                                                                         \
     void *target = jump_table[p->cur->type];                                   \
-    ASSERT(target != NULL, "Unknown token type in parser: '%.*s'",             \
-           (int)TOKEN_TYPE_MAP[p->cur->type].len,                              \
-           TOKEN_TYPE_MAP[p->cur->type].p);                                    \
     goto *target;                                                              \
   } while (0)
 
