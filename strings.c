@@ -48,7 +48,7 @@ inline size_t Str_hash(const Str *str) {
     hash *= FNV_PRIME;
   }
 
-  return hash & GLOBAL_MASK;
+  return hash;
 }
 
 int64_t Str_to_int64_t(const Str *str) {
