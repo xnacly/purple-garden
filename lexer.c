@@ -2,6 +2,7 @@
 #include "common.h"
 #include "mem.h"
 #include "strings.h"
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -60,7 +61,6 @@ Lexer Lexer_new(Str input) {
   };
 }
 
-// TODO: replace these macro usages with simple indexing when length is valid
 #define cur(L) ((L->pos < L->input.len) ? L->input.p[L->pos] : 0)
 
 static bool is_alphanum(char cc) {
@@ -69,23 +69,24 @@ static bool is_alphanum(char cc) {
 }
 
 // we can "intern" these, since all of them are the same, regardless of position
-Token *INTERN_DELIMITOR_LEFT = &(Token){.type = T_DELIMITOR_LEFT};
-Token *INTERN_DELIMITOR_RIGHT = &(Token){.type = T_DELIMITOR_RIGHT};
-Token *INTERN_BRAKET_LEFT = &(Token){.type = T_BRAKET_LEFT};
-Token *INTERN_BRAKET_RIGHT = &(Token){.type = T_BRAKET_RIGHT};
-Token *INTERN_MINUS = &(Token){.type = T_MINUS};
-Token *INTERN_PLUS = &(Token){.type = T_PLUS};
-Token *INTERN_ASTERISKS = &(Token){.type = T_ASTERISKS};
-Token *INTERN_SLASH = &(Token){.type = T_SLASH};
-Token *INTERN_FALSE = &(Token){.type = T_FALSE};
-Token *INTERN_TRUE = &(Token){.type = T_TRUE};
-Token *INTERN_EQUAL = &(Token){.type = T_EQUAL};
-Token *INTERN_EOF = &(Token){.type = T_EOF};
+Token *INTERN_DELIMITOR_LEFT = &SINGLE_TOK(T_DELIMITOR_LEFT);
+Token *INTERN_DELIMITOR_RIGHT = &SINGLE_TOK(T_DELIMITOR_RIGHT);
+Token *INTERN_BRAKET_LEFT = &SINGLE_TOK(T_BRAKET_LEFT);
+Token *INTERN_BRAKET_RIGHT = &SINGLE_TOK(T_BRAKET_RIGHT);
+Token *INTERN_MINUS = &SINGLE_TOK(T_MINUS);
+Token *INTERN_PLUS = &SINGLE_TOK(T_PLUS);
+Token *INTERN_ASTERISKS = &SINGLE_TOK(T_ASTERISKS);
+Token *INTERN_SLASH = &SINGLE_TOK(T_SLASH);
+Token *INTERN_FALSE = &SINGLE_TOK(T_FALSE);
+Token *INTERN_TRUE = &SINGLE_TOK(T_TRUE);
+Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
+Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 
 size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
   ASSERT(out != NULL, "Failed to allocate token list");
   size_t count = 0;
   static void *jump_table[256] = {
+      [0 ... 255] = &&unknown,
       ['('] = &&delimitor_left,
       [')'] = &&delimitor_right,
       ['['] = &&braket_left,
@@ -109,15 +110,7 @@ size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
       [0] = &&end,
   };
 
-#define JUMP_TARGET                                                            \
-  do {                                                                         \
-    int c = cur(l);                                                            \
-    ASSERT(!(c & 0x80), "Non-ASCII input character!");                         \
-    void *target = jump_table[c];                                              \
-    ASSERT(target != NULL, "Unknown character in lexer: '%c'(%d)",             \
-           l->input.p[l->pos], l->input.p[l->pos]);                            \
-    goto *target;                                                              \
-  } while (0);
+#define JUMP_TARGET goto *jump_table[(int8_t)l->input.p[l->pos]]
 
   JUMP_TARGET;
 
@@ -296,6 +289,11 @@ comment:
 whitespace:
   l->pos++;
   JUMP_TARGET;
+
+unknown: {
+  uint8_t c = cur(l);
+  ASSERT(0, "Unexpected byte '%c' (0x%X) in input", c, c)
+}
 
 end:
   out[count++] = INTERN_EOF;

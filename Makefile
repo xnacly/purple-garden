@@ -1,5 +1,4 @@
 CC := gcc
-
 FLAGS := -std=c23 \
         -Wall -Wextra -Werror -fdiagnostics-color=always \
         -fno-common -Winit-self -Wfloat-equal -Wundef -Wshadow \
@@ -8,6 +7,7 @@ FLAGS := -std=c23 \
         -Wno-cast-qual -Wswitch-default -Wunreachable-code \
         -Wno-ignored-qualifiers -Wno-unused-parameter \
         -Wno-unused-function -Wno-unused-variable -Wno-aggregate-return \
+		-Wno-override-init \
 		-Wno-unused-command-line-argument -lm
 
 RELEASE_FLAGS := -O3 -flto -fno-semantic-interposition \
