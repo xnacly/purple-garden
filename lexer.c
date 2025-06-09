@@ -88,6 +88,10 @@ Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 
 size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
   ASSERT(out != NULL, "Failed to allocate token list");
+
+  size_t true_hash = Str_hash(&STRING("true"));
+  size_t false_hash = Str_hash(&STRING("false"));
+
   size_t count = 0;
   static void *jump_table[256] = {
       [0 ... 255] = &&unknown,
@@ -233,14 +237,9 @@ ident: {
 
   size_t len = l->pos - start;
   Token *t;
-  if (len == 4 &&
-      (l->input.p[start + 0] == 't' && l->input.p[start + 1] == 'r' &&
-       l->input.p[start + 2] == 'u' && l->input.p[start + 3] == 'e')) {
+  if (hash == true_hash) {
     t = INTERN_TRUE;
-  } else if (len == 5 &&
-             (l->input.p[start + 0] == 'f' && l->input.p[start + 1] == 'a' &&
-              l->input.p[start + 2] == 'l' && l->input.p[start + 3] == 's' &&
-              l->input.p[start + 4] == 'e')) {
+  } else if (hash == false_hash) {
     t = INTERN_FALSE;
   } else {
     t = a->request(a->ctx, sizeof(Token));
@@ -265,7 +264,7 @@ string: {
     hash *= FNV_PRIME;
   }
 
-  if (cur(l) != '"') {
+  if (UNLIKELY(cur(l) != '"')) {
     Str slice = Str_slice(&l->input, l->pos, l->input.len);
     fprintf(stderr, "lex: Unterminated string near: '%.*s'", (int)slice.len,
             slice.p);
