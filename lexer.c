@@ -3,6 +3,7 @@
 #include "mem.h"
 #include "strings.h"
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -67,9 +68,7 @@ inline static bool is_alphanum(uint8_t cc) {
   uint8_t lower = cc | 0x20;
   bool is_alpha = (lower >= 'a' && lower <= 'z');
   bool is_digit = (cc >= '0' && cc <= '9');
-  return is_alpha || is_digit;
-  // return (cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') ||
-  //        (cc >= '0' && cc <= '9') || cc == '_' || cc == '-';
+  return is_alpha || is_digit || cc == '_' || cc == '-';
 }
 
 // we can "intern" these, since all of them are the same, regardless of position
