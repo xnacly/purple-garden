@@ -63,9 +63,13 @@ Lexer Lexer_new(Str input) {
 
 #define cur(L) ((L->pos < L->input.len) ? L->input.p[L->pos] : 0)
 
-static bool is_alphanum(char cc) {
-  return (cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') ||
-         (cc >= '0' && cc <= '9') || cc == '_' || cc == '-';
+inline static bool is_alphanum(uint8_t cc) {
+  uint8_t lower = cc | 0x20;
+  bool is_alpha = (lower >= 'a' && lower <= 'z');
+  bool is_digit = (cc >= '0' && cc <= '9');
+  return is_alpha || is_digit;
+  // return (cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') ||
+  //        (cc >= '0' && cc <= '9') || cc == '_' || cc == '-';
 }
 
 // we can "intern" these, since all of them are the same, regardless of position
