@@ -88,6 +88,12 @@ Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
   ASSERT(out != NULL, "Failed to allocate token list");
 
+  // empty input
+  if (l->input.len == 0) {
+    out[0] = INTERN_EOF;
+    return 1;
+  }
+
   size_t true_hash = Str_hash(&STRING("true"));
   size_t false_hash = Str_hash(&STRING("false"));
 
