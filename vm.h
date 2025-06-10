@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define REGISTERS 128
+#define REGISTERS 127
 #define CALL_ARGUMENT_STACK 256
 #define VARIABLE_TABLE_SIZE 256
 #define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
@@ -142,7 +142,7 @@ typedef struct {
   uint32_t *bytecode;
   // current position in the bytecode
   size_t pc;
-  Value *registers[REGISTERS + 1];
+  Value registers[REGISTERS + 1];
   // frame stores variables of the current scope, meta data and other required
   // data
   Frame *frame;
@@ -150,7 +150,7 @@ typedef struct {
   // than one arguments are passed to a function these are pushed to the stack,
   // except the last one, which is in r0 either way, so we just take it from
   // there
-  Value *stack[CALL_ARGUMENT_STACK];
+  Value stack[CALL_ARGUMENT_STACK];
   // stack_cur stores how many elements there currently are in the stack
   size_t stack_cur;
   // arg_count enables the vm to know how many register values it needs to pop

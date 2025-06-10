@@ -125,7 +125,7 @@ int Vm_run(Vm *vm, Allocator *alloc) {
 
     switch (op) {
     case OP_LOAD:
-      vm->registers[0] = vm->globals[arg];
+      vm->registers[0] = *vm->globals[arg];
       break;
     case OP_LOADV: {
       // bounds checking and checking for variable validity is performed at
@@ -145,24 +145,24 @@ int Vm_run(Vm *vm, Allocator *alloc) {
           VM_ERR("Undefined variable with hash %i", arg);
         }
       }
-      vm->registers[0] = v;
+      vm->registers[0] = *v;
       break;
     }
     case OP_STORE:
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      vm->frame->variable_table[vm->registers[0]->string.hash &
-                                VARIABLE_TABLE_SIZE_MASK] = vm->registers[arg];
+      vm->frame->variable_table[vm->registers[0].string.hash &
+                                VARIABLE_TABLE_SIZE_MASK] =
+          NEW(vm->registers[arg]);
       break;
     case OP_ADD: {
-      Value *left = vm->registers[0];
-      Value *right = vm->registers[arg];
+      Value *left = &vm->registers[0];
+      Value *right = &vm->registers[arg];
       if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0] = NEW({
-            .type = V_DOUBLE,
-            .floating = Value_as_double(left) + Value_as_double(right),
-        });
+        vm->registers[0].floating =
+            Value_as_double(right) + Value_as_double(left);
+        vm->registers[0].type = V_DOUBLE;
       } else {
         if (!(left->type == V_INT && right->type == V_INT)) {
           VM_ERR("VM[+] Incompatible types %.*s and %.*s",
@@ -171,21 +171,18 @@ int Vm_run(Vm *vm, Allocator *alloc) {
                  (int)VALUE_TYPE_MAP[right->type].len,
                  VALUE_TYPE_MAP[right->type].p)
         }
-        vm->registers[0] = NEW({
-            .type = V_INT,
-            .integer = left->integer + right->integer,
-        });
+        vm->registers[0].integer = right->integer + left->integer;
+        vm->registers[0].type = V_INT;
       }
       break;
     }
     case OP_SUB: {
-      Value *left = vm->registers[0];
-      Value *right = vm->registers[arg];
+      Value *left = &vm->registers[0];
+      Value *right = &vm->registers[arg];
       if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0] = NEW({
-            .type = V_DOUBLE,
-            .floating = Value_as_double(right) - Value_as_double(left),
-        });
+        vm->registers[0].floating =
+            Value_as_double(right) - Value_as_double(left);
+        vm->registers[0].type = V_DOUBLE;
       } else {
         if (!(left->type == V_INT && right->type == V_INT)) {
           VM_ERR("VM[-] Incompatible types %.*s and %.*s",
@@ -194,21 +191,18 @@ int Vm_run(Vm *vm, Allocator *alloc) {
                  (int)VALUE_TYPE_MAP[right->type].len,
                  VALUE_TYPE_MAP[right->type].p)
         }
-        vm->registers[0] = NEW({
-            .type = V_INT,
-            .integer = right->integer - left->integer,
-        });
+        vm->registers[0].type = V_INT;
+        vm->registers[0].integer = right->integer - left->integer;
       }
       break;
     }
     case OP_MUL: {
-      Value *left = vm->registers[0];
-      Value *right = vm->registers[arg];
+      Value *left = &vm->registers[0];
+      Value *right = &vm->registers[arg];
       if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0] = NEW({
-            .type = V_DOUBLE,
-            .floating = Value_as_double(left) * Value_as_double(right),
-        });
+        vm->registers[0].floating =
+            Value_as_double(right) * Value_as_double(left);
+        vm->registers[0].type = V_DOUBLE;
       } else {
         if (!(left->type == V_INT && right->type == V_INT)) {
           VM_ERR("VM[*] Incompatible types %.*s and %.*s",
@@ -217,21 +211,18 @@ int Vm_run(Vm *vm, Allocator *alloc) {
                  (int)VALUE_TYPE_MAP[right->type].len,
                  VALUE_TYPE_MAP[right->type].p)
         }
-        vm->registers[0] = NEW({
-            .type = V_INT,
-            .integer = left->integer * right->integer,
-        });
+        vm->registers[0].type = V_INT;
+        vm->registers[0].integer = right->integer * left->integer;
       }
       break;
     }
     case OP_DIV: {
-      Value *left = vm->registers[0];
-      Value *right = vm->registers[arg];
+      Value *left = &vm->registers[0];
+      Value *right = &vm->registers[arg];
       if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0] = NEW({
-            .type = V_DOUBLE,
-            .floating = Value_as_double(right) / Value_as_double(left),
-        });
+        vm->registers[0].floating =
+            Value_as_double(right) / Value_as_double(left);
+        vm->registers[0].type = V_DOUBLE;
       } else {
         if (!(left->type == V_INT && right->type == V_INT)) {
           VM_ERR("VM[/] Incompatible types %.*s and %.*s",
@@ -240,22 +231,16 @@ int Vm_run(Vm *vm, Allocator *alloc) {
                  (int)VALUE_TYPE_MAP[right->type].len,
                  VALUE_TYPE_MAP[right->type].p)
         }
-        vm->registers[0] = NEW({
-            .type = V_INT,
-            .integer = right->integer / left->integer,
-        });
+        vm->registers[0].type = V_INT;
+        vm->registers[0].integer = right->integer / left->integer;
       }
       break;
     }
     case OP_EQ: {
       // pointer comparison fast path
-      if (vm->registers[0] == vm->registers[arg]) {
-        vm->registers[0] = vm->globals[1];
-      } else {
-        vm->registers[0] = Value_cmp(vm->registers[0], vm->registers[arg])
-                               ? vm->globals[1]
-                               : vm->globals[0];
-      }
+      vm->registers[0] = Value_cmp(&vm->registers[0], &vm->registers[arg])
+                             ? *vm->globals[1]
+                             : *vm->globals[0];
       break;
     }
     case OP_ARGS:
@@ -277,22 +262,23 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       // Ctx, removes a branch -> shaves around 1-2ms (2-4% runtime)
       ASSERT(vm->stack_cur < CALL_ARGUMENT_STACK,
              "Out of argument stack space: %d", CALL_ARGUMENT_STACK)
-      vm->stack[vm->stack_cur++] = vm->globals[arg];
+      vm->stack[vm->stack_cur++] = *vm->globals[arg];
       break;
     case OP_BUILTIN: {
       if (!vm->arg_count) {
-        vm->registers[0] = vm->builtins[arg](NULL, 0, alloc);
+        vm->registers[0] = *vm->builtins[arg](NULL, 0, alloc);
       } else {
         // at this point all builtins are just syscalls into an array of
         // function pointers
-        const Value *args[vm->arg_count];
+        Value args[vm->arg_count];
         for (int i = vm->arg_count - 1; i > 0; i--) {
           ASSERT(vm->stack_cur != 0,
                  "No element in argument stack, failed to pop");
           args[i - 1] = vm->stack[--vm->stack_cur];
         }
         args[vm->arg_count - 1] = vm->registers[0];
-        vm->registers[0] = vm->builtins[arg](args, vm->arg_count, alloc);
+        vm->registers[0] =
+            *vm->builtins[arg]((const Value **)&args, vm->arg_count, alloc);
       }
       vm->arg_count = 1;
       break;
@@ -320,7 +306,7 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       break;
     }
     case OP_ASSERT: {
-      if (vm->registers[0]->type != V_TRUE) {
+      if (vm->registers[0].type != V_TRUE) {
         VM_ERR("Assertion failed, value is not true")
       }
       break;

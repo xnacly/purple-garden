@@ -174,14 +174,14 @@ int main() {
 
     bool error = false;
     Vm_run(vm, &alloc);
-    if (!Value_cmp_deep(vm->registers[0], &c.expected_r0)) {
+    if (!Value_cmp_deep(&vm->registers[0], &c.expected_r0)) {
       printf("\tbad value at r0: want=%s got=%s",
              VALUE_TYPE_MAP[c.expected_r0.type].p,
-             VALUE_TYPE_MAP[vm->registers[0]->type].p);
+             VALUE_TYPE_MAP[vm->registers[0].type].p);
       printf("\n\twant=");
       Value_debug(&c.expected_r0);
       printf("\n\tgot=");
-      Value_debug(vm->registers[0]);
+      Value_debug(&vm->registers[0]);
       puts("");
 #if PRINT_DISASM_ON_ERR
       disassemble(vm, &ctx);
