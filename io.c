@@ -22,7 +22,12 @@ Str IO_read_file_to_string(char *path) {
     close(fd);
     ASSERT(length > 0, "input is empty")
   }
-  char *buffer = mmap(NULL, length, PROT_READ, MAP_PRIVATE, fd, 0);
+
+  char *buffer = 0;
+  if (length != 0) {
+    buffer = mmap(NULL, length, PROT_READ, MAP_PRIVATE, fd, 0);
+  }
+
   ASSERT(close(fd) == 0, "failed to close file");
   ASSERT(buffer != MAP_FAILED, "failed to mmap input")
   return (Str){.len = length, .p = (const uint8_t *)buffer};
