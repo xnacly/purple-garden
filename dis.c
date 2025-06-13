@@ -52,7 +52,6 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
       switch (op) {
       case OP_LEAVE:
         puts("");
-      case OP_POP:
       case OP_ASSERT:
         break;
 #if DISASSEMBLE_INCLUDE_POSITIONS
@@ -65,22 +64,9 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
       }
 
       switch (op) {
-      case OP_PUSHG:
-      case OP_LOAD:
+      case OP_LOADG:
         printf(": ");
         Value_debug(vm->globals[arg]);
-        break;
-      case OP_LOADV:
-        printf(": $");
-        for (size_t j = 0; j < vm->global_len; j++) {
-          Value *v = vm->globals[j];
-          if (v->type == V_STR && (v->string.hash & GLOBAL_MASK) == arg) {
-            Str_debug(&v->string);
-          }
-        }
-        break;
-      case OP_BUILTIN:
-        printf(": <@builtin>");
         break;
       case OP_CALL: {
         for (size_t j = 0; j < MAX_BUILTIN_SIZE; j++) {

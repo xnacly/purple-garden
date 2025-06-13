@@ -6,25 +6,23 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define REGISTERS 127
-#define CALL_ARGUMENT_STACK 256
-#define VARIABLE_TABLE_SIZE 256
-#define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
-
 static Value *INTERNED_TRUE = &(Value){.type = V_TRUE};
 static Value *INTERNED_FALSE = &(Value){.type = V_FALSE};
 static Value *INTERNED_NONE =
     &(Value){.type = V_OPTION, .option = (struct Option){.is_some = false}};
 
 typedef enum {
-  // LOAD rANY
-  //
-  // LOAD a Value from the const table to r0
-  OP_LOAD,
+
   // STORE rANY
   //
   // STORE a Value from r0 into an arbitrary register
   OP_STORE,
+
+  // LOAD rANY
+  //
+  // LOAD a Value from rANY into r0
+  OP_LOAD,
+
   // OP_VAR globalANY
   //
   // Copy value from Frame assigned to variable name stored in global pool at
@@ -52,21 +50,6 @@ typedef enum {
   //
   // compares value at r0 and rANY via Value_cmp
   OP_EQ = 6,
-
-  // OP_PUSH rANY
-  //
-  // pushes the value in rANY to the stack
-  OP_PUSH,
-
-  // OP_PUSHG gANY
-  //
-  // pushes a value from the global pool to the stack
-  OP_PUSHG,
-
-  // OP_POP rANY
-  //
-  // pops a value from the stack
-  OP_POP,
 
   // OP_VAR rANY
   //
@@ -111,6 +94,11 @@ typedef enum {
   //
   // stops execution with error message if r0 evals to false
   OP_ASSERT,
+
+  // LOADG rANY
+  //
+  // LOADG a global from the const table to r0
+  OP_LOADG,
 } VM_OP;
 
 #define VM_ERR(fmt, ...)                                                       \
@@ -119,51 +107,7 @@ typedef enum {
 
 extern Str OP_MAP[];
 
-// A frame represents a Scope, a new scope is created upon entering a lambda -
-// since lambdas are pure there is no way to interact with the previous frame
-// inside of a lambda, the pointer is kept to allow the runtime to restore the
-// scope state to its state before entering the lambda
-//
-// WARNING: do not stack allocate, since variable_table can be huge
-typedef struct Frame {
-  struct Frame *prev;
-  // returning out of scope, we need to jump back to the callsite of the
-  // function
-  size_t return_to_bytecode;
-  // stores Values by their hash, serving as a variable table
-  Value *variable_table[VARIABLE_TABLE_SIZE];
-} Frame;
-
-typedef struct {
-  uint32_t global_len;
-  // globals represents the global pool created by the bytecode compiler
-  Value **globals;
-  uint64_t bytecode_len;
-  uint32_t *bytecode;
-  // current position in the bytecode
-  size_t pc;
-  Value registers[REGISTERS + 1];
-  // frame stores variables of the current scope, meta data and other required
-  // data
-  Frame *frame;
-  // stack is used for handling arguments of a function or builtin call, if more
-  // than one arguments are passed to a function these are pushed to the stack,
-  // except the last one, which is in r0 either way, so we just take it from
-  // there
-  Value stack[CALL_ARGUMENT_STACK];
-  // stack_cur stores how many elements there currently are in the stack
-  size_t stack_cur;
-  // arg_count enables the vm to know how many register values it needs to pop
-  // off the stack and pass to the function called via CALL or BUILTIN
-  size_t arg_count;
-
-  builtin_function *builtins;
-#if DEBUG
-  size_t instruction_counter[256];
-#endif
-} Vm;
-
 Vm Vm_new(Allocator *alloc);
 void Vm_register_builtin(Vm *vm, builtin_function bf, Str name);
-int Vm_run(Vm *vm, Allocator *alloc);
+int Vm_run(Vm *vm);
 void Vm_destroy(Vm *vm);

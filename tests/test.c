@@ -119,7 +119,6 @@ int main() {
     CASE((= false false), VAL(.type = V_TRUE)),
 
     // variables
-    CASE((@let name "user"), VAL(.type = V_STR, .string = STRING("name"))),
     CASE((@let name "user")name, VAL(.type = V_STR, .string = STRING("user"))),
     CASE((@let age 25)age, VAL(.type = V_INT, .integer = 25)),
 
@@ -173,7 +172,7 @@ int main() {
     Ctx ctx = cc(vm, &alloc, nodes, node_count);
 
     bool error = false;
-    Vm_run(vm, &alloc);
+    Vm_run(vm);
     if (!Value_cmp_deep(&vm->registers[0], &c.expected_r0)) {
       printf("\tbad value at r0: want=%s got=%s",
              VALUE_TYPE_MAP[c.expected_r0.type].p,

@@ -4,9 +4,13 @@
 #define PREC 1e-9
 
 Str VALUE_TYPE_MAP[] = {
-    [V_OPTION] = STRING("Option::"), [V_STR] = STRING("Str"),
-    [V_INT] = STRING("Int"),         [V_DOUBLE] = STRING("Double"),
-    [V_TRUE] = STRING("True"),       [V_FALSE] = STRING("False"),
+    [V_UNDEFINED] = STRING("undefined"),
+    [V_OPTION] = STRING("Option::"),
+    [V_STR] = STRING("Str"),
+    [V_INT] = STRING("Int"),
+    [V_DOUBLE] = STRING("Double"),
+    [V_TRUE] = STRING("True"),
+    [V_FALSE] = STRING("False"),
     [V_ARRAY] = STRING("Array"),
 };
 
@@ -54,7 +58,10 @@ inline bool Value_cmp(const Value *a, const Value *b) {
 }
 
 void Value_debug(const Value *v) {
-  Str_debug(&VALUE_TYPE_MAP[v->type]);
+  Str *t = &VALUE_TYPE_MAP[v->type];
+  if (t != NULL) {
+    Str_debug(t);
+  }
   switch (v->type) {
   case V_OPTION: {
     if (v->option.is_some) {

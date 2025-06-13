@@ -1,7 +1,6 @@
 #include "assert.h"
 #include <stdlib.h>
 
-#include "builtins.h"
 #include "cc.h"
 #include "common.h"
 #include "lexer.h"
@@ -69,7 +68,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       v->type = V_ARRAY;
       v->array = (struct Array){.len = 0};
       vm->globals[vm->global_len] = v;
-      BC(OP_LOAD, vm->global_len++)
+      BC(OP_LOADG, vm->global_len++)
     } else {
       TODO("N_ARRAY#real arrays")
     }
@@ -79,9 +78,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     // interning logic, global pool 0 is the only instance for false in the
     // runtime, 1 for true, strings get interned by their hashes
     if (n->token->type == T_FALSE) {
-      BC(OP_LOAD, 0)
+      BC(OP_LOADG, 0)
     } else if (n->token->type == T_TRUE) {
-      BC(OP_LOAD, 1)
+      BC(OP_LOADG, 1)
     } else if (n->token->type == T_STRING) {
       size_t hash = n->token->string.hash & GLOBAL_MASK;
       size_t cached_index = ctx->global_hash_buckets[hash];
@@ -96,21 +95,19 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         ctx->global_hash_buckets[hash] = vm->global_len + 1;
         vm->globals[vm->global_len++] = token_to_value(n->token, alloc);
       }
-      BC(OP_LOAD, expected_index)
+      BC(OP_LOADG, expected_index)
     } else {
       ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
              "cc: out of global space, what the fuck are you doing (there is "
              "space "
              "for 256k globals)");
       vm->globals[vm->global_len] = token_to_value(n->token, alloc);
-      BC(OP_LOAD, vm->global_len++)
+      BC(OP_LOADG, vm->global_len++)
     }
     break;
   }
   case N_IDENT: {
-    uint64_t hash = n->token->string.hash & GLOBAL_MASK;
-    ASSERT(ctx->global_hash_buckets[hash], "Undefined variable `%.*s`",
-           (int)n->token->string.len, n->token->string.p);
+    uint64_t hash = n->token->string.hash & VARIABLE_TABLE_SIZE_MASK;
     BC(OP_LOADV, hash);
     break;
   }
@@ -133,14 +130,6 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     break;
   }
   case N_BUILTIN: {
-    /*if (!n->children_length) {
-      // TODO: is this really what we want? What about an empty println, this
-      // should just call puts
-      //
-      // skip generating bytecode for empty builtin invocations
-      return;
-    }*/
-
     Str *s = &n->token->string;
     int b = runtime_builtin_hashes[s->hash & MAX_BUILTIN_SIZE_MASK];
     // compile time "pseudo" builtins
@@ -155,10 +144,14 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       };
       case COMPILE_BUILTIN_NONE: { // (@None)
         // global idx 2 is Option::None
-        BC(OP_LOAD, 2);
+        BC(OP_LOADG, 2);
         break;
       }
-      case COMPILE_BUILTIN_FUNCTION: { // (@function <name> [<args>] <body>)
+      case COMPILE_BUILTIN_IF: { // (@if <condition> <s-expr's>)
+        ASSERT(0, "Unimplemented")
+        break;
+      }
+      case COMPILE_BUILTIN_FUNCTION: { // (@function <name> [<args>] <s-expr's>)
         ASSERT(n->children_length >= 2,
                "@function expects <name> [<arguments>] [body]");
         Str *name = &n->children[0]->token->string;
@@ -179,88 +172,27 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         Node **params = n->children[1]->children;
         size_t param_len = n->children[1]->children_length;
 
-        // Calling convention overview:
+        // Calling convention:
         //
-        // parameters=[a b c]
-        // arguments=[0 1 2]
-        // stack=[0 1]
-        //
-        // r0 = c
-        // stack top = b
-        // stack top-1 = a
-
-        // calling convention mandates accumulator register (r0) holds the value
-        // for the last argument of a function, thus we need to move it to its
-        // variable
-        if (param_len > 0) {
-          Node *param = params[param_len - 1];
+        // registers  = r1 r2 r3
+        // parameters = [a b c]
+        // arguments  = [1 2 3]
+        for (size_t i = 0; i < param_len; i++) {
+          Node *param = params[i];
           ASSERT(param->type == N_IDENT,
                  "Expected identifier as function parameter in `%.*s` "
                  "definition, got `%.*s`",
                  (int)name->len, name->p, (int)NODE_TYPE_MAP[param->type].len,
                  NODE_TYPE_MAP[param->type].p);
-
-          size_t r = Ctx_allocate_register(ctx);
-          BC(OP_STORE, r);
-          size_t param_hash = param->token->string.hash & GLOBAL_MASK;
-          size_t cached_index = ctx->global_hash_buckets[param_hash];
-          size_t expected_index = vm->global_len;
-          if (cached_index) {
-            // -1 because index is stored +1 to distinguish unset (0) from index
-            // 0
-            expected_index = cached_index - 1;
-          } else {
-            ASSERT(
-                vm->global_len + 1 < GLOBAL_SIZE,
-                "cc: out of global space, what the fuck are you doing (there "
-                "is space for 256k globals)");
-            // stored +1 to distinguish unset (0) from index 0
-            ctx->global_hash_buckets[param_hash] = vm->global_len + 1;
-            vm->globals[vm->global_len++] = token_to_value(param->token, alloc);
-          }
-
-          BC(OP_LOAD, expected_index);
-          BC(OP_VAR, r)
-          Ctx_free_register(ctx, r);
-        }
-
-        // calling convention mandates all arguments > 1 to be on the stack, we
-        // deal with this here
-        if (param_len > 1) {
-          for (int i = param_len - 2; i > -1; i--) {
-            Node *param = params[i];
-            ASSERT(param->type == N_IDENT,
-                   "Expected identifier as function parameter in `%.*s` "
-                   "definition, got `%.*s`",
-                   (int)name->len, name->p, (int)NODE_TYPE_MAP[param->type].len,
-                   NODE_TYPE_MAP[param->type].p);
-            BC(OP_POP, 0);
-            size_t r = Ctx_allocate_register(ctx);
-            BC(OP_STORE, r);
-            size_t param_hash = param->token->string.hash & GLOBAL_MASK;
-            size_t cached_index = ctx->global_hash_buckets[param_hash];
-            size_t expected_index = vm->global_len;
-            if (cached_index) {
-              expected_index = cached_index - 1;
-            } else {
-              ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
-                     "cc: out of global space, what the fuck are you doing "
-                     "(there is space for 256k globals)");
-              ctx->global_hash_buckets[param_hash] = vm->global_len + 1;
-              vm->globals[vm->global_len++] =
-                  token_to_value(param->token, alloc);
-            }
-
-            BC(OP_LOAD, expected_index);
-            BC(OP_VAR, r)
-            Ctx_free_register(ctx, r);
-          }
+          BC(OP_LOAD, i + 1);
+          BC(OP_VAR, param->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
         }
 
         // compiling the body, returning a value is free since its just in r0
         if (n->children_length > 2) {
           for (size_t i = 2; i < n->children_length; i++) {
             // PERF: if last Node is N_CALL think about reusing call frames
+            // (TCO)
             compile(alloc, vm, ctx, n->children[i]);
           }
         }
@@ -275,52 +207,24 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
                "<var-name> <var-value>`, got %zu",
                n->children_length);
         compile(alloc, vm, ctx, n->children[1]);
-        size_t r = Ctx_allocate_register(ctx);
-        BC(OP_STORE, r);
         Token *ident = n->children[0]->token;
-        size_t hash = ident->string.hash & GLOBAL_MASK;
-        size_t cached_index = ctx->global_hash_buckets[hash];
-        size_t expected_index = vm->global_len;
-        if (cached_index) {
-          expected_index = cached_index - 1;
-        } else {
-          ASSERT(
-              vm->global_len + 1 < GLOBAL_SIZE,
-              "cc: out of global space, what the fuck are you doing (there is "
-              "space "
-              "for 256k globals)");
-          ctx->global_hash_buckets[hash] = vm->global_len + 1;
-          vm->globals[vm->global_len++] = token_to_value(ident, alloc);
-        }
-        BC(OP_LOAD, expected_index);
-        BC(OP_VAR, r);
-        Ctx_free_register(ctx, r);
+        size_t hash = ident->string.hash & VARIABLE_TABLE_SIZE_MASK;
+        BC(OP_VAR, hash);
         break;
       }
       default:
       }
-    } else {
+    } else { // calling a builtin function thats not a compile time construct
       size_t hash = s->hash & MAX_BUILTIN_SIZE_MASK;
       builtin_function bf = vm->builtins[hash];
       ASSERT(bf != NULL, "Unknown builtin `@%.*s`", (int)s->len, s->p)
 
-      // single argument at r0
-      if (n->children_length == 1) {
-        compile(alloc, vm, ctx, n->children[0]);
-      } else {
-        for (size_t i = 0; i < n->children_length; i++) {
-          compile(alloc, vm, ctx, n->children[i]);
-          if (i < n->children_length - 1) {
-            // same optimisation as for user defined function calls in N_CALL
-            // compilation
-            if (vm->bytecode[vm->bytecode_len - 2] == OP_LOAD) {
-              vm->bytecode[vm->bytecode_len - 2] = OP_PUSHG;
-            } else {
-              BC(OP_PUSH, 0)
-            }
-          }
-        }
+      for (size_t i = 0; i < n->children_length; i++) {
+        compile(alloc, vm, ctx, n->children[i]);
+        BC(OP_STORE, i + 1)
+      }
 
+      if (n->children_length > 1) {
         BC(OP_ARGS, n->children_length);
       }
 
@@ -328,42 +232,19 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     }
     break;
   }
-  case N_CALL: {
+  case N_CALL: { // function call site (<name> <args>)
     Str *name = &n->token->string;
     int loc = ctx->function_hash_to_bytecode_index[name->hash &
                                                    MAX_BUILTIN_SIZE_MASK];
     ASSERT(loc > -1, "Undefined function `%.*s`", (int)name->len, name->p)
-    // single argument at r0
-    if (n->children_length == 1) {
-      compile(alloc, vm, ctx, n->children[0]);
-    } else if (n->children_length > 1) {
-      for (size_t i = 0; i < n->children_length; i++) {
-        compile(alloc, vm, ctx, n->children[i]);
-        if (i < n->children_length - 1) {
-          // optimization by merging OP_LOAD and a directly following OP_PUSH
-          // into a single instruction, before calling something like (f true
-          // false) would produce 10 instructions:
-          //
-          // LOAD 1: True
-          // PUSH 0
-          // LOAD 1: True
-          // ARGS 2
-          // CALL 0: <f>
-          //
-          // This change reduces the instructions by 2 from 10 to 8:
-          //
-          // PUSHG 1
-          // LOAD 0: False
-          // ARGS 2
-          // CALL 0: <f>
-          if (vm->bytecode[vm->bytecode_len - 2] == OP_LOAD) {
-            vm->bytecode[vm->bytecode_len - 2] = OP_PUSHG;
-          } else {
-            BC(OP_PUSH, 0)
-          }
-        }
-      }
 
+    // we compile all arguments to bytecode one by one by one
+    for (size_t i = 0; i < n->children_length; i++) {
+      compile(alloc, vm, ctx, n->children[i]);
+      BC(OP_STORE, i + 1)
+    }
+
+    if (n->children_length > 1) {
       BC(OP_ARGS, n->children_length);
     }
 
@@ -380,16 +261,17 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   }
 }
 
+#define NEW_CC_BUILTIN(NAME, ENUM_VARIANT)                                     \
+  runtime_builtin_hashes[Str_hash(&STRING(NAME)) & MAX_BUILTIN_SIZE_MASK] =    \
+      COMPILE_BUILTIN_##ENUM_VARIANT;
+
 Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size) {
   // compile time constructs
-  runtime_builtin_hashes[Str_hash(&STRING("let")) & MAX_BUILTIN_SIZE_MASK] =
-      COMPILE_BUILTIN_LET;
-  runtime_builtin_hashes[Str_hash(&STRING("function")) &
-                         MAX_BUILTIN_SIZE_MASK] = COMPILE_BUILTIN_FUNCTION;
-  runtime_builtin_hashes[Str_hash(&STRING("assert")) & MAX_BUILTIN_SIZE_MASK] =
-      COMPILE_BUILTIN_ASSERT;
-  runtime_builtin_hashes[Str_hash(&STRING("None")) & MAX_BUILTIN_SIZE_MASK] =
-      COMPILE_BUILTIN_NONE;
+  NEW_CC_BUILTIN("let", LET)
+  NEW_CC_BUILTIN("function", FUNCTION)
+  NEW_CC_BUILTIN("assert", ASSERT)
+  NEW_CC_BUILTIN("None", NONE)
+  NEW_CC_BUILTIN("if", IF)
 
   // specifically set size 1 to keep r0 the temporary register reserved
   Ctx ctx = {

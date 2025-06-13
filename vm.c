@@ -6,22 +6,21 @@
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
 
-void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
+inline void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
   vm->builtins[Str_hash(&name) & MAX_BUILTIN_SIZE_MASK] = bf;
 }
 
 Vm Vm_new(Allocator *alloc) {
   Vm vm = {
+      .alloc = alloc,
       .global_len = 0,
       .bytecode_len = 0,
       .pc = 0,
       .bytecode = NULL,
       .globals = NULL,
-      .stack = {},
-      .stack_cur = 0,
   };
 
-  vm.builtins = BUILTIN_MAP;
+  vm.builtins = (void **)BUILTIN_MAP;
   vm.bytecode = alloc->request(alloc->ctx, (sizeof(uint32_t) * BYTECODE_SIZE));
   vm.globals = alloc->request(alloc->ctx, (sizeof(Value *) * GLOBAL_SIZE));
   vm.globals[0] = INTERNED_FALSE;
@@ -40,11 +39,10 @@ Vm Vm_new(Allocator *alloc) {
 }
 
 Str OP_MAP[256] = {
-    [OP_LOAD] = STRING("LOAD"),   [OP_STORE] = STRING("STORE"),
-    [OP_ADD] = STRING("ADD"),     [OP_SUB] = STRING("SUB"),
-    [OP_MUL] = STRING("MUL"),     [OP_DIV] = STRING("DIV"),
-    [OP_EQ] = STRING("EQ"),       [OP_POP] = STRING("POP"),
-    [OP_PUSH] = STRING("PUSH"),   [OP_PUSHG] = STRING("PUSHG"),
+    [OP_LOADG] = STRING("LOADG"), [OP_LOAD] = STRING("LOAD"),
+    [OP_STORE] = STRING("STORE"), [OP_ADD] = STRING("ADD"),
+    [OP_SUB] = STRING("SUB"),     [OP_MUL] = STRING("MUL"),
+    [OP_DIV] = STRING("DIV"),     [OP_EQ] = STRING("EQ"),
     [OP_VAR] = STRING("VAR"),     [OP_LOADV] = STRING("LOADV"),
     [OP_ARGS] = STRING("ARGS"),   [OP_BUILTIN] = STRING("BUILTIN"),
     [OP_LEAVE] = STRING("LEAVE"), [OP_CALL] = STRING("CALL"),
@@ -75,26 +73,20 @@ static size_t frame_count = 1;
 #endif
 
 void freelist_push(FrameFreeList *fl, Frame *frame) {
-#if DEBUG
-  printf("[VM]: exiting frame #%zu\n", frame_count--);
-#endif
   frame->prev = fl->head;
-  memset(frame->variable_table, 0, sizeof(frame->variable_table));
+  // memset(frame->variable_table, 0, sizeof(frame->variable_table));
   frame->return_to_bytecode = 0;
   fl->head = frame;
 }
 
 #define NEW(...)                                                               \
   ({                                                                           \
-    Value *__v = alloc->request(alloc->ctx, sizeof(Value));                    \
+    Value *__v = vm->alloc->request(vm->alloc->ctx, sizeof(Value));            \
     *__v = (Value)__VA_ARGS__;                                                 \
     __v;                                                                       \
   })
 
 Frame *freelist_pop(FrameFreeList *fl) {
-#if DEBUG
-  printf("[VM]: entering frame #%zu\n", frame_count++);
-#endif
   if (!fl->head)
     return fl->alloc->request(fl->alloc->ctx, sizeof(Frame));
   Frame *f = fl->head;
@@ -103,18 +95,11 @@ Frame *freelist_pop(FrameFreeList *fl) {
   return f;
 }
 
-int Vm_run(Vm *vm, Allocator *alloc) {
-  FrameFreeList *fl = &(FrameFreeList){.alloc = alloc};
+int Vm_run(Vm *vm) {
+  FrameFreeList *fl = &(FrameFreeList){.alloc = vm->alloc};
   freelist_preallocate(fl);
   vm->arg_count = 1;
   vm->frame = freelist_pop(fl);
-#if DEBUG
-  for (size_t i = 0; i < vm->global_len; i++) {
-    printf("VM[glob%zu/%zu] ", i + 1, (size_t)vm->global_len);
-    Value_debug(vm->globals[i]);
-    puts("");
-  }
-#endif
   while (vm->pc < vm->bytecode_len) {
     VM_OP op = vm->bytecode[vm->pc];
     uint32_t arg = vm->bytecode[vm->pc + 1];
@@ -124,26 +109,19 @@ int Vm_run(Vm *vm, Allocator *alloc) {
 #endif
 
     switch (op) {
-    case OP_LOAD:
+    case OP_LOADG:
       vm->registers[0] = *vm->globals[arg];
+      break;
+    case OP_LOAD:
+      vm->registers[0] = vm->registers[arg];
       break;
     case OP_LOADV: {
       // bounds checking and checking for variable validity is performed at
       // compile time, but we still have to check if the variable is available
       // in the current scope...
-      Value *v = vm->frame->variable_table[arg & VARIABLE_TABLE_SIZE_MASK];
+      Value *v = vm->frame->variable_table[arg];
       if (v == NULL) {
-        Value *possible_ident_name = vm->globals[arg & GLOBAL_MASK];
-        // this is for when we know the identifier because we interned it
-        // already
-        if (possible_ident_name != NULL) {
-          VM_ERR("Undefined variable `%.*s`",
-                 (int)possible_ident_name->string.len,
-                 possible_ident_name->string.p);
-        } else {
-          // this is for when we dont know the identifier
-          VM_ERR("Undefined variable with hash %i", arg);
-        }
+        VM_ERR("Undefined variable with hash %i", arg);
       }
       vm->registers[0] = *v;
       break;
@@ -152,9 +130,7 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      vm->frame->variable_table[vm->registers[0].string.hash &
-                                VARIABLE_TABLE_SIZE_MASK] =
-          NEW(vm->registers[arg]);
+      vm->frame->variable_table[arg] = NEW(vm->registers[0]);
       break;
     case OP_ADD: {
       Value *left = &vm->registers[0];
@@ -246,40 +222,10 @@ int Vm_run(Vm *vm, Allocator *alloc) {
     case OP_ARGS:
       vm->arg_count = arg;
       break;
-    case OP_POP:
-      ASSERT(vm->stack_cur, "Attempting to pop from stack, but stack is empty")
-      vm->registers[0] = vm->stack[--vm->stack_cur];
-      break;
-    case OP_PUSH:
-      // TODO: move this check to cc.c by keeping track of the stack depth in
-      // Ctx, removes a branch -> shaves around 1-2ms (2-4% runtime)
-      ASSERT(vm->stack_cur < CALL_ARGUMENT_STACK,
-             "Out of argument stack space: %d", CALL_ARGUMENT_STACK)
-      vm->stack[vm->stack_cur++] = vm->registers[0];
-      break;
-    case OP_PUSHG:
-      // TODO: move this check to cc.c by keeping track of the stack depth in
-      // Ctx, removes a branch -> shaves around 1-2ms (2-4% runtime)
-      ASSERT(vm->stack_cur < CALL_ARGUMENT_STACK,
-             "Out of argument stack space: %d", CALL_ARGUMENT_STACK)
-      vm->stack[vm->stack_cur++] = *vm->globals[arg];
-      break;
     case OP_BUILTIN: {
-      if (!vm->arg_count) {
-        vm->registers[0] = *vm->builtins[arg](NULL, 0, alloc);
-      } else {
-        // at this point all builtins are just syscalls into an array of
-        // function pointers
-        Value args[vm->arg_count];
-        for (int i = vm->arg_count - 1; i > 0; i--) {
-          ASSERT(vm->stack_cur != 0,
-                 "No element in argument stack, failed to pop");
-          args[i - 1] = vm->stack[--vm->stack_cur];
-        }
-        args[vm->arg_count - 1] = vm->registers[0];
-        vm->registers[0] =
-            *vm->builtins[arg]((const Value **)&args, vm->arg_count, alloc);
-      }
+      // at this point all builtins are just syscalls into an array of
+      // function pointers
+      ((builtin_function)vm->builtins[arg])(vm);
       vm->arg_count = 1;
       break;
     }
@@ -315,39 +261,8 @@ int Vm_run(Vm *vm, Allocator *alloc) {
       VM_ERR("Unimplemented instruction %.*s", (int)OP_MAP[op].len,
              OP_MAP[op].p)
     }
-#if DEBUG
-    printf("VM[%06zu][%-8.*s][%10lu]: {.registers=[", vm->pc,
-           (int)OP_MAP[(op)].len, OP_MAP[(op)].p, (size_t)arg);
-    for (size_t i = 0; i < 128; i++) {
-      printf(" ");
-      if (vm->registers[i] == NULL)
-        break;
-      Value_debug(vm->registers[i]);
-    }
-    printf("]");
-    if (vm->stack_cur) {
-      printf(",.stack=[");
-    }
-    for (size_t i = 0; i < vm->stack_cur; i++) {
-      printf(" ");
-      Value_debug(vm->stack[i]);
-    }
-    if (vm->stack_cur) {
-      printf(" ]");
-    }
-    printf("}\n");
-#endif
     vm->pc += 2;
   }
-#if DEBUG
-  for (size_t i = 0;; i++) {
-    if (vm->registers[i] == NULL)
-      break;
-    printf("VM[r%zu]: ", i);
-    Value_debug(vm->registers[i]);
-    puts("");
-  }
-#endif
   return 0;
 vm_end:
   return 1;

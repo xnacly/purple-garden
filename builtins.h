@@ -2,14 +2,10 @@
 
 #include "common.h"
 #include "mem.h"
+#include "vm.h"
 
-// Represents the type signature for a builtin function
-typedef Value *(*builtin_function)(const Value **args, size_t count,
-                                   Allocator *alloc);
-
-Value *builtin_print(const Value **arg, size_t count, Allocator *alloc);
-Value *builtin_println(const Value **arg, size_t count, Allocator *alloc);
-Value *builtin_len(const Value **arg, size_t count, Allocator *alloc);
-Value *builtin_type(const Value **arg, size_t count, Allocator *alloc);
-
-Value *builtin_Some(const Value **arg, size_t count, Allocator *alloc);
+void builtin_print(Vm *vm);
+void builtin_println(Vm *vm);
+void builtin_len(Vm *vm);
+void builtin_type(Vm *vm);
+void builtin_Some(Vm *vm);

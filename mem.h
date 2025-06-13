@@ -1,7 +1,7 @@
 #ifndef MEM_H
 #define MEM_H
 
-#include "common.h"
+#include <stddef.h>
 
 typedef struct {
   size_t current;

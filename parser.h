@@ -51,4 +51,6 @@ Parser Parser_new(Allocator *alloc, Token **t);
 // Returns the next top level Node
 Node Parser_next(Parser *p);
 size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes);
+#if DEBUG
 void Node_debug(Node *n, size_t depth);
+#endif

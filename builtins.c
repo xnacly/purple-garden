@@ -1,9 +1,11 @@
 #include "builtins.h"
 #include "common.h"
-#include "vm.h"
 
 static void print_value(const Value *v) {
   switch (v->type) {
+  case V_UNDEFINED:
+    printf("undefined");
+    break;
   case V_OPTION: {
     if (v->option.is_some) {
       printf("Some(");
@@ -44,24 +46,18 @@ static void print_value(const Value *v) {
 }
 
 // print works the same as println but without the newline
-Value *builtin_print(const Value **arg, size_t count, Allocator *alloc) {
-  if (count == 1) {
-    print_value(arg[0]);
-  } else {
-    for (size_t i = 0; i < count; i++) {
-      print_value(arg[i]);
-      putc(' ', stdout);
-    }
+void builtin_print(Vm *vm) {
+  for (size_t i = 1; i < vm->arg_count + 1; i++) {
+    print_value(&vm->registers[i]);
+    putc(' ', stdout);
   }
-  return INTERNED_NONE;
 }
 
 // println outputs its argument to stdout, joined with ' ' and postfixed with a
 // newline
-Value *builtin_println(const Value **arg, size_t count, Allocator *alloc) {
-  builtin_print(arg, count, alloc);
+void builtin_println(Vm *vm) {
+  builtin_print(vm);
   putc('\n', stdout);
-  return INTERNED_NONE;
 }
 
 // len returns the value of its argument:
@@ -69,29 +65,29 @@ Value *builtin_println(const Value **arg, size_t count, Allocator *alloc) {
 // - for V_STRING: string length
 // - for V_LIST: amount of children in list
 // - else None
-Value *builtin_len(const Value **arg, size_t count, Allocator *alloc) {
-  ASSERT(count == 1, "len only works for a singular argument")
-  const Value *a = arg[0];
+void builtin_len(Vm *vm) {
+  ASSERT(vm->arg_count == 1, "@len only works for a singular argument")
+  const Value *a = &vm->registers[1];
+  size_t len = 0;
   if (a->type == V_STR) {
-    Value *v = alloc->request(alloc->ctx, sizeof(Value));
-    v->type = V_INT;
-    v->integer = a->string.len;
-    return v;
+    len = a->string.len;
   } else if (a->type == V_ARRAY) {
-    Value *v = alloc->request(alloc->ctx, sizeof(Value));
-    v->type = V_INT;
-    v->integer = a->array.len;
-    return v;
+    len = a->array.len;
   } else {
-    fputs("builtin_len only strings and lists have a length", stderr);
+    fputs("@len only strings and lists have a length", stderr);
     exit(EXIT_FAILURE);
   }
+
+  vm->registers[0] = (Value){
+      .type = V_INT,
+      .integer = len,
+  };
 }
 
-Value *builtin_type(const Value **arg, size_t count, Allocator *alloc) {
-  ASSERT(count == 1, "type only accepts one argument")
+void builtin_type(Vm *vm) {
+  ASSERT(vm->arg_count == 1, "@type only works for a singular argument")
   Str s;
-  switch (arg[0]->type) {
+  switch (vm->registers[1].type) {
   case V_OPTION:
     s = STRING("option");
     break;
@@ -112,17 +108,22 @@ Value *builtin_type(const Value **arg, size_t count, Allocator *alloc) {
   default:
   }
 
-  Value *v = alloc->request(alloc->ctx, sizeof(Value));
-  v->type = V_STR;
-  v->string = s;
-  return v;
+  vm->registers[0] = (Value){
+      .type = V_STR,
+      .string = s,
+  };
 }
 
-Value *builtin_Some(const Value **arg, size_t count, Allocator *alloc) {
-  ASSERT(count == 1, "Some: expected 1 argument, got %zu", count)
-  Value *v = alloc->request(alloc->ctx, sizeof(Value));
-  v->type = V_OPTION;
-  v->option.value = (const struct Value *)arg[0];
-  v->option.is_some = true;
-  return v;
+void builtin_Some(Vm *vm) {
+  ASSERT(vm->arg_count == 1, "@type only works for a singular argument")
+  Value *inner = vm->alloc->request(vm->alloc->ctx, sizeof(Value));
+  *inner = vm->registers[1];
+  struct Option o = (struct Option){
+      .is_some = true,
+      .value = inner,
+  };
+  vm->registers[0] = (Value){
+      .type = V_OPTION,
+      .option = o,
+  };
 }

@@ -258,7 +258,7 @@ int main(int argc, char **argv) {
 
     vm_alloc->ctx = vm_alloc->init(a.block_allocator);
   }
-  int runtime_code = Vm_run(&vm, vm_alloc);
+  int runtime_code = Vm_run(&vm);
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
 
   if (UNLIKELY(a.memory_usage)) {
