@@ -184,6 +184,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
                  "definition, got `%.*s`",
                  (int)name->len, name->p, (int)NODE_TYPE_MAP[param->type].len,
                  NODE_TYPE_MAP[param->type].p);
+          // PERF: changing args to start from r1 to starting from r0, thus
+          // saving a single OP_LOAD for each function invocation
           BC(OP_LOAD, i + 1);
           BC(OP_VAR, param->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
         }
