@@ -27,6 +27,19 @@ Str Str_slice(const Str *str, size_t start, size_t end) {
   };
 }
 
+// Str_concat allocates a block of a->len+b->len, copies the underlying strings
+// from a and b into said block and returns a Str as a view
+Str Str_concat(const Str *a, const Str *b, Allocator *alloc) {
+  size_t len = a->len + b->len;
+  const uint8_t *s = alloc->request(alloc->ctx, len);
+  memcpy((void *)s, a->p, a->len);
+  memcpy((void *)(s + a->len), b->p, b->len);
+  return (Str){
+      .p = s,
+      .len = len,
+  };
+}
+
 bool Str_eq(const Str *a, const Str *b) {
   ASSERT(a != NULL, "Str_eq: a is NULL");
   ASSERT(b != NULL, "Str_eq: b is NULL");
