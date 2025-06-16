@@ -24,7 +24,7 @@ void *bump_request(void *ctx, size_t size) {
   BumpCtx *b_ctx = (BumpCtx *)ctx;
   size_t align = sizeof(void *);
   b_ctx->pos = (b_ctx->pos + align - 1) & ~(align - 1);
-  ASSERT(b_ctx->pos + size <= b_ctx->len, "OOM :(");
+  ASSERT(b_ctx->pos + size <= b_ctx->len, "OOM :( with %zu", b_ctx->len);
   void *block_entry = (char *)b_ctx->block + b_ctx->pos;
   b_ctx->pos += size;
   return block_entry;

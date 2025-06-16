@@ -95,18 +95,14 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         expected_index = cached_index - 1;
       } else {
         ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
-               "cc: out of global space, what the fuck are you doing (there is "
-               "space "
-               "for 256k globals)");
+               "cc: out of global space, what the fuck are you doing");
         ctx->global_hash_buckets[hash] = vm->global_len + 1;
         vm->globals[vm->global_len++] = token_to_value(n->token, alloc);
       }
       BC(OP_LOADG, expected_index)
     } else {
       ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
-             "cc: out of global space, what the fuck are you doing (there is "
-             "space "
-             "for 256k globals)");
+             "cc: out of global space, what the fuck are you doing");
       vm->globals[vm->global_len] = token_to_value(n->token, alloc);
       BC(OP_LOADG, vm->global_len++)
     }

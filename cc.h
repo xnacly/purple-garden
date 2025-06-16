@@ -10,8 +10,7 @@
   vm->bytecode[vm->bytecode_len++] = CODE;                                     \
   vm->bytecode[vm->bytecode_len++] = ARG;                                      \
   ASSERT(vm->bytecode_len <= BYTECODE_SIZE,                                    \
-         "cc: out of bytecode space, what the fuck are you doing (there is "   \
-         "space for 4MB of bytecode)");
+         "cc: out of bytecode space, what the fuck are you doing");
 
 #define GROW_FACTOR 2
 
