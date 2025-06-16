@@ -135,7 +135,12 @@ int Vm_run(Vm *vm) {
     case OP_ADD: {
       Value *left = &vm->registers[0];
       Value *right = &vm->registers[arg];
-      if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
+      if (left->type == V_STR && right->type == V_STR) {
+        vm->registers[0] = (Value){
+            .type = V_STR,
+            .string = Str_concat(&right->string, &left->string, vm->alloc),
+        };
+      } else if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
         vm->registers[0].floating =
             Value_as_double(right) + Value_as_double(left);
         vm->registers[0].type = V_DOUBLE;
