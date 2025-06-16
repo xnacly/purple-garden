@@ -43,6 +43,9 @@ inline static Value *token_to_value(Token *t, Allocator *a) {
 static size_t Ctx_allocate_register(Ctx *ctx) {
   ASSERT(ctx->register_allocated_count < REGISTERS, "cc: out of registers")
   ctx->registers[ctx->register_allocated_count] = true;
+#if DEBUG
+  printf("allocating r%zu\n", ctx->register_allocated_count);
+#endif
   return ctx->register_allocated_count++;
 }
 
@@ -51,6 +54,9 @@ static void Ctx_free_register(Ctx *ctx, size_t i) {
          "cc: register index out of bounds");
   assert(ctx->registers[i] && "cc: attempting to free unallocated register");
   ctx->register_allocated_count--;
+#if DEBUG
+  printf("freeing r%zu\n", ctx->register_allocated_count);
+#endif
   ctx->registers[i] = false;
 }
 
@@ -221,9 +227,15 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       builtin_function bf = vm->builtins[hash];
       ASSERT(bf != NULL, "Unknown builtin `@%.*s`", (int)s->len, s->p)
 
+      size_t registers[n->children_length];
       for (size_t i = 0; i < n->children_length; i++) {
         compile(alloc, vm, ctx, n->children[i]);
-        BC(OP_STORE, i + 1)
+        size_t r = Ctx_allocate_register(ctx);
+        registers[i] = r;
+        BC(OP_STORE, r)
+      }
+      for (int i = n->children_length - 1; i >= 0; i--) {
+        Ctx_free_register(ctx, registers[i]);
       }
 
       if (n->children_length > 1) {
@@ -241,11 +253,16 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     ASSERT(loc > -1, "Undefined function `%.*s`", (int)name->len, name->p)
 
     // we compile all arguments to bytecode one by one by one
+    size_t registers[n->children_length];
     for (size_t i = 0; i < n->children_length; i++) {
       compile(alloc, vm, ctx, n->children[i]);
-      BC(OP_STORE, i + 1)
+      size_t r = Ctx_allocate_register(ctx);
+      registers[i] = r;
+      BC(OP_STORE, r)
     }
-
+    for (int i = n->children_length - 1; i >= 0; i--) {
+      Ctx_free_register(ctx, registers[i]);
+    }
     if (n->children_length > 1) {
       BC(OP_ARGS, n->children_length);
     }
