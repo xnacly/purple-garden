@@ -1,8 +1,13 @@
 #include "vm.h"
+#include "builtins.h"
 #include "common.h"
 #include "mem.h"
 #include "strings.h"
 #include <stdint.h>
+
+// PERF: maybe 128 is too many, but prefetching a recursion depth can have
+// some positive effects on the runtime performance
+#define PREALLOCATE_FREELIST_SIZE 128
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
 
@@ -23,9 +28,9 @@ Vm Vm_new(Allocator *alloc) {
   vm.builtins = (void **)BUILTIN_MAP;
   vm.bytecode = alloc->request(alloc->ctx, (sizeof(uint32_t) * BYTECODE_SIZE));
   vm.globals = alloc->request(alloc->ctx, (sizeof(Value *) * GLOBAL_SIZE));
-  vm.globals[0] = INTERNED_FALSE;
-  vm.globals[1] = INTERNED_TRUE;
-  vm.globals[2] = INTERNED_NONE;
+  vm.globals[GLOBAL_FALSE] = INTERNED_FALSE;
+  vm.globals[GLOBAL_TRUE] = INTERNED_TRUE;
+  vm.globals[GLOBAL_NONE] = INTERNED_NONE;
   vm.global_len = 3;
 
   Vm_register_builtin(&vm, builtin_print, STRING("print"));
@@ -59,9 +64,7 @@ typedef struct {
 } FrameFreeList;
 
 void freelist_preallocate(FrameFreeList *fl) {
-  // PERF: maybe 256 is too many, but prefetching a recursion depth can have
-  // some positive effects on the runtime performance
-  for (size_t i = 0; i < 256; i++) {
+  for (size_t i = 0; i < PREALLOCATE_FREELIST_SIZE; i++) {
     Frame *frame = fl->alloc->request(fl->alloc->ctx, sizeof(Frame));
     frame->prev = fl->head;
     fl->head = frame;
@@ -119,18 +122,18 @@ int Vm_run(Vm *vm) {
       // bounds checking and checking for variable validity is performed at
       // compile time, but we still have to check if the variable is available
       // in the current scope...
-      Value *v = vm->frame->variable_table[arg];
-      if (v == NULL) {
+      Value v = vm->frame->variable_table[arg];
+      if (v.type == V_UNDEFINED) {
         VM_ERR("Undefined variable with hash %i", arg);
       }
-      vm->registers[0] = *v;
+      vm->registers[0] = v;
       break;
     }
     case OP_STORE:
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      vm->frame->variable_table[arg] = NEW(vm->registers[0]);
+      vm->frame->variable_table[arg] = vm->registers[0];
       break;
     case OP_ADD: {
       Value *left = &vm->registers[0];

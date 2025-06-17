@@ -1,6 +1,6 @@
 #pragma once
 
-#include "vm.h"
+#include "parser.h"
 
 #ifndef DISASSEMBLE_INCLUDE_POSITIONS
 #define DISASSEMBLE_INCLUDE_POSITIONS 0

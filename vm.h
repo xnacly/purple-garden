@@ -1,10 +1,11 @@
 #pragma once
 
-#include "builtins.h"
 #include "common.h"
-#include "parser.h"
 #include <stdint.h>
-#include <stdlib.h>
+
+#define GLOBAL_FALSE 0
+#define GLOBAL_TRUE 1
+#define GLOBAL_NONE 2
 
 static Value *INTERNED_TRUE = &(Value){.type = V_TRUE};
 static Value *INTERNED_FALSE = &(Value){.type = V_FALSE};

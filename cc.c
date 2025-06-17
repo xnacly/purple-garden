@@ -67,9 +67,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   case N_ARRAY: {
     if (n->children_length == 0) {
       ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
-             "cc: out of global space, what the fuck are you doing (there is "
-             "space "
-             "for 256k globals)");
+             "cc: out of global space, what the fuck are you doing");
       Value *v = alloc->request(alloc->ctx, sizeof(Value));
       v->type = V_ARRAY;
       v->array = (struct Array){.len = 0};
@@ -82,30 +80,55 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   }
   case N_ATOM: {
     // interning logic, global pool 0 is the only instance for false in the
-    // runtime, 1 for true, strings get interned by their hashes
+    // runtime, 1 for true, strings get interned by their hashes, doubles by
+    // their bits and ints by their integer representation
+
+// High tag bits
+#define TAG_FALSE 0x1000000000000000ULL
+#define TAG_TRUE 0x2000000000000000ULL
+#define TAG_STRING 0x3000000000000000ULL
+#define TAG_DOUBLE 0x4000000000000000ULL
+#define TAG_INT 0x5000000000000000ULL
+
+// Tag mask to keep lower bits
+#define TAG_MASK 0x0FFFFFFFFFFFFFFFULL
+
+    size_t hash;
     if (n->token->type == T_FALSE) {
-      BC(OP_LOADG, 0)
+      BC(OP_LOADG, GLOBAL_FALSE);
+      break;
     } else if (n->token->type == T_TRUE) {
-      BC(OP_LOADG, 1)
+      BC(OP_LOADG, GLOBAL_TRUE);
+      break;
     } else if (n->token->type == T_STRING) {
-      size_t hash = n->token->string.hash & GLOBAL_MASK;
-      size_t cached_index = ctx->global_hash_buckets[hash];
-      size_t expected_index = vm->global_len;
-      if (cached_index) {
-        expected_index = cached_index - 1;
-      } else {
-        ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
-               "cc: out of global space, what the fuck are you doing");
-        ctx->global_hash_buckets[hash] = vm->global_len + 1;
-        vm->globals[vm->global_len++] = token_to_value(n->token, alloc);
-      }
-      BC(OP_LOADG, expected_index)
+      hash = TAG_STRING | (n->token->string.hash & TAG_MASK);
+    } else if (n->token->type == T_DOUBLE) {
+      // type punning by using token->integer while token->floating is filled
+      hash = TAG_DOUBLE | (n->token->integer & TAG_MASK);
+    } else if (n->token->type == T_INTEGER) {
+      hash = TAG_INT | (n->token->integer & TAG_MASK);
     } else {
       ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
              "cc: out of global space, what the fuck are you doing");
       vm->globals[vm->global_len] = token_to_value(n->token, alloc);
-      BC(OP_LOADG, vm->global_len++)
+      BC(OP_LOADG, vm->global_len++);
+      break;
     }
+
+    size_t bucket = hash & GLOBAL_MASK;
+    size_t cached_index = ctx->global_hash_buckets[bucket];
+    size_t expected_index = vm->global_len;
+
+    if (cached_index) {
+      expected_index = cached_index - 1;
+    } else {
+      ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
+             "cc: out of global space, what the fuck are you doing");
+      ctx->global_hash_buckets[bucket] = vm->global_len + 1;
+      vm->globals[vm->global_len++] = token_to_value(n->token, alloc);
+    }
+
+    BC(OP_LOADG, expected_index)
     break;
   }
   case N_IDENT: {
@@ -145,8 +168,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         break;
       };
       case COMPILE_BUILTIN_NONE: { // (@None)
-        // global idx 2 is Option::None
-        BC(OP_LOADG, 2);
+        BC(OP_LOADG, GLOBAL_NONE);
         break;
       }
       case COMPILE_BUILTIN_IF: { // (@if <condition> <s-expr's>)

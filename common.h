@@ -89,7 +89,7 @@ typedef struct Frame {
   // function
   size_t return_to_bytecode;
   // stores Values by their hash, serving as a variable table
-  Value *variable_table[VARIABLE_TABLE_SIZE];
+  Value variable_table[VARIABLE_TABLE_SIZE];
 } Frame;
 
 typedef struct {
