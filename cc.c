@@ -34,7 +34,7 @@ inline static Value *token_to_value(Token *t, Allocator *a) {
     v->floating = t->floating;
     break;
   default:
-    ASSERT(0, "Unsupported value for this")
+    ASSERT(0, "Unsupported value for this");
     break;
   }
   return v;

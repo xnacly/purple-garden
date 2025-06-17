@@ -187,7 +187,7 @@ int main(int argc, char **argv) {
                         + file_size_or_min
                         // size for nodes
                         + (file_size_or_min * sizeof(Node))) /
-                    3;
+                    2;
 
   pipeline_allocator.ctx = pipeline_allocator.init(min_size);
   VERBOSE_PUTS("mem::init: Allocated memory block of size=%zuB", min_size);
