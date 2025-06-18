@@ -1,4 +1,4 @@
-CC := gcc
+CC ?= gcc
 FLAGS := -std=c23 \
         -Wall -Wextra -Werror -fdiagnostics-color=always \
         -fno-common -Winit-self -Wfloat-equal -Wundef -Wshadow \
@@ -43,30 +43,36 @@ PG := ./examples/hello-world.garden
 
 all: release
 
+# Extra compile-time flags per binary
+DEBUG_EXTRA := -DDEBUG=1 -fsanitize=address,undefined -g3
+RELEASE_EXTRA := -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"'
+BENCH_EXTRA := -DCOMMIT='"BENCH"'
+
 # Ensure build dirs
 $(OBJ_DIR) $(BIN_DIR):
 	mkdir -p $@
 
-# Build .o files from .c
+# Object compilation uses EXTRA_FLAGS passed as a make variable
 $(OBJ_DIR)/%.o: %.c | $(OBJ_DIR)
 	@mkdir -p $(dir $@)
-	$(CC) $(FLAGS) -MMD -MP -c $< -o $@
+	$(CC) $(FLAGS) $(EXTRA_FLAGS) -MMD -MP -c $< -o $@
 
-# Final binaries
+# Final binaries pass appropriate EXTRA_FLAGS to the compile rule
+$(DEBUG_BIN): EXTRA_FLAGS := $(DEBUG_EXTRA)
 $(DEBUG_BIN): $(OBJ) | $(BIN_DIR)
-	$(CC) -g3 $(FLAGS) -fsanitize=address,undefined -DDEBUG=1 $^ -o $@
+	$(CC) $(FLAGS) $(DEBUG_EXTRA) $^ -o $@
 
-$(VERBOSE_BIN): $(OBJ) | $(BIN_DIR)
-	$(CC) -g3 $(FLAGS) $(RELEASE_FLAGS) $^ -o $@
-
+$(RELEASE_BIN): EXTRA_FLAGS := $(RELEASE_EXTRA)
 $(RELEASE_BIN): $(OBJ) | $(BIN_DIR)
-	$(CC) -g3 $(FLAGS) $(RELEASE_FLAGS) -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"' $^ -o $@
+	$(CC) $(FLAGS) $(RELEASE_FLAGS) $^ -o $@
 
+$(BENCH_BIN): EXTRA_FLAGS := $(BENCH_EXTRA)
 $(BENCH_BIN): $(OBJ) | $(BIN_DIR)
-	$(CC) $(FLAGS) $(RELEASE_FLAGS) -DCOMMIT='"BENCH"' $^ -o $@
+	$(CC) $(FLAGS) $(RELEASE_FLAGS) $(BENCH_EXTRA) $^ -o $@
 
+$(DEBUG_BIN): EXTRA_FLAGS := $(DEBUG_EXTRA)
 $(TEST_BIN): $(TEST_OBJ) | $(BIN_DIR)
-	$(CC) $(FLAGS) -g3 -fsanitize=address,undefined -DDEBUG=0 $^ -o $@
+	$(CC) $(FLAGS) $^ -o $@
 
 # Run targets
 run: $(DEBUG_BIN)

@@ -16,5 +16,18 @@
         pkgs.valgrind
       ];
     };
+
+    # this is missing git information since nix sucks ass and won't let me
+    # include the .git folder required for COMMIT and COMMIT_MSG in the :w
+    packages.${system}.default = pkgs.stdenv.mkDerivation {
+        name = "purple-garden";
+        src = ./.;
+        buildInputs = [ pkgs.gcc pkgs.gnumake];
+        buildPhase = "make release";
+        installPhase = ''
+            mkdir -p $out/bin
+            cp ./build/purple_garden $out/bin/pg
+        '';
+    };
   };
 }

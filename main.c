@@ -6,23 +6,13 @@
 
 #include "6cl/6cl.h"
 #include "cc.h"
+#include "commit.h"
 #include "common.h"
 #include "io.h"
 #include "lexer.h"
 #include "mem.h"
 #include "parser.h"
 #include "vm.h"
-
-#define CTX "pre"
-#define VERSION "alpha"
-
-#ifndef COMMIT
-#define COMMIT "(no commit associated)"
-#endif
-
-#ifndef COMMIT_MSG
-#define COMMIT_MSG "(no commit message associated)"
-#endif
 
 #define VERBOSE_PUTS(fmt, ...)                                                 \
   do {                                                                         \
