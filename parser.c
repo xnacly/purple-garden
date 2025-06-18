@@ -43,7 +43,7 @@ static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
     new = new < NODE_INITIAL_CHILD_SIZE ? NODE_INITIAL_CHILD_SIZE : new;
     Node **old = n->children;
     n->children = alloc->request(alloc->ctx, sizeof(Node *) * new);
-    if (n->children != NULL) {
+    if (old != NULL) {
       memcpy(n->children, old, sizeof(Node *) * n->children_length);
     }
     n->children_cap = new;
