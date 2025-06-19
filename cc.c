@@ -9,6 +9,15 @@
 #include "strings.h"
 #include "vm.h"
 
+#if DEBUG
+#define DEBUG_PUTS(fmt, ...)                                                   \
+  do {                                                                         \
+    printf("[CC] " fmt "\n", ##__VA_ARGS__);                                   \
+  } while (0)
+#else
+#define DEBUG_PUTS(fmt, ...)
+#endif
+
 // token_to_value converts tokens, such as strings, boolean and numbers to
 // runtime values
 inline static Value *token_to_value(Token *t, Allocator *a) {
@@ -180,10 +189,22 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
                "@function expects <name> [<arguments>] [body]");
         Str *name = &n->children[0]->token->string;
         size_t hash = name->hash & MAX_BUILTIN_SIZE_MASK;
-        ctx->function_hash_to_bytecode_index[hash] = vm->bytecode_len;
-        // TODO: replace this with the new annotation systems
-        ctx->function_hash_to_function_name[hash] =
-            n->children[0]->token->string;
+        Node **params = n->children[1]->children;
+        size_t param_len = n->children[1]->children_length;
+
+        CtxFunction function_ctx = {
+            .name = &n->children[0]->token->string,
+            .bytecode_index = vm->bytecode_len,
+            .argument_count = param_len,
+        };
+        ctx->hash_to_function[hash] = function_ctx;
+
+        // PERF: optimisation for removing empty functions
+        if (n->children_length == 2) {
+          DEBUG_PUTS("Removing body of empty `%.*s` function",
+                     (int)function_ctx.name->len, function_ctx.name->p);
+          return;
+        }
 
         // this is the worst hack i have ever written, this is used to jump over
         // the bytecode of a function (header with args setup and body), so we
@@ -192,9 +213,6 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         size_t jump_op_index = vm->bytecode_len;
         BC(OP_JMP,
            0xAFFEDEAD); // https://de.wiktionary.org/wiki/Klappe_zu,_Affe_tot
-
-        Node **params = n->children[1]->children;
-        size_t param_len = n->children[1]->children_length;
 
         // Calling convention:
         //
@@ -224,6 +242,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         }
 
         vm->bytecode[jump_op_index + 1] = vm->bytecode_len;
+        ctx->hash_to_function[hash].size =
+            vm->bytecode_len - function_ctx.bytecode_index;
         BC(OP_LEAVE, 0);
         break;
       }
@@ -266,9 +286,21 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   }
   case N_CALL: { // function call site (<name> <args>)
     Str *name = &n->token->string;
-    int loc = ctx->function_hash_to_bytecode_index[name->hash &
-                                                   MAX_BUILTIN_SIZE_MASK];
-    ASSERT(loc > -1, "Undefined function `%.*s`", (int)name->len, name->p)
+    CtxFunction *func =
+        &ctx->hash_to_function[name->hash & MAX_BUILTIN_SIZE_MASK];
+    ASSERT(func->name != NULL, "Undefined function `%.*s`", (int)name->len,
+           name->p)
+    ASSERT(n->children_length == func->argument_count,
+           "`%.*s` wants %zu arguments, got %zu", (int)func->name->len,
+           func->name->p, func->argument_count, n->children_length);
+
+    // PERF: optimisation to remove calls to empty functions, since their
+    // definition is also removed
+    if (!func->size) {
+      DEBUG_PUTS("Removing call to empty `%.*s` function (size=%zu)",
+                 (int)func->name->len, func->name->p, func->size);
+      return;
+    }
 
     // we compile all arguments to bytecode one by one by one
     size_t registers[n->children_length];
@@ -285,7 +317,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       BC(OP_ARGS, n->children_length);
     }
 
-    BC(OP_CALL, loc);
+    BC(OP_CALL, func->bytecode_index);
     break;
   }
   default:
@@ -316,16 +348,8 @@ Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size) {
       .registers = {0},
       .global_hash_buckets =
           alloc->request(alloc->ctx, sizeof(Value) * GLOBAL_SIZE),
-      .function_hash_to_bytecode_index =
-          alloc->request(alloc->ctx, sizeof(size_t) * MAX_BUILTIN_SIZE),
-      .function_hash_to_function_name =
-          alloc->request(alloc->ctx, sizeof(Str) * MAX_BUILTIN_SIZE),
+      .hash_to_function = {},
   };
-
-#pragma GCC unroll 64
-  for (size_t i = 0; i < MAX_BUILTIN_SIZE; i++) {
-    ctx.function_hash_to_bytecode_index[i] = -1;
-  }
 
   for (size_t i = 0; i < size; i++) {
     compile(alloc, vm, &ctx, nodes[i]);

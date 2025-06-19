@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common.h"
 #include "parser.h"
 
 #ifndef DISASSEMBLE_INCLUDE_POSITIONS
@@ -23,14 +24,18 @@ typedef enum {
   COMPILE_BUILTIN_IF,
 } COMPILE_BUILTIN;
 
+typedef struct CtxFunction {
+  Str *name;
+  size_t size;
+  size_t bytecode_index;
+  size_t argument_count;
+} CtxFunction;
+
 typedef struct Ctx {
   bool registers[REGISTERS + 1];
   size_t *global_hash_buckets;
   size_t register_allocated_count;
-  int *function_hash_to_bytecode_index;
-  Str *function_hash_to_function_name;
-  // TODO:keep track of function sizes to remove calls to empty functions and
-  // their def
+  CtxFunction hash_to_function[MAX_BUILTIN_SIZE];
 } Ctx;
 
 // cc requests a Node from parser::Parser_next compiles said Node and its

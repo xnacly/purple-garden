@@ -29,7 +29,8 @@ typedef struct {
   // Allocator::destroy cleans state up and deallocates any owned memory areas
   void (*destroy)(void *ctx);
   // Allocator::reset resets the allocator space while ideally keeping the
-  // memory allocated for future use.
+  // memory allocated for future use - thus making reclaiming and overwriting
+  // cheap
   void (*reset)(void *ctx);
 } Allocator;
 
@@ -38,7 +39,6 @@ typedef struct {
   size_t len;
   size_t pos;
 } BumpCtx;
-
 void *bump_init(size_t size);
 void *bump_request(void *ctx, size_t size);
 void bump_destroy(void *ctx);

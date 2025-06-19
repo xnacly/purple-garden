@@ -3,12 +3,6 @@
 #include "strings.h"
 #include "vm.h"
 
-// TODO: switch cc to emit these and the disassembler to use them
-typedef struct {
-  size_t at;
-  const char *comments;
-} Annotation;
-
 void disassemble(const Vm *vm, const Ctx *ctx) {
   if (vm->global_len > 0) {
     printf("__globals:\n\t");
@@ -30,13 +24,14 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
     for (size_t i = 0; i < vm->bytecode_len; i += 2) {
       if (ctx_available) {
         for (size_t j = 0; j < MAX_BUILTIN_SIZE; j++) {
-          size_t location = ctx->function_hash_to_bytecode_index[j];
-          if (location == i) {
-            if (location != 0) {
+          CtxFunction func = ctx->hash_to_function[j];
+          if (func.bytecode_index == i && func.name != NULL) {
+            if (func.bytecode_index != 0) {
               puts("");
             }
-            printf("\n__0x%06zX[%04zX]: ", i, j);
-            Str_debug(&ctx->function_hash_to_function_name[j]);
+            printf("\n; %.*s::{args=%zu,size=%zu}\n__0x%06zX[%04zX]: ",
+                   (int)func.name->len, func.name->p, func.argument_count,
+                   func.size, i, j);
           }
         }
       }
@@ -65,16 +60,16 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
 
       switch (op) {
       case OP_LOADG:
-        printf(": ");
+        printf("; ");
         Value_debug(vm->globals[arg]);
         break;
       case OP_CALL: {
         for (size_t j = 0; j < MAX_BUILTIN_SIZE; j++) {
-          size_t location = ctx->function_hash_to_bytecode_index[j];
-          if (location == arg) {
-            printf(": <");
-            Str_debug(&ctx->function_hash_to_function_name[j]);
-            printf(">");
+          CtxFunction func = ctx->hash_to_function[j];
+          if (func.bytecode_index == arg && func.name != NULL) {
+            printf("; <");
+            Str_debug(func.name);
+            printf("> $%zu", func.argument_count);
           }
         }
         break;

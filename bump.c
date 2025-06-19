@@ -38,7 +38,7 @@ void bump_destroy(void *ctx) {
   // pages,  but  the freeing could be delayed until memory pres‐
   // sure occurs.
   //
-  // TODO: benchmark this
+  // TODO: benchmark this (only interesting for dealloction performance)
   madvise(b_ctx->block, b_ctx->len, MADV_FREE);
   int res = munmap(b_ctx->block, b_ctx->len);
   ASSERT(res == 0, "munmap failed");

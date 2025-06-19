@@ -23,3 +23,6 @@
 (@function call5 [x] (call4 x))
 
 (@println (call5 0))
+
+(@function hello [])
+(hello)
