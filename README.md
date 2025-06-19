@@ -387,11 +387,11 @@ $ hotspot
 - [x] `cc`: fast path for `ADD,SUB,MUL,DIV` with one child and a fast path for two children
 - [x] `cc`, `vm`: operate only on references, not values
 - [x] `vm`: frame free list to make entering and leaving scopes as fast as possible
-- [x] `vm`: preallocate 256 frames for even faster scope interaction
+- [x] `vm`: preallocate 128 frames for even faster scope interaction (recursion)
 - [x] `vm`: `EQ` fastpath for checking if lhs and rhs point to the same memory region
 - [ ] `jit`: native compile functions before enterning the runtime, enabled via `+aot-functions`
 - [ ] `cc`: multiple string concatinations should use a shared buffer and only allocate on string usage
-- [ ] `cc`: deadcode elimination for empty functions and their callsites
+- [x] `cc`: deadcode elimination for empty functions and their callsites
 - [ ] `vm`: trail call optimisation
 - [ ] `vm`: merge smaller bytecode ops often used together into new ops
     - [x] `vm`: merge `LOAD` and `PUSH` consecutively into `PUSHG`
