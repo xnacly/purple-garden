@@ -29,60 +29,52 @@ nix develop
 make
 
 # results in:
-# ================== INPUTS ==================
 # ; vim: filetype=racket
 # 
 # ; @println is a predefined function responsible for writing to stdout
 # ; builtins are specifically called via @<builtin>
 # (@println "Hello" "World")
-# ================== TOKENS ==================
 # [T_DELIMITOR_LEFT]
 # [T_BUILTIN][println]
 # [T_STRING][Hello]
 # [T_STRING][World]
 # [T_DELIMITOR_RIGHT]
 # [T_EOF]
-# lex: 32768.09KB of 598016.00KB used (5.48%)
-# ================== ASTREE ==================
+# lex : 32768.09KB of 149504.00KB used (21.92%)
 # N_BUILTIN[T_BUILTIN][println](
 #  N_ATOM[T_STRING][Hello],
 #  N_ATOM[T_STRING][World]
 # )
-# parse: 40960.31KB of 598016.00KB used (6.85%)
-# ================== DISASM ==================
-# ; vim: filetype=asm
-# ; Vm {global=4/4194304, bytecode=10/4194304}
+# ast : 40960.27KB of 149504.00KB used (27.40%)
+# allocating r1
+# allocating r2
+# freeing r2
+# freeing r1
 # __globals:
 #         False; {idx=0}
 #         True; {idx=1}
-#         Str(`Hello`); {idx=2,hash=1847627}
-#         Str(`World`); {idx=3,hash=2157875}
+#         Option::None; {idx=2}
+#         Str(`Hello`); {idx=3,hash=274763}
+#         Str(`World`); {idx=4,hash=60723}
 # 
 # __entry:
-#         LOAD 2: Str(`Hello`)
-#         PUSH 0
-#         LOAD 3: Str(`World`)
+#         LOADG 3: Str(`Hello`)
+#         STORE 1
+#         LOADG 4: Str(`World`)
+#         STORE 2
 #         ARGS 2
-#         BUILTIN 2: <@println>
-# cc: 221216.38KB of 598016.00KB used (36.991715%)
-# [VM]: entering frame #1
-# ================== GLOBAL ==================
-# VM[glob1/4] False
-# VM[glob2/4] True
-# VM[glob3/4] Str(`Hello`)
-# VM[glob4/4] Str(`World`)
-# ================== VM OPS ==================
-# VM[000000][LOAD    ][         2]: {.registers=[ Str(`Hello`) ]}
-# VM[000002][PUSH    ][         0]: {.registers=[ Str(`Hello`) ],.stack=[ Str(`Hello`) ]}
-# VM[000004][LOAD    ][         3]: {.registers=[ Str(`World`) ],.stack=[ Str(`Hello`) ]}
-# VM[000006][ARGS    ][         2]: {.registers=[ Str(`World`) ],.stack=[ Str(`Hello`) ]}
+#         BUILTIN 166
+# cc  : 69632.34KB of 149504.00KB used (46.575567%)
 # Hello World
-# VM[000008][BUILTIN ][         2]: {.registers=[ Option(None) ]}
-# ==================  REGS  ==================
-# VM[r0]: Option(None)
-# ================== MEMORY ==================
-# cc: 221732.38KB of 598016.00KB used (37.078000%)
-# vm: 221732.38KB of 598016.00KB used (37.078000%)
+# vm  : 70658.34KB of 149504.00KB used (47.261836%)
+# | Opcode     | Compiled %               | Executed %               |
+# | ---------- | ------------------------ | ------------------------ |
+# | STORE      | 2               (33.33%) | 2               (33.33%) |
+# | LOADG      | 2               (33.33%) | 2               (33.33%) |
+# | ARGS       | 1               (16.67%) | 1               (16.67%) |
+# | BUILTIN    | 1               (16.67%) | 1               (16.67%) |
+# | ========== | ======================== | ======================== |
+# | ::<>       | 6               (99.99%) | 6               (99.99%) |
 
 # provide a custom file to execute
 make PG=examples/ops.garden
@@ -95,13 +87,13 @@ make PG=examples/ops.garden
 ```sh
 $ make release
 ./purple_garden
-# error: Missing a file? try `-h/--help`
-$ ./purple_garden -h
-# usage ./purple_garden: [ +v / +version] [ +d / +disassemble]
-#                        [ +b / +block-allocator <long=0>] [ +a / +aot-functions]
-#                        [ +m / +memory-usage] [ +V / +verbose]
-#                        [ +r / +run <string=``>]
-#                        [ +h / +help] <file.garden>
+# error: Missing a file? try `+h/+help`
+$ ./purple_garden +h
+# usage ./build/purple_garden: [ +v / +version] [ +d / +disassemble]
+#                              [ +b / +block-allocator <long=0>] [ +a / +aot-functions]
+#                              [ +m / +memory-usage] [ +V / +verbose]
+#                              [ +s / +stats] [ +r / +run <string=``>]
+#                              [ +h / +help] <file.garden>
 # 
 # Option:
 #           +v / +version
@@ -122,6 +114,9 @@ $ ./purple_garden -h
 #           +V / +verbose
 #                 verbose logging
 # 
+#           +s / +stats
+#                 show statistics
+# 
 #           +r / +run <string=``>
 #                 executes the argument as if an input file was given
 # 
@@ -129,56 +124,59 @@ $ ./purple_garden -h
 #                 help page and usage
 # 
 # Examples:
-#         ./purple_garden +v +d \
-#                         +b 0 +a \
-#                         +m +V \
-#                         +r ""
+#         ./build/purple_garden +v +d \
+#                               +b 0 +a \
+#                               +m +V \
+#                               +s +r ""
 # 
-#         ./purple_garden +version +disassemble \
-#                         +block-allocator 0 +aot-functions \
-#                         +memory-usage +verbose \
-#                         +run ""
+#         ./build/purple_garden +version +disassemble \
+#                               +block-allocator 0 +aot-functions \
+#                               +memory-usage +verbose \
+#                               +stats +run ""
 ```
 
 ### Running tests
 
 ```sh
 $ make test
-# [+][PASS][Case 1/34] in=`3.1415`
-# [+][PASS][Case 2/34] in=`.1415`
-# [+][PASS][Case 3/34] in=`"string"`
-# [+][PASS][Case 4/34] in=`true false`
-# [+][PASS][Case 5/34] in=`true false true false`
-# [+][PASS][Case 6/34] in=`"hello"`
-# [+][PASS][Case 7/34] in=`(+2 2)`
-# [+][PASS][Case 8/34] in=`(-5 3)`
-# [+][PASS][Case 9/34] in=`(*3 4)`
-# [+][PASS][Case 10/34] in=`(/ 6 2)`
-# [+][PASS][Case 11/34] in=`(+1(-2 1))`
-# [+][PASS][Case 12/34] in=`(+2.0 2)`
-# [+][PASS][Case 13/34] in=`(+2 2.0)`
-# [+][PASS][Case 14/34] in=`(-5.0 3)`
-# [+][PASS][Case 15/34] in=`(-5 3.0)`
-# [+][PASS][Case 16/34] in=`(*3.0 4)`
-# [+][PASS][Case 17/34] in=`(*3 4.0)`
-# [+][PASS][Case 18/34] in=`(/ 6.0 2)`
-# [+][PASS][Case 19/34] in=`(/ 6 2.0)`
-# [+][PASS][Case 20/34] in=`(@len "hello")`
-# [+][PASS][Case 21/34] in=`(@len "hello")(@len "hello")`
-# [+][PASS][Case 22/34] in=`(@len "")`
-# [+][PASS][Case 23/34] in=`(@len "a")`
-# [+][PASS][Case 24/34] in=`(= 1 1)`
-# [+][PASS][Case 25/34] in=`(= "abc" "abc")`
-# [+][PASS][Case 26/34] in=`(= 3.1415 3.1415)`
-# [+][PASS][Case 27/34] in=`(= true true)`
-# [+][PASS][Case 28/34] in=`(= false false)`
-# [+][PASS][Case 29/34] in=`(@assert true)`
-# [+][PASS][Case 30/34] in=`(@let name "user")`
-# [+][PASS][Case 31/34] in=`(@let name "user")name`
-# [+][PASS][Case 32/34] in=`(@let age 25)age`
-# [+][PASS][Case 33/34] in=`(@function ret[arg] arg)(ret 25)`
-# [+][PASS][Case 34/34] in=`(@function add25[arg](+arg 25))(add25 25)`
-# 34 of 34 passed, 0 failed
+# [+][PASS][Case 1/37] in=`3.1415`
+# [+][PASS][Case 2/37] in=`.1415`
+# [+][PASS][Case 3/37] in=`"string"`
+# [+][PASS][Case 4/37] in=`true false`
+# [+][PASS][Case 5/37] in=`true false true false`
+# [+][PASS][Case 6/37] in=`"hello"`
+# [+][PASS][Case 7/37] in=`(+2 2)`
+# [+][PASS][Case 8/37] in=`(-5 3)`
+# [+][PASS][Case 9/37] in=`(*3 4)`
+# [+][PASS][Case 10/37] in=`(/ 6 2)`
+# [+][PASS][Case 11/37] in=`(+1(-2 1))`
+# [+][PASS][Case 12/37] in=`(+2.0 2)`
+# [+][PASS][Case 13/37] in=`(+2 2.0)`
+# [+][PASS][Case 14/37] in=`(-5.0 3)`
+# [+][PASS][Case 15/37] in=`(-5 3.0)`
+# [+][PASS][Case 16/37] in=`(*3.0 4)`
+# [+][PASS][Case 17/37] in=`(*3 4.0)`
+# [+][PASS][Case 18/37] in=`(/ 6.0 2)`
+# [+][PASS][Case 19/37] in=`(/ 6 2.0)`
+# [+][PASS][Case 20/37] in=`(@len "hello")`
+# [+][PASS][Case 21/37] in=`(@len "hello")(@len "hello")`
+# [+][PASS][Case 22/37] in=`(@len "")`
+# [+][PASS][Case 23/37] in=`(@len "a")`
+# [+][PASS][Case 24/37] in=`(= 1 1)`
+# [+][PASS][Case 25/37] in=`(= "abc" "abc")`
+# [+][PASS][Case 26/37] in=`(= 3.1415 3.1415)`
+# [+][PASS][Case 27/37] in=`(= true true)`
+# [+][PASS][Case 28/37] in=`(= true false)`
+# [+][PASS][Case 29/37] in=`(= false false)`
+# [+][PASS][Case 30/37] in=`(@let name "user")name`
+# [+][PASS][Case 31/37] in=`(@let age 25)age`
+# [+][PASS][Case 32/37] in=`(@function ret[arg] arg)(ret 25)`
+# [+][PASS][Case 33/37] in=`(@function add25[arg](+arg 25))(add25 25)`
+# [+][PASS][Case 34/37] in=`(@assert true)`
+# [+][PASS][Case 35/37] in=`(@None)`
+# [+][PASS][Case 36/37] in=`(@Some true)`
+# [+][PASS][Case 37/37] in=`(@Some false)`
+# [=] 37/37 passed, 0 failed
 ```
 
 
@@ -212,15 +210,17 @@ Results in `Hello World` and of course bytecode disassembly:
 __globals:
         False; {idx=0}
         True; {idx=1}
-        Str(`Hello`); {idx=2,hash=1847627}
-        Str(`World`); {idx=3,hash=2157875}
+        Option::None; {idx=2}
+        Str(`Hello`); {idx=3,hash=274763}
+        Str(`World`); {idx=4,hash=60723}
 
 __entry:
-        LOAD 2: Str(`Hello`)
-        PUSH 0
-        LOAD 3: Str(`World`)
+        LOADG 3; Str(`Hello`)
+        STORE 1
+        LOADG 4; Str(`World`)
+        STORE 2
         ARGS 2
-        BUILTIN 2: <@println>
+        BUILTIN 166
 ```
 
 Or of course the benchmark example:
@@ -229,47 +229,45 @@ Or of course the benchmark example:
 __globals:
         False; {idx=0}
         True; {idx=1}
-        Str(`b`); {idx=2,hash=798181}
-        Str(`a`); {idx=3,hash=796972}
-        Double(2.5); {idx=4}
+        Option::None; {idx=2}
+        Double(2.5); {idx=3}
 
 __entry:
-__0x000000[00B2]: comparer
-        JMP 26
+; comparer::{args=2,size=20}
+__0x000000[00B2]:
+        JMP 20
+        LOAD 1
+        VAR 44
+        LOAD 2
+        VAR 229
+        LOADV 44
         STORE 1
-        LOAD 2: Str(`b`)
-        VAR 1
-        POP
-        STORE 1
-        LOAD 3: Str(`a`)
-        VAR 1
-        LOADV 796972: $a
-        STORE 1
-        LOADV 798181: $b
+        LOADV 229
         EQ 1
-        BUILTIN 1: <@assert>
+        ASSERT
         LEAVE
 
 
-__0x00001C[0047]: inc
-        JMP 46
+; inc::{args=1,size=18}
+__0x000016[0047]:
+        JMP 40
+        LOAD 1
+        VAR 44
+        LOADV 44
         STORE 1
-        LOAD 3: Str(`a`)
-        VAR 1
-        LOADV 796972: $a
-        PUSH 0
-        LOADV 796972: $a
+        LOADV 44
+        STORE 2
         ARGS 2
-        CALL 0: <comparer>
+        CALL 0; <comparer> $2
         LEAVE
 
-        LOAD 4: Double(2.5)
-        CALL 28: <inc>
+        LOADG 3; Double(2.5)
+        STORE 1
+        CALL 22; <inc> $1
 ```
 
 The disassembler attempts to display as much information as possible:
 
-- allocation informations `Vm {<field>=<actual elements>/<allocated element space>}`
 - elements of the global pool, their pool index and their hashes
 - readable bytecode names: `LOAD` and `BUILTIN` instead of `0` and `6`
 - global pool values for certain bytecode operators: ```global=Str(`Hello World`)```
@@ -305,22 +303,22 @@ notated between `[` and `]`.
 # built in time measurements
 $ make bench PG=examples/bench.garden
 # [    0.0000ms] main::Args_parse: Parsed arguments
-# [    0.0110ms] io::IO_read_file_to_string: mmaped input of size=2500090B
-# [    0.0040ms] mem::init: Allocated memory block of size=612368384B
-# [   13.5170ms] lexer::Lexer_all: lexed tokens count=1000033
-# [    8.2350ms] parser::Parser_next created AST with node_count=250003
-# [    6.8260ms] cc::cc: Flattened AST to byte code/global pool length=1000052/250005
-# [   20.5990ms] vm::Vm_run: executed byte code
-# [    0.4510ms] mem::Allocator::destroy: Deallocated memory space
+# [    0.0240ms] io::IO_read_file_to_string: mmaped input of size=2500090B
+# [    0.0050ms] mem::init: Allocated memory block of size=153092096B
+# [   28.6080ms] lexer::Lexer_all: lexed tokens count=1000033
+# [   16.7020ms] parser::Parser_next created AST with node_count=250003
+# [    9.4510ms] cc::cc: Flattened AST to byte code/global pool length=1500048/4
+# [   35.7510ms] vm::Vm_run: executed byte code
+# [    0.4220ms] mem::Allocator::destroy: Deallocated memory space
 # [    0.0000ms] vm::Vm_destroy: teared vm down
 # [    0.0000ms] munmap: unmapped input
 
 # or hyperfine
 $ make release
 $ hyperfine "./purple_garden examples/bench.garden"
-# Benchmark 1: ./purple_garden examples/bench.garden
-#   Time (mean ± σ):      49.0 ms ±   0.8 ms    [User: 40.5 ms, System: 7.9 ms]
-#   Range (min … max):    48.0 ms …  52.6 ms    60 runs
+# Benchmark 1: ./build/purple_garden examples/bench.garden
+#   Time (mean ± σ):      80.8 ms ±   4.6 ms    [User: 71.9 ms, System: 7.6 ms]
+#   Range (min … max):    74.7 ms … 101.6 ms    34 runs
 ```
 
 ### Profiling
@@ -347,7 +345,7 @@ $ hotspot
   - [x] strings
   - [x] booleans
   - [x] lists
-  - [ ] optionals (support in backend - compiler, vm)
+  - [x] optionals (support in backend - compiler, vm)
   - [ ] objects
 - [ ] language constructs
   - [x] variables
@@ -356,7 +354,7 @@ $ hotspot
   - [ ] loops
   - [x] functions
   - [ ] pattern matching
-- [ ] builtins
+- [x] builtins
   - [x] println
   - [x] print
   - [x] len
@@ -393,6 +391,7 @@ $ hotspot
 - [x] `vm`: `EQ` fastpath for checking if lhs and rhs point to the same memory region
 - [ ] `jit`: native compile functions before enterning the runtime, enabled via `+aot-functions`
 - [ ] `cc`: multiple string concatinations should use a shared buffer and only allocate on string usage
+- [ ] `cc`: deadcode elimination for empty functions and their callsites
 - [ ] `vm`: trail call optimisation
 - [ ] `vm`: merge smaller bytecode ops often used together into new ops
     - [x] `vm`: merge `LOAD` and `PUSH` consecutively into `PUSHG`
