@@ -3,6 +3,53 @@
 #include "common.h"
 #include <stdint.h>
 
+// A frame represents a Scope, a new scope is created upon entering a lambda -
+// since lambdas are pure there is no way to interact with the previous frame
+// inside of a lambda, the pointer is kept to allow the runtime to restore the
+// scope state to its state before entering the lambda
+//
+// WARNING: do not stack allocate, since variable_table can be huge
+typedef struct Frame {
+  struct Frame *prev;
+  // returning out of scope, we need to jump back to the callsite of the
+  // function
+  size_t return_to_bytecode;
+  // stores Values by their hash, serving as a variable table
+  Value variable_table[VARIABLE_TABLE_SIZE];
+} Frame;
+
+typedef struct {
+  uint32_t global_len;
+  // globals represents the global pool created by the bytecode compiler
+  Value **globals;
+
+  uint64_t bytecode_len;
+  uint32_t *bytecode;
+
+  // current position in the bytecode
+  size_t pc;
+  Value registers[REGISTERS + 1];
+
+  // frame stores variables of the current scope, meta data and other required
+  // data
+  Frame *frame;
+
+  // arg_count enables the vm to know how many register it needs to read
+  // and pass to the function called via CALL or BUILTIN
+  size_t arg_count;
+
+  // i have to type erase here :(
+  void **builtins;
+
+  Allocator *alloc;
+#if DEBUG
+  size_t instruction_counter[256];
+#endif
+} Vm;
+
+// Represents the type signature for a builtin function
+typedef void (*builtin_function)(Vm *vm);
+
 #define GLOBAL_FALSE 0
 #define GLOBAL_TRUE 1
 #define GLOBAL_NONE 2
@@ -108,7 +155,10 @@ typedef enum {
 
 extern Str OP_MAP[];
 
-Vm Vm_new(Allocator *alloc);
+// Creates a new virtual machine with registered builtins, static_alloc is used
+// to allocate space for both the global pool and the byte code space, alloc is
+// used in the virtual machine itself
+Vm Vm_new(Allocator *static_alloc, Allocator *alloc);
 void Vm_register_builtin(Vm *vm, builtin_function bf, Str name);
 int Vm_run(Vm *vm);
 void Vm_destroy(Vm *vm);

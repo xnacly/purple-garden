@@ -4,6 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// TODO: add a tag for Str.p not pointing into an mmaped space => they need to
+// be deallocated if dangling
+
 // str is a simple stack allocated wrapper around C char arrays, providing
 // constant time length access and zero allocation+copy interactions for all
 // methods except Str_to

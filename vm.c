@@ -5,9 +5,9 @@
 #include "strings.h"
 #include <stdint.h>
 
-// PERF: maybe 128 is too many, but prefetching a recursion depth can have
+// PERF: maybe _ is too many, but prefetching a recursion depth can have
 // some positive effects on the runtime performance
-#define PREALLOCATE_FREELIST_SIZE 128
+#define PREALLOCATE_FREELIST_SIZE 32
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
 
@@ -15,19 +15,14 @@ inline void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
   vm->builtins[Str_hash(&name) & MAX_BUILTIN_SIZE_MASK] = bf;
 }
 
-Vm Vm_new(Allocator *alloc) {
-  Vm vm = {
-      .alloc = alloc,
-      .global_len = 0,
-      .bytecode_len = 0,
-      .pc = 0,
-      .bytecode = NULL,
-      .globals = NULL,
-  };
+Vm Vm_new(Allocator *static_alloc, Allocator *alloc) {
+  Vm vm = {0};
+  vm.alloc = alloc;
 
   vm.builtins = (void **)BUILTIN_MAP;
-  vm.bytecode = alloc->request(alloc->ctx, (sizeof(uint32_t) * BYTECODE_SIZE));
-  vm.globals = alloc->request(alloc->ctx, (sizeof(Value *) * GLOBAL_SIZE));
+
+  vm.bytecode = CALL(static_alloc, request, (sizeof(uint32_t) * BYTECODE_SIZE));
+  vm.globals = CALL(static_alloc, request, (sizeof(uint32_t) * GLOBAL_SIZE));
   vm.globals[GLOBAL_FALSE] = INTERNED_FALSE;
   vm.globals[GLOBAL_TRUE] = INTERNED_TRUE;
   vm.globals[GLOBAL_NONE] = INTERNED_NONE;
@@ -84,7 +79,7 @@ void freelist_push(FrameFreeList *fl, Frame *frame) {
 
 #define NEW(...)                                                               \
   ({                                                                           \
-    Value *__v = vm->alloc->request(vm->alloc->ctx, sizeof(Value));            \
+    Value *__v = CALL(vm->alloc, request, sizeof(Value));                      \
     *__v = (Value)__VA_ARGS__;                                                 \
     __v;                                                                       \
   })
@@ -276,4 +271,4 @@ vm_end:
   return 1;
 }
 
-void Vm_destroy(Vm *vm) {}
+void Vm_destroy(Vm *vm) { CALL(vm->alloc, destroy); }

@@ -143,13 +143,6 @@ int main() {
   size_t len = sizeof(cases) / sizeof(Case);
   for (size_t i = 0; i < len; i++) {
     Case c = cases[i];
-    Allocator alloc = {
-        .init = bump_init,
-        .request = bump_request,
-        .destroy = bump_destroy,
-        .reset = bump_reset,
-    };
-
     size_t min_size = (
                           // size for globals
                           (MIN_MEM * sizeof(Value))
@@ -160,16 +153,23 @@ int main() {
                       2;
 
     Lexer l = Lexer_new(c.input);
-    alloc.ctx = alloc.init(min_size);
-    Token **tokens = alloc.request(alloc.ctx, MIN_MEM * sizeof(Token));
-    Lexer_all(&l, &alloc, tokens);
-    Parser p = Parser_new(&alloc, tokens);
+    Allocator *alloc = bump_init(min_size);
+    // specifically omitted, since the tests should not flake or have any memory
+    // issues that could be the result of gc issues, thus the bump allocator
+    // from bump.c is used and Vm_destroy calls alloc->destroy on said allocator
+    //
+    // CALL(alloc, destroy);
+    Token **tokens = CALL(alloc, request, MIN_MEM * sizeof(Token));
+    Lexer_all(&l, alloc, tokens);
+    Parser p = Parser_new(alloc, tokens);
     size_t node_count = MIN_MEM * sizeof(Node *) / 4;
-    Node **nodes = alloc.request(alloc.ctx, node_count);
+    Node **nodes = CALL(alloc, request, node_count);
     node_count = Parser_all(nodes, &p, node_count);
-    Vm _vm = Vm_new(&alloc);
+    // tests only use the bump allocator, no gc, as explained above, thus both
+    // static and vm runtime allocator are simply: alloc
+    Vm _vm = Vm_new(alloc, alloc);
     Vm *vm = &_vm;
-    Ctx ctx = cc(vm, &alloc, nodes, node_count);
+    Ctx ctx = cc(vm, alloc, nodes, node_count);
 
     bool error = false;
     Vm_run(vm);
@@ -187,7 +187,6 @@ int main() {
 #endif
       error = true;
     }
-    alloc.destroy(alloc.ctx);
 
     if (error) {
       failed++;

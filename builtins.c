@@ -116,7 +116,7 @@ void builtin_type(Vm *vm) {
 
 void builtin_Some(Vm *vm) {
   ASSERT(vm->arg_count == 1, "@type only works for a singular argument")
-  Value *inner = vm->alloc->request(vm->alloc->ctx, sizeof(Value));
+  Value *inner = CALL(vm->alloc, request, sizeof(Value));
   *inner = vm->registers[1];
   struct Option o = (struct Option){
       .is_some = true,

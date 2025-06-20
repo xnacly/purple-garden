@@ -3,14 +3,33 @@
 
 #include <stddef.h>
 
+// 5MB
+#define GC_MIN_HEAP 262144
+
 typedef struct {
   size_t current;
   size_t allocated;
 } Stats;
 
+// CALL is used to emulate method calls by calling a METHOD on SELF with
+// SELF->ctx and __VA_ARGS__, this is useful for interface interaction, such as
+// Allocator, which reduces alloc_bump.request(alloc_bump.ctx, 64); to
+// CALL(alloc_bump, request, 64), removing the need for passing the context in
+// manually
+#define CALL(SELF, METHOD, ...) (SELF)->METHOD((SELF)->ctx, ##__VA_ARGS__)
+
 // Allocator defines an interface abstracting different allocators, so the
 // runtime of the virtual machine does not need to know about implementation
 // details, can be used like this:
+//
+//
+//  #define ALLOC_HEAP_SIZE = 1024
+//  Allocator alloc_bump = bump_init(ALLOC_HEAP_SIZE);
+//
+//  size_t some_block_size = 16;
+//  void *some_block = alloc_bump.request(alloc_bump.ctx, some_block_size);
+//
+//  alloc_bump.destroy(alloc_bump.ctx);
 //
 typedef struct {
   // Allocator::ctx refers to an internal allocator state and owned memory
@@ -21,28 +40,13 @@ typedef struct {
   // Allocator::stats is expected to return the current statistics of the
   // underlying allocator
   Stats (*stats)(void *ctx);
-  // Allocator::init does initial house keeping and returns the value for
-  // Allocator::ctx, this MUST outlive any callsite
-  void *(*init)(size_t size);
   // Allocator::request returns a handle to a block of memory of size `size`
   void *(*request)(void *ctx, size_t size);
   // Allocator::destroy cleans state up and deallocates any owned memory areas
   void (*destroy)(void *ctx);
-  // Allocator::reset resets the allocator space while ideally keeping the
-  // memory allocated for future use - thus making reclaiming and overwriting
-  // cheap
-  void (*reset)(void *ctx);
 } Allocator;
 
-typedef struct {
-  void *block;
-  size_t len;
-  size_t pos;
-} BumpCtx;
-void *bump_init(size_t size);
-void *bump_request(void *ctx, size_t size);
-void bump_destroy(void *ctx);
-void bump_reset(void *ctx);
-Stats bump_stats(void *ctx);
+Allocator *bump_init(size_t size);
+Allocator *xcgc_init(size_t size, void *vm);
 
 #endif

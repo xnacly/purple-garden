@@ -160,15 +160,6 @@ int main(int argc, char **argv) {
   a.stats = true;
 #endif
 
-  // this allocator stores both nodes, bytecode and the global pool of the vm,
-  // thus it has to life exactly as long as the vm does.
-  Allocator pipeline_allocator = {
-      .init = bump_init,
-      .request = bump_request,
-      .destroy = bump_destroy,
-      .reset = bump_reset,
-      .stats = bump_stats,
-  };
   size_t file_size_or_min = (input.len < MIN_MEM ? MIN_MEM : input.len);
   size_t min_size = (
                         // size for globals
@@ -179,12 +170,14 @@ int main(int argc, char **argv) {
                         + (file_size_or_min * sizeof(Node))) /
                     2;
 
-  pipeline_allocator.ctx = pipeline_allocator.init(min_size);
+  // this allocator stores both nodes, bytecode and the global pool of the vm,
+  // thus it has to life exactly as long as the vm does.
+  Allocator *pipeline_allocator = bump_init(min_size);
   VERBOSE_PUTS("mem::init: Allocated memory block of size=%zuB", min_size);
   Lexer l = Lexer_new(input);
-  Token **tokens = pipeline_allocator.request(
-      pipeline_allocator.ctx, file_size_or_min * sizeof(Token *));
-  size_t count = Lexer_all(&l, &pipeline_allocator, tokens);
+  Token **tokens =
+      CALL(pipeline_allocator, request, file_size_or_min * sizeof(Token *));
+  size_t count = Lexer_all(&l, pipeline_allocator, tokens);
 #if DEBUG
   for (size_t i = 0; i < count; i++) {
     Token_debug(tokens[i]);
@@ -193,14 +186,14 @@ int main(int argc, char **argv) {
 #endif
   VERBOSE_PUTS("lexer::Lexer_all: lexed tokens count=%zu", count);
   if (UNLIKELY(a.memory_usage)) {
-    Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
+    Stats s = CALL(pipeline_allocator, stats);
     double percent = (s.current * 100) / (double)s.allocated;
     printf("lex : %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
   }
-  Parser p = Parser_new(&pipeline_allocator, tokens);
+  Parser p = Parser_new(pipeline_allocator, tokens);
   size_t node_count = file_size_or_min * sizeof(Node *) / 4;
-  Node **nodes = pipeline_allocator.request(pipeline_allocator.ctx, node_count);
+  Node **nodes = CALL(pipeline_allocator, request, node_count);
   node_count = Parser_all(nodes, &p, node_count);
 #if DEBUG
   for (size_t i = 0; i < node_count; i++) {
@@ -211,13 +204,16 @@ int main(int argc, char **argv) {
   VERBOSE_PUTS("parser::Parser_next created AST with node_count=%zu",
                node_count);
   if (UNLIKELY(a.memory_usage)) {
-    Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
+    Stats s = CALL(pipeline_allocator, stats);
     double percent = (s.current * 100) / (double)s.allocated;
     printf("ast : %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
   }
-  Vm vm = Vm_new(&pipeline_allocator);
-  Ctx ctx = cc(&vm, &pipeline_allocator, nodes, node_count);
+
+  // alloc is NULL here, because we are setting it later on, depending on the
+  // cli configuration
+  Vm vm = Vm_new(pipeline_allocator, NULL);
+  Ctx ctx = cc(&vm, pipeline_allocator, nodes, node_count);
   VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu",
                vm.bytecode_len, (size_t)vm.global_len);
 
@@ -227,32 +223,25 @@ int main(int argc, char **argv) {
   }
 
   if (UNLIKELY(a.memory_usage)) {
-    Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
+    Stats s = CALL(pipeline_allocator, stats);
     double percent = (s.current * 100) / (double)s.allocated;
     printf("cc  : %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
   }
 
-  // TODO: replace this with default gc
-  Allocator *vm_alloc = &pipeline_allocator;
   if (a.block_allocator > 0) {
     VERBOSE_PUTS(
         "vm: got --block-allocator, using bump allocator with size %zuB/%zuKB",
         a.block_allocator * 1024, a.block_allocator);
-    a.block_allocator *= 1024;
-    vm_alloc->init = bump_init;
-    vm_alloc->request = bump_request;
-    vm_alloc->destroy = bump_destroy;
-    vm_alloc->reset = bump_reset;
-    vm_alloc->stats = bump_stats;
-
-    vm_alloc->ctx = vm_alloc->init(a.block_allocator);
+    vm.alloc = bump_init(a.block_allocator * 1024);
+  } else {
+    vm.alloc = xcgc_init(GC_MIN_HEAP, &vm);
   }
   int runtime_code = Vm_run(&vm);
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
 
   if (UNLIKELY(a.memory_usage)) {
-    Stats s = pipeline_allocator.stats(pipeline_allocator.ctx);
+    Stats s = CALL(vm.alloc, stats);
     double percent = (s.current * 100) / (double)s.allocated;
     printf("vm  : %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
@@ -262,7 +251,7 @@ int main(int argc, char **argv) {
     bytecode_stats(&vm);
   }
 
-  pipeline_allocator.destroy(pipeline_allocator.ctx);
+  CALL(pipeline_allocator, destroy);
   VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");
 
   Vm_destroy(&vm);

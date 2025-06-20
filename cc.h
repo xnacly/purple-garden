@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "parser.h"
+#include "vm.h"
 
 #ifndef DISASSEMBLE_INCLUDE_POSITIONS
 #define DISASSEMBLE_INCLUDE_POSITIONS 0
