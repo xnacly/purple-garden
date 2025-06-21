@@ -36,11 +36,11 @@ inline static Value *token_to_value(Token *t, Allocator *a) {
     break;
   case T_INTEGER:
     v->type = V_INT;
-    v->integer = t->integer;
+    v->integer = Str_to_int64_t(&t->string);
     break;
   case T_DOUBLE:
     v->type = V_DOUBLE;
-    v->floating = t->floating;
+    v->floating = Str_to_double(&t->string);
     break;
   default:
     ASSERT(0, "Unsupported value for this");
@@ -113,9 +113,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       hash = TAG_STRING | (n->token->string.hash & TAG_MASK);
     } else if (n->token->type == T_DOUBLE) {
       // type punning by using token->integer while token->floating is filled
-      hash = TAG_DOUBLE | (n->token->integer & TAG_MASK);
+      hash = TAG_DOUBLE | (n->token->string.hash & TAG_MASK);
     } else if (n->token->type == T_INTEGER) {
-      hash = TAG_INT | (n->token->integer & TAG_MASK);
+      hash = TAG_INT | (n->token->string.hash & TAG_MASK);
     } else {
       ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
              "cc: out of global space, what the fuck are you doing");

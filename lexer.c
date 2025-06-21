@@ -202,8 +202,11 @@ number: {
   size_t start = l->pos;
   size_t i = start;
   bool is_double = false;
+  size_t hash = FNV_OFFSET_BASIS;
   for (; i < l->input.len; i++) {
     char cc = l->input.p[i];
+    hash ^= cc;
+    hash *= FNV_PRIME;
     if (cc >= '0' && cc <= '9')
       continue;
     if (cc == '.') {
@@ -215,17 +218,16 @@ number: {
   }
 
   l->pos = i;
-  Str s = {
+  Token *n = a->request(a->ctx, sizeof(Token));
+  n->string = (Str){
       .p = l->input.p + start,
       .len = i - start,
+      .hash = hash,
   };
-  Token *n = a->request(a->ctx, sizeof(Token));
   if (is_double) {
     n->type = T_DOUBLE;
-    n->floating = Str_to_double(&s);
   } else {
     n->type = T_INTEGER;
-    n->integer = Str_to_int64_t(&s);
   }
 
   out[count++] = n;
