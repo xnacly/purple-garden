@@ -1,4 +1,5 @@
 // TODO: split this up into a DEBUG and a performance entry point
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
@@ -252,6 +253,7 @@ int main(int argc, char **argv) {
   }
 
   CALL(pipeline_allocator, destroy);
+  free(pipeline_allocator);
   VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");
 
   Vm_destroy(&vm);

@@ -21,7 +21,7 @@
 // token_to_value converts tokens, such as strings, boolean and numbers to
 // runtime values
 inline static Value *token_to_value(Token *t, Allocator *a) {
-  Value *v = a->request(a->ctx, sizeof(Value));
+  Value *v = CALL(a, request, sizeof(Value));
   switch (t->type) {
   case T_STRING:
   case T_IDENT:
@@ -43,7 +43,7 @@ inline static Value *token_to_value(Token *t, Allocator *a) {
     v->floating = Str_to_double(&t->string);
     break;
   default:
-    ASSERT(0, "Unsupported value for this");
+    ASSERT(0, "Unsupported value for token_to_value");
     break;
   }
   return v;
@@ -77,7 +77,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     if (n->children_length == 0) {
       ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
              "cc: out of global space, what the fuck are you doing");
-      Value *v = alloc->request(alloc->ctx, sizeof(Value));
+      Value *v = CALL(alloc, request, sizeof(Value));
       v->type = V_ARRAY;
       v->array = (struct Array){.len = 0};
       vm->globals[vm->global_len] = v;
@@ -346,8 +346,7 @@ Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size) {
   Ctx ctx = {
       .register_allocated_count = 1,
       .registers = {0},
-      .global_hash_buckets =
-          alloc->request(alloc->ctx, sizeof(Value) * GLOBAL_SIZE),
+      .global_hash_buckets = CALL(alloc, request, sizeof(size_t) * GLOBAL_SIZE),
       .hash_to_function = {},
   };
 

@@ -20,6 +20,7 @@ static void xcgc_run(GcCtx *c) {
   // TODO: 1. add a bump allocator with 2kb for frames, separate from the gc
   // TODO: 2. add the Str tag for heap strings
   // TODO: 3. scan roots (variable table entries, registers)
+  ASSERT(0, "xcgc collection is not implemented yet")
 }
 
 void *gc_request(void *ctx, size_t size) {

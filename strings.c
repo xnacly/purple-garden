@@ -31,7 +31,7 @@ Str Str_slice(const Str *str, size_t start, size_t end) {
 // from a and b into said block and returns a Str as a view
 Str Str_concat(const Str *a, const Str *b, Allocator *alloc) {
   size_t len = a->len + b->len;
-  const uint8_t *s = alloc->request(alloc->ctx, len);
+  const uint8_t *s = CALL(alloc, request, len);
   memcpy((void *)s, a->p, a->len);
   memcpy((void *)(s + a->len), b->p, b->len);
   return (Str){

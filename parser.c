@@ -42,7 +42,7 @@ static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
     size_t new = n->children_cap *NODE_CAP_GROW;
     new = new < NODE_INITIAL_CHILD_SIZE ? NODE_INITIAL_CHILD_SIZE : new;
     Node **old = n->children;
-    n->children = alloc->request(alloc->ctx, sizeof(Node *) * new);
+    n->children = CALL(alloc, request, sizeof(Node *) * new);
     if (old != NULL) {
       memcpy(n->children, old, sizeof(Node *) * n->children_length);
     }
@@ -86,7 +86,7 @@ size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
   JUMP_NEXT;
 
 atom: {
-  Node *n = p->alloc->request(p->alloc->ctx, sizeof(Node));
+  Node *n = CALL(p->alloc, request, sizeof(Node));
   n->type = N_ATOM;
   n->token = p->cur;
   advance(p);
@@ -95,7 +95,7 @@ atom: {
 }
 
 ident: {
-  Node *n = p->alloc->request(p->alloc->ctx, sizeof(Node));
+  Node *n = CALL(p->alloc, request, sizeof(Node));
   n->type = N_IDENT;
   n->token = p->cur;
   advance(p);
@@ -104,7 +104,7 @@ ident: {
 }
 
 stmt_begin: {
-  Node *n = p->alloc->request(p->alloc->ctx, sizeof(Node));
+  Node *n = CALL(p->alloc, request, sizeof(Node));
   n->children_length = 0;
   n->children_cap = 0;
   consume(p, T_DELIMITOR_LEFT);
@@ -144,7 +144,7 @@ stmt_end: {
 }
 
 arr_start: {
-  Node *n = p->alloc->request(p->alloc->ctx, sizeof(Node));
+  Node *n = CALL(p->alloc, request, sizeof(Node));
   n->children_length = 0;
   n->children_cap = 0;
   n->type = N_ARRAY;

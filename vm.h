@@ -3,6 +3,10 @@
 #include "common.h"
 #include <stdint.h>
 
+// PERF: maybe _ is too many, but prefetching a recursion depth can have
+// some positive effects on the runtime performance
+#define PREALLOCATE_FREELIST_SIZE 32
+
 // A frame represents a Scope, a new scope is created upon entering a lambda -
 // since lambdas are pure there is no way to interact with the previous frame
 // inside of a lambda, the pointer is kept to allow the runtime to restore the

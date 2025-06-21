@@ -42,14 +42,8 @@ extern Str TOKEN_TYPE_MAP[];
 
 typedef struct {
   TokenType type;
-  union {
-    // filled when .type=T_STRING|T_IDENT
-    Str string;
-    // filled when .type=T_DOUBLE
-    double floating;
-    // filled when .type=T_INTEGER
-    int64_t integer;
-  };
+  // stores all values for T_STRING,T_IDENT,T_INTEGER and T_DOUBLE
+  Str string;
 } Token;
 
 #if DEBUG

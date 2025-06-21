@@ -3,8 +3,16 @@
 
 #include <stddef.h>
 
-// 5MB
-#define GC_MIN_HEAP 262144
+#ifdef DEBUG
+#if DEBUG
+#define VERBOSE_ALLOCATOR 1
+#endif
+#else
+#define VERBOSE_ALLOCATOR 0
+#endif
+
+// 1MB
+#define GC_MIN_HEAP 1024 * 1024
 
 typedef struct {
   size_t current;
@@ -16,7 +24,15 @@ typedef struct {
 // Allocator, which reduces alloc_bump.request(alloc_bump.ctx, 64); to
 // CALL(alloc_bump, request, 64), removing the need for passing the context in
 // manually
+#if VERBOSE_ALLOCATOR
+#include <stdio.h>
+#define CALL(SELF, METHOD, ...)                                                \
+  (fprintf(stderr, "[ALLOCATOR] %s@%s::%d: %s->%s(%s)\n", __FILE__, __func__,  \
+           __LINE__, #SELF, #METHOD, #__VA_ARGS__),                            \
+   (SELF)->METHOD((SELF)->ctx, ##__VA_ARGS__))
+#else
 #define CALL(SELF, METHOD, ...) (SELF)->METHOD((SELF)->ctx, ##__VA_ARGS__)
+#endif
 
 // Allocator defines an interface abstracting different allocators, so the
 // runtime of the virtual machine does not need to know about implementation

@@ -5,10 +5,6 @@
 #include "strings.h"
 #include <stdint.h>
 
-// PERF: maybe _ is too many, but prefetching a recursion depth can have
-// some positive effects on the runtime performance
-#define PREALLOCATE_FREELIST_SIZE 32
-
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
 
 inline void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
@@ -21,8 +17,8 @@ Vm Vm_new(Allocator *static_alloc, Allocator *alloc) {
 
   vm.builtins = (void **)BUILTIN_MAP;
 
-  vm.bytecode = CALL(static_alloc, request, (sizeof(uint32_t) * BYTECODE_SIZE));
-  vm.globals = CALL(static_alloc, request, (sizeof(uint32_t) * GLOBAL_SIZE));
+  vm.bytecode = CALL(static_alloc, request, sizeof(uint32_t) * BYTECODE_SIZE);
+  vm.globals = CALL(static_alloc, request, (sizeof(Value *) * GLOBAL_SIZE));
   vm.globals[GLOBAL_FALSE] = INTERNED_FALSE;
   vm.globals[GLOBAL_TRUE] = INTERNED_TRUE;
   vm.globals[GLOBAL_NONE] = INTERNED_NONE;
@@ -59,8 +55,8 @@ typedef struct {
 } FrameFreeList;
 
 void freelist_preallocate(FrameFreeList *fl) {
-  for (size_t i = 0; i < PREALLOCATE_FREELIST_SIZE; i++) {
-    Frame *frame = fl->alloc->request(fl->alloc->ctx, sizeof(Frame));
+  for (int i = 0; i < PREALLOCATE_FREELIST_SIZE; i++) {
+    Frame *frame = CALL(fl->alloc, request, sizeof(Frame));
     frame->prev = fl->head;
     fl->head = frame;
   }
@@ -86,7 +82,7 @@ void freelist_push(FrameFreeList *fl, Frame *frame) {
 
 Frame *freelist_pop(FrameFreeList *fl) {
   if (!fl->head)
-    return fl->alloc->request(fl->alloc->ctx, sizeof(Frame));
+    return CALL(fl->alloc, request, sizeof(Frame));
   Frame *f = fl->head;
   fl->head = f->prev;
   f->prev = NULL;
@@ -95,7 +91,9 @@ Frame *freelist_pop(FrameFreeList *fl) {
 
 int Vm_run(Vm *vm) {
   FrameFreeList *fl = &(FrameFreeList){.alloc = vm->alloc};
+#if PREALLOCATE_FREELIST_SIZE
   freelist_preallocate(fl);
+#endif
   vm->arg_count = 1;
   vm->frame = freelist_pop(fl);
   while (vm->pc < vm->bytecode_len) {
@@ -271,4 +269,7 @@ vm_end:
   return 1;
 }
 
-void Vm_destroy(Vm *vm) { CALL(vm->alloc, destroy); }
+void Vm_destroy(Vm *vm) {
+  CALL(vm->alloc, destroy);
+  free(vm->alloc);
+}

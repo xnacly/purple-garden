@@ -35,11 +35,7 @@ void Token_debug(Token *token) {
   putc(']', stdout);
   switch (token->type) {
   case T_DOUBLE:
-    printf("(%g)", token->floating);
-    break;
   case T_INTEGER:
-    printf("(%ld)", token->integer);
-    break;
   case T_STRING:
   case T_BUILTIN:
   case T_IDENT:
@@ -166,7 +162,7 @@ builtin: {
       .len = len,
       .hash = hash,
   };
-  Token *b = a->request(a->ctx, sizeof(Token));
+  Token *b = CALL(a, request, sizeof(Token));
   b->string = s;
   b->type = T_BUILTIN;
   out[count++] = b;
@@ -218,7 +214,7 @@ number: {
   }
 
   l->pos = i;
-  Token *n = a->request(a->ctx, sizeof(Token));
+  Token *n = CALL(a, request, sizeof(Token));
   n->string = (Str){
       .p = l->input.p + start,
       .len = i - start,
@@ -249,7 +245,7 @@ ident: {
   } else if (hash == false_hash) {
     t = INTERN_FALSE;
   } else {
-    t = a->request(a->ctx, sizeof(Token));
+    t = CALL(a, request, sizeof(Token));
     t->type = T_IDENT;
     t->string = (Str){
         .p = l->input.p + start,
@@ -277,7 +273,7 @@ string: {
             slice.p);
     out[count++] = INTERN_EOF;
   } else {
-    Token *t = a->request(a->ctx, sizeof(Token));
+    Token *t = CALL(a, request, sizeof(Token));
     t->type = T_STRING;
     t->string = (Str){
         .p = l->input.p + start,
