@@ -39,7 +39,7 @@ static void consume(Parser *p, TokenType tt) {
 // added to n->children
 static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
   if (n->children_length + 1 >= n->children_cap) {
-    size_t new = n->children_cap *NODE_CAP_GROW;
+    size_t new = n->children_cap * NODE_CAP_GROW;
     new = new < NODE_INITIAL_CHILD_SIZE ? NODE_INITIAL_CHILD_SIZE : new;
     Node **old = n->children;
     n->children = CALL(alloc, request, sizeof(Node *) * new);
@@ -136,6 +136,7 @@ stmt_begin: {
 }
 
 stmt_end: {
+  ASSERT(stack_top != 0, "Unexpected expr end");
   consume(p, T_DELIMITOR_RIGHT);
   Node *prev = stack[stack_top];
   stack_top--;
@@ -155,6 +156,7 @@ arr_start: {
 }
 
 arr_end: {
+  ASSERT(stack_top != 0, "Unexpected array end");
   consume(p, T_BRAKET_RIGHT);
   Node *prev = stack[stack_top];
   stack_top--;

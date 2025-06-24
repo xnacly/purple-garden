@@ -114,6 +114,7 @@ size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
       ['0' ... '9'] = &&number,
       ['a' ... 'z'] = &&ident,
       ['A' ... 'Z'] = &&ident,
+      ['\''] = &&quoted,
       ['_'] = &&ident,
       ['"'] = &&string,
       [0] = &&end,
@@ -253,6 +254,30 @@ ident: {
         .hash = hash,
     };
   }
+  out[count++] = t;
+  JUMP_TARGET;
+}
+
+// same as string but only with leading '
+quoted: {
+  // skip '
+  l->pos++;
+  size_t start = l->pos;
+  size_t hash = FNV_OFFSET_BASIS;
+  for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
+    hash ^= cc;
+    hash *= FNV_PRIME;
+  }
+
+  size_t len = l->pos - start;
+  Token *t;
+  t = CALL(a, request, sizeof(Token));
+  t->type = T_STRING;
+  t->string = (Str){
+      .p = l->input.p + start,
+      .len = len,
+      .hash = hash,
+  };
   out[count++] = t;
   JUMP_TARGET;
 }

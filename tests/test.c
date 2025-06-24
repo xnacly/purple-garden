@@ -71,6 +71,12 @@ int main() {
     CASE(.1415, VAL(.type = V_DOUBLE, .floating = 0.1415)),
 
     CASE("string", VAL(.type = V_STR, .string = STRING("string"))),
+    {
+        .input = STRING("'this-is-really-a-quoted-symbol"),
+        .expected_r0 =
+            (Value){.type = V_STR,
+                    .string = STRING("this-is-really-a-quoted-symbol")},
+    },
     // TODO: this is for future me to implement
     // CASE("escaped string\"", BC(OP_LOAD, 0), VAL(.type = V_STRING, .string
     // = STRING("escaped string\""))),

@@ -8,6 +8,10 @@
   "string"
 )
 
+(@println
+  'quoted-identifier-at-this-point
+)
+
 ; optionals
 (@println
    (@Some "value") ; Option::Some("value")

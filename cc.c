@@ -73,20 +73,6 @@ static size_t runtime_builtin_hashes[MAX_BUILTIN_SIZE + 1];
 
 static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   switch (n->type) {
-  case N_ARRAY: {
-    if (n->children_length == 0) {
-      ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
-             "cc: out of global space, what the fuck are you doing");
-      Value *v = CALL(alloc, request, sizeof(Value));
-      v->type = V_ARRAY;
-      v->array = (struct Array){.len = 0};
-      vm->globals[vm->global_len] = v;
-      BC(OP_LOADG, vm->global_len++)
-    } else {
-      TODO("N_ARRAY#real arrays")
-    }
-    break;
-  }
   case N_ATOM: {
     // interning logic, global pool 0 is the only instance for false in the
     // runtime, 1 for true, strings get interned by their hashes, doubles by
@@ -320,6 +306,23 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     BC(OP_CALL, func->bytecode_index);
     break;
   }
+  // TODO: Arrays are just sugar for lists, same same
+  case N_LIST:
+  case N_ARRAY: {
+    if (n->children_length == 0) {
+      ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
+             "cc: out of global space, what the fuck are you doing");
+      Value *v = CALL(alloc, request, sizeof(Value));
+      v->type = V_ARRAY;
+      v->array = (struct Array){.len = 0};
+      vm->globals[vm->global_len] = v;
+      BC(OP_LOADG, vm->global_len++)
+    } else {
+      TODO("N_ARRAY#real arrays")
+    }
+    break;
+  }
+
   default:
     Str *s = &NODE_TYPE_MAP[n->type];
     ASSERT(0,
