@@ -5,6 +5,17 @@
 #include "strings.h"
 #include <stdint.h>
 
+Str OP_MAP[256] = {
+    [OP_LOADG] = STRING("LOADG"), [OP_LOAD] = STRING("LOAD"),
+    [OP_STORE] = STRING("STORE"), [OP_ADD] = STRING("ADD"),
+    [OP_SUB] = STRING("SUB"),     [OP_MUL] = STRING("MUL"),
+    [OP_DIV] = STRING("DIV"),     [OP_EQ] = STRING("EQ"),
+    [OP_VAR] = STRING("VAR"),     [OP_LOADV] = STRING("LOADV"),
+    [OP_ARGS] = STRING("ARGS"),   [OP_BUILTIN] = STRING("BUILTIN"),
+    [OP_LEAVE] = STRING("LEAVE"), [OP_CALL] = STRING("CALL"),
+    [OP_JMP] = STRING("JMP"),     [OP_ASSERT] = STRING("ASSERT"),
+    [OP_JMPF] = STRING("JMPF")};
+
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
 
 inline void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
@@ -33,17 +44,6 @@ Vm Vm_new(Allocator *static_alloc, Allocator *alloc) {
 
   return vm;
 }
-
-Str OP_MAP[256] = {
-    [OP_LOADG] = STRING("LOADG"), [OP_LOAD] = STRING("LOAD"),
-    [OP_STORE] = STRING("STORE"), [OP_ADD] = STRING("ADD"),
-    [OP_SUB] = STRING("SUB"),     [OP_MUL] = STRING("MUL"),
-    [OP_DIV] = STRING("DIV"),     [OP_EQ] = STRING("EQ"),
-    [OP_VAR] = STRING("VAR"),     [OP_LOADV] = STRING("LOADV"),
-    [OP_ARGS] = STRING("ARGS"),   [OP_BUILTIN] = STRING("BUILTIN"),
-    [OP_LEAVE] = STRING("LEAVE"), [OP_CALL] = STRING("CALL"),
-    [OP_JMP] = STRING("JMP"),     [OP_ASSERT] = STRING("ASSERT"),
-};
 
 // FrameFreeList works by caching a list of Frames so we don't have to interact
 // with the heap for the first N Frames, but instead use the preallocated
@@ -246,6 +246,12 @@ int Vm_run(Vm *vm) {
         vm->frame = vm->frame->prev;
       }
       freelist_push(fl, old);
+      break;
+    }
+    case OP_JMPF: {
+      if (__builtin_expect(vm->registers[0].type == V_FALSE, 0)) {
+        vm->pc = arg;
+      }
       break;
     }
     case OP_JMP: {

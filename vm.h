@@ -64,7 +64,6 @@ static Value *INTERNED_NONE =
     &(Value){.type = V_OPTION, .option = (struct Option){.is_some = false}};
 
 typedef enum {
-
   // STORE rANY
   //
   // STORE a Value from r0 into an arbitrary register
@@ -151,6 +150,11 @@ typedef enum {
   //
   // LOADG a global from the const table to r0
   OP_LOADG,
+
+  // JMPF bANY
+  //
+  // jump to bANY if r0 is false
+  OP_JMPF
 } VM_OP;
 
 #define VM_ERR(fmt, ...)                                                       \

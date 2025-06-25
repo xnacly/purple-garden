@@ -26,7 +26,7 @@ static void xcgc_run(GcCtx *c) {
 void *gc_request(void *ctx, size_t size) {
   GcCtx *c = (GcCtx *)ctx;
   if (c->pos + size >= c->size) {
-#if DEBUG
+#if VERBOSE_ALLOCATOR
     printf("[XCGC] triggering gc at %zu, %.3f%% of %zuB\n", c->pos,
            (c->pos * 100) / (double)c->size, c->size);
 #endif
@@ -41,7 +41,7 @@ void *gc_request(void *ctx, size_t size) {
   void *p = (char *)c->to_space + c->pos;
   c->pos += size;
 
-#if DEBUG
+#if VERBOSE_ALLOCATOR
   double avail = c->size - c->pos;
   printf(
       "[XCGC] allocated %zuB, %.0fB::%.3f%% available until gc is triggered\n",

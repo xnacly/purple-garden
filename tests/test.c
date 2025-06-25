@@ -142,6 +142,8 @@ int main() {
     CASE((@Some false),
          VAL(.type = V_OPTION,
              .option = {.is_some = true, .value = INTERNED_FALSE})),
+
+    // conditionals
   };
 
   size_t passed = 0;

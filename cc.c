@@ -167,7 +167,20 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         break;
       }
       case COMPILE_BUILTIN_IF: { // (@if <condition> <s-expr's>)
-        ASSERT(0, "Unimplemented")
+        ASSERT(n->children_length >= 2,
+               "Need at least a condition and a body for an if expr")
+
+        // <condition>
+        compile(alloc, vm, ctx, n->children[0]);
+        size_t jmpf_index = vm->bytecode_len;
+        BC(OP_JMPF, 0xAFFEDEAD);
+
+        // <s-expr's>
+        for (size_t i = 1; i < n->children_length; i++) {
+          compile(alloc, vm, ctx, n->children[i]);
+        }
+
+        vm->bytecode[jmpf_index + 1] = vm->bytecode_len;
         break;
       }
       case COMPILE_BUILTIN_FUNCTION: { // (@function <name> [<args>] <s-expr's>)

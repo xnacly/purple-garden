@@ -5,7 +5,7 @@
 
 #ifdef DEBUG
 #if DEBUG
-#define VERBOSE_ALLOCATOR 1
+#define VERBOSE_ALLOCATOR 0
 #endif
 #else
 #define VERBOSE_ALLOCATOR 0
