@@ -4,7 +4,6 @@
 static void print_value(const Value *v) {
   switch (v->type) {
   case V_UNDEFINED:
-    printf("undefined");
     break;
   case V_OPTION: {
     if (v->option.is_some) {
