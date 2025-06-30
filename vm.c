@@ -249,14 +249,15 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_JMPF: {
-      if (__builtin_expect(vm->registers[0].type == V_FALSE, 0)) {
+      if (vm->registers[0].type == V_FALSE) {
         vm->pc = arg;
+        continue;
       }
       break;
     }
     case OP_JMP: {
       vm->pc = arg;
-      break;
+      continue;
     }
     case OP_ASSERT: {
       if (vm->registers[0].type != V_TRUE) {
@@ -265,7 +266,7 @@ int Vm_run(Vm *vm) {
       break;
     }
     default:
-      VM_ERR("Unimplemented instruction %.*s", (int)OP_MAP[op].len,
+      VM_ERR("Unimplemented instruction `%.*s`", (int)OP_MAP[op].len,
              OP_MAP[op].p)
     }
     vm->pc += 2;

@@ -225,25 +225,26 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
                  "definition, got `%.*s`",
                  (int)name->len, name->p, (int)NODE_TYPE_MAP[param->type].len,
                  NODE_TYPE_MAP[param->type].p);
-          // PERF: changing args to start from r1 to starting from r0, thus
-          // saving a single OP_LOAD for each function invocation
+          // PERF: changing args to start from r1 to starting from r0,
+          // thus saving a single OP_LOAD for each function invocation
           BC(OP_LOAD, i + 1);
           BC(OP_VAR, param->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
         }
 
-        // compiling the body, returning a value is free since its just in r0
+        // compiling the body, returning a value is free since its just in
+        // r0
         if (n->children_length > 2) {
           for (size_t i = 2; i < n->children_length; i++) {
-            // PERF: if last Node is N_CALL think about reusing call frames
-            // (TCO)
+            // PERF: if last Node is N_CALL think about reusing call
+            // frames (TCO)
             compile(alloc, vm, ctx, n->children[i]);
           }
         }
 
+        BC(OP_LEAVE, 0);
         vm->bytecode[jump_op_index + 1] = vm->bytecode_len;
         ctx->hash_to_function[hash].size =
             vm->bytecode_len - function_ctx.bytecode_index;
-        BC(OP_LEAVE, 0);
         break;
       }
       case COMPILE_BUILTIN_LET: { // (@len <var-name> <var-value>)
