@@ -207,7 +207,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         // backfill jumps to the end of the switch statement
         for (size_t i = 0; i < n->children_length; i++) {
           int jump_argument_location = backfill_slots[i];
-          if (jump_argument_location) {
+          if (jump_argument_location &&
+              jump_argument_location >= (int)vm->bytecode_len) {
             vm->bytecode[jump_argument_location + 1] = vm->bytecode_len;
           }
         }
