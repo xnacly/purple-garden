@@ -233,9 +233,9 @@ __globals:
         Double(2.5); {idx=3}
 
 __entry:
-; comparer::{args=2,size=20}
+; comparer::{args=2,size=34}
 __0x000000[00B2]:
-        JMP 20
+        JMP 34
         LOAD 1
         VAR 44
         LOAD 2
@@ -244,13 +244,19 @@ __0x000000[00B2]:
         STORE 1
         LOADV 229
         EQ 1
+        JMPF 32
+        LOADV 44
+        STORE 1
+        LOADV 229
+        EQ 1
         ASSERT
+        JMP 2952715949
         LEAVE
 
 
-; inc::{args=1,size=18}
-__0x000016[0047]:
-        JMP 40
+; inc::{args=1,size=20}
+__0x000022[0047]:
+        JMP 54
         LOAD 1
         VAR 44
         LOADV 44
@@ -263,7 +269,7 @@ __0x000016[0047]:
 
         LOADG 3; Double(2.5)
         STORE 1
-        CALL 22; <inc> $1
+        CALL 34; <inc> $1
 ```
 
 The disassembler attempts to display as much information as possible:
@@ -284,12 +290,11 @@ $ wc -l examples/bench.garden
 # 250003 examples/bench.garden
 ```
 
-> This benchmark example is for optimizing tail calls and builtin dispatch:
+> This benchmark example is for optimizing tail calls, builtin dispatch and match performance:
 
 ```racket
-(@function comparer [a b] (@assert (= a b)))
+(@function comparer [a b] (@match ((= a b) (@assert (= a b)))))
 (@function inc [a] (comparer a a))
-(inc 2.5)
 (inc 2.5)
 (inc 2.5)
 (inc 2.5)
@@ -303,22 +308,22 @@ notated between `[` and `]`.
 # built in time measurements
 $ make bench PG=examples/bench.garden
 # [    0.0000ms] main::Args_parse: Parsed arguments
-# [    0.0240ms] io::IO_read_file_to_string: mmaped input of size=2500090B
-# [    0.0050ms] mem::init: Allocated memory block of size=153092096B
-# [   28.6080ms] lexer::Lexer_all: lexed tokens count=1000033
-# [   16.7020ms] parser::Parser_next created AST with node_count=250003
-# [    9.4510ms] cc::cc: Flattened AST to byte code/global pool length=1500048/4
-# [   35.7510ms] vm::Vm_run: executed byte code
-# [    0.4220ms] mem::Allocator::destroy: Deallocated memory space
-# [    0.0000ms] vm::Vm_destroy: teared vm down
+# [    0.0110ms] io::IO_read_file_to_string: mmaped input of size=2500109B
+# [    0.0030ms] mem::init: Allocated memory block of size=153092096B
+# [    6.6480ms] lexer::Lexer_all: lexed tokens count=1000043
+# [    8.2900ms] parser::Parser_next created AST with node_count=250003
+# [    5.3380ms] cc::cc: Flattened AST to byte code/global pool length=1500060/4
+# [    0.1120ms] vm::Vm_run: executed byte code
+# [    0.3490ms] mem::Allocator::destroy: Deallocated memory space
+# [    0.0180ms] vm::Vm_destroy: teared vm down
 # [    0.0000ms] munmap: unmapped input
 
 # or hyperfine
 $ make release
 $ hyperfine "./purple_garden examples/bench.garden"
 # Benchmark 1: ./build/purple_garden examples/bench.garden
-#   Time (mean ± σ):      80.8 ms ±   4.6 ms    [User: 71.9 ms, System: 7.6 ms]
-#   Range (min … max):    74.7 ms … 101.6 ms    34 runs
+#   Time (mean ± σ):      21.7 ms ±   0.9 ms    [User: 13.9 ms, System: 7.6 ms]
+#   Range (min … max):    20.2 ms …  25.0 ms    128 runs
 ```
 
 ### Profiling
@@ -349,8 +354,7 @@ $ hotspot
   - [ ] objects
 - [ ] language constructs
   - [x] variables
-  - [ ] if
-  - [ ] match
+  - [x] match
   - [ ] loops
   - [x] functions
   - [ ] pattern matching
