@@ -6,14 +6,14 @@
 #include <stdint.h>
 
 Str OP_MAP[256] = {
-    [OP_LOADG] = STRING("LOADG"), [OP_LOAD] = STRING("LOAD"),
-    [OP_STORE] = STRING("STORE"), [OP_ADD] = STRING("ADD"),
-    [OP_SUB] = STRING("SUB"),     [OP_MUL] = STRING("MUL"),
-    [OP_DIV] = STRING("DIV"),     [OP_EQ] = STRING("EQ"),
-    [OP_VAR] = STRING("VAR"),     [OP_LOADV] = STRING("LOADV"),
-    [OP_ARGS] = STRING("ARGS"),   [OP_BUILTIN] = STRING("BUILTIN"),
-    [OP_LEAVE] = STRING("LEAVE"), [OP_CALL] = STRING("CALL"),
-    [OP_JMP] = STRING("JMP"),     [OP_ASSERT] = STRING("ASSERT"),
+    [OP_STORE] = STRING("STORE"),     [OP_LOAD] = STRING("LOAD"),
+    [OP_ADD] = STRING("ADD"),         [OP_SUB] = STRING("SUB"),
+    [OP_MUL] = STRING("MUL"),         [OP_DIV] = STRING("DIV"),
+    [OP_EQ] = STRING("EQ"),           [OP_VAR] = STRING("VAR"),
+    [OP_LOADV] = STRING("LOADV"),     [OP_ARGS] = STRING("ARGS"),
+    [OP_BUILTIN] = STRING("BUILTIN"), [OP_LEAVE] = STRING("LEAVE"),
+    [OP_CALL] = STRING("CALL"),       [OP_JMP] = STRING("JMP"),
+    [OP_ASSERT] = STRING("ASSERT"),   [OP_LOADG] = STRING("LOADG"),
     [OP_JMPF] = STRING("JMPF")};
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
@@ -102,6 +102,9 @@ int Vm_run(Vm *vm) {
 
 #if DEBUG
     vm->instruction_counter[op]++;
+    Str *str = &OP_MAP[op];
+    printf("[VM][%06zu|%05zu] %.*s%*.s=%06u\n", vm->pc, vm->pc + 1,
+           (int)str->len, str->p, 10 - (int)str->len, " ", arg);
 #endif
 
     switch (op) {

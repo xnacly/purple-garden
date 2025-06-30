@@ -1,7 +1,8 @@
 ; vim: filetype=racket
-(@println 
-  (@if true (+ 1 1)))
+(@let n 1)
 
 (@println (@match 
-            true "true" 
-            false "false"))
+  ((= n 12) "is 12")
+  ((= n 10) "is 10")
+  "something else"
+))

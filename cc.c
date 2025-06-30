@@ -166,21 +166,52 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         BC(OP_LOADG, GLOBAL_NONE);
         break;
       }
-      case COMPILE_BUILTIN_IF: { // (@if <condition> <s-expr's>)
-        ASSERT(n->children_length >= 2,
-               "Need at least a condition and a body for an if expr")
+      case COMPILE_BUILTIN_MATCH: { // (@match
+                                    //  (<condition> <s-expr's>) ; case 1
+                                    //  (<condition> <s-expr's>) ; case 2
+                                    //  (<s-expr's>) ; default case
+                                    //  )
+        ASSERT(n->children_length >= 1,
+               "Need at least one case for a match expr")
 
-        // <condition>
-        compile(alloc, vm, ctx, n->children[0]);
-        size_t jmpf_index = vm->bytecode_len;
-        BC(OP_JMPF, 0xAFFEDEAD);
+        // used for jumping to the end of the match statement once a case is
+        // done
+        int backfill_slots[n->children_length];
+        bool encountered_default_cause = false;
 
-        // <s-expr's>
-        for (size_t i = 1; i < n->children_length; i++) {
-          compile(alloc, vm, ctx, n->children[i]);
+        // iterating over cases
+        for (size_t i = 0; i < n->children_length; i++) {
+          Node *cur_case = n->children[i];
+
+          if (cur_case->children_length > 1) {
+            Node *cur_condition = cur_case->children[0];
+            Node *cur_body = cur_case->children[1];
+            compile(alloc, vm, ctx, cur_condition);
+            size_t last_case_start = vm->bytecode_len;
+            // jump to next case conditional
+            BC(OP_JMPF, 0xAFFEDEAD)
+            compile(alloc, vm, ctx, cur_body);
+            backfill_slots[i] = vm->bytecode_len;
+            BC(OP_JMP, 0xAFFEDEAD)
+            vm->bytecode[last_case_start + 1] = vm->bytecode_len;
+          } else {
+            ASSERT(!encountered_default_cause,
+                   "Only a single default case allowed")
+            // default case has a singular children, being executed if all other
+            // cases do not match
+            compile(alloc, vm, ctx, cur_case);
+            encountered_default_cause = true;
+          }
         }
 
-        vm->bytecode[jmpf_index + 1] = vm->bytecode_len;
+        // backfill jumps to the end of the switch statement
+        for (size_t i = 0; i < n->children_length; i++) {
+          int jump_argument_location = backfill_slots[i];
+          if (jump_argument_location) {
+            vm->bytecode[jump_argument_location + 1] = vm->bytecode_len;
+          }
+        }
+
         break;
       }
       case COMPILE_BUILTIN_FUNCTION: { // (@function <name> [<args>] <s-expr's>)
@@ -205,10 +236,10 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
           return;
         }
 
-        // this is the worst hack i have ever written, this is used to jump over
-        // the bytecode of a function (header with args setup and body), so we
-        // keep the bytecode compilation single pass and the bytecode linear,
-        // this works (for now at least)
+        // this is the worst hack i have ever written, this is used to
+        // jump over the bytecode of a function (header with args setup
+        // and body), so we keep the bytecode compilation single pass and
+        // the bytecode linear, this works (for now at least)
         size_t jump_op_index = vm->bytecode_len;
         BC(OP_JMP,
            0xAFFEDEAD); // https://de.wiktionary.org/wiki/Klappe_zu,_Affe_tot
@@ -357,7 +388,7 @@ Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size) {
   NEW_CC_BUILTIN("function", FUNCTION)
   NEW_CC_BUILTIN("assert", ASSERT)
   NEW_CC_BUILTIN("None", NONE)
-  NEW_CC_BUILTIN("if", IF)
+  NEW_CC_BUILTIN("match", MATCH)
 
   // specifically set size 1 to keep r0 the temporary register reserved
   Ctx ctx = {

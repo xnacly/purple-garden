@@ -37,10 +37,10 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
       }
       VM_OP op = vm->bytecode[i];
       size_t arg = vm->bytecode[i + 1];
-#if DISASSEMBLE_INCLUDE_POSITIONS
-      printf("\n\t; @0x%04zX/0x%04zX", i, i + 1);
-#endif
       printf("\n\t");
+#if DISASSEMBLE_INCLUDE_POSITIONS
+      printf("[%04zu|%04zu]\t", i, i + 1);
+#endif
       Str_debug(&OP_MAP[op]);
 
       // dont print the argument if its unused in the vm
@@ -51,7 +51,8 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
         break;
 #if DISASSEMBLE_INCLUDE_POSITIONS
       case OP_JMP:
-        printf(" 0x%04zX", arg);
+      case OP_JMPF:
+        printf(" %04zu", arg);
         break;
 #endif
       default:
