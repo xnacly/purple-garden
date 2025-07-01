@@ -188,11 +188,17 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
             Node *cur_body = cur_case->children[1];
             compile(alloc, vm, ctx, cur_condition);
             size_t last_case_start = vm->bytecode_len;
-            // jump to next case conditional
+            // jump to next case conditional if conditional above is false
             BC(OP_JMPF, 0xAFFEDEAD)
+
             compile(alloc, vm, ctx, cur_body);
-            backfill_slots[i] = vm->bytecode_len;
-            BC(OP_JMP, 0xAFFEDEAD)
+
+            // only jmp to end of match statement if not already at the end,
+            // since we are inside of the body of a case
+            if (i != n->children_length - 1) {
+              backfill_slots[i] = vm->bytecode_len;
+              BC(OP_JMP, 0xAFFEDEAD)
+            }
             vm->bytecode[last_case_start + 1] = vm->bytecode_len;
           } else {
             ASSERT(!encountered_default_cause,
@@ -205,10 +211,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         }
 
         // backfill jumps to the end of the switch statement
-        for (size_t i = 0; i < n->children_length; i++) {
+        for (size_t i = 0; i < n->children_length - 1; i++) {
           int jump_argument_location = backfill_slots[i];
-          if (jump_argument_location &&
-              jump_argument_location >= (int)vm->bytecode_len) {
+          if (jump_argument_location) {
             vm->bytecode[jump_argument_location + 1] = vm->bytecode_len;
           }
         }
