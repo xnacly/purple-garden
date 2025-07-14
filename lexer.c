@@ -58,9 +58,9 @@ Lexer Lexer_new(Str input) {
   };
 }
 
-#define cur(L) ((L->pos < L->input.len) ? L->input.p[L->pos] : 0)
+#define cur(L) (L->input.p[L->pos])
 
-inline static bool is_alphanum(uint8_t cc) {
+__attribute__((always_inline)) inline static bool is_alphanum(uint8_t cc) {
   uint8_t lower = cc | 0x20;
   bool is_alpha = (lower >= 'a' && lower <= 'z');
   bool is_digit = (cc >= '0' && cc <= '9');
@@ -96,31 +96,31 @@ size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
   size_t count = 0;
   static void *jump_table[256] = {
       [0 ... 255] = &&unknown,
+      [' '] = &&whitespace,
+      ['\t'] = &&whitespace,
+      ['\n'] = &&whitespace,
+      [';'] = &&comment,
       ['('] = &&delimitor_left,
       [')'] = &&delimitor_right,
-      ['['] = &&braket_left,
-      [']'] = &&braket_right,
       ['@'] = &&builtin,
+      ['.'] = &&number,
+      ['0' ... '9'] = &&number,
+      ['a' ... 'z'] = &&ident,
+      ['A' ... 'Z'] = &&ident,
+      ['_'] = &&ident,
+      ['\''] = &&quoted,
+      ['"'] = &&string,
       ['+'] = &&plus,
       ['-'] = &&minus,
       ['/'] = &&slash,
       ['*'] = &&asterisks,
       ['='] = &&equal,
-      [' '] = &&whitespace,
-      ['\t'] = &&whitespace,
-      ['\n'] = &&whitespace,
-      [';'] = &&comment,
-      ['.'] = &&number,
-      ['0' ... '9'] = &&number,
-      ['a' ... 'z'] = &&ident,
-      ['A' ... 'Z'] = &&ident,
-      ['\''] = &&quoted,
-      ['_'] = &&ident,
-      ['"'] = &&string,
+      ['['] = &&braket_left,
+      [']'] = &&braket_right,
       [0] = &&end,
   };
 
-#define JUMP_TARGET goto *jump_table[(int8_t)l->input.p[l->pos]]
+#define JUMP_TARGET goto *jump_table[(int32_t)l->input.p[l->pos]]
 
   JUMP_TARGET;
 
