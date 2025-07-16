@@ -31,6 +31,10 @@ bool Value_cmp_deep(const Value *a, const Value *b) {
     return false;
   }
 
+  if (a->is_some ^ b->is_some) {
+    return false;
+  }
+
   switch (a->type) {
   case V_STR:
     return Str_eq(&a->string, &b->string);
@@ -42,15 +46,8 @@ bool Value_cmp_deep(const Value *a, const Value *b) {
     return a->integer == b->integer;
   case V_TRUE:
   case V_FALSE:
+  case V_NONE:
     return true;
-  case V_OPTION:
-    if (a->option.is_some && b->option.is_some) {
-      return Value_cmp_deep(a->option.value, a->option.value);
-    } else if (!a->option.is_some && !b->option.is_some) {
-      return true;
-    } else {
-      return false;
-    }
   case V_ARRAY:
     // TODO: implement deep array comparison
   default:
@@ -132,13 +129,9 @@ int main() {
 
     // builtins
     CASE((@assert true), VAL(.type = V_TRUE)),
-    CASE((@None), VAL(.type = V_OPTION, .option = {.is_some = false})),
-    CASE((@Some true),
-         VAL(.type = V_OPTION,
-             .option = {.is_some = true, .value = INTERNED_TRUE})),
-    CASE((@Some false),
-         VAL(.type = V_OPTION,
-             .option = {.is_some = true, .value = INTERNED_FALSE})),
+    CASE((@None), VAL(.type = V_NONE)),
+    CASE((@Some true), VAL(.type = V_TRUE, .is_some = true)),
+    CASE((@Some false), VAL(.type = V_FALSE, .is_some = true)),
 
     // match
     //
@@ -183,9 +176,7 @@ int main() {
     bool error = false;
     Vm_run(vm);
     if (!Value_cmp_deep(&vm->registers[0], &c.expected_r0)) {
-      printf("\tbad value at r0: want=%s got=%s",
-             VALUE_TYPE_MAP[c.expected_r0.type].p,
-             VALUE_TYPE_MAP[vm->registers[0].type].p);
+      printf("\tbad value at r0");
       printf("\n\twant=");
       Value_debug(&c.expected_r0);
       printf("\n\tgot=");

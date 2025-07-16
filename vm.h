@@ -60,8 +60,7 @@ typedef void (*builtin_function)(Vm *vm);
 
 static Value *INTERNED_TRUE = &(Value){.type = V_TRUE};
 static Value *INTERNED_FALSE = &(Value){.type = V_FALSE};
-static Value *INTERNED_NONE =
-    &(Value){.type = V_OPTION, .option = (struct Option){.is_some = false}};
+static Value *INTERNED_NONE = &(Value){.type = V_NONE};
 
 typedef enum {
   // STORE rANY

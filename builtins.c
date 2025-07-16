@@ -2,19 +2,13 @@
 #include "common.h"
 
 static void print_value(const Value *v) {
-  switch (v->type) {
-  case V_UNDEFINED:
-    break;
-  case V_OPTION: {
-    if (v->option.is_some) {
-      printf("Some(");
-      print_value(v->option.value);
-      putc(')', stdout);
-    } else {
-      printf("None");
-    }
-    break;
+  if (v->is_some) {
+    printf("Option::Some(");
   }
+  switch (v->type) {
+  case V_NONE:
+    printf("Option::None");
+    break;
   case V_STR:
     Str_debug(&v->string);
     break;
@@ -41,6 +35,10 @@ static void print_value(const Value *v) {
     printf("]");
     break;
   default:
+  }
+
+  if (v->is_some) {
+    printf(")");
   }
 }
 
@@ -86,25 +84,30 @@ void builtin_len(Vm *vm) {
 void builtin_type(Vm *vm) {
   ASSERT(vm->arg_count == 1, "@type only works for a singular argument")
   Str s;
-  switch (vm->registers[1].type) {
-  case V_OPTION:
+  const Value *v = &vm->registers[1];
+  if (v->is_some) {
     s = STRING("option");
-    break;
-  case V_STR:
-    s = STRING("string");
-    break;
-  case V_INT:
-  case V_DOUBLE:
-    s = STRING("number");
-    break;
-  case V_TRUE:
-  case V_FALSE:
-    s = STRING("boolean");
-    break;
-  case V_ARRAY:
-    s = STRING("array");
-    break;
-  default:
+  } else {
+    switch (vm->registers[1].type) {
+    case V_NONE:
+      s = STRING("option");
+      break;
+    case V_STR:
+      s = STRING("string");
+      break;
+    case V_INT:
+    case V_DOUBLE:
+      s = STRING("number");
+      break;
+    case V_TRUE:
+    case V_FALSE:
+      s = STRING("boolean");
+      break;
+    case V_ARRAY:
+      s = STRING("array");
+      break;
+    default:
+    }
   }
 
   vm->registers[0] = (Value){
@@ -114,15 +117,8 @@ void builtin_type(Vm *vm) {
 }
 
 void builtin_Some(Vm *vm) {
-  ASSERT(vm->arg_count == 1, "@type only works for a singular argument")
-  Value *inner = CALL(vm->alloc, request, sizeof(Value));
-  *inner = vm->registers[1];
-  struct Option o = (struct Option){
-      .is_some = true,
-      .value = inner,
-  };
-  vm->registers[0] = (Value){
-      .type = V_OPTION,
-      .option = o,
-  };
+  ASSERT(vm->arg_count == 1, "@Some only works for a singular argument")
+  Value inner = vm->registers[1];
+  inner.is_some = true;
+  vm->registers[0] = inner;
 }

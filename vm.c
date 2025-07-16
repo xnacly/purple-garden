@@ -119,7 +119,7 @@ int Vm_run(Vm *vm) {
       // compile time, but we still have to check if the variable is available
       // in the current scope...
       Value v = vm->frame->variable_table[arg];
-      if (v.type == V_UNDEFINED) {
+      if (v.type == V_NONE) {
         VM_ERR("Undefined variable with hash %i", arg);
       }
       vm->registers[0] = v;

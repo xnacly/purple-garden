@@ -42,8 +42,7 @@
 #include "strings.h"
 
 typedef enum {
-  V_UNDEFINED,
-  V_OPTION,
+  V_NONE,
   V_STR,
   V_DOUBLE,
   V_INT,
@@ -57,6 +56,9 @@ extern Str VALUE_TYPE_MAP[];
 // Value represents a value known to the runtime
 typedef struct Value {
   ValueType type;
+  // true if @Some, otherwise self is just a Value, not an option with said
+  // inner Value
+  bool is_some;
   // Value can also be just an option, similar to Rusts option if type is
   // V_OPTION and .is_some is false, this acts as a NONE value
   union {
@@ -68,18 +70,9 @@ typedef struct Value {
       // holds members of the array
       struct Value **value;
     } array;
-
-    struct Option {
-      bool is_some;
-      // holds some
-      const struct Value *value;
-    } option;
   };
 } Value;
 
 bool Value_cmp(const Value *a, const Value *b);
 void Value_debug(const Value *v);
 double Value_as_double(const Value *v);
-
-#define SOME(val)                                                              \
-  (Option) { .is_some = true, .some = val }
