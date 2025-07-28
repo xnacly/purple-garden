@@ -365,11 +365,11 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
              "cc: out of global space, what the fuck are you doing");
       Value *v = CALL(alloc, request, sizeof(Value));
       v->type = V_ARRAY;
-      v->array = (struct Array){.len = 0};
+      v->array = (List){.len = 0, .cap = 0};
       vm->globals[vm->global_len] = v;
       BC(OP_LOADG, vm->global_len++)
     } else {
-      TODO("N_ARRAY#real arrays")
+      TODO("N_ARRAY#statically allocate known array sizes")
     }
     break;
   }

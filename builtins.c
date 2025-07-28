@@ -27,7 +27,7 @@ static void print_value(const Value *v) {
   case V_ARRAY:
     printf("[");
     for (size_t i = 0; i < v->array.len; i++) {
-      print_value(v->array.value[i]);
+      print_value(&((Value *)v->array.elements)[i]);
       if (i + 1 < v->array.len) {
         printf(", ");
       }

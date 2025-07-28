@@ -53,8 +53,38 @@ typedef enum {
 
 extern Str VALUE_TYPE_MAP[];
 
+// List is purple gardens internal array representation. It is implemented as a
+// growing array and can be configured via the LIST_* macros. It owns its
+// values. Can be used like so:
+//
+//     #include "adts.h"
+//
+//     List l = List_new(8, vm->alloc);
+//     List_append(&l, *INTERNED_TRUE);
+//     List_append(&l, *INTERNED_NONE);
+//     List_append(
+//         &l, (Value){.type = V_STR, .is_some = true, .string =
+//         STRING("HOLA")});
+//     Value array = (Value){.type = V_ARRAY, .array = l};
+typedef struct {
+  size_t cap;
+  size_t len;
+  struct Value *elements; // voided because c sucks with selfreferencing types
+  Allocator *a;
+} List;
+
+// Map is purple gardens internal hash map representation. It is implemented as
+// a list of buckets, in which each bucket is a List, thus enabling hash
+// collision resolving. Can be configured via the MAP_* macros. It owns its
+// values.
+typedef struct {
+  size_t size;
+  List *buckets;
+  Allocator *a;
+} Map;
+
 // Value represents a value known to the runtime
-typedef struct Value {
+typedef struct {
   ValueType type;
   // true if @Some, otherwise self is just a Value, not an option with said
   // inner Value
@@ -65,13 +95,16 @@ typedef struct Value {
     Str string;
     double floating;
     int64_t integer;
-    struct Array {
-      size_t len;
-      // holds members of the array
-      struct Value **value;
-    } array;
+    List array;
+    Map obj;
   };
 } Value;
+
+// global values that compiler, optimiser and vm use, often mapped to global
+// pool indexes 0,1,2
+static Value *INTERNED_FALSE = &(Value){.type = V_FALSE};
+static Value *INTERNED_TRUE = &(Value){.type = V_TRUE};
+static Value *INTERNED_NONE = &(Value){.type = V_NONE};
 
 bool Value_cmp(const Value *a, const Value *b);
 void Value_debug(const Value *v);

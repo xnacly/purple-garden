@@ -1,4 +1,5 @@
 #include "common.h"
+#include "adts.h"
 #include <string.h>
 
 #define PREC 1e-9
@@ -87,7 +88,7 @@ void Value_debug(const Value *v) {
   case V_ARRAY: {
     printf("[");
     for (size_t i = 0; i < v->array.len; i++) {
-      Value_debug(v->array.value[i]);
+      Value_debug(List_get(&v->array, i));
     }
     printf("]");
     break;
