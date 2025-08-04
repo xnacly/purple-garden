@@ -25,3 +25,12 @@
   ; different type lists
   [1 "hello" "world" true]
 )
+
+;; objects
+(@let obj { 'user-name "dummy" })
+(@println obj) ; { user-name: "dummy" }
+(@let obj.user-name "xnacly")
+(@println 
+  obj ; { user-name: "xnacly" }
+  obj.user-name ; "xnacly"
+)
