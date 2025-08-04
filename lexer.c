@@ -13,6 +13,8 @@ Str TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
                         [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
                         [T_BRAKET_LEFT] = STRING("T_BRAKET_LEFT"),
                         [T_BRAKET_RIGHT] = STRING("T_BRAKET_RIGHT"),
+                        [T_CURLY_LEFT] = STRING("T_CURLY_LEFT"),
+                        [T_CURLY_RIGHT] = STRING("T_CURLY_RIGHT"),
                         [T_STRING] = STRING("T_STRING"),
                         [T_TRUE] = STRING("T_TRUE"),
                         [T_FALSE] = STRING("T_FALSE"),
@@ -72,6 +74,8 @@ Token *INTERN_DELIMITOR_LEFT = &SINGLE_TOK(T_DELIMITOR_LEFT);
 Token *INTERN_DELIMITOR_RIGHT = &SINGLE_TOK(T_DELIMITOR_RIGHT);
 Token *INTERN_BRAKET_LEFT = &SINGLE_TOK(T_BRAKET_LEFT);
 Token *INTERN_BRAKET_RIGHT = &SINGLE_TOK(T_BRAKET_RIGHT);
+Token *INTERN_CURLY_LEFT = &SINGLE_TOK(T_CURLY_LEFT);
+Token *INTERN_CURLY_RIGHT = &SINGLE_TOK(T_CURLY_RIGHT);
 Token *INTERN_MINUS = &SINGLE_TOK(T_MINUS);
 Token *INTERN_PLUS = &SINGLE_TOK(T_PLUS);
 Token *INTERN_ASTERISKS = &SINGLE_TOK(T_ASTERISKS);
@@ -117,6 +121,8 @@ size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
       ['='] = &&equal,
       ['['] = &&braket_left,
       [']'] = &&braket_right,
+      ['{'] = &&curly_left,
+      ['}'] = &&curly_right,
       [0] = &&end,
   };
 
@@ -141,6 +147,16 @@ braket_left:
 
 braket_right:
   out[count++] = INTERN_BRAKET_RIGHT;
+  l->pos++;
+  JUMP_TARGET;
+
+curly_left:
+  out[count++] = INTERN_CURLY_LEFT;
+  l->pos++;
+  JUMP_TARGET;
+
+curly_right:
+  out[count++] = INTERN_CURLY_RIGHT;
   l->pos++;
   JUMP_TARGET;
 

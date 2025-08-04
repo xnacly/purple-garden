@@ -21,6 +21,10 @@ typedef enum {
   T_BRAKET_LEFT,
   // ]
   T_BRAKET_RIGHT,
+  // {
+  T_CURLY_LEFT,
+  // }
+  T_CURLY_RIGHT,
   // anything between ""
   T_STRING,
   T_TRUE,
