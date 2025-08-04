@@ -24,6 +24,10 @@ static void print_value(const Value *v) {
   case V_FALSE:
     printf("false");
     break;
+  case V_OBJ:
+    // TODO: V_OBJ
+    printf("{}");
+    break;
   case V_ARRAY:
     printf("[");
     for (size_t i = 0; i < v->array.len; i++) {
@@ -70,6 +74,9 @@ void builtin_len(Vm *vm) {
     len = a->string.len;
   } else if (a->type == V_ARRAY) {
     len = a->array.len;
+  }
+  if (a->type == V_OBJ) {
+    len = a->obj.size;
   } else {
     fputs("@len only strings and lists have a length", stderr);
     exit(EXIT_FAILURE);
@@ -105,6 +112,9 @@ void builtin_type(Vm *vm) {
       break;
     case V_ARRAY:
       s = STRING("array");
+      break;
+    case V_OBJ:
+      s = STRING("object");
       break;
     default:
     }

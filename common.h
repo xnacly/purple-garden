@@ -49,6 +49,7 @@ typedef enum {
   V_TRUE,
   V_FALSE,
   V_ARRAY,
+  V_OBJ,
 } ValueType;
 
 extern Str VALUE_TYPE_MAP[];
