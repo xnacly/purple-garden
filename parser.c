@@ -39,7 +39,7 @@ static void consume(Parser *p, TokenType tt) {
 // added to n->children
 static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
   if (n->children_length + 1 >= n->children_cap) {
-    size_t new = n->children_cap * NODE_CAP_GROW;
+    size_t new = n->children_cap *NODE_CAP_GROW;
     new = new < NODE_INITIAL_CHILD_SIZE ? NODE_INITIAL_CHILD_SIZE : new;
     Node **old = n->children;
     n->children = CALL(alloc, request, sizeof(Node *) * new);
@@ -68,6 +68,8 @@ size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
       [T_DELIMITOR_RIGHT] = &&stmt_end,
       [T_BRAKET_LEFT] = &&arr_start,
       [T_BRAKET_RIGHT] = &&arr_end,
+      [T_CURLY_LEFT] = &&obj_start,
+      [T_CURLY_RIGHT] = &&obj_end,
       [T_STRING] = &&atom,
       [T_TRUE] = &&atom,
       [T_FALSE] = &&atom,
@@ -164,6 +166,26 @@ arr_end: {
   JUMP_NEXT;
 }
 
+obj_start: {
+  Node *n = CALL(p->alloc, request, sizeof(Node));
+  n->children_length = 0;
+  n->children_cap = 0;
+  n->type = N_OBJECT;
+  consume(p, T_CURLY_LEFT);
+  stack_top++;
+  stack[stack_top] = n;
+  JUMP_NEXT;
+}
+
+obj_end: {
+  ASSERT(stack_top != 0, "Unexpected obj end");
+  consume(p, T_CURLY_RIGHT);
+  Node *prev = stack[stack_top];
+  stack_top--;
+  Node_add_child(p->alloc, stack[stack_top], prev);
+  JUMP_NEXT;
+}
+
 eof:
   ASSERT(!stack_top, "Missing closing delimitor");
   return stack[0]->children_length;
@@ -175,6 +197,7 @@ Str NODE_TYPE_MAP[] = {
     //
     [N_IDENT] = STRING("N_IDENT"),
     [N_ARRAY] = STRING("N_ARRAY"),
+    [N_OBJECT] = STRING("N_OBJECT"),
     // main data structure
     [N_LIST] = STRING("N_LIST"),
     // builtin call

@@ -17,6 +17,8 @@ typedef enum {
   N_IDENT,
   // anything between [ and ]
   N_ARRAY,
+  // anything between { and }
+  N_OBJECT,
   // main data structure
   N_LIST,
   // builtins, like @println, @len, @let, @function, etc
@@ -34,7 +36,7 @@ extern Str NODE_TYPE_MAP[];
 // stores all possible values of a node
 typedef struct Node {
   NodeType type;
-  // only populated for N_FUNCTION and N_LIST; stores the amount of nodes in the
+  // stores the amount of nodes in the
   // functions body or the amount of children in a list
   size_t children_length;
   // stores the children_cap to implement a growing array
