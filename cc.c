@@ -357,14 +357,25 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     BC(OP_CALL, func->bytecode_index);
     break;
   }
-  // TODO: Arrays are just sugar for lists, same same
-  case N_LIST:
+  case N_OBJECT: {
+    ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
+           "cc: out of global space, what the fuck are you doing");
+    Value *v = CALL(alloc, request, sizeof(Value));
+    v->type = V_OBJ;
+    // TODO: correct init here
+    v->obj = (Map){.size = 0};
+    vm->globals[vm->global_len] = v;
+    BC(OP_LOADG, vm->global_len++);
+    break;
+  }
+  case N_LIST: // Arrays are just sugar for lists, same same
   case N_ARRAY: {
     if (n->children_length == 0) {
       ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
              "cc: out of global space, what the fuck are you doing");
       Value *v = CALL(alloc, request, sizeof(Value));
       v->type = V_ARRAY;
+      // TODO: correct init here
       v->array = (List){.len = 0, .cap = 0};
       vm->globals[vm->global_len] = v;
       BC(OP_LOADG, vm->global_len++)
