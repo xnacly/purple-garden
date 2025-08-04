@@ -26,9 +26,7 @@ Value *List_get(const List *l, size_t idx) {
     return INTERNED_NONE;
   }
 
-  Value *e = &((Value *)l->elements)[idx];
-  e->is_some = true;
-  return e;
+  return &((Value *)l->elements)[idx];
 }
 
 Map Map_new(size_t cap, Allocator *a);
