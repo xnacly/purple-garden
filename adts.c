@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "mem.h"
+#include <string.h>
 
 List List_new(size_t cap, Allocator *a) {
   List l = {
@@ -14,7 +15,15 @@ List List_new(size_t cap, Allocator *a) {
 
 void List_append(List *l, Value v) {
   if (l->len + 1 >= l->cap) {
-    ASSERT(0, "TODO: grow here");
+    size_t old_cap = l->cap;
+    size_t new_cap = old_cap * 2;
+
+    Value *new_mem = CALL(l->a, request, new_cap * sizeof(Value));
+    ASSERT(new_mem != NULL, "List growth failed: %zu -> %zu", old_cap, new_cap);
+
+    memcpy(new_mem, l->elements, old_cap * sizeof(Value));
+    l->elements = (struct Value *)new_mem;
+    l->cap = new_cap;
   }
 
   ((Value *)l->elements)[l->len++] = v;

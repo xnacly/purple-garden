@@ -67,11 +67,18 @@ extern Str VALUE_TYPE_MAP[];
 //         &l, (Value){.type = V_STR, .is_some = true, .string =
 //         STRING("HOLA")});
 //     Value array = (Value){.type = V_ARRAY, .array = l};
+//
+// List is based on zigs segmented list and has the advantage of not needing to
+// copy its previous members on growing
 typedef struct {
   size_t cap;
   size_t len;
   struct Value *elements; // voided because c sucks with selfreferencing types
   Allocator *a;
+
+  // TODO:
+  // https://github.com/ziglang/zig/blob/e17a050bc695f7d117b89adb1d258813593ca111/lib/std/segmented_list.zig
+  // and https://danielchasehooper.com/posts/segment_array/
 } List;
 
 // Map is purple gardens internal hash map representation. It is implemented as

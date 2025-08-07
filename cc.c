@@ -302,7 +302,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       builtin_function bf = vm->builtins[hash];
       ASSERT(bf != NULL, "Unknown builtin `@%.*s`", (int)s->len, s->p)
 
-      size_t registers[n->children_length];
+      size_t len = n->children_length == 0 ? 1 : n->children_length;
+      size_t registers[len];
       for (size_t i = 0; i < n->children_length; i++) {
         compile(alloc, vm, ctx, n->children[i]);
         size_t r = Ctx_allocate_register(ctx);
