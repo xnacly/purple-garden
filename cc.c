@@ -1,5 +1,6 @@
 #include "assert.h"
 #include <stdlib.h>
+#include <string.h>
 
 #include "cc.h"
 #include "common.h"
@@ -424,3 +425,37 @@ Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size) {
 
 #undef BC
 #undef TODO
+
+Ctx cc_seeded(Vm *vm, Allocator *alloc, Node **nodes, size_t size,
+              const Ctx *seed) {
+  // compile time constructs
+  NEW_CC_BUILTIN("let", LET)
+  NEW_CC_BUILTIN("function", FUNCTION)
+  NEW_CC_BUILTIN("assert", ASSERT)
+  NEW_CC_BUILTIN("None", NONE)
+  NEW_CC_BUILTIN("match", MATCH)
+
+  Ctx ctx = {
+      .register_allocated_count = 1,
+      .registers = {0},
+      .global_hash_buckets = CALL(alloc, request, sizeof(size_t) * GLOBAL_SIZE),
+      .hash_to_function = {},
+  };
+
+  if (seed != NULL) {
+    // carry over known functions
+    memcpy(ctx.hash_to_function, seed->hash_to_function,
+           sizeof(ctx.hash_to_function));
+    // carry over global interning buckets to avoid duplicates
+    if (seed->global_hash_buckets) {
+      memcpy(ctx.global_hash_buckets, seed->global_hash_buckets,
+             sizeof(size_t) * GLOBAL_SIZE);
+    }
+  }
+
+  for (size_t i = 0; i < size; i++) {
+    compile(alloc, vm, &ctx, nodes[i]);
+  }
+  return ctx;
+}
+

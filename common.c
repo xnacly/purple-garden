@@ -83,7 +83,7 @@ void Value_debug(const Value *v) {
     printf("(%g)", v->floating);
     break;
   case V_INT:
-    printf("(%ld)", v->integer);
+    printf("(%lld)", (long long)v->integer);
     break;
   case V_OBJ:
     // TODO: V_OBJ

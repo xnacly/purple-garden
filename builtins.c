@@ -16,7 +16,7 @@ static void print_value(const Value *v) {
     printf("%g", v->floating);
     break;
   case V_INT:
-    printf("%ld", v->integer);
+    printf("%lld", (long long)v->integer);
     break;
   case V_TRUE:
     printf("true");
@@ -74,11 +74,10 @@ void builtin_len(Vm *vm) {
     len = a->string.len;
   } else if (a->type == V_ARRAY) {
     len = a->array.len;
-  }
-  if (a->type == V_OBJ) {
+  } else if (a->type == V_OBJ) {
     len = a->obj.size;
   } else {
-    fputs("@len only strings and lists have a length", stderr);
+    fputs("@len only strings, arrays and objects have a length", stderr);
     exit(EXIT_FAILURE);
   }
 

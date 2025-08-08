@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 
@@ -35,9 +37,12 @@ typedef struct {
   const char *run;
   bool verbose;
   bool stats;
+    bool repl;
   int version;
   char *filename;
 } Args;
+
+static int run_repl(const Args *a);
 
 Args Args_parse(int argc, char **argv) {
   enum {
@@ -49,6 +54,7 @@ Args Args_parse(int argc, char **argv) {
     __VERBOSE,
     __STATS,
     __RUN,
+    __REPL,
   };
 
   SixFlag options[] = {
@@ -99,6 +105,11 @@ Args Args_parse(int argc, char **argv) {
                  .type = SIX_STR,
                  .description =
                      "executes the argument as if an input file was given"},
+      [__REPL] = {.name = "repl",
+                  .short_name = 'R',
+                  .type = SIX_BOOL,
+                  .b = false,
+                  .description = "start interactive REPL"},
   };
   Args a = (Args){0};
   Six s = {
@@ -117,6 +128,7 @@ Args Args_parse(int argc, char **argv) {
   a.run = s.flags[__RUN].s;
   a.verbose = s.flags[__VERBOSE].b;
   a.stats = s.flags[__STATS].b;
+  a.repl = s.flags[__REPL].b;
   a.version = s.flags[__VERSION].b;
 
   // command handling
@@ -128,8 +140,8 @@ Args Args_parse(int argc, char **argv) {
     exit(EXIT_SUCCESS);
   }
 
-  if (a.filename == NULL && (a.run == NULL || a.run[0] == 0)) {
-    fprintf(stderr, "error: Missing a file? try `-h/--help`\n");
+  if (!a.repl && a.filename == NULL && (a.run == NULL || a.run[0] == 0)) {
+    fprintf(stderr, "error: Missing a file? try `+h/+help` or `+repl`\n");
     exit(EXIT_FAILURE);
   };
 
@@ -145,7 +157,11 @@ int main(int argc, char **argv) {
   }
   VERBOSE_PUTS("main::Args_parse: Parsed arguments");
 
-  Str input;
+  if (a.repl) {
+    return run_repl(&a);
+  }
+
+  Str input = {0};
   if (a.run != NULL && a.run[0] != 0) {
     input = (Str){.p = (const uint8_t *)a.run, .len = strlen(a.run)};
   } else {
@@ -215,10 +231,10 @@ int main(int argc, char **argv) {
   // cli configuration
   Vm vm = Vm_new(pipeline_allocator, NULL);
   Ctx ctx = cc(&vm, pipeline_allocator, nodes, node_count);
-  VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu",
-               vm.bytecode_len, (size_t)vm.global_len);
+  VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%llu/%zu",
+               (unsigned long long)vm.bytecode_len, (size_t)vm.global_len);
 
-  if (UNLIKELY(a.disassemble)) {
+  if (!a.repl && UNLIKELY(a.disassemble)) {
     disassemble(&vm, &ctx);
     puts("");
   }
@@ -265,4 +281,119 @@ int main(int argc, char **argv) {
   VERBOSE_PUTS("munmap: unmapped input");
 
   return runtime_code == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+static int run_repl(const Args *a) {
+  // fixed-size working buffers sized for interactive use
+  size_t file_size_or_min = MIN_MEM;
+  size_t min_size = ((file_size_or_min * sizeof(Value)) + file_size_or_min +
+                     (file_size_or_min * sizeof(Node))) /
+                    2;
+
+  Allocator *pipeline_allocator = bump_init(min_size);
+  Token **tokens = CALL(pipeline_allocator, request,
+                        file_size_or_min * sizeof(Token *));
+  size_t node_cap = file_size_or_min * sizeof(Node *) / 4;
+  Node **nodes = CALL(pipeline_allocator, request, node_cap);
+
+  Vm vm = Vm_new(pipeline_allocator, NULL);
+  if (a->block_allocator > 0) {
+    vm.alloc = bump_init(a->block_allocator * 1024);
+  } else {
+    vm.alloc = xcgc_init(GC_MIN_HEAP, &vm);
+  }
+
+  printf("purple_garden REPL. Type :q to quit, :help for help.\n");
+  char line[8192];
+  Ctx last_ctx = (Ctx){0};
+  while (true) {
+    printf("> ");
+    fflush(stdout);
+    if (fgets(line, sizeof(line), stdin) == NULL) {
+      break;
+    }
+    size_t linelen = strlen(line);
+    while (linelen && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r')) {
+      line[--linelen] = '\0';
+    }
+    if (linelen == 0) {
+      continue;
+    }
+    if (strcmp(line, ":q") == 0 || strcmp(line, ":quit") == 0) {
+      break;
+    }
+    if (strcmp(line, ":help") == 0) {
+      puts(":q/:quit  exit\n:dis      disassemble last submission\n:stats    show bytecode stats\n:mem      show memory usage\n:reset    reset VM state");
+      continue;
+    }
+    if (strcmp(line, ":reset") == 0) {
+      Vm_destroy(&vm);
+      CALL(pipeline_allocator, destroy);
+      free(pipeline_allocator);
+      pipeline_allocator = bump_init(min_size);
+      tokens = CALL(pipeline_allocator, request,
+                    file_size_or_min * sizeof(Token *));
+      nodes = CALL(pipeline_allocator, request, node_cap);
+      vm = Vm_new(pipeline_allocator, NULL);
+      vm.alloc = (a->block_allocator > 0) ? bump_init(a->block_allocator * 1024)
+                                          : xcgc_init(GC_MIN_HEAP, &vm);
+      memset(&last_ctx, 0, sizeof(last_ctx));
+      puts("reset");
+      continue;
+    }
+    if (strcmp(line, ":dis") == 0) {
+      disassemble(&vm, &last_ctx);
+      puts("");
+      continue;
+    }
+    if (strcmp(line, ":stats") == 0) {
+      bytecode_stats(&vm);
+      continue;
+    }
+    if (strcmp(line, ":mem") == 0) {
+      Stats s = CALL(vm.alloc, stats);
+      double percent = (s.current * 100) / (double)s.allocated;
+      printf("vm  : %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
+             s.allocated / 1024.0, percent);
+      continue;
+    }
+
+    // copy line into allocator and lex/parse
+    uint8_t *persist = CALL(pipeline_allocator, request, linelen + 1);
+    memcpy(persist, line, linelen);
+    persist[linelen] = '\0';
+    Str src = (Str){.p = persist, .len = linelen};
+    Lexer rl = Lexer_new(src);
+    size_t rcount = Lexer_all(&rl, pipeline_allocator, tokens);
+    (void)rcount;
+    Parser rp = Parser_new(pipeline_allocator, tokens);
+    size_t node_count = Parser_all(nodes, &rp, node_cap);
+
+    bool only_function_defs = node_count > 0;
+    size_t function_hash = Str_hash(&STRING("function"));
+    for (size_t i = 0; i < node_count; i++) {
+      Node *tn = nodes[i];
+      if (!(tn->type == N_BUILTIN && tn->token &&
+            tn->token->string.hash == function_hash)) {
+        only_function_defs = false;
+        break;
+      }
+    }
+
+    Ctx new_ctx = cc_seeded(&vm, pipeline_allocator, nodes, node_count,
+                            last_ctx.global_hash_buckets ? &last_ctx : NULL);
+    last_ctx = new_ctx;
+
+    if (!only_function_defs) {
+      int code = Vm_run(&vm);
+      if (code != 0) {
+        fprintf(stderr, "[repl] runtime error (code=%d)\n", code);
+      }
+    }
+  }
+
+  CALL(pipeline_allocator, destroy);
+  free(pipeline_allocator);
+  Vm_destroy(&vm);
+  return EXIT_SUCCESS;
 }

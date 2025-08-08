@@ -44,6 +44,12 @@ typedef struct Ctx {
 // the runtime requires
 Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size);
 
+// Like cc(), but allows seeding the compiler context with a previous context
+// to enable incremental compilation (e.g., for a REPL) so that previously
+// defined functions remain callable in subsequent compilations.
+Ctx cc_seeded(Vm *vm, Allocator *alloc, Node **nodes, size_t size,
+              const Ctx *seed);
+
 // disassemble prints a readable bytecode representation with labels, globals
 // and comments as a heap allocated string
 void disassemble(const Vm *vm, const Ctx *ctx);
