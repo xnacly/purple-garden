@@ -3,14 +3,21 @@
 #include "common.h"
 #include <stdint.h>
 
+typedef enum {
+  // create array in vm
+  VM_NEW_ARRAY,
+  // create obj in vm
+  VM_NEW_OBJ,
+} VM_New;
+
 // PERF: maybe _ is too many, but prefetching a recursion depth can have
 // some positive effects on the runtime performance
 #define PREALLOCATE_FREELIST_SIZE 32
 
-// A frame represents a Scope, a new scope is created upon entering a lambda -
-// since lambdas are pure there is no way to interact with the previous frame
-// inside of a lambda, the pointer is kept to allow the runtime to restore the
-// scope state to its state before entering the lambda
+// A frame represents a Scope, a new scope is created upon entering a function -
+// since functions are pure, there is no way to interact with the previous frame
+// inside of a function, the pointer is kept to allow the runtime to restore the
+// scope state to its state before entering the functions scope
 //
 // WARNING: do not stack allocate, since variable_table can be huge
 typedef struct Frame {
@@ -40,7 +47,10 @@ typedef struct {
 
   // arg_count enables the vm to know how many register it needs to read
   // and pass to the function called via CALL or BUILTIN
-  size_t arg_count;
+  uint32_t arg_count;
+
+  // used for container sizes and stuff
+  uint32_t size_hint;
 
   // i have to type erase here :(
   void **builtins;
@@ -149,7 +159,23 @@ typedef enum {
   // JMPF bANY
   //
   // jump to bANY if r0 is false
-  OP_JMPF
+  OP_JMPF,
+
+  // NEW oType
+  //
+  // Creates an instance of the value defined via its argument, see enum
+  // VM_New
+  OP_NEW,
+
+  // APPEND rANY
+  //
+  // Appends r0 to rANY
+  OP_APPEND,
+
+  // Size uint32_t
+  //
+  // Specifices a size
+  OP_SIZE,
 } VM_OP;
 
 #define VM_ERR(fmt, ...)                                                       \

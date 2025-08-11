@@ -1,4 +1,5 @@
 #include "vm.h"
+#include "adts.h"
 #include "builtins.h"
 #include "common.h"
 #include "mem.h"
@@ -14,7 +15,9 @@ Str OP_MAP[256] = {
     [OP_BUILTIN] = STRING("BUILTIN"), [OP_LEAVE] = STRING("LEAVE"),
     [OP_CALL] = STRING("CALL"),       [OP_JMP] = STRING("JMP"),
     [OP_ASSERT] = STRING("ASSERT"),   [OP_LOADG] = STRING("LOADG"),
-    [OP_JMPF] = STRING("JMPF")};
+    [OP_JMPF] = STRING("JMPF"),       [OP_APPEND] = STRING("APPEND"),
+    [OP_NEW] = STRING("NEW"),         [OP_SIZE] = STRING("SIZE"),
+};
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
 
@@ -103,11 +106,38 @@ int Vm_run(Vm *vm) {
 #if DEBUG
     vm->instruction_counter[op]++;
     Str *str = &OP_MAP[op];
-    printf("[VM][%06zu|%05zu] %.*s%*.s=%06u\n", vm->pc, vm->pc + 1,
+    printf("[VM][%06zu|%05zu] %.*s%*.s=%06u { ", vm->pc, vm->pc + 1,
            (int)str->len, str->p, 10 - (int)str->len, " ", arg);
+    for (size_t i = 0; i < 3; i++) {
+      Value_debug(&vm->registers[i]);
+      printf(" ");
+    }
+    puts("}");
 #endif
 
     switch (op) {
+    case OP_SIZE:
+      vm->size_hint = arg;
+      break;
+    case OP_NEW: {
+      size_t size_hint = vm->size_hint;
+      Value v = (Value){};
+      switch ((VM_New)arg) {
+      case VM_NEW_ARRAY:
+        v.type = V_ARRAY;
+        v.array = List_new(size_hint, vm->alloc);
+        break;
+      default:
+        ASSERT(0, "OP_NEW unimplemented");
+        break;
+      }
+      vm->registers[0] = v;
+      vm->size_hint = 0;
+      break;
+    }
+    case OP_APPEND:
+      List_append(&vm->registers[arg].array, vm->registers[0]);
+      break;
     case OP_LOADG:
       vm->registers[0] = *vm->globals[arg];
       break;

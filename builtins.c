@@ -61,11 +61,6 @@ void builtin_println(Vm *vm) {
   putc('\n', stdout);
 }
 
-// len returns the value of its argument:
-//
-// - for V_STRING: string length
-// - for V_LIST: amount of children in list
-// - else None
 void builtin_len(Vm *vm) {
   ASSERT(vm->arg_count == 1, "@len only works for a singular argument")
   const Value *a = &vm->registers[1];
