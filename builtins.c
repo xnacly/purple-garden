@@ -74,8 +74,7 @@ void builtin_len(Vm *vm) {
     len = a->string.len;
   } else if (a->type == V_ARRAY) {
     len = a->array.len;
-  }
-  if (a->type == V_OBJ) {
+  } else if (a->type == V_OBJ) {
     len = a->obj.size;
   } else {
     fputs("@len only strings and lists have a length", stderr);

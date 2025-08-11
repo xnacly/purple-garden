@@ -1,5 +1,5 @@
 ; vim: filetype=racket
-(@function
+(@fn
   ; name
   add3        
   ; arguments
@@ -11,18 +11,18 @@
 (@println
   (add3 3.1415 3.1415 3.1415))
 
-(@function greeting [greetee] (@println "hello world to:" greetee))
+(@fn greeting [greetee] (@println "hello world to:" greetee))
 (greeting "user")
 
 ;; tail calls
-(@function inc [x] (+ x 1))
-(@function call1 [x] (inc x))
-(@function call2 [x] (call1 x))
-(@function call3 [x] (call2 x))
-(@function call4 [x] (call3 x))
-(@function call5 [x] (call4 x))
+(@fn inc [x] (+ x 1))
+(@fn call1 [x] (inc x))
+(@fn call2 [x] (call1 x))
+(@fn call3 [x] (call2 x))
+(@fn call4 [x] (call3 x))
+(@fn call5 [x] (call4 x))
 
 (@println (call5 0))
 
-(@function hello [])
+(@fn hello [])
 (hello)

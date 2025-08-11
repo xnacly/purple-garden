@@ -41,6 +41,8 @@
 
 #include "strings.h"
 
+extern Str VALUE_TYPE_MAP[];
+
 typedef enum {
   V_NONE,
   V_STR,
@@ -51,8 +53,6 @@ typedef enum {
   V_ARRAY,
   V_OBJ,
 } ValueType;
-
-extern Str VALUE_TYPE_MAP[];
 
 // List is purple gardens internal array representation. It is implemented as a
 // growing array and can be configured via the LIST_* macros. It owns its
@@ -68,8 +68,8 @@ extern Str VALUE_TYPE_MAP[];
 //         STRING("HOLA")});
 //     Value array = (Value){.type = V_ARRAY, .array = l};
 //
-// List is based on zigs segmented list and has the advantage of not needing to
-// copy its previous members on growing
+// List will be based on zigs segmented list and has the advantage of not
+// needing to copy its previous members on growing
 typedef struct {
   size_t cap;
   size_t len;

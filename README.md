@@ -4,7 +4,7 @@ purple_garden is a lean lisp, designed and implemented with a focus on
 performance
 
 ```racket
-(@function greeting [greetee] 
+(@fn greeting [greetee] 
     (@println "hello world to:" greetee))
 ; prints `hello world to: user`
 (greeting "user")

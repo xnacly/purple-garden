@@ -403,7 +403,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
 Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size) {
   // compile time constructs
   NEW_CC_BUILTIN("let", LET)
-  NEW_CC_BUILTIN("function", FUNCTION)
+  NEW_CC_BUILTIN("fn", FUNCTION)
   NEW_CC_BUILTIN("assert", ASSERT)
   NEW_CC_BUILTIN("None", NONE)
   NEW_CC_BUILTIN("match", MATCH)
@@ -419,6 +419,10 @@ Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size) {
   for (size_t i = 0; i < size; i++) {
     compile(alloc, vm, &ctx, nodes[i]);
   }
+
+  ASSERT(ctx.register_allocated_count == 1,
+         "Not all registers were freed, compiler bug!");
+
   return ctx;
 }
 

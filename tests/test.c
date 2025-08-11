@@ -49,7 +49,8 @@ bool Value_cmp_deep(const Value *a, const Value *b) {
   case V_NONE:
     return true;
   case V_ARRAY:
-    // TODO: implement deep array comparison
+  case V_OBJ:
+    // TODO: implement deep array and obj comparison
   default:
     // lists arent really the same, this is not a deep equal
     return false;
@@ -123,8 +124,8 @@ int main() {
     CASE((@let age 25)age, VAL(.type = V_INT, .integer = 25)),
 
     // functions
-    CASE((@function ret[arg] arg)(ret 25), VAL(.type = V_INT, .integer = 25)),
-    CASE((@function add25[arg](+arg 25))(add25 25),
+    CASE((@fn ret[arg] arg)(ret 25), VAL(.type = V_INT, .integer = 25)),
+    CASE((@fn add25[arg](+arg 25))(add25 25),
          VAL(.type = V_INT, .integer = 50)),
 
     // builtins
