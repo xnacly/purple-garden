@@ -134,7 +134,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   case N_BIN: {
     // single argument is just a return of that value
     if (n->children_length == 1) {
-      // TODO: arithmetic optimisations like n+0=n; n*0=0; n*1=n, etc
+      // PERF: arithmetic optimisations like n+0=n; n*0=0; n*1=n, etc
       compile(alloc, vm, ctx, n->children[0]);
     } else if (n->children_length == 2) {
       // two arguments is easy to compile, just load and add two Values
@@ -252,9 +252,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
 
         // Calling convention:
         //
-        // registers  = r1 r2 r3
-        // parameters = [a b c]
-        // arguments  = [1 2 3]
+        // registers  = rn1 rn2 rn3
+        // parameters = [ a  b  c]
+        // arguments  = [ 1  2  3]
         for (size_t i = 0; i < param_len; i++) {
           Node *param = params[i];
           ASSERT(param->type == N_IDENT,
@@ -262,6 +262,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
                  "definition, got `%.*s`",
                  (int)name->len, name->p, (int)NODE_TYPE_MAP[param->type].len,
                  NODE_TYPE_MAP[param->type].p);
+
           // PERF: changing args to start from r1 to starting from r0,
           // thus saving a single OP_LOAD for each function invocation
           BC(OP_LOAD, i + 1);
@@ -314,10 +315,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         Ctx_free_register(ctx, registers[i]);
       }
 
-      if (n->children_length > 1) {
-        BC(OP_ARGS, n->children_length);
-      }
-
+      BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(n->children_length,
+                                              ctx->register_allocated_count));
       BC(OP_BUILTIN, hash);
     }
     break;
@@ -351,41 +350,47 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     for (int i = n->children_length - 1; i >= 0; i--) {
       Ctx_free_register(ctx, registers[i]);
     }
-    if (n->children_length > 1) {
-      BC(OP_ARGS, n->children_length);
-    }
 
+    BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(n->children_length,
+                                            ctx->register_allocated_count));
     BC(OP_CALL, func->bytecode_index);
     break;
   }
   case N_OBJECT: {
-    ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
-           "cc: out of global space, what the fuck are you doing");
-    Value *v = CALL(alloc, request, sizeof(Value));
-    v->type = V_OBJ;
-    // TODO: correct init here
-    v->obj = (Map){.size = 0};
-    vm->globals[vm->global_len] = v;
-    BC(OP_LOADG, vm->global_len++);
+    ASSERT(0, "N_OBJECT: Unimplemented");
     break;
   }
-  case N_LIST: // Arrays are just sugar for lists, same same
+  case N_LIST: // Lists are just sugar for arrays, same same
   case N_ARRAY: {
-    if (n->children_length == 0) {
-      ASSERT(vm->global_len + 1 < GLOBAL_SIZE,
-             "cc: out of global space, what the fuck are you doing");
-      Value *v = CALL(alloc, request, sizeof(Value));
-      v->type = V_ARRAY;
-      // TODO: correct init here
-      v->array = (List){.len = 0, .cap = 0};
-      vm->globals[vm->global_len] = v;
-      BC(OP_LOADG, vm->global_len++)
-    } else {
-      TODO("N_ARRAY#statically allocate known array sizes")
+    size_t size = n->children_length;
+    // fast path for empty array
+    if (size != 0) {
+      // size hint is placed in r0 to instruct the OP_NEW to use the allocation
+      // size for any value, such as an array or object.
+      BC(OP_SIZE, size);
+    }
+
+    BC(OP_NEW, VM_NEW_ARRAY);
+
+    // fast path for empty array
+    if (size != 0) {
+      // after OP_NEW the created value is in r0, we must now temporarly move
+      // it to any other register, so its not clobbered by acm register usage
+      size_t list_register = Ctx_allocate_register(ctx);
+      BC(OP_STORE, list_register)
+
+      for (size_t i = 0; i < size; i++) {
+        compile(alloc, vm, ctx, n->children[i]);
+        BC(OP_APPEND, list_register);
+      }
+
+      // move the array back into r0, since it needs to be the return value of
+      // this N_ARRAY and N_LIST node
+      BC(OP_LOAD, list_register);
+      Ctx_free_register(ctx, list_register);
     }
     break;
   }
-
   default:
     Str *s = &NODE_TYPE_MAP[n->type];
     ASSERT(0,

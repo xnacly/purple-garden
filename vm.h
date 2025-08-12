@@ -3,14 +3,27 @@
 #include "common.h"
 #include <stdint.h>
 
+#define ENCODE_ARG_COUNT_AND_OFFSET(COUNT, OFFSET)                             \
+  /* offset-1 since r0 is always allocated */                                  \
+  (((COUNT) & 0x7F) << 7 | ((OFFSET - 1) & 0x7F))
+#define DECODE_ARG_COUNT(ARG) (((ARG) >> 7) & 0x7F)
+#define DECODE_ARG_OFFSET(ARG) ((ARG) & 0x7F)
+
+typedef enum {
+  // create array in vm
+  VM_NEW_ARRAY,
+  // create obj in vm
+  VM_NEW_OBJ,
+} VM_New;
+
 // PERF: maybe _ is too many, but prefetching a recursion depth can have
 // some positive effects on the runtime performance
 #define PREALLOCATE_FREELIST_SIZE 32
 
-// A frame represents a Scope, a new scope is created upon entering a lambda -
-// since lambdas are pure there is no way to interact with the previous frame
-// inside of a lambda, the pointer is kept to allow the runtime to restore the
-// scope state to its state before entering the lambda
+// A frame represents a Scope, a new scope is created upon entering a function -
+// since functions are pure, there is no way to interact with the previous frame
+// inside of a function, the pointer is kept to allow the runtime to restore the
+// scope state to its state before entering the functions scope
 //
 // WARNING: do not stack allocate, since variable_table can be huge
 typedef struct Frame {
@@ -22,7 +35,7 @@ typedef struct Frame {
   Value variable_table[VARIABLE_TABLE_SIZE];
 } Frame;
 
-typedef struct {
+typedef struct __Vm {
   uint32_t global_len;
   // globals represents the global pool created by the bytecode compiler
   Value **globals;
@@ -38,9 +51,13 @@ typedef struct {
   // data
   Frame *frame;
 
-  // arg_count enables the vm to know how many register it needs to read
-  // and pass to the function called via CALL or BUILTIN
-  size_t arg_count;
+  // encode amount of arguments to function call, can be CALL or BUILTIN
+  uint16_t arg_count;
+  // encode offset to know where the arguments start in the register block
+  uint16_t arg_offset;
+
+  // used for container sizes and stuff
+  uint32_t size_hint;
 
   // i have to type erase here :(
   void **builtins;
@@ -68,12 +85,6 @@ typedef enum {
   //
   // LOAD a Value from rANY into r0
   OP_LOAD,
-
-  // OP_VAR globalANY
-  //
-  // Copy value from Frame assigned to variable name stored in global pool at
-  // globalANY
-  // OP_VAR,
 
   // OP_ADD rANY
   //
@@ -149,7 +160,23 @@ typedef enum {
   // JMPF bANY
   //
   // jump to bANY if r0 is false
-  OP_JMPF
+  OP_JMPF,
+
+  // NEW oType
+  //
+  // Creates an instance of the value defined via its argument, see enum
+  // VM_New
+  OP_NEW,
+
+  // APPEND rANY
+  //
+  // Appends r0 to rANY
+  OP_APPEND,
+
+  // Size uint32_t
+  //
+  // Specifices a size
+  OP_SIZE,
 } VM_OP;
 
 #define VM_ERR(fmt, ...)                                                       \

@@ -61,11 +61,13 @@ typedef enum {
 //     #include "adts.h"
 //
 //     List l = List_new(8, vm->alloc);
-//     List_append(&l, *INTERNED_TRUE);
-//     List_append(&l, *INTERNED_NONE);
+//     List_append(&l, *INTERNED_TRUE, vm->alloc);
+//     List_append(&l, *INTERNED_NONE, vm->alloc);
 //     List_append(
 //         &l, (Value){.type = V_STR, .is_some = true, .string =
-//         STRING("HOLA")});
+//         STRING("HOLA")},
+//         vm->alloc
+//     );
 //     Value array = (Value){.type = V_ARRAY, .array = l};
 //
 // List will be based on zigs segmented list and has the advantage of not
@@ -74,8 +76,6 @@ typedef struct {
   size_t cap;
   size_t len;
   struct Value *elements; // voided because c sucks with selfreferencing types
-  Allocator *a;
-
   // TODO:
   // https://github.com/ziglang/zig/blob/e17a050bc695f7d117b89adb1d258813593ca111/lib/std/segmented_list.zig
   // and https://danielchasehooper.com/posts/segment_array/
@@ -88,7 +88,6 @@ typedef struct {
 typedef struct {
   size_t size;
   List *buckets;
-  Allocator *a;
 } Map;
 
 // Value represents a value known to the runtime

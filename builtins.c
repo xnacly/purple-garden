@@ -1,6 +1,9 @@
 #include "builtins.h"
 #include "common.h"
 
+#define ARG(I) (vm->registers[vm->arg_offset + 1 + (I)])
+#define RETURN(...) (vm->registers[0] = (Value)__VA_ARGS__)
+
 static void print_value(const Value *v) {
   if (v->is_some) {
     printf("Option::Some(");
@@ -48,10 +51,11 @@ static void print_value(const Value *v) {
 
 // print works the same as println but without the newline
 void builtin_print(Vm *vm) {
-  for (size_t i = 1; i < vm->arg_count + 1; i++) {
-    print_value(&vm->registers[i]);
+  for (uint16_t i = 0; i < vm->arg_count; i++) {
+    print_value(&ARG(i));
     putc(' ', stdout);
   }
+  RETURN(*INTERNED_NONE);
 }
 
 // println outputs its argument to stdout, joined with ' ' and postfixed with a
@@ -59,16 +63,12 @@ void builtin_print(Vm *vm) {
 void builtin_println(Vm *vm) {
   builtin_print(vm);
   putc('\n', stdout);
+  RETURN(*INTERNED_NONE);
 }
 
-// len returns the value of its argument:
-//
-// - for V_STRING: string length
-// - for V_LIST: amount of children in list
-// - else None
 void builtin_len(Vm *vm) {
   ASSERT(vm->arg_count == 1, "@len only works for a singular argument")
-  const Value *a = &vm->registers[1];
+  const Value *a = &ARG(0);
   size_t len = 0;
   if (a->type == V_STR) {
     len = a->string.len;
@@ -81,20 +81,21 @@ void builtin_len(Vm *vm) {
     exit(EXIT_FAILURE);
   }
 
-  vm->registers[0] = (Value){
+  RETURN({
       .type = V_INT,
       .integer = len,
-  };
+  });
 }
 
 void builtin_type(Vm *vm) {
   ASSERT(vm->arg_count == 1, "@type only works for a singular argument")
+  uint16_t offset = vm->arg_offset;
   Str s;
-  const Value *v = &vm->registers[1];
-  if (v->is_some) {
+  const Value *a = &ARG(0);
+  if (a->is_some) {
     s = STRING("option");
   } else {
-    switch (vm->registers[1].type) {
+    switch (a->type) {
     case V_NONE:
       s = STRING("option");
       break;
@@ -119,15 +120,15 @@ void builtin_type(Vm *vm) {
     }
   }
 
-  vm->registers[0] = (Value){
+  RETURN({
       .type = V_STR,
       .string = s,
-  };
+  });
 }
 
 void builtin_Some(Vm *vm) {
   ASSERT(vm->arg_count == 1, "@Some only works for a singular argument")
-  Value inner = vm->registers[1];
+  Value inner = ARG(0);
   inner.is_some = true;
-  vm->registers[0] = inner;
+  RETURN(inner);
 }

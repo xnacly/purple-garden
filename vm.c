@@ -1,4 +1,5 @@
 #include "vm.h"
+#include "adts.h"
 #include "builtins.h"
 #include "common.h"
 #include "mem.h"
@@ -14,7 +15,9 @@ Str OP_MAP[256] = {
     [OP_BUILTIN] = STRING("BUILTIN"), [OP_LEAVE] = STRING("LEAVE"),
     [OP_CALL] = STRING("CALL"),       [OP_JMP] = STRING("JMP"),
     [OP_ASSERT] = STRING("ASSERT"),   [OP_LOADG] = STRING("LOADG"),
-    [OP_JMPF] = STRING("JMPF")};
+    [OP_JMPF] = STRING("JMPF"),       [OP_APPEND] = STRING("APPEND"),
+    [OP_NEW] = STRING("NEW"),         [OP_SIZE] = STRING("SIZE"),
+};
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
 
@@ -100,14 +103,46 @@ int Vm_run(Vm *vm) {
     VM_OP op = vm->bytecode[vm->pc];
     uint32_t arg = vm->bytecode[vm->pc + 1];
 
+#define PRINT_REGISTERS 5
 #if DEBUG
     vm->instruction_counter[op]++;
     Str *str = &OP_MAP[op];
-    printf("[VM][%06zu|%05zu] %.*s%*.s=%06u\n", vm->pc, vm->pc + 1,
+    printf("[VM][%06zu|%05zu] %.*s%*.s=%06u", vm->pc, vm->pc + 1,
            (int)str->len, str->p, 10 - (int)str->len, " ", arg);
+#if PRINT_REGISTERS
+    printf("{ ");
+     for (size_t i = 0; i < PRINT_REGISTERS; i++) {
+      Value_debug(&vm->registers[i]);
+      printf(" ");
+    }
+    printf("} ");
+#endif
+    puts("");
 #endif
 
     switch (op) {
+    case OP_SIZE:
+      vm->size_hint = arg;
+      break;
+    case OP_NEW: {
+                     NEW({});
+      Value v = (Value){};
+      switch ((VM_New)arg) {
+      case VM_NEW_ARRAY:
+        v.type = V_ARRAY;
+        v.array = List_new(vm->size_hint, vm->alloc);
+        break;
+      default:
+        ASSERT(0, "OP_NEW unimplemented");
+        break;
+      }
+      vm->registers[0] = v;
+      vm->size_hint = 0;
+      break;
+    }
+    case OP_APPEND:
+      List_append(&vm->registers[arg].array, vm->registers[0], vm->alloc);
+      break;
     case OP_LOADG:
       vm->registers[0] = *vm->globals[arg];
       break;
@@ -224,13 +259,15 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_ARGS:
-      vm->arg_count = arg;
+      vm->arg_count = DECODE_ARG_COUNT(arg);
+      vm->arg_offset = DECODE_ARG_OFFSET(arg);
       break;
     case OP_BUILTIN: {
       // at this point all builtins are just syscalls into an array of
       // function pointers
       ((builtin_function)vm->builtins[arg])(vm);
       vm->arg_count = 1;
+      vm->arg_offset = 0;
       break;
     }
     case OP_CALL: {
@@ -240,6 +277,7 @@ int Vm_run(Vm *vm) {
       vm->frame = f;
       vm->pc = arg;
       vm->arg_count = 1;
+      vm->arg_offset = 0;
       break;
     }
     case OP_LEAVE: {

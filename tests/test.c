@@ -18,7 +18,10 @@ typedef struct {
   (Value) { __VA_ARGS__ }
 
 #define CASE(in, r0)                                                           \
-  { .input = STRING(#in "\0"), .expected_r0 = r0, }
+  {                                                                            \
+      .input = STRING(#in "\0"),                                               \
+      .expected_r0 = r0,                                                       \
+  }
 
 // stolen from common.(c|h) and adapted
 bool Value_cmp_deep(const Value *a, const Value *b) {

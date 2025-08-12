@@ -10,7 +10,7 @@
 // str is a simple stack allocated wrapper around C char arrays, providing
 // constant time length access and zero allocation+copy interactions for all
 // methods except if Allocator is present as its argument. Cheap to copy.
-typedef struct {
+typedef struct __Str {
   // store the pointer to the underlying char
   const uint8_t *p;
   // hash of the input, do not expect it to be filled, has to be computed via

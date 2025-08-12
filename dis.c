@@ -45,6 +45,10 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
 
       // dont print the argument if its unused in the vm
       switch (op) {
+      case OP_ARGS:
+        printf(" %zu ; count=%zu,offset=%zu", arg, DECODE_ARG_COUNT(arg),
+               DECODE_ARG_OFFSET(arg));
+        break;
       case OP_LEAVE:
         puts("");
       case OP_ASSERT:

@@ -26,3 +26,6 @@
 
 (@fn hello [])
 (hello)
+
+(@fn tuplify [v] [(@type v) (@len v)])
+(@println (tuplify "hello world"))

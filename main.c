@@ -173,6 +173,10 @@ int main(int argc, char **argv) {
 
   // this allocator stores both nodes, bytecode and the global pool of the vm,
   // thus it has to life exactly as long as the vm does.
+  //
+  // TODO: this has to be split into allocators for each stage: one for tokens,
+  // one for nodes and one for the compiler (bytecode and globals, etc...). This
+  // will reduce memory usage by a lot since the above is WAY too conservative
   Allocator *pipeline_allocator = bump_init(min_size);
   VERBOSE_PUTS("mem::init: Allocated memory block of size=%zuB", min_size);
   Lexer l = Lexer_new(input);
