@@ -3,6 +3,12 @@
 #include "common.h"
 #include <stdint.h>
 
+#define ENCODE_ARG_COUNT_AND_OFFSET(COUNT, OFFSET)                             \
+  /* offset-1 since r0 is always allocated */                                  \
+  (((COUNT) & 0x7F) << 7 | ((OFFSET - 1) & 0x7F))
+#define DECODE_ARG_COUNT(ARG) (((ARG) >> 7) & 0x7F)
+#define DECODE_ARG_OFFSET(ARG) ((ARG) & 0x7F)
+
 typedef enum {
   // create array in vm
   VM_NEW_ARRAY,
@@ -29,7 +35,7 @@ typedef struct Frame {
   Value variable_table[VARIABLE_TABLE_SIZE];
 } Frame;
 
-typedef struct {
+typedef struct __Vm {
   uint32_t global_len;
   // globals represents the global pool created by the bytecode compiler
   Value **globals;
@@ -45,9 +51,10 @@ typedef struct {
   // data
   Frame *frame;
 
-  // arg_count enables the vm to know how many register it needs to read
-  // and pass to the function called via CALL or BUILTIN
-  uint32_t arg_count;
+  // encode amount of arguments to function call, can be CALL or BUILTIN
+  uint16_t arg_count;
+  // encode offset to know where the arguments start in the register block
+  uint16_t arg_offset;
 
   // used for container sizes and stuff
   uint32_t size_hint;
@@ -78,12 +85,6 @@ typedef enum {
   //
   // LOAD a Value from rANY into r0
   OP_LOAD,
-
-  // OP_VAR globalANY
-  //
-  // Copy value from Frame assigned to variable name stored in global pool at
-  // globalANY
-  // OP_VAR,
 
   // OP_ADD rANY
   //

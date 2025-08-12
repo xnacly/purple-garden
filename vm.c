@@ -103,16 +103,21 @@ int Vm_run(Vm *vm) {
     VM_OP op = vm->bytecode[vm->pc];
     uint32_t arg = vm->bytecode[vm->pc + 1];
 
+#define PRINT_REGISTERS 5
 #if DEBUG
     vm->instruction_counter[op]++;
     Str *str = &OP_MAP[op];
-    printf("[VM][%06zu|%05zu] %.*s%*.s=%06u { ", vm->pc, vm->pc + 1,
+    printf("[VM][%06zu|%05zu] %.*s%*.s=%06u", vm->pc, vm->pc + 1,
            (int)str->len, str->p, 10 - (int)str->len, " ", arg);
-    for (size_t i = 0; i < 3; i++) {
+#if PRINT_REGISTERS
+    printf("{ ");
+     for (size_t i = 0; i < PRINT_REGISTERS; i++) {
       Value_debug(&vm->registers[i]);
       printf(" ");
     }
-    puts("}");
+    printf("} ");
+#endif
+    puts("");
 #endif
 
     switch (op) {
@@ -120,12 +125,12 @@ int Vm_run(Vm *vm) {
       vm->size_hint = arg;
       break;
     case OP_NEW: {
-      size_t size_hint = vm->size_hint;
+                     NEW({});
       Value v = (Value){};
       switch ((VM_New)arg) {
       case VM_NEW_ARRAY:
         v.type = V_ARRAY;
-        v.array = List_new(size_hint, vm->alloc);
+        v.array = List_new(vm->size_hint, vm->alloc);
         break;
       default:
         ASSERT(0, "OP_NEW unimplemented");
@@ -254,13 +259,15 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_ARGS:
-      vm->arg_count = arg;
+      vm->arg_count = DECODE_ARG_COUNT(arg);
+      vm->arg_offset = DECODE_ARG_OFFSET(arg);
       break;
     case OP_BUILTIN: {
       // at this point all builtins are just syscalls into an array of
       // function pointers
       ((builtin_function)vm->builtins[arg])(vm);
       vm->arg_count = 1;
+      vm->arg_offset = 0;
       break;
     }
     case OP_CALL: {
@@ -270,6 +277,7 @@ int Vm_run(Vm *vm) {
       vm->frame = f;
       vm->pc = arg;
       vm->arg_count = 1;
+      vm->arg_offset = 0;
       break;
     }
     case OP_LEAVE: {

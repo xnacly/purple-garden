@@ -252,9 +252,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
 
         // Calling convention:
         //
-        // registers  = r1 r2 r3
-        // parameters = [a b c]
-        // arguments  = [1 2 3]
+        // registers  = rn1 rn2 rn3
+        // parameters = [ a  b  c]
+        // arguments  = [ 1  2  3]
         for (size_t i = 0; i < param_len; i++) {
           Node *param = params[i];
           ASSERT(param->type == N_IDENT,
@@ -262,6 +262,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
                  "definition, got `%.*s`",
                  (int)name->len, name->p, (int)NODE_TYPE_MAP[param->type].len,
                  NODE_TYPE_MAP[param->type].p);
+
           // PERF: changing args to start from r1 to starting from r0,
           // thus saving a single OP_LOAD for each function invocation
           BC(OP_LOAD, i + 1);
@@ -314,8 +315,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         Ctx_free_register(ctx, registers[i]);
       }
 
-      // TODO: merge offset and argument count to enable new calling convention
-      BC(OP_ARGS, n->children_length);
+      BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(n->children_length,
+                                              ctx->register_allocated_count));
       BC(OP_BUILTIN, hash);
     }
     break;
@@ -350,8 +351,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       Ctx_free_register(ctx, registers[i]);
     }
 
-    // TODO: merge offset and argument count to enable new calling convention
-    BC(OP_ARGS, n->children_length);
+    BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(n->children_length,
+                                            ctx->register_allocated_count));
     BC(OP_CALL, func->bytecode_index);
     break;
   }
@@ -376,16 +377,6 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       // after OP_NEW the created value is in r0, we must now temporarly move
       // it to any other register, so its not clobbered by acm register usage
       size_t list_register = Ctx_allocate_register(ctx);
-
-      // BUG: BIG BIG BIG problem:
-      //
-      // This lives longer than, lets say a function or builtin call. These
-      // require all arguments to start from r1..n, assuming all registers in
-      // that context were freed, which isnt the case here. Thus the calling
-      // convention is flawed. The fix is to encode the offset of the argument
-      // window in the OP_ARGS instruction. This way the window can start at an
-      // arbitrary location and enables the longer than usual lifetimes of some
-      // registers.
       BC(OP_STORE, list_register)
 
       for (size_t i = 0; i < size; i++) {
