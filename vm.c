@@ -136,7 +136,7 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_APPEND:
-      List_append(&vm->registers[arg].array, vm->registers[0]);
+      List_append(&vm->registers[arg].array, vm->registers[0], vm->alloc);
       break;
     case OP_LOADG:
       vm->registers[0] = *vm->globals[arg];

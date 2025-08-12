@@ -44,7 +44,7 @@ typedef enum {
 // TOKEN_TYPE_MAP allows for mapping TokenType to its string representation
 extern Str TOKEN_TYPE_MAP[];
 
-typedef struct {
+typedef struct __Token {
   TokenType type;
   // stores all values for T_STRING,T_IDENT,T_INTEGER and T_DOUBLE
   Str string;

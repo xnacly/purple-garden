@@ -34,7 +34,7 @@ typedef enum {
 extern Str NODE_TYPE_MAP[];
 
 // stores all possible values of a node
-typedef struct Node {
+typedef struct __Node {
   NodeType type;
   // stores the amount of nodes in the
   // functions body or the amount of children in a list
@@ -46,7 +46,7 @@ typedef struct Node {
   Token *token;
   // either children of a list or body of a function, length encoded in
   // Node.children_length
-  struct Node **children;
+  struct __Node **children;
 } Node;
 
 Parser Parser_new(Allocator *alloc, Token **t);

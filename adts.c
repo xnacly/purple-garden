@@ -13,12 +13,12 @@ List List_new(size_t cap, Allocator *a) {
   return l;
 }
 
-void List_append(List *l, Value v) {
+void List_append(List *l, Value v, Allocator *a) {
   if (l->len + 1 >= l->cap) {
     size_t old_cap = l->cap;
     size_t new_cap = old_cap * 2;
 
-    Value *new_mem = CALL(l->a, request, new_cap * sizeof(Value));
+    Value *new_mem = CALL(a, request, new_cap * sizeof(Value));
     ASSERT(new_mem != NULL, "List growth failed: %zu -> %zu", old_cap, new_cap);
 
     memcpy(new_mem, l->elements, old_cap * sizeof(Value));
@@ -38,7 +38,8 @@ Value *List_get(const List *l, size_t idx) {
   return &((Value *)l->elements)[idx];
 }
 
+// TODO: implement before adding support for V_OBJ
 Map Map_new(size_t cap, Allocator *a);
-void Map_insert(Map *m, Str *s, Value v);
+void Map_insert(Map *m, Str *s, Value v, Allocator *a);
 Value *Map_get(const Map *m, Str *s);
 bool Map_has(const Map *m, Str *s);
