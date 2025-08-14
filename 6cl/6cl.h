@@ -4,6 +4,7 @@
  * */
 #pragma once
 #include <stddef.h>
+#include <stdbool.h>
 
 #ifndef SIX_OPTION_PREFIX
 #define SIX_OPTION_PREFIX '+'
