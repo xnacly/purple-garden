@@ -1,9 +1,6 @@
 #include "builtins.h"
 #include "common.h"
 
-#define ARG(I) (vm->registers[vm->arg_offset + 1 + (I)])
-#define RETURN(...) (vm->registers[0] = (Value)__VA_ARGS__)
-
 static void print_value(const Value *v) {
   if (v->is_some) {
     printf("Option::Some(");
