@@ -1,4 +1,3 @@
-// TODO: split this up into a DEBUG and a performance entry point
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

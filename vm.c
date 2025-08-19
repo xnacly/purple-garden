@@ -1,10 +1,11 @@
-#include "vm.h"
+#include <stdint.h>
+
 #include "adts.h"
 #include "builtins.h"
 #include "common.h"
 #include "mem.h"
 #include "strings.h"
-#include <stdint.h>
+#include "vm.h"
 
 Str OP_MAP[256] = {
     [OP_STORE] = STRING("STORE"),     [OP_LOAD] = STRING("LOAD"),
@@ -107,11 +108,11 @@ int Vm_run(Vm *vm) {
 #if DEBUG
     vm->instruction_counter[op]++;
     Str *str = &OP_MAP[op];
-    printf("[VM][%06zu|%05zu] %.*s%*.s=%06u", vm->pc, vm->pc + 1,
-           (int)str->len, str->p, 10 - (int)str->len, " ", arg);
+    printf("[VM][%06zu|%05zu] %.*s%*.s=%06u", vm->pc, vm->pc + 1, (int)str->len,
+           str->p, 10 - (int)str->len, " ", arg);
 #if PRINT_REGISTERS
     printf("{ ");
-     for (size_t i = 0; i < PRINT_REGISTERS; i++) {
+    for (size_t i = 0; i < PRINT_REGISTERS; i++) {
       Value_debug(&vm->registers[i]);
       printf(" ");
     }
@@ -125,7 +126,7 @@ int Vm_run(Vm *vm) {
       vm->size_hint = arg;
       break;
     case OP_NEW: {
-                     NEW({});
+      NEW({});
       Value v = (Value){};
       switch ((VM_New)arg) {
       case VM_NEW_ARRAY:
@@ -318,6 +319,8 @@ vm_end:
 }
 
 void Vm_destroy(Vm *vm) {
-  CALL(vm->alloc, destroy);
-  free(vm->alloc);
+  if (vm->alloc != NULL) {
+    CALL(vm->alloc, destroy);
+    free(vm->alloc);
+  }
 }
