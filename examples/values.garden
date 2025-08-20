@@ -29,8 +29,8 @@
 ;; objects
 (@let obj { 'user-name "dummy" })
 (@println obj) ; { user-name: "dummy" }
-(@let obj.user-name "xnacly")
+(@let obj/user-name "xnacly")
 (@println 
   obj ; { user-name: "xnacly" }
-  obj.user-name ; "xnacly"
+  obj/user-name ; "xnacly"
 )
