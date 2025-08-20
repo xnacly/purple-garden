@@ -3,6 +3,19 @@
 #include "common.h"
 #include <stdint.h>
 
+typedef struct {
+  // removes all default builtins like @len, @type, etc
+  bool remove_default_builtins;
+  // disables the @std/ namespace
+  bool disable_std_namespace;
+  // disables garbage collection and allocates 'max_memory' with a bump
+  // allocator
+  bool disable_gc;
+  // defines the maximum amount of memory purple garden is allowed to allocate,
+  // if this is hit, the vm exits with a non zero code
+  uint64_t max_memory;
+} Vm_Config;
+
 #define ENCODE_ARG_COUNT_AND_OFFSET(COUNT, OFFSET)                             \
   /* offset-1 since r0 is always allocated */                                  \
   (((COUNT) & 0x7F) << 7 | ((OFFSET - 1) & 0x7F))
@@ -188,7 +201,7 @@ extern Str OP_MAP[];
 // Creates a new virtual machine with registered builtins, static_alloc is used
 // to allocate space for both the global pool and the byte code space, alloc is
 // used in the virtual machine itself
-Vm Vm_new(Allocator *static_alloc, Allocator *alloc);
+Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc);
 void Vm_register_builtin(Vm *vm, builtin_function bf, Str name);
 int Vm_run(Vm *vm);
 void Vm_destroy(Vm *vm);
