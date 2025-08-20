@@ -6,14 +6,18 @@
 #include "parser.h"
 #include "vm.h"
 
-typedef struct Pg {
-  Allocator *__alloc;
-  Vm __vm;
-} Pg;
+#define MIN_MEMORY 1 * 1024
 
-Pg pg_init(uint64_t max_memory) {
-  Allocator *a = bump_init(max_memory);
-  return (Pg){.__alloc = a, .__vm = Vm_new(a, NULL)};
+Pg pg_init(Vm_Config *conf) {
+  if (conf->max_memory < MIN_MEMORY) {
+    conf->max_memory = MIN_MEMORY;
+  }
+  Allocator *a = bump_init(conf->max_memory / 2);
+  return (Pg){
+      .__alloc = a,
+      .__vm = Vm_new(*conf, a, NULL),
+      .__conf = conf,
+  };
 }
 
 // TODO: I have to make this better, maybe reattach lexer to the parser to not
@@ -30,6 +34,13 @@ uint8_t pg_exec_file(Pg *pg, const char *filename) {
   Node **nodes = CALL(pg->__alloc, request, MAX_NODES);
   size_t node_count = Parser_all(nodes, &p, MAX_NODES);
   Ctx ctx = cc(&pg->__vm, pg->__alloc, nodes, node_count);
+
+  if (pg->__conf->disable_gc) {
+    pg->__vm.alloc = bump_init(pg->__conf->max_memory / 2);
+  } else {
+    pg->__vm.alloc = xcgc_init(pg->__conf->max_memory / 2, &pg->__vm);
+  }
+
   return Vm_run(&pg->__vm);
 }
 

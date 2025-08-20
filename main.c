@@ -216,7 +216,7 @@ int main(int argc, char **argv) {
 
   // alloc is NULL here, because we are setting it later on, depending on the
   // cli configuration
-  Vm vm = Vm_new(pipeline_allocator, NULL);
+  Vm vm = Vm_new((Vm_Config){}, pipeline_allocator, NULL);
   Ctx ctx = cc(&vm, pipeline_allocator, nodes, node_count);
   VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu",
                vm.bytecode_len, (size_t)vm.global_len);

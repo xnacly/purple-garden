@@ -26,7 +26,7 @@ inline void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
   vm->builtins[Str_hash(&name) & MAX_BUILTIN_SIZE_MASK] = bf;
 }
 
-Vm Vm_new(Allocator *static_alloc, Allocator *alloc) {
+Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
   Vm vm = {0};
   vm.alloc = alloc;
 
@@ -39,12 +39,13 @@ Vm Vm_new(Allocator *static_alloc, Allocator *alloc) {
   vm.globals[GLOBAL_NONE] = INTERNED_NONE;
   vm.global_len = 3;
 
-  Vm_register_builtin(&vm, builtin_print, STRING("print"));
-  Vm_register_builtin(&vm, builtin_println, STRING("println"));
-  Vm_register_builtin(&vm, builtin_len, STRING("len"));
-  Vm_register_builtin(&vm, builtin_type, STRING("type"));
-  Vm_register_builtin(&vm, builtin_Some, STRING("Some"));
-  // Vm_register_builtin(&vm, builtin_None, STRING("None"));
+  if (!conf.remove_default_builtins) {
+    Vm_register_builtin(&vm, builtin_print, STRING("print"));
+    Vm_register_builtin(&vm, builtin_println, STRING("println"));
+    Vm_register_builtin(&vm, builtin_len, STRING("len"));
+    Vm_register_builtin(&vm, builtin_type, STRING("type"));
+    Vm_register_builtin(&vm, builtin_Some, STRING("Some"));
+  }
 
   return vm;
 }
