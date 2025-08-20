@@ -36,7 +36,7 @@ TEST_BIN := $(TEST_DIR)/test
 
 PG := ./examples/hello-world.garden
 
-.PHONY: all run verbose release bench test clean
+.PHONY: all run verbose release bench test clean lib
 
 all: release
 
@@ -76,6 +76,10 @@ $(TEST_BIN): LINK_FLAGS :=
 $(TEST_BIN): $(TEST_OBJ) | $(BIN_DIR)
 	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@
 
+# lib build
+$(BIN_DIR)/libpg.a: $(SRC_OBJ) | $(BIN_DIR)
+	ar rcs $@ $^
+
 # Run targets
 run: $(DEBUG_BIN)
 	./$(DEBUG_BIN) $(PG)
@@ -90,6 +94,8 @@ bench: $(BENCH_BIN)
 
 test: $(TEST_BIN)
 	./$(TEST_BIN)
+
+lib: $(BIN_DIR)/libpg.a
 
 clean:
 	rm -rf $(BIN_DIR) $(OBJ_DIR) $(TEST_BIN)
