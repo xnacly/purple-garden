@@ -3,11 +3,11 @@
 
 static void print_value(const Value *v) {
   if (v->is_some) {
-    printf("Option::Some(");
+    printf("Option/Some(");
   }
   switch (v->type) {
   case V_NONE:
-    printf("Option::None");
+    printf("Option/None");
     break;
   case V_STR:
     Str_debug(&v->string);

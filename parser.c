@@ -38,7 +38,7 @@ static void consume(Parser *p, TokenType tt) {
 // datastructure of purple garden - should be called before each new children
 // added to n->children
 static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
-  if (n->children_length + 1 >= n->children_cap) {
+  if (n->children_length >= n->children_cap) {
     size_t new = n->children_cap *NODE_CAP_GROW;
     new = new < NODE_INITIAL_CHILD_SIZE ? NODE_INITIAL_CHILD_SIZE : new;
     Node **old = n->children;

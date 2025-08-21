@@ -11,13 +11,13 @@
 // constant time length access and zero allocation+copy interactions for all
 // methods except if Allocator is present as its argument. Cheap to copy.
 typedef struct __Str {
-  // store the pointer to the underlying char
-  const uint8_t *p;
   // hash of the input, do not expect it to be filled, has to be computed via
   // Str_hash or inline in the lexer
   uint64_t hash;
   // length of the input without a zero terminator
-  size_t len;
+  uint32_t len;
+  // store the pointer to the underlying char
+  const uint8_t *p;
 } Str;
 
 #define FNV_OFFSET_BASIS 0x811c9dc5
