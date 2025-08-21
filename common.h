@@ -43,6 +43,9 @@
 
 extern Str VALUE_TYPE_MAP[];
 
+typedef struct Value Value; // forward declared so the compiler knows a thing or
+                            // two about a thing or two
+
 typedef enum {
   V_NONE,
   V_STR,
@@ -73,9 +76,9 @@ typedef enum {
 // List will be based on zigs segmented list and has the advantage of not
 // needing to copy its previous members on growing
 typedef struct {
-  size_t cap;
-  size_t len;
-  struct Value *elements; // voided because c sucks with selfreferencing types
+  uint32_t cap;
+  uint32_t len;
+  Value *elements;
   // TODO:
   // https://github.com/ziglang/zig/blob/e17a050bc695f7d117b89adb1d258813593ca111/lib/std/segmented_list.zig
   // and https://danielchasehooper.com/posts/segment_array/
@@ -91,19 +94,16 @@ typedef struct {
 } Map;
 
 // Value represents a value known to the runtime
-typedef struct {
-  ValueType type;
-  // true if @Some, otherwise self is just a Value, not an option with said
-  // inner Value
-  bool is_some;
-  // Value can also be just an option, similar to Rusts option if type is
-  // V_OPTION and .is_some is false, this acts as a NONE value
+typedef struct Value {
+  // true if @Some, otherwise self is just a Value, if @None just .type=V_NONE
+  unsigned int is_some : 1;
+  unsigned int type : 3;
   union {
     Str string;
-    double floating;
-    int64_t integer;
     List array;
     Map obj;
+    double floating;
+    int64_t integer;
   };
 } Value;
 

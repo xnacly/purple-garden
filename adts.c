@@ -14,7 +14,7 @@ List List_new(size_t cap, Allocator *a) {
 }
 
 void List_append(List *l, Value v, Allocator *a) {
-  if (l->len + 1 >= l->cap) {
+  if (l->len >= l->cap) {
     size_t old_cap = l->cap;
     size_t new_cap = old_cap * 2;
 
@@ -26,16 +26,17 @@ void List_append(List *l, Value v, Allocator *a) {
     l->cap = new_cap;
   }
 
-  ((Value *)l->elements)[l->len++] = v;
+  l->elements[l->len++] = v;
 }
 
-// Option guarded checked access to the inner elements
-Value *List_get(const List *l, size_t idx) {
+// V_NONE guarded checked access to the inner elements
+Value List_get(const List *l, size_t idx) {
   if (idx >= l->len) {
-    return INTERNED_NONE;
+    return *INTERNED_NONE;
   }
 
-  return &((Value *)l->elements)[idx];
+  Value v = l->elements[idx];
+  return v;
 }
 
 // TODO: implement before adding support for V_OBJ

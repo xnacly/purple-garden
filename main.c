@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
     input = (Str){.p = (const uint8_t *)a.run, .len = strlen(a.run)};
   } else {
     input = IO_read_file_to_string(a.filename);
-    VERBOSE_PUTS("io::IO_read_file_to_string: mmaped input of size=%zuB",
+    VERBOSE_PUTS("io::IO_read_file_to_string: mmaped input of size=%uB",
                  input.len);
   }
 
