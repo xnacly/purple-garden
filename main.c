@@ -188,7 +188,8 @@ int main(int argc, char **argv) {
     puts("");
   }
 #endif
-  VERBOSE_PUTS("lexer::Lexer_all: lexed tokens count=%zu", count);
+  VERBOSE_PUTS("lexer::Lexer_all: lexed tokens count=%zu (%zuB)", count,
+               count * sizeof(Token *));
   if (UNLIKELY(a.memory_usage)) {
     Stats s = CALL(pipeline_allocator, stats);
     double percent = (s.current * 100) / (double)s.allocated;
@@ -218,8 +219,11 @@ int main(int argc, char **argv) {
   // cli configuration
   Vm vm = Vm_new((Vm_Config){}, pipeline_allocator, NULL);
   Ctx ctx = cc(&vm, pipeline_allocator, nodes, node_count);
-  VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu",
-               vm.bytecode_len, (size_t)vm.global_len);
+  VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu "
+               "(%zuB/%zuB)",
+               vm.bytecode_len, (size_t)vm.global_len,
+               vm.bytecode_len * sizeof(uint32_t),
+               vm.global_len * sizeof(Value));
 
   if (UNLIKELY(a.disassemble)) {
     disassemble(&vm, &ctx);
