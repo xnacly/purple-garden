@@ -109,9 +109,10 @@ typedef struct Value {
 
 // global values that compiler, optimiser and vm use, often mapped to global
 // pool indexes 0,1,2
-static Value *INTERNED_FALSE = &(Value){.type = V_FALSE};
-static Value *INTERNED_TRUE = &(Value){.type = V_TRUE};
-static Value *INTERNED_NONE = &(Value){.type = V_NONE};
+__attribute__((unused)) static Value *INTERNED_FALSE =
+    &(Value){.type = V_FALSE};
+__attribute__((unused)) static Value *INTERNED_TRUE = &(Value){.type = V_TRUE};
+__attribute__((unused)) static Value *INTERNED_NONE = &(Value){.type = V_NONE};
 
 bool Value_cmp(const Value *a, const Value *b);
 void Value_debug(const Value *v);

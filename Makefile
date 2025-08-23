@@ -21,7 +21,7 @@ TEST_DIR := ./tests
 OBJ_DIR := build/cache
 BIN_DIR := build
 
-SRC := $(shell find . -name "*.c" ! -path "./main.c" ! -path "./tests/*")
+SRC := $(shell find . -name "*.c" ! -path "./main.c" ! -path "./tests/*" ! -path "./examples/*")
 TEST_SRC := $(shell find ./tests -name "*.c")
 
 SRC_OBJ := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SRC))
