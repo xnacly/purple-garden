@@ -87,16 +87,12 @@ Token *INTERN_TRUE = &SINGLE_TOK(T_TRUE);
 Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
 Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 
-size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
-  ASSERT(out != NULL, "Failed to allocate token list");
-
+Token *Lexer_next(Lexer *l, Allocator *a) {
   // empty input
   if (l->input.len == 0) {
-    out[0] = INTERN_EOF;
-    return 1;
+    return INTERN_EOF;
   }
 
-  size_t count = 0;
 #pragma GCC diagnostic push
   // We know what we're doing, so this is fine:
   //
@@ -137,40 +133,34 @@ size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
   JUMP_TARGET;
 
 delimitor_left:
-  out[count++] = INTERN_DELIMITOR_LEFT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_DELIMITOR_LEFT;
 
 delimitor_right:
-  out[count++] = INTERN_DELIMITOR_RIGHT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_DELIMITOR_RIGHT;
 
 braket_left:
-  out[count++] = INTERN_BRAKET_LEFT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_BRAKET_LEFT;
 
 braket_right:
-  out[count++] = INTERN_BRAKET_RIGHT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_BRAKET_RIGHT;
 
 curly_left:
-  out[count++] = INTERN_CURLY_LEFT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_CURLY_LEFT;
 
 curly_right:
-  out[count++] = INTERN_CURLY_RIGHT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_CURLY_RIGHT;
 
 builtin: {
   l->pos++;
   // not an ident after @, this is shit
   if (!is_alphanum(cur(l))) {
-    out[count++] = INTERN_EOF;
+    return INTERN_EOF;
   }
   size_t start = l->pos;
   size_t hash = FNV_OFFSET_BASIS;
@@ -188,34 +178,28 @@ builtin: {
   Token *b = CALL(a, request, sizeof(Token));
   b->string = s;
   b->type = T_BUILTIN;
-  out[count++] = b;
-  JUMP_TARGET;
+  return b;
 }
 
 plus:
-  out[count++] = INTERN_PLUS;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_PLUS;
 
 minus:
-  out[count++] = INTERN_MINUS;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_MINUS;
 
 slash:
-  out[count++] = INTERN_SLASH;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_SLASH;
 
 equal:
-  out[count++] = INTERN_EQUAL;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_EQUAL;
 
 asterisks:
-  out[count++] = INTERN_ASTERISKS;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_ASTERISKS;
 
 number: {
   size_t start = l->pos;
@@ -249,8 +233,7 @@ number: {
     n->type = T_INTEGER;
   }
 
-  out[count++] = n;
-  JUMP_TARGET;
+  return n;
 }
 
 ident: {
@@ -276,8 +259,7 @@ ident: {
         .hash = hash,
     };
   }
-  out[count++] = t;
-  JUMP_TARGET;
+  return t;
 }
 
 // same as string but only with leading '
@@ -300,8 +282,7 @@ quoted: {
       .len = len,
       .hash = hash,
   };
-  out[count++] = t;
-  JUMP_TARGET;
+  return t;
 }
 
 string: {
@@ -318,7 +299,7 @@ string: {
     Str slice = Str_slice(&l->input, l->pos, l->input.len);
     fprintf(stderr, "lex: Unterminated string near: '%.*s'", (int)slice.len,
             slice.p);
-    out[count++] = INTERN_EOF;
+    return INTERN_EOF;
   } else {
     Token *t = CALL(a, request, sizeof(Token));
     t->type = T_STRING;
@@ -327,11 +308,10 @@ string: {
         .len = l->pos - start,
         .hash = hash,
     };
-    out[count++] = t;
     // skip "
     l->pos++;
+    return t;
   }
-  JUMP_TARGET;
 }
 
 comment:
@@ -349,10 +329,7 @@ unknown: {
 }
 
 end:
-  out[count++] = INTERN_EOF;
-  return count;
+  return INTERN_EOF;
 }
-
-Token *Lexer_next(Lexer *l) { return INTERN_EOF; }
 
 #undef SINGLE_TOK

@@ -13,13 +13,17 @@ Parser Parser_new(Allocator *alloc, Lexer *l) {
       .alloc = alloc,
       .lexer = l,
       .pos = 0,
-      .cur = Lexer_next(l),
+      .cur = Lexer_next(l, alloc),
   };
 }
 
 static void advance(Parser *p) {
+#if DEBUG
+  Token_debug(p->cur);
+  puts("");
+#endif
   p->pos++;
-  p->cur = Lexer_next(p->lexer);
+  p->cur = Lexer_next(p->lexer, p->alloc);
 }
 
 static void consume(Parser *p, TokenType tt) {
@@ -52,7 +56,6 @@ static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
   n->children[n->children_length++] = child;
 }
 
-// TODO: #5: restructure this to fit Parser_next
 size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
   // stack keeps the list(s) we are in, the last element is always the current
   // list, the first (0) is root
@@ -193,6 +196,11 @@ eof:
 }
 
 Node Parser_next(Parser *p) {
+  // TODO: remove this stub
+  while (p->cur->type != T_EOF) {
+    advance(p);
+  }
+
   return (Node){
       .type = N_UNKNOWN,
   };

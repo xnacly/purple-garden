@@ -65,4 +65,4 @@ typedef struct {
 } Lexer;
 
 Lexer Lexer_new(Str input);
-Token *Lexer_next(Lexer *l);
+Token *Lexer_next(Lexer *l, Allocator *a);
