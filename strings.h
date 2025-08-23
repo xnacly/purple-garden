@@ -22,7 +22,6 @@ typedef struct __Str {
 
 #define FNV_OFFSET_BASIS 0x811c9dc5
 #define FNV_PRIME 0x01000193
-#define GLOBAL_MASK (GLOBAL_SIZE - 1)
 
 #define STRING(str) ((Str){.len = sizeof(str) - 1, .p = (const uint8_t *)str})
 #define STRING_EMPTY ((Str){.len = 0, .p = NULL})
@@ -33,6 +32,6 @@ Str Str_slice(const Str *str, size_t start, size_t end);
 Str Str_concat(const Str *a, const Str *b, Allocator *alloc);
 bool Str_eq(const Str *a, const Str *b);
 void Str_debug(const Str *str);
-size_t Str_hash(const Str *str);
+uint32_t Str_hash(const Str *str);
 int64_t Str_to_int64_t(const Str *str);
 double Str_to_double(const Str *str);

@@ -160,65 +160,25 @@ int main(int argc, char **argv) {
   a.stats = true;
 #endif
 
-  size_t file_size_or_min = (input.len < MIN_MEM ? MIN_MEM : input.len);
-  size_t min_size = (
-                        // size for globals
-                        (file_size_or_min * sizeof(Value))
-                        // size for bytecode
-                        + file_size_or_min
-                        // size for nodes
-                        + (file_size_or_min * sizeof(Node))) /
-                    2;
-
   // this allocator stores both nodes, bytecode and the global pool of the vm,
   // thus it has to life exactly as long as the vm does.
   //
-  // TODO: this has to be split into allocators for each stage: one for tokens,
-  // one for nodes and one for the compiler (bytecode and globals, etc...). This
-  // will reduce memory usage by a lot since the above is WAY too conservative
-  Allocator *pipeline_allocator = bump_init(min_size);
-  VERBOSE_PUTS("mem::init: Allocated memory block of size=%zuB", min_size);
-  Lexer l = Lexer_new(input);
-  Token **tokens =
-      CALL(pipeline_allocator, request, file_size_or_min * sizeof(Token *));
-  size_t count = Lexer_all(&l, pipeline_allocator, tokens);
-#if DEBUG
-  for (size_t i = 0; i < count; i++) {
-    Token_debug(tokens[i]);
-    puts("");
-  }
-#endif
-  VERBOSE_PUTS("lexer::Lexer_all: lexed tokens count=%zu (%zuB)", count,
-               count * sizeof(Token *));
-  if (UNLIKELY(a.memory_usage)) {
-    Stats s = CALL(pipeline_allocator, stats);
-    double percent = (s.current * 100) / (double)s.allocated;
-    printf("lex : %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
-           s.allocated / 1024.0, percent);
-  }
-  Parser p = Parser_new(pipeline_allocator, tokens);
-  size_t node_count = file_size_or_min * sizeof(Node *) / 4;
-  Node **nodes = CALL(pipeline_allocator, request, node_count);
-  node_count = Parser_all(nodes, &p, node_count);
-#if DEBUG
-  for (size_t i = 0; i < node_count; i++) {
-    Node_debug(nodes[i], 0);
-    puts("");
-  }
-#endif
-  VERBOSE_PUTS("parser::Parser_next created AST with node_count=%zu",
-               node_count);
-  if (UNLIKELY(a.memory_usage)) {
-    Stats s = CALL(pipeline_allocator, stats);
-    double percent = (s.current * 100) / (double)s.allocated;
-    printf("ast : %.2fKB of %.2fKB used (%.2f%%)\n", s.current / 1024.0,
-           s.allocated / 1024.0, percent);
-  }
+  Allocator *pipeline_allocator = bump_init(MIN_MEM);
+  VERBOSE_PUTS("mem::init: Allocated memory block of size=%zuB", MIN_MEM);
+  Lexer lexer = Lexer_new(input);
+  Parser parser = Parser_new(pipeline_allocator, &lexer);
+  // TODO: move this into parser::advance
+  // VERBOSE_PUTS("lexer::Lexer_all: lexed tokens count=%zu (%zuB)", count,
+  // count * sizeof(Token *));
+  //
+  // TODO: move this into cc::cc (replacing node iteration with something like
+  // parser::next) VERBOSE_PUTS("parser::Parser_next created AST with
+  // node_count=%zu", node_count);
 
   // alloc is NULL here, because we are setting it later on, depending on the
   // cli configuration
   Vm vm = Vm_new((Vm_Config){}, pipeline_allocator, NULL);
-  Ctx ctx = cc(&vm, pipeline_allocator, nodes, node_count);
+  Ctx ctx = cc(&vm, pipeline_allocator, &parser);
   VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu "
                "(%zuB/%zuB)",
                vm.bytecode_len, (size_t)vm.global_len,

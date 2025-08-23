@@ -10,14 +10,17 @@
 #define DEBUG 0
 #endif
 
-#ifndef MIN_MEM
-#define MIN_MEM 4 * 1024 * 1024
-#endif
-
-#define BYTECODE_SIZE (5 * 1024 * 1024)
-#define GLOBAL_SIZE 512 * 1024
+#define BYTECODE_SIZE (2 * 1024 * 1024)
+#define GLOBAL_SIZE 512
+#define GLOBAL_SIZE_MASK (GLOBAL_SIZE - 1)
 #define MAX_BUILTIN_SIZE 1024
 #define MAX_BUILTIN_SIZE_MASK (MAX_BUILTIN_SIZE - 1)
+
+#ifndef MIN_MEM
+#define MIN_MEM                                                                \
+  BYTECODE_SIZE * sizeof(uint32_t) + 2 * GLOBAL_SIZE * sizeof(Value) +         \
+      MAX_BUILTIN_SIZE * sizeof(builtin_function)
+#endif
 
 #define REGISTERS 127
 #define CALL_ARGUMENT_STACK 256

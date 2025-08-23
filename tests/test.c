@@ -1,8 +1,4 @@
-#include "../cc.h"
-#include "../common.h"
-#include "../lexer.h"
-#include "../parser.h"
-#include "../vm.h"
+#include "../pg.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -149,36 +145,12 @@ int main() {
   size_t len = sizeof(cases) / sizeof(Case);
   for (size_t i = 0; i < len; i++) {
     Case c = cases[i];
-    size_t min_size = (
-                          // size for globals
-                          (MIN_MEM * sizeof(Value))
-                          // size for bytecode
-                          + MIN_MEM
-                          // size for nodes
-                          + (MIN_MEM * sizeof(Node))) *
-                      2;
+    Pg pg = pg_init(&(Vm_Config){});
+    uint8_t code = pg_exec_Str(&pg, c.input);
 
-    Lexer l = Lexer_new(c.input);
-    Allocator *alloc = bump_init(min_size);
-    // specifically omitted, since the tests should not flake or have any memory
-    // issues that could be the result of gc issues, thus the bump allocator
-    // from bump.c is used and Vm_destroy calls alloc->destroy on said allocator
-    //
-    // CALL(alloc, destroy);
-    Token **tokens = CALL(alloc, request, MIN_MEM * sizeof(Token));
-    Lexer_all(&l, alloc, tokens);
-    Parser p = Parser_new(alloc, tokens);
-    size_t node_count = MIN_MEM * sizeof(Node *) / 4;
-    Node **nodes = CALL(alloc, request, node_count);
-    node_count = Parser_all(nodes, &p, node_count);
-    // tests only use the bump allocator, no gc, as explained above, thus both
-    // static and vm runtime allocator are simply: alloc
-    Vm _vm = Vm_new(alloc, alloc);
-    Vm *vm = &_vm;
-    Ctx ctx = cc(vm, alloc, nodes, node_count);
+    Vm *vm = &pg.__vm;
 
     bool error = false;
-    Vm_run(vm);
     if (!Value_cmp_deep(&vm->registers[0], &c.expected_r0)) {
       printf("\tbad value at r0");
       printf("\n\twant=");
@@ -199,7 +171,7 @@ int main() {
       passed++;
       printf("[+][PASS][Case %zu/%zu] in=`%s` \n", i + 1, len, c.input.p);
     }
-    Vm_destroy(vm);
+    pg_destroy(&pg);
   }
 
   printf("[=] %zu/%zu passed, %zu failed\n", passed, len, failed);

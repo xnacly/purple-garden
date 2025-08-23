@@ -8,18 +8,18 @@
 #define NODE_CAP_GROW 2
 #define NODE_INITIAL_CHILD_SIZE 8
 
-Parser Parser_new(Allocator *alloc, Token **t) {
+Parser Parser_new(Allocator *alloc, Lexer *l) {
   return (Parser){
       .alloc = alloc,
-      .tokens = t,
+      .lexer = l,
       .pos = 0,
-      .cur = t[0],
+      .cur = Lexer_next(l),
   };
 }
 
 static void advance(Parser *p) {
   p->pos++;
-  p->cur = p->tokens[p->pos];
+  p->cur = Lexer_next(p->lexer);
 }
 
 static void consume(Parser *p, TokenType tt) {
@@ -39,7 +39,7 @@ static void consume(Parser *p, TokenType tt) {
 // added to n->children
 static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
   if (n->children_length >= n->children_cap) {
-    size_t new = n->children_cap *NODE_CAP_GROW;
+    size_t new = n->children_cap * NODE_CAP_GROW;
     new = new < NODE_INITIAL_CHILD_SIZE ? NODE_INITIAL_CHILD_SIZE : new;
     Node **old = n->children;
     n->children = CALL(alloc, request, sizeof(Node *) * new);
@@ -52,6 +52,7 @@ static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
   n->children[n->children_length++] = child;
 }
 
+// TODO: #5: restructure this to fit Parser_next
 size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
   // stack keeps the list(s) we are in, the last element is always the current
   // list, the first (0) is root

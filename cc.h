@@ -42,7 +42,7 @@ typedef struct Ctx {
 // cc requests a Node from parser::Parser_next compiles said Node and its
 // children to populate the Vm, its global pool, its bytecode and do all prep
 // the runtime requires
-Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size);
+Ctx cc(Vm *vm, Allocator *alloc, Parser *p);
 
 // disassemble prints a readable bytecode representation with labels, globals
 // and comments as a heap allocated string

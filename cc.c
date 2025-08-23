@@ -110,7 +110,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       break;
     }
 
-    size_t bucket = hash & GLOBAL_MASK;
+    size_t bucket = hash & GLOBAL_SIZE_MASK;
     size_t cached_index = ctx->global_hash_buckets[bucket];
     size_t expected_index = vm->global_len;
 
@@ -405,7 +405,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   runtime_builtin_hashes[Str_hash(&STRING(NAME)) & MAX_BUILTIN_SIZE_MASK] =    \
       COMPILE_BUILTIN_##ENUM_VARIANT;
 
-Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size) {
+Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
   // compile time constructs
   NEW_CC_BUILTIN("let", LET)
   NEW_CC_BUILTIN("fn", FUNCTION)
@@ -421,8 +421,12 @@ Ctx cc(Vm *vm, Allocator *alloc, Node **nodes, size_t size) {
       .hash_to_function = {},
   };
 
-  for (size_t i = 0; i < size; i++) {
-    compile(alloc, vm, &ctx, nodes[i]);
+  while (true) {
+    Node n = Parser_next(p);
+    if (n.type == N_UNKNOWN) {
+      break;
+    }
+    compile(alloc, vm, &ctx, &n);
   }
 
   ASSERT(ctx.register_allocated_count == 1,

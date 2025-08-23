@@ -57,6 +57,8 @@ Lexer Lexer_new(Str input) {
   return (Lexer){
       .input = input,
       .pos = 0,
+      .true_hash = Str_hash(&STRING("true")),
+      .false_hash = Str_hash(&STRING("false")),
   };
 }
 
@@ -85,6 +87,7 @@ Token *INTERN_TRUE = &SINGLE_TOK(T_TRUE);
 Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
 Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 
+// TODO: #5: rework this into Lexer_next
 size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
   ASSERT(out != NULL, "Failed to allocate token list");
 
@@ -94,10 +97,13 @@ size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
     return 1;
   }
 
-  size_t true_hash = Str_hash(&STRING("true"));
-  size_t false_hash = Str_hash(&STRING("false"));
-
   size_t count = 0;
+#pragma GCC diagnostic push
+  // We know what we're doing, so this is fine:
+  //
+  // we assign unknown to all and overwrite these to make sure an invalid
+  // index is not a unassigned memory access.
+#pragma GCC diagnostic ignored "-Winitializer-overrides"
   static void *jump_table[256] = {
       [0 ... 255] = &&unknown,
       [' '] = &&whitespace,
@@ -125,6 +131,7 @@ size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
       ['}'] = &&curly_right,
       [0] = &&end,
   };
+#pragma GCC diagnostic pop
 
 #define JUMP_TARGET goto *jump_table[(int32_t)l->input.p[l->pos]]
 
@@ -257,9 +264,9 @@ ident: {
 
   size_t len = l->pos - start;
   Token *t;
-  if (hash == true_hash) {
+  if (hash == l->true_hash) {
     t = INTERN_TRUE;
-  } else if (hash == false_hash) {
+  } else if (hash == l->false_hash) {
     t = INTERN_FALSE;
   } else {
     t = CALL(a, request, sizeof(Token));

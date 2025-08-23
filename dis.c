@@ -11,7 +11,7 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
       Value_debug(v);
       printf("; {idx=%zu", i);
       if (v->type == V_STR) {
-        printf(",hash=%zu", v->string.hash & GLOBAL_MASK);
+        printf(",hash=%zu", v->string.hash & GLOBAL_SIZE_MASK);
       }
       printf("}\n\t");
     }
