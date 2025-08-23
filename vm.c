@@ -32,7 +32,6 @@ Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
 
   vm.builtins = (void **)BUILTIN_MAP;
 
-  vm.bytecode = CALL(static_alloc, request, sizeof(uint32_t) * BYTECODE_SIZE);
   vm.globals = CALL(static_alloc, request, (sizeof(Value *) * GLOBAL_SIZE));
   vm.globals[GLOBAL_FALSE] = INTERNED_FALSE;
   vm.globals[GLOBAL_TRUE] = INTERNED_TRUE;
@@ -62,6 +61,7 @@ typedef struct {
 void freelist_preallocate(FrameFreeList *fl) {
   for (int i = 0; i < PREALLOCATE_FREELIST_SIZE; i++) {
     Frame *frame = CALL(fl->alloc, request, sizeof(Frame));
+    frame->variable_table = List_new(8, fl->alloc);
     frame->prev = fl->head;
     fl->head = frame;
   }
@@ -86,8 +86,11 @@ void freelist_push(FrameFreeList *fl, Frame *frame) {
   })
 
 Frame *freelist_pop(FrameFreeList *fl) {
-  if (!fl->head)
-    return CALL(fl->alloc, request, sizeof(Frame));
+  if (!fl->head) {
+    Frame *f = CALL(fl->alloc, request, sizeof(Frame));
+    f->variable_table = List_new(8, fl->alloc);
+    return f;
+  }
   Frame *f = fl->head;
   fl->head = f->prev;
   f->prev = NULL;
@@ -143,7 +146,7 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_APPEND:
-      List_append(&vm->registers[arg].array, vm->registers[0], vm->alloc);
+      List_append(&vm->registers[arg].array, vm->alloc, vm->registers[0]);
       break;
     case OP_LOADG:
       vm->registers[0] = *vm->globals[arg];
@@ -155,7 +158,7 @@ int Vm_run(Vm *vm) {
       // bounds checking and checking for variable validity is performed at
       // compile time, but we still have to check if the variable is available
       // in the current scope...
-      Value v = vm->frame->variable_table[arg];
+      Value v = List_get(&vm->frame->variable_table, arg);
       if (v.type == V_NONE) {
         VM_ERR("Undefined variable with hash %i", arg);
       }
@@ -166,7 +169,7 @@ int Vm_run(Vm *vm) {
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      vm->frame->variable_table[arg] = vm->registers[0];
+      List_insert(&vm->frame->variable_table, vm->alloc, arg, vm->registers[0]);
       break;
     case OP_ADD: {
       Value *left = &vm->registers[0];

@@ -123,7 +123,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       vm->globals[vm->global_len++] = token_to_value(n->token, alloc);
     }
 
-    BC(OP_LOADG, expected_index)
+    BC(OP_LOADG, expected_index);
     break;
   }
   case N_IDENT: {
@@ -140,9 +140,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       // two arguments is easy to compile, just load and add two Values
       compile(alloc, vm, ctx, n->children[0]);
       size_t r = Ctx_allocate_register(ctx);
-      BC(OP_STORE, r)
+      BC(OP_STORE, r);
       compile(alloc, vm, ctx, n->children[1]);
-      BC(n->token->type, r)
+      BC(n->token->type, r);
       Ctx_free_register(ctx, r);
     } else {
       TODO("compile#N_LIST for Node.children_length > 3 is not implemented");
@@ -187,19 +187,19 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
             Node *cur_condition = cur_case->children[0];
             Node *cur_body = cur_case->children[1];
             compile(alloc, vm, ctx, cur_condition);
-            size_t last_case_start = vm->bytecode_len;
+            size_t last_case_start = BC_LEN;
             // jump to next case conditional if conditional above is false
-            BC(OP_JMPF, 0xAFFEDEAD)
+            BC(OP_JMPF, 0xAFFEDEAD);
 
             compile(alloc, vm, ctx, cur_body);
 
             // only jmp to end of match statement if not already at the end,
             // since we are inside of the body of a case
             if (i != n->children_length - 1) {
-              backfill_slots[i] = vm->bytecode_len;
-              BC(OP_JMP, 0xAFFEDEAD)
+              backfill_slots[i] = BC_LEN;
+              BC(OP_JMP, 0xAFFEDEAD);
             }
-            vm->bytecode[last_case_start + 1] = vm->bytecode_len;
+            ByteCodeBuilder_insert_arg(ctx->bcb, last_case_start, BC_LEN);
           } else {
             ASSERT(!encountered_default_cause,
                    "Only a single default case allowed")
@@ -214,7 +214,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         for (size_t i = 0; i < n->children_length - 1; i++) {
           int jump_argument_location = backfill_slots[i];
           if (jump_argument_location) {
-            vm->bytecode[jump_argument_location + 1] = vm->bytecode_len;
+            ByteCodeBuilder_insert_arg(ctx->bcb, jump_argument_location,
+                                       BC_LEN);
           }
         }
 
@@ -230,7 +231,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
 
         CtxFunction function_ctx = {
             .name = &n->children[0]->token->string,
-            .bytecode_index = vm->bytecode_len,
+            .bytecode_index = BC_LEN,
             .argument_count = param_len,
         };
         ctx->hash_to_function[hash] = function_ctx;
@@ -246,7 +247,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         // jump over the bytecode of a function (header with args setup
         // and body), so we keep the bytecode compilation single pass and
         // the bytecode linear, this works (for now at least)
-        size_t jump_op_index = vm->bytecode_len;
+        size_t jump_op_index = BC_LEN;
         BC(OP_JMP,
            0xAFFEDEAD); // https://de.wiktionary.org/wiki/Klappe_zu,_Affe_tot
 
@@ -280,9 +281,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         }
 
         BC(OP_LEAVE, 0);
-        vm->bytecode[jump_op_index + 1] = vm->bytecode_len;
-        ctx->hash_to_function[hash].size =
-            vm->bytecode_len - function_ctx.bytecode_index;
+        ByteCodeBuilder_insert_arg(ctx->bcb, jump_op_index, BC_LEN);
+        ctx->hash_to_function[hash].size = BC_LEN - function_ctx.bytecode_index;
         break;
       }
       case COMPILE_BUILTIN_LET: { // (@len <var-name> <var-value>)
@@ -309,7 +309,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
         compile(alloc, vm, ctx, n->children[i]);
         size_t r = Ctx_allocate_register(ctx);
         registers[i] = r;
-        BC(OP_STORE, r)
+        BC(OP_STORE, r);
       }
       for (int i = n->children_length - 1; i >= 0; i--) {
         Ctx_free_register(ctx, registers[i]);
@@ -345,7 +345,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       compile(alloc, vm, ctx, n->children[i]);
       size_t r = Ctx_allocate_register(ctx);
       registers[i] = r;
-      BC(OP_STORE, r)
+      BC(OP_STORE, r);
     }
     for (int i = n->children_length - 1; i >= 0; i--) {
       Ctx_free_register(ctx, registers[i]);
@@ -377,7 +377,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       // after OP_NEW the created value is in r0, we must now temporarly move
       // it to any other register, so its not clobbered by acm register usage
       size_t list_register = Ctx_allocate_register(ctx);
-      BC(OP_STORE, list_register)
+      BC(OP_STORE, list_register);
 
       for (size_t i = 0; i < size; i++) {
         compile(alloc, vm, ctx, n->children[i]);
@@ -413,12 +413,15 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
   NEW_CC_BUILTIN("None", NONE)
   NEW_CC_BUILTIN("match", MATCH)
 
+  ByteCodeBuilder bcb = ByteCodeBuilder_new(alloc);
+
   // specifically set size 1 to keep r0 the temporary register reserved
   Ctx ctx = {
       .register_allocated_count = 1,
       .registers = {0},
       .global_hash_buckets = CALL(alloc, request, sizeof(size_t) * GLOBAL_SIZE),
       .hash_to_function = {},
+      .bcb = &bcb,
   };
 
   while (true) {
@@ -436,6 +439,8 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
   ASSERT(ctx.register_allocated_count == 1,
          "Not all registers were freed, compiler bug!");
 
+  vm->bytecode = ctx.bcb->buffer;
+  vm->bytecode_len = ctx.bcb->len;
   return ctx;
 }
 

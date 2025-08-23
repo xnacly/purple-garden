@@ -9,8 +9,9 @@
 #define LIST_GROW_MULTIPLIER 1.5f
 
 List List_new(size_t cap, Allocator *a);
-void List_append(List *l, Value v, Allocator *a);
+void List_append(List *l, Allocator *a, Value v);
 Value List_get(const List *l, size_t idx);
+void List_insert(List *l, Allocator *a, size_t idx, Value v);
 
 #define MAP_DEFAULT_SIZE 16
 #define MAP_GROW_MULTIPLIER 1.5f

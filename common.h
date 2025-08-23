@@ -10,7 +10,8 @@
 #define DEBUG 0
 #endif
 
-#define BYTECODE_SIZE (2 * 1024 * 1024)
+// 128 instruction pairs amount to around 1KB memory usage
+#define INIT_BYTECODE_SIZE 128 * 2
 #define GLOBAL_SIZE 512
 #define GLOBAL_SIZE_MASK (GLOBAL_SIZE - 1)
 #define MAX_BUILTIN_SIZE 1024
@@ -18,7 +19,7 @@
 
 #ifndef MIN_MEM
 #define MIN_MEM                                                                \
-  BYTECODE_SIZE * sizeof(uint32_t) + 2 * GLOBAL_SIZE * sizeof(Value) +         \
+  INIT_BYTECODE_SIZE * sizeof(uint32_t) + 2 * GLOBAL_SIZE * sizeof(Value) +    \
       MAX_BUILTIN_SIZE * sizeof(builtin_function)
 #endif
 
@@ -45,6 +46,8 @@
   fprintf(stderr, "TODO: " fmt " failed in " __FILE__ ":%d\n", ##__VA_ARGS__,  \
           __LINE__);                                                           \
   exit(EXIT_FAILURE);
+
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 #include "strings.h"
 
