@@ -25,6 +25,12 @@ static void xcgc_run(GcCtx *c) {
 
 void *gc_request(void *ctx, size_t size) {
   GcCtx *c = (GcCtx *)ctx;
+
+  // the request is now failable because we want to stay under MAX_MEM
+  if (c->pos + size >= MAX_MEM) {
+    return NULL;
+  }
+
   if (c->pos + size >= c->size) {
 #if VERBOSE_ALLOCATOR
     printf("[XCGC] triggering gc at %zu, %.3f%% of %zuB\n", c->pos,

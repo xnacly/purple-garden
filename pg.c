@@ -8,7 +8,7 @@
 #include "vm.h"
 
 Pg pg_init(Vm_Config *conf) {
-  Allocator *a = BumpResize_init(conf->max_memory);
+  Allocator *a = bump_init(MIN_MEM, conf->max_memory);
   return (Pg){
       .__alloc = a,
       .__vm = Vm_new(*conf, a, NULL),

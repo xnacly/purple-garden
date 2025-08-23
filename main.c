@@ -163,7 +163,7 @@ int main(int argc, char **argv) {
   // this allocator stores both nodes, bytecode and the global pool of the vm,
   // thus it has to life exactly as long as the vm does.
   //
-  Allocator *pipeline_allocator = bump_init(MIN_MEM);
+  Allocator *pipeline_allocator = bump_init(MIN_MEM, 0);
   VERBOSE_PUTS("mem::init: Allocated memory block of size=%zuB", MIN_MEM);
   Lexer lexer = Lexer_new(input);
   Parser parser = Parser_new(pipeline_allocator, &lexer);
@@ -201,7 +201,7 @@ int main(int argc, char **argv) {
     VERBOSE_PUTS(
         "vm: got --block-allocator, using bump allocator with size %zuB/%zuKB",
         a.block_allocator * 1024, a.block_allocator);
-    vm.alloc = bump_init(a.block_allocator * 1024);
+    vm.alloc = bump_init(a.block_allocator * 1024, MAX_MEM);
   } else {
     vm.alloc = xcgc_init(GC_MIN_HEAP, &vm);
   }

@@ -192,6 +192,12 @@ eof:
   return stack[0]->children_length;
 }
 
+Node Parser_next(Parser *p) {
+  return (Node){
+      .type = N_UNKNOWN,
+  };
+}
+
 Str NODE_TYPE_MAP[] = {
     // strings, numbers, booleans
     [N_ATOM] = STRING("N_ATOM"),

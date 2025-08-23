@@ -62,7 +62,7 @@ typedef struct {
   void (*destroy)(void *ctx);
 } Allocator;
 
-Allocator *bump_init(size_t size);
+Allocator *bump_init(size_t min_size, size_t max_size);
 Allocator *xcgc_init(size_t size, void *vm);
 
 #endif

@@ -87,7 +87,6 @@ Token *INTERN_TRUE = &SINGLE_TOK(T_TRUE);
 Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
 Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 
-// TODO: #5: rework this into Lexer_next
 size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
   ASSERT(out != NULL, "Failed to allocate token list");
 
@@ -103,7 +102,7 @@ size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
   //
   // we assign unknown to all and overwrite these to make sure an invalid
   // index is not a unassigned memory access.
-#pragma GCC diagnostic ignored "-Winitializer-overrides"
+#pragma GCC diagnostic ignored "-Woverride-init"
   static void *jump_table[256] = {
       [0 ... 255] = &&unknown,
       [' '] = &&whitespace,
@@ -353,5 +352,7 @@ end:
   out[count++] = INTERN_EOF;
   return count;
 }
+
+Token *Lexer_next(Lexer *l) { return INTERN_EOF; }
 
 #undef SINGLE_TOK

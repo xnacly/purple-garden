@@ -22,6 +22,10 @@
       MAX_BUILTIN_SIZE * sizeof(builtin_function)
 #endif
 
+#ifndef MAX_MEM
+#define MAX_MEM (128 * 1024 * 1024)
+#endif
+
 #define REGISTERS 127
 #define CALL_ARGUMENT_STACK 256
 #define VARIABLE_TABLE_SIZE 256
