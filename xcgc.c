@@ -33,8 +33,8 @@ void *gc_request(void *ctx, size_t size) {
 
   if (c->pos + size >= c->size) {
 #if VERBOSE_ALLOCATOR
-    printf("[XCGC] triggering gc at %zu, %.3f%% of %zuB\n", c->pos,
-           (c->pos * 100) / (double)c->size, c->size);
+    printf("[XCGC] triggering gc at %zu, %.3f%% of %zuB because of %zuB\n",
+           c->pos, (c->pos * 100) / (double)c->size, c->size, size);
 #endif
     xcgc_run(c);
 

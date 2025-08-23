@@ -426,6 +426,10 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
     if (n.type == N_UNKNOWN) {
       break;
     }
+#if DEBUG
+    Node_debug(&n, 0);
+    puts("");
+#endif
     compile(alloc, vm, &ctx, &n);
   }
 

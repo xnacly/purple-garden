@@ -5,14 +5,14 @@
 
 #ifdef DEBUG
 #if DEBUG
-#define VERBOSE_ALLOCATOR 0
+#define VERBOSE_ALLOCATOR 1
 #endif
 #else
 #define VERBOSE_ALLOCATOR 0
 #endif
 
-// 1MB
-#define GC_MIN_HEAP 1024 * 1024
+// 1KB
+#define GC_MIN_HEAP 1024
 
 typedef struct {
   size_t current;

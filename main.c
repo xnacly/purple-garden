@@ -167,6 +167,7 @@ int main(int argc, char **argv) {
   VERBOSE_PUTS("mem::init: Allocated memory block of size=%zuB", MIN_MEM);
   Lexer lexer = Lexer_new(input);
   Parser parser = Parser_new(pipeline_allocator, &lexer);
+
   // TODO: move this into parser::advance
   // VERBOSE_PUTS("lexer::Lexer_all: lexed tokens count=%zu (%zuB)", count,
   // count * sizeof(Token *));
@@ -178,6 +179,12 @@ int main(int argc, char **argv) {
   // alloc is NULL here, because we are setting it later on, depending on the
   // cli configuration
   Vm vm = Vm_new((Vm_Config){}, pipeline_allocator, NULL);
+  if (UNLIKELY(a.memory_usage)) {
+    Stats s = CALL(pipeline_allocator, stats);
+    double percent = (s.current * 100) / (double)s.allocated;
+    printf("vmnew: %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
+           s.allocated / 1024.0, percent);
+  }
   Ctx ctx = cc(&vm, pipeline_allocator, &parser);
   VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu "
                "(%zuB/%zuB)",

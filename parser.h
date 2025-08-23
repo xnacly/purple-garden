@@ -27,7 +27,9 @@ typedef enum {
   N_BIN,
   // function call
   N_CALL,
-  // error and end case
+  // root node
+  N_ROOT,
+  // error case
   N_UNKNOWN,
 } NodeType;
 

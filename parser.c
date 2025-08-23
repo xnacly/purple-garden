@@ -56,18 +56,26 @@ static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
   n->children[n->children_length++] = child;
 }
 
-size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
+Node Parser_next(Parser *p) {
+#define MAX_DEPTH 256
   // stack keeps the list(s) we are in, the last element is always the current
   // list, the first (0) is root
-  Node *stack[256] = {0};
+  Node *stack[MAX_DEPTH] = {0};
   stack[0] = &(Node){
-      .type = N_UNKNOWN,
-      .children = nodes,
-      .children_cap = max_nodes,
+      .type = N_ROOT,
+      .children = NULL,
+      .children_cap = 0,
   };
   size_t stack_top = 0;
 
+#pragma GCC diagnostic push
+  // We know what we're doing, so this is fine:
+  //
+  // we assign unknown to all and overwrite these to make sure an invalid
+  // index is not a unassigned memory access.
+#pragma GCC diagnostic ignored "-Woverride-init"
   static void *jump_table[256] = {
+      [0 ... 255] = &&unkown,
       [T_DELIMITOR_LEFT] = &&stmt_begin,
       [T_DELIMITOR_RIGHT] = &&stmt_end,
       [T_BRAKET_LEFT] = &&arr_start,
@@ -82,12 +90,9 @@ size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
       [T_IDENT] = &&ident,
       [T_EOF] = &&eof,
   };
+#pragma GCC diagnostic pop
 
-#define JUMP_NEXT                                                              \
-  do {                                                                         \
-    void *target = jump_table[p->cur->type];                                   \
-    goto *target;                                                              \
-  } while (0)
+#define JUMP_NEXT goto *jump_table[p->cur->type];
 
   JUMP_NEXT;
 
@@ -147,7 +152,13 @@ stmt_end: {
   Node *prev = stack[stack_top];
   stack_top--;
   Node_add_child(p->alloc, stack[stack_top], prev);
-  JUMP_NEXT;
+  // I think we should stop this here if stack_top == 0, right? Thus stopping at
+  // a root parse
+  if (stack_top == 0) {
+    return *stack[0]->children[0];
+  } else {
+    JUMP_NEXT
+  }
 }
 
 arr_start: {
@@ -190,20 +201,10 @@ obj_end: {
   JUMP_NEXT;
 }
 
+// we want to end or error here
 eof:
-  ASSERT(!stack_top, "Missing closing delimitor");
-  return stack[0]->children_length;
-}
-
-Node Parser_next(Parser *p) {
-  // TODO: remove this stub
-  while (p->cur->type != T_EOF) {
-    advance(p);
-  }
-
-  return (Node){
-      .type = N_UNKNOWN,
-  };
+unkown:
+  return (Node){.type = N_UNKNOWN};
 }
 
 Str NODE_TYPE_MAP[] = {
@@ -221,6 +222,7 @@ Str NODE_TYPE_MAP[] = {
     [N_BIN] = STRING("N_BIN"),
     [N_CALL] = STRING("N_CALL"),
     // error and end case
+    [N_ROOT] = STRING("N_ROOT"),
     [N_UNKNOWN] = STRING("N_UNKOWN"),
 };
 
