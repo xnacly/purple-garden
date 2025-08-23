@@ -94,6 +94,8 @@ Node Parser_next(Parser *p) {
 
 #define JUMP_NEXT goto *jump_table[p->cur->type];
 
+  ASSERT(stack_top < MAX_DEPTH, "Stack overflow, max 256 stack depth");
+
   JUMP_NEXT;
 
 atom: {
@@ -119,6 +121,12 @@ stmt_begin: {
   n->children_length = 0;
   n->children_cap = 0;
   consume(p, T_DELIMITOR_LEFT);
+  // BUG: there is a segfault here, triggerable via:
+  //
+  // (@fn hello [] ())
+  // (hello) * 1mio
+  //
+  // This may be an alloc failure in the bump allocator bump_request in line 120
   n->token = p->cur;
   switch (p->cur->type) {
   case T_BUILTIN:
@@ -203,6 +211,10 @@ obj_end: {
 
 // we want to end or error here
 eof:
+  // TODO: this is buggy and needs a fix once im awake again
+  if (stack_top == 0) {
+    return *stack[0]->children[0];
+  }
 unkown:
   return (Node){.type = N_UNKNOWN};
 }

@@ -8,7 +8,6 @@
 #define VERBOSE_ALLOCATOR 1
 #endif
 #else
-#define VERBOSE_ALLOCATOR 0
 #endif
 
 // 50KB
@@ -24,7 +23,7 @@ typedef struct {
 // Allocator, which reduces alloc_bump.request(alloc_bump.ctx, 64); to
 // CALL(alloc_bump, request, 64), removing the need for passing the context in
 // manually
-#if VERBOSE_ALLOCATOR
+#ifdef VERBOSE_ALLOCATOR
 #include <stdio.h>
 #define CALL(SELF, METHOD, ...)                                                \
   (fprintf(stderr, "[ALLOCATOR] %s@%s::%d: %s->%s(%s)\n", __FILE__, __func__,  \

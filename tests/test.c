@@ -145,7 +145,7 @@ int main() {
   size_t len = sizeof(cases) / sizeof(Case);
   for (size_t i = 0; i < len; i++) {
     Case c = cases[i];
-    Pg pg = pg_init(&(Vm_Config){});
+    Pg pg = pg_init(&(Vm_Config){.disable_gc = true});
     uint8_t code = pg_exec_Str(&pg, c.input);
 
     Vm *vm = &pg.__vm;
@@ -171,6 +171,7 @@ int main() {
       passed++;
       printf("[+][PASS][Case %zu/%zu] in=`%s` \n", i + 1, len, c.input.p);
     }
+
     pg_destroy(&pg);
   }
 

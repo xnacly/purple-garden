@@ -339,8 +339,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       return;
     }
 
+    size_t children_length = n->children_length < 1 ? 1 : n->children_length;
     // we compile all arguments to bytecode one by one by one
-    size_t registers[n->children_length];
+    size_t registers[children_length];
     for (size_t i = 0; i < n->children_length; i++) {
       compile(alloc, vm, ctx, n->children[i]);
       size_t r = Ctx_allocate_register(ctx);

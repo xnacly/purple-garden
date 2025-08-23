@@ -87,6 +87,8 @@ Token *INTERN_TRUE = &SINGLE_TOK(T_TRUE);
 Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
 Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 
+// TODO: lexer needs a hash based string and ident interning model, the current
+// falls apart after around 1 mio identifiers
 Token *Lexer_next(Lexer *l, Allocator *a) {
   // empty input
   if (l->input.len == 0) {
