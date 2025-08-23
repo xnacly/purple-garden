@@ -4,6 +4,9 @@
 #include <stdint.h>
 
 typedef struct {
+  // defines the maximum amount of memory purple garden is allowed to allocate,
+  // if this is hit, the vm exits with a non zero code
+  uint64_t max_memory;
   // removes all default builtins like @len, @type, etc
   bool remove_default_builtins;
   // disables the @std/ namespace
@@ -11,9 +14,6 @@ typedef struct {
   // disables garbage collection and allocates 'max_memory' with a bump
   // allocator
   bool disable_gc;
-  // defines the maximum amount of memory purple garden is allowed to allocate,
-  // if this is hit, the vm exits with a non zero code
-  uint64_t max_memory;
 } Vm_Config;
 
 #define ENCODE_ARG_COUNT_AND_OFFSET(COUNT, OFFSET)                             \

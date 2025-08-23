@@ -1,0 +1,9 @@
+; vim: filetype=scheme
+
+(@println 
+    ; dbg is the builtin registered in main.c
+    (@dbg 
+      "hello" "world" 
+      3.1415 
+      true false 
+      [1 2]))
