@@ -23,12 +23,7 @@ void *bump_request(void *ctx, size_t size) {
   size_t align = sizeof(void *);
   b_ctx->pos = (b_ctx->pos + align - 1) & ~(align - 1);
 
-  // We are OOM as specified by bump_init(max, ...)
-  if (b_ctx->max != 0 && b_ctx->pos + size >= b_ctx->max) {
-    // TODO: every call to bump_request must be checked for NULL after this
-    // change, otherwise nullpointer access + deref
-    return NULL;
-  }
+  ASSERT(!(b_ctx->max != 0 && b_ctx->pos + size < b_ctx->max), "OOM - WTF");
 
   if (b_ctx->pos + size > b_ctx->size) {
     size_t new_len = b_ctx->size * 2;

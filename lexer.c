@@ -165,7 +165,7 @@ builtin: {
     return INTERN_EOF;
   }
   size_t start = l->pos;
-  size_t hash = FNV_OFFSET_BASIS;
+  uint32_t hash = FNV_OFFSET_BASIS;
   for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
@@ -207,7 +207,7 @@ number: {
   size_t start = l->pos;
   size_t i = start;
   bool is_double = false;
-  size_t hash = FNV_OFFSET_BASIS;
+  uint32_t hash = FNV_OFFSET_BASIS;
   for (; i < l->input.len; i++) {
     char cc = l->input.p[i];
     hash ^= cc;
@@ -240,7 +240,7 @@ number: {
 
 ident: {
   size_t start = l->pos;
-  size_t hash = FNV_OFFSET_BASIS;
+  uint32_t hash = FNV_OFFSET_BASIS;
   for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
@@ -269,7 +269,7 @@ quoted: {
   // skip '
   l->pos++;
   size_t start = l->pos;
-  size_t hash = FNV_OFFSET_BASIS;
+  uint32_t hash = FNV_OFFSET_BASIS;
   for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
@@ -291,7 +291,7 @@ string: {
   // skip "
   l->pos++;
   size_t start = l->pos;
-  size_t hash = FNV_OFFSET_BASIS;
+  uint32_t hash = FNV_OFFSET_BASIS;
   for (char cc = cur(l); cc > 0 && cc != '"'; l->pos++, cc = cur(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;

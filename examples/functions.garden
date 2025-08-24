@@ -14,18 +14,15 @@
 (@fn greeting [greetee] (@println "hello world to:" greetee))
 (greeting "user")
 
-;; tail calls
+;; tail calls 
+;; BUG: this seems buggy
 (@fn inc [x] (+ x 1))
 (@fn call1 [x] (inc x))
 (@fn call2 [x] (call1 x))
 (@fn call3 [x] (call2 x))
 (@fn call4 [x] (call3 x))
 (@fn call5 [x] (call4 x))
-
 (@println (call5 0))
-
-(@fn hello [])
-(hello)
 
 (@fn tuplify [v] [(@type v) (@len v)])
 (@println (tuplify "hello world"))

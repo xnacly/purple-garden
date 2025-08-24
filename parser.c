@@ -121,12 +121,6 @@ stmt_begin: {
   n->children_length = 0;
   n->children_cap = 0;
   consume(p, T_DELIMITOR_LEFT);
-  // BUG: there is a segfault here, triggerable via:
-  //
-  // (@fn hello [] ())
-  // (hello) * 1mio
-  //
-  // This may be an alloc failure in the bump allocator bump_request in line 120
   n->token = p->cur;
   switch (p->cur->type) {
   case T_BUILTIN:
@@ -209,12 +203,12 @@ obj_end: {
   JUMP_NEXT;
 }
 
-// we want to end or error here
-eof:
-  // TODO: this is buggy and needs a fix once im awake again
-  if (stack_top == 0) {
-    return *stack[0]->children[0];
-  }
+eof: // we dont have any more input, return stack top
+  Node *n = stack[stack_top];
+  ASSERT(n->children_length == 0, "Top level sexpr necessary");
+  return *n;
+
+// we want to error here
 unkown:
   return (Node){.type = N_UNKNOWN};
 }

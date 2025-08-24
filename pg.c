@@ -37,5 +37,7 @@ uint8_t pg_exec_file(Pg *pg, const char *filename) {
 
 void pg_destroy(Pg *pg) {
   Vm_destroy(&pg->__vm);
-  CALL(pg->__alloc, destroy);
+  if (!pg->__conf->disable_gc) {
+    CALL(pg->__alloc, destroy);
+  }
 }

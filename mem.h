@@ -4,9 +4,9 @@
 #include <stddef.h>
 
 #ifdef DEBUG
-#if DEBUG
-#define VERBOSE_ALLOCATOR 1
-#endif
+// #if DEBUG
+// #define VERBOSE_ALLOCATOR 1
+// #endif
 #else
 #endif
 

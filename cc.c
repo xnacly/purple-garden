@@ -430,11 +430,23 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
     if (n.type == N_UNKNOWN) {
       break;
     }
+
+    if (n.type == N_ROOT) {
+      for (size_t i = 0; i < n.children_length; i++) {
 #if DEBUG
-    Node_debug(&n, 0);
-    puts("");
+        Node_debug(&n, 0);
+        puts("");
 #endif
-    compile(alloc, vm, &ctx, &n);
+        compile(alloc, vm, &ctx, n.children[i]);
+      }
+      break;
+    } else {
+#if DEBUG
+      Node_debug(&n, 0);
+      puts("");
+#endif
+      compile(alloc, vm, &ctx, &n);
+    }
   }
 
   ASSERT(ctx.register_allocated_count == 1,
