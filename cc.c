@@ -46,6 +46,7 @@ inline static Value *token_to_value(Token *t, Allocator *a) {
     ASSERT(0, "Unsupported value for token_to_value");
     break;
   }
+
   return v;
 }
 
@@ -73,14 +74,9 @@ static size_t runtime_builtin_hashes[MAX_BUILTIN_SIZE + 1];
 
 static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
   switch (n->type) {
-  case N_ATOM: {
-    // interning logic, global pool 0 is the only instance for false in the
-    // runtime, 1 for true, strings get interned by their hashes, doubles by
-    // their bits and ints by their integer representation
-
+  case N_ATOM: { // TODO: this works but not good enough and its somewhat silly
+                 // to think we wouldnt need a collision strategy for buckets
 // High tag bits
-#define TAG_FALSE 0x1000000000000000ULL
-#define TAG_TRUE 0x2000000000000000ULL
 #define TAG_STRING 0x3000000000000000ULL
 #define TAG_DOUBLE 0x4000000000000000ULL
 #define TAG_INT 0x5000000000000000ULL
@@ -98,7 +94,6 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
     } else if (n->token->type == T_STRING) {
       hash = TAG_STRING | (n->token->string.hash & TAG_MASK);
     } else if (n->token->type == T_DOUBLE) {
-      // type punning by using token->integer while token->floating is filled
       hash = TAG_DOUBLE | (n->token->string.hash & TAG_MASK);
     } else if (n->token->type == T_INTEGER) {
       hash = TAG_INT | (n->token->string.hash & TAG_MASK);
