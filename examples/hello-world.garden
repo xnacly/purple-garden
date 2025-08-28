@@ -2,4 +2,5 @@
 
 ; @println is a predefined function responsible for writing to stdout 
 ; builtins are specifically called via @<builtin>
-(@println "Hello" "World")
+(@fn hello [] ())
+(hello)

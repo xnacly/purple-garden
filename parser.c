@@ -20,7 +20,7 @@ Parser Parser_new(Allocator *alloc, Lexer *l) {
 static void advance(Parser *p) {
 #if DEBUG
   Token_debug(p->cur);
-  puts("");
+  puts("hurensohn");
 #endif
   p->pos++;
   p->cur = Lexer_next(p->lexer, p->alloc);
@@ -95,7 +95,6 @@ Node Parser_next(Parser *p) {
 #define JUMP_NEXT goto *jump_table[p->cur->type];
 
   ASSERT(stack_top < MAX_DEPTH, "Stack overflow, max 256 stack depth");
-
   JUMP_NEXT;
 
 atom: {
@@ -118,9 +117,8 @@ ident: {
 
 stmt_begin: {
   Node *n = CALL(p->alloc, request, sizeof(Node));
-  n->children_length = 0;
-  n->children_cap = 0;
   consume(p, T_DELIMITOR_LEFT);
+  ASSERT(n != NULL, "IDK anymore");
   n->token = p->cur;
   switch (p->cur->type) {
   case T_BUILTIN:

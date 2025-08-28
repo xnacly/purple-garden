@@ -62,6 +62,6 @@ typedef struct {
 } Allocator;
 
 Allocator *bump_init(size_t min_size, size_t max_size);
-Allocator *xcgc_init(size_t size, void *vm);
+Allocator *xcgc_init(void *vm, size_t min_size, size_t max_size);
 
 #endif

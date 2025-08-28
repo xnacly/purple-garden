@@ -209,9 +209,9 @@ int main(int argc, char **argv) {
     VERBOSE_PUTS(
         "vm: got --block-allocator, using bump allocator with size %zuB/%zuKB",
         a.block_allocator * 1024, a.block_allocator);
-    vm.alloc = bump_init(a.block_allocator * 1024, MAX_MEM);
+    vm.alloc = bump_init(a.block_allocator * 1024, 0);
   } else {
-    vm.alloc = xcgc_init(GC_MIN_HEAP, &vm);
+    vm.alloc = xcgc_init(&vm, GC_MIN_HEAP, 0);
   }
   int runtime_code = Vm_run(&vm);
   VERBOSE_PUTS("vm::Vm_run: executed byte code");

@@ -14,6 +14,7 @@ typedef struct {
 
   size_t size;
   size_t pos;
+  size_t max;
 } GcCtx;
 
 static void xcgc_run(GcCtx *c) {
@@ -26,11 +27,6 @@ static void xcgc_run(GcCtx *c) {
 void *gc_request(void *ctx, size_t size) {
   GcCtx *c = (GcCtx *)ctx;
 
-  // the request is now failable because we want to stay under MAX_MEM
-  if (c->pos + size >= MAX_MEM) {
-    return NULL;
-  }
-
   if (c->pos + size >= c->size) {
 #ifdef VERBOSE_ALLOCATOR
     printf("[XCGC] triggering gc at %zu, %.3f%% of %zuB because of %zuB\n",
@@ -38,8 +34,8 @@ void *gc_request(void *ctx, size_t size) {
 #endif
     xcgc_run(c);
 
-    ASSERT(c->pos < c->size, "xcgc bug: full heap after collection");
     // necessary to guard buffer overflows
+    ASSERT(c->pos < c->size, "xcgc bug: full heap after collection");
   }
 
   size_t align = sizeof(void *);
@@ -76,16 +72,17 @@ Stats gc_stats(void *ctx) {
 // https://en.wikipedia.org/wiki/Cheney%27s_algorithm. With mostly separate
 // stages and only stopping the world for the smalles time possible,
 // specifically only while moving from the from-space to the to-space.
-Allocator *xcgc_init(size_t size, void *vm) {
+Allocator *xcgc_init(void *vm, size_t min_size, size_t max_size) {
   GcCtx *ctx = malloc(sizeof(GcCtx));
   ASSERT(ctx != NULL, "failed to allocate garbage collector context");
   ctx->vm = (Vm *)vm;
-  ctx->from_space = malloc(size);
+  ctx->from_space = malloc(min_size);
   ASSERT(ctx->from_space != NULL, "failed to allocate xcgc from_space");
-  ctx->to_space = malloc(size);
+  ctx->to_space = malloc(min_size);
   ASSERT(ctx->to_space != NULL, "failed to allocate xcgc to_space");
   ctx->pos = 0;
-  ctx->size = size;
+  ctx->size = min_size;
+  ctx->max = max_size;
 
   Allocator *a = malloc(sizeof(Allocator));
   ASSERT(ctx != NULL, "failed to alloc gc allocator");

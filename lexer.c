@@ -31,8 +31,9 @@ Str TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
 
 #if DEBUG
 void Token_debug(Token *token) {
+  ASSERT(token != NULL, "NULL token!");
   ASSERT(token->type <= T_EOF, "Out of bounds type, SHOULD NEVER HAPPEN");
-  putc('[', stdout);
+  printf("[");
   Str_debug(&TOKEN_TYPE_MAP[token->type]);
   putc(']', stdout);
   switch (token->type) {
@@ -247,13 +248,13 @@ ident: {
   }
 
   size_t len = l->pos - start;
-  Token *t;
+
   if (hash == l->true_hash) {
-    t = INTERN_TRUE;
+    return INTERN_TRUE;
   } else if (hash == l->false_hash) {
-    t = INTERN_FALSE;
+    return INTERN_FALSE;
   } else {
-    t = CALL(a, request, sizeof(Token));
+    Token *t = CALL(a, request, sizeof(Token));
     t->type = T_IDENT;
     t->string = (Str){
         .p = l->input.p + start,
@@ -261,7 +262,6 @@ ident: {
         .hash = hash,
     };
   }
-  return t;
 }
 
 // same as string but only with leading '

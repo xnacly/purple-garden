@@ -24,7 +24,7 @@ uint8_t pg_exec_Str(Pg *pg, Str input) {
   if (pg->__conf->disable_gc) {
     pg->__vm.alloc = pg->__alloc;
   } else {
-    pg->__vm.alloc = xcgc_init(pg->__conf->max_memory, &pg->__vm);
+    pg->__vm.alloc = xcgc_init(&pg->__vm, GC_MIN_HEAP, pg->__conf->max_memory);
   }
 
   return Vm_run(&pg->__vm);

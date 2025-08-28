@@ -51,8 +51,7 @@ bool Str_eq(const Str *a, const Str *b) {
 }
 
 void Str_debug(const Str *str) {
-  if (str == NULL)
-    return;
+  ASSERT(str != NULL, "HS");
   printf("%.*s", (int)str->len, str->p);
 }
 
