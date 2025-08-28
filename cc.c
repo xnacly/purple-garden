@@ -348,6 +348,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       registers[i] = r;
       BC(OP_STORE, r);
     }
+
     for (int i = n->children_length - 1; i >= 0; i--) {
       Ctx_free_register(ctx, registers[i]);
     }

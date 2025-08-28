@@ -108,7 +108,7 @@ int Vm_run(Vm *vm) {
     VM_OP op = vm->bytecode[vm->pc];
     uint32_t arg = vm->bytecode[vm->pc + 1];
 
-#define PRINT_REGISTERS 0
+#define PRINT_REGISTERS 2
 #if DEBUG
     vm->instruction_counter[op]++;
     Str *str = &OP_MAP[op];

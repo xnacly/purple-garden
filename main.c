@@ -111,6 +111,7 @@ Args Args_parse(int argc, char **argv) {
   }
   a.block_allocator = s.flags[__BLOCK_ALLOC].l;
   a.aot_functions = s.flags[__AOT].b;
+  // a.disassemble = s.flags[__DISASSEMBLE].b;
   a.disassemble = s.flags[__DISASSEMBLE].b;
   a.memory_usage = s.flags[__MEMORY_USAGE].b;
   a.run = s.flags[__RUN].s;

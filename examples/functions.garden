@@ -15,7 +15,6 @@
 (greeting "user")
 
 ;; tail calls 
-;; BUG: this seems buggy
 (@fn inc [x] (+ x 1))
 (@fn call1 [x] (inc x))
 (@fn call2 [x] (call1 x))
