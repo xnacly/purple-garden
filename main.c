@@ -189,9 +189,9 @@ int main(int argc, char **argv) {
   Ctx ctx = cc(&vm, pipeline_allocator, &parser);
   VERBOSE_PUTS("cc::cc: Flattened AST to byte code/global pool length=%zu/%zu "
                "(%zuB/%zuB)",
-               vm.bytecode_len, (size_t)vm.global_len,
-               vm.bytecode_len * sizeof(uint32_t),
-               vm.global_len * sizeof(Value));
+               (size_t)vm.bytecode_len, (size_t)vm.global_len,
+               (size_t)vm.bytecode_len * sizeof(uint32_t),
+               (size_t)vm.global_len * sizeof(Value));
 
   if (UNLIKELY(a.disassemble)) {
     disassemble(&vm, &ctx);

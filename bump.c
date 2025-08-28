@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <string.h>
 
 // BumpResize allocator header
 typedef struct {
@@ -31,11 +32,23 @@ void *bump_request(void *ctx, size_t size) {
       new_len *= 2;
     }
 
-    void *new_block =
-        mremap(b_ctx->block, b_ctx->size, new_len, MREMAP_MAYMOVE);
-    ASSERT(new_block != MAP_FAILED, "mremap failed");
-    b_ctx->block = new_block;
-    b_ctx->size = new_len;
+  #ifdef PLATFORM_DARWIN
+  // macOS does not support mremap; allocate a new region, copy, then unmap old
+  void *new_block = mmap(NULL, new_len, PROT_READ | PROT_WRITE,
+               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT(new_block != MAP_FAILED, "mmap grow failed");
+  memcpy(new_block, b_ctx->block, b_ctx->size);
+  int unmap_res = munmap(b_ctx->block, b_ctx->size);
+  ASSERT(unmap_res == 0, "munmap grow old block failed");
+  b_ctx->block = new_block;
+  b_ctx->size = new_len;
+  #else
+  void *new_block =
+    mremap(b_ctx->block, b_ctx->size, new_len, MREMAP_MAYMOVE);
+  ASSERT(new_block != MAP_FAILED, "mremap failed");
+  b_ctx->block = new_block;
+  b_ctx->size = new_len;
+  #endif
   }
 
   void *block_entry = (char *)b_ctx->block + b_ctx->pos;
