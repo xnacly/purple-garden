@@ -239,7 +239,7 @@ void Node_debug(Node *n, size_t depth) {
   switch (n->type) {
   case N_IDENT:
     Token_debug(n->token);
-    printf("{idx=%zu}", n->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
+    printf("{idx=%llu}", n->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
     break;
   case N_ATOM:
   case N_BIN:

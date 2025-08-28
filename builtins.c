@@ -16,7 +16,7 @@ static void print_value(const Value *v) {
     printf("%g", v->floating);
     break;
   case V_INT:
-    printf("%ld", v->integer);
+    printf("%lld", v->integer);
     break;
   case V_TRUE:
     printf("true");
@@ -114,6 +114,9 @@ void builtin_type(Vm *vm) {
       s = STRING("object");
       break;
     default:
+      fputs("@type internal error: unknown value type", stderr);
+      exit(EXIT_FAILURE);
+      break;
     }
   }
 

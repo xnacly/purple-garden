@@ -8,7 +8,12 @@ FLAGS := -std=c23 \
         -Wno-ignored-qualifiers -Wno-unused-parameter \
         -Wno-unused-function -Wno-unused-variable -Wno-aggregate-return \
         -Wno-override-init \
-        -Wno-unused-command-line-argument -lm
+		-Wno-unused-command-line-argument -lm
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+	FLAGS += -DPLATFORM_DARWIN
+endif
 
 RELEASE_FLAGS := -O3 -flto -fno-semantic-interposition \
                  -fno-asynchronous-unwind-tables -march=native

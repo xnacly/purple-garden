@@ -44,7 +44,7 @@ void Token_debug(Token *token) {
   case T_IDENT:
     putc('[', stdout);
     Str_debug(&token->string);
-    printf("]{.hash=%zu}", token->string.hash);
+    printf("]{.hash=%llu}", token->string.hash);
     break;
   case T_TRUE:
   case T_FALSE:
@@ -261,6 +261,8 @@ ident: {
         .len = len,
         .hash = hash,
     };
+
+    return t;
   }
 }
 
