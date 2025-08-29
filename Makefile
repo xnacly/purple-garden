@@ -1,6 +1,6 @@
 CC ?= gcc
 FLAGS := -std=c23 \
-        -Wall -Wextra -Werror -fdiagnostics-color=always \
+        -Wall -Wextra -Werror -fno-diagnostics-color \
         -fno-common -Winit-self -Wfloat-equal -Wundef -Wshadow \
         -Wpointer-arith -Wcast-align -Wstrict-prototypes \
         -Wstrict-overflow=5 -Wwrite-strings -Waggregate-return \
@@ -75,7 +75,6 @@ $(BENCH_BIN): LINK_FLAGS := $(RELEASE_FLAGS) $(BENCH_EXTRA)
 $(BENCH_BIN): $(OBJ) | $(BIN_DIR)
 	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@
 
-# Test build (just reuse debug compile flags if needed)
 $(TEST_BIN): COMPILE_FLAGS := 
 $(TEST_BIN): LINK_FLAGS := 
 $(TEST_BIN): $(TEST_OBJ) | $(BIN_DIR)

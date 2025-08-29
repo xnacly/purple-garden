@@ -16,7 +16,7 @@ static void print_value(const Value *v) {
     printf("%g", v->floating);
     break;
   case V_INT:
-    printf("%lld", v->integer);
+    printf("%ld", v->integer);
     break;
   case V_TRUE:
     printf("true");

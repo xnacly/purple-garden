@@ -20,7 +20,7 @@ Parser Parser_new(Allocator *alloc, Lexer *l) {
 static void advance(Parser *p) {
 #if DEBUG
   Token_debug(p->cur);
-  puts("hurensohn");
+  puts("");
 #endif
   p->pos++;
   p->cur = Lexer_next(p->lexer, p->alloc);
@@ -239,7 +239,7 @@ void Node_debug(Node *n, size_t depth) {
   switch (n->type) {
   case N_IDENT:
     Token_debug(n->token);
-    printf("{idx=%llu}", n->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
+    printf("{idx=%lu}", n->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
     break;
   case N_ATOM:
   case N_BIN:

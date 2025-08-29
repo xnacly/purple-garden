@@ -130,12 +130,18 @@ int Vm_run(Vm *vm) {
       vm->size_hint = arg;
       break;
     case OP_NEW: {
-      NEW({});
       Value v = (Value){};
       switch ((VM_New)arg) {
       case VM_NEW_ARRAY:
         v.type = V_ARRAY;
-        v.array = List_new(vm->size_hint, vm->alloc);
+        if (vm->size_hint != 0) {
+          v.array = List_new(vm->size_hint, vm->alloc);
+        } else {
+          v.array = (List){
+              .cap = 0,
+              .len = 0,
+          };
+        }
         break;
       default:
         ASSERT(0, "OP_NEW unimplemented");

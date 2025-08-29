@@ -84,7 +84,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
 // Tag mask to keep lower bits
 #define TAG_MASK 0x0FFFFFFFFFFFFFFFULL
 
-    size_t hash;
+    size_t hash = 0;
     if (n->token->type == T_FALSE) {
       BC(OP_LOADG, GLOBAL_FALSE);
       break;
