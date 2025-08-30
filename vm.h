@@ -51,9 +51,11 @@ typedef struct Frame {
 typedef struct __Vm {
   uint32_t global_len;
   // globals represents the global pool created by the bytecode compiler
-  Value **globals;
+  Value *globals;
 
   uint64_t bytecode_len;
+  // TODO: replace this with a 32bit wide instruction and encode op, arg1, arg2
+  // in it
   uint32_t *bytecode;
 
   // current position in the bytecode

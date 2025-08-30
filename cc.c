@@ -20,28 +20,27 @@
 
 // token_to_value converts tokens, such as strings, boolean and numbers to
 // runtime values
-inline static Value *token_to_value(Token *t, Allocator *a) {
-  Value *v = CALL(a, request, sizeof(Value));
-  *v = (Value){0};
+inline static Value token_to_value(Token *t, Allocator *a) {
+  Value v = (Value){0};
   switch (t->type) {
   case T_STRING:
   case T_IDENT:
-    v->type = V_STR;
-    v->string = t->string;
+    v.type = V_STR;
+    v.string = t->string;
     break;
   case T_TRUE:
-    v->type = V_TRUE;
+    v.type = V_TRUE;
     break;
   case T_FALSE:
-    v->type = V_FALSE;
+    v.type = V_FALSE;
     break;
   case T_INTEGER:
-    v->type = V_INT;
-    v->integer = Str_to_int64_t(&t->string);
+    v.type = V_INT;
+    v.integer = Str_to_int64_t(&t->string);
     break;
   case T_DOUBLE:
-    v->type = V_DOUBLE;
-    v->floating = Str_to_double(&t->string);
+    v.type = V_DOUBLE;
+    v.floating = Str_to_double(&t->string);
     break;
   default:
     ASSERT(0, "Unsupported value for token_to_value");

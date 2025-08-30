@@ -7,11 +7,11 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
   if (vm->global_len > 0) {
     printf("__globals:\n\t");
     for (size_t i = 0; i < vm->global_len; i++) {
-      Value *v = vm->globals[i];
-      Value_debug(v);
+      Value v = vm->globals[i];
+      Value_debug(&v);
       printf("; {idx=%zu", i);
-      if (v->type == V_STR) {
-        printf(",hash=%lu", v->string.hash & GLOBAL_SIZE_MASK);
+      if (v.type == V_STR) {
+        printf(",hash=%lu", v.string.hash & GLOBAL_SIZE_MASK);
       }
       printf("}\n\t");
     }
@@ -66,7 +66,7 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
       switch (op) {
       case OP_LOADG:
         printf("; ");
-        Value_debug(vm->globals[arg]);
+        Value_debug(&vm->globals[arg]);
         break;
       case OP_CALL: {
         for (size_t j = 0; j < MAX_BUILTIN_SIZE; j++) {

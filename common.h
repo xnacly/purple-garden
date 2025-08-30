@@ -99,6 +99,8 @@ typedef struct {
   List *buckets;
 } Map;
 
+// TODO: make this smaller, its necessary; NaN-Boxing
+
 // Value represents a value known to the runtime
 typedef struct Value {
   // true if @Some, otherwise self is just a Value, if @None just .type=V_NONE

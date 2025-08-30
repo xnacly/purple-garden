@@ -32,10 +32,10 @@ Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
 
   vm.builtins = (void **)BUILTIN_MAP;
 
-  vm.globals = CALL(static_alloc, request, (sizeof(Value *) * GLOBAL_SIZE));
-  vm.globals[GLOBAL_FALSE] = INTERNED_FALSE;
-  vm.globals[GLOBAL_TRUE] = INTERNED_TRUE;
-  vm.globals[GLOBAL_NONE] = INTERNED_NONE;
+  vm.globals = CALL(static_alloc, request, (sizeof(Value) * GLOBAL_SIZE));
+  vm.globals[GLOBAL_FALSE] = *INTERNED_FALSE;
+  vm.globals[GLOBAL_TRUE] = *INTERNED_TRUE;
+  vm.globals[GLOBAL_NONE] = *INTERNED_NONE;
   vm.global_len = 3;
 
   if (!conf.remove_default_builtins) {
@@ -61,6 +61,7 @@ typedef struct {
 void freelist_preallocate(FrameFreeList *fl) {
   for (int i = 0; i < PREALLOCATE_FREELIST_SIZE; i++) {
     Frame *frame = CALL(fl->alloc, request, sizeof(Frame));
+    *frame = (Frame){0};
     frame->variable_table = List_new(8, fl->alloc);
     frame->prev = fl->head;
     fl->head = frame;
@@ -75,6 +76,7 @@ void freelist_push(FrameFreeList *fl, Frame *frame) {
   frame->prev = fl->head;
   // memset(frame->variable_table, 0, sizeof(frame->variable_table));
   frame->return_to_bytecode = 0;
+  frame->variable_table.len = 0;
   fl->head = frame;
 }
 
@@ -155,7 +157,7 @@ int Vm_run(Vm *vm) {
       List_append(&vm->registers[arg].array, vm->alloc, vm->registers[0]);
       break;
     case OP_LOADG:
-      vm->registers[0] = *vm->globals[arg];
+      vm->registers[0] = vm->globals[arg];
       break;
     case OP_LOAD:
       vm->registers[0] = vm->registers[arg];
@@ -265,8 +267,8 @@ int Vm_run(Vm *vm) {
     case OP_EQ: {
       // pointer comparison fast path
       vm->registers[0] = Value_cmp(&vm->registers[0], &vm->registers[arg])
-                             ? *vm->globals[1]
-                             : *vm->globals[0];
+                             ? vm->globals[1]
+                             : vm->globals[0];
       break;
     }
     case OP_ARGS:
