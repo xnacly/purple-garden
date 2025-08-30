@@ -4,15 +4,14 @@
 #include <stddef.h>
 
 #ifdef DEBUG
-#if DEBUG
-#define VERBOSE_ALLOCATOR 0
-#endif
+// #if DEBUG
+// #define VERBOSE_ALLOCATOR 1
+// #endif
 #else
-#define VERBOSE_ALLOCATOR 0
 #endif
 
-// 1MB
-#define GC_MIN_HEAP 1024 * 1024
+// 50KB
+#define GC_MIN_HEAP 50 * 1024
 
 typedef struct {
   size_t current;
@@ -24,7 +23,7 @@ typedef struct {
 // Allocator, which reduces alloc_bump.request(alloc_bump.ctx, 64); to
 // CALL(alloc_bump, request, 64), removing the need for passing the context in
 // manually
-#if VERBOSE_ALLOCATOR
+#ifdef VERBOSE_ALLOCATOR
 #include <stdio.h>
 #define CALL(SELF, METHOD, ...)                                                \
   (fprintf(stderr, "[ALLOCATOR] %s@%s::%d: %s->%s(%s)\n", __FILE__, __func__,  \
@@ -62,7 +61,7 @@ typedef struct {
   void (*destroy)(void *ctx);
 } Allocator;
 
-Allocator *bump_init(size_t size);
-Allocator *xcgc_init(size_t size, void *vm);
+Allocator *bump_init(size_t min_size, size_t max_size);
+Allocator *xcgc_init(void *vm, size_t min_size, size_t max_size);
 
 #endif

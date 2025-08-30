@@ -1,8 +1,4 @@
-#include "../cc.h"
-#include "../common.h"
-#include "../lexer.h"
-#include "../parser.h"
-#include "../vm.h"
+#include "../pg.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +15,7 @@ typedef struct {
 
 #define CASE(in, r0)                                                           \
   {                                                                            \
-      .input = STRING(#in "\0"),                                               \
+      .input = STRING(#in),                                                    \
       .expected_r0 = r0,                                                       \
   }
 
@@ -60,34 +56,46 @@ bool Value_cmp_deep(const Value *a, const Value *b) {
   }
 }
 
+// @_ is used to simply return its argument since pg doesnt allow top level
+// atoms
+void builtin_test_return(Vm *vm) { RETURN(ARG(0)); }
+
 int main() {
   Case cases[] = {
     // atoms:
 
     // doubles
-    CASE(3.1415, VAL(.type = V_DOUBLE, .floating = 3.1415)),
-    CASE(.1415, VAL(.type = V_DOUBLE, .floating = 0.1415)),
+    CASE((@test_return 3.1415), VAL(.type = V_DOUBLE, .floating = 3.1415)),
+    CASE((@test_return 0.1415), VAL(.type = V_DOUBLE, .floating = 0.1415)),
 
-    CASE("string", VAL(.type = V_STR, .string = STRING("string"))),
+    CASE((@test_return "string"),
+         VAL(.type = V_STR, .string = STRING("string"))),
     {
-        .input = STRING("'this-is-really-a-quoted-symbol"),
+        .input = ((Str){.len = sizeof("(@test_return 'quoted)"
+                                      "\0") -
+                               1,
+                        .p = (const uint8_t *)"(@test_return 'quoted)"
+                                              "\0"}),
         .expected_r0 =
             (Value){.type = V_STR,
-                    .string = STRING("this-is-really-a-quoted-symbol")},
+                    .string = ((Str){.len = sizeof("quoted") - 1,
+                                     .p = (const uint8_t *)"quoted"})},
     },
     // TODO: this is for future me to implement
     // CASE("escaped string\"", BC(OP_LOAD, 0), VAL(.type = V_STRING, .string
     // = STRING("escaped string\""))),
-    CASE(true false, VAL(.type = V_FALSE)),
+    CASE((@test_return false), VAL(.type = V_FALSE)),
     // checking if boolean interning works
-    CASE(true false true false, VAL(.type = V_FALSE)),
-    CASE("hello", VAL(.type = V_STR, .string = STRING("hello"))),
+    CASE((@test_return true)(@test_return false)(@test_return false),
+         VAL(.type = V_FALSE)),
+    CASE((@test_return "hello"), VAL(.type = V_STR, .string = STRING("hello"))),
 
     // too large integer and double values
     // https://github.com/xNaCly/purple-garden/issues/1
     // CASE(9223372036854775807, VAL(.type = V_UNDEFINED)),
     // CASE(
-    //     179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858369.0,
+    //
+    // 179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858369.0,
     //     VAL(.type = V_UNDEFINED)),
 
     // math:
@@ -123,8 +131,9 @@ int main() {
     CASE((= false false), VAL(.type = V_TRUE)),
 
     // variables
-    CASE((@let name "user")name, VAL(.type = V_STR, .string = STRING("user"))),
-    CASE((@let age 25)age, VAL(.type = V_INT, .integer = 25)),
+    CASE((@let name "user")(@test_return name),
+         VAL(.type = V_STR, .string = STRING("user"))),
+    CASE((@let age 25)(@test_return age), VAL(.type = V_INT, .integer = 25)),
 
     // functions
     CASE((@fn ret[arg] arg)(ret 25), VAL(.type = V_INT, .integer = 25)),
@@ -149,36 +158,14 @@ int main() {
   size_t len = sizeof(cases) / sizeof(Case);
   for (size_t i = 0; i < len; i++) {
     Case c = cases[i];
-    size_t min_size = (
-                          // size for globals
-                          (MIN_MEM * sizeof(Value))
-                          // size for bytecode
-                          + MIN_MEM
-                          // size for nodes
-                          + (MIN_MEM * sizeof(Node))) *
-                      2;
+    Vm_Config conf = (Vm_Config){.disable_gc = true};
+    Pg pg = pg_init(&conf);
+    PG_REGISTER_BUILTIN(&pg, "test_return", builtin_test_return);
+    uint8_t code = pg_exec_Str(&pg, c.input);
 
-    Lexer l = Lexer_new(c.input);
-    Allocator *alloc = bump_init(min_size);
-    // specifically omitted, since the tests should not flake or have any memory
-    // issues that could be the result of gc issues, thus the bump allocator
-    // from bump.c is used and Vm_destroy calls alloc->destroy on said allocator
-    //
-    // CALL(alloc, destroy);
-    Token **tokens = CALL(alloc, request, MIN_MEM * sizeof(Token));
-    Lexer_all(&l, alloc, tokens);
-    Parser p = Parser_new(alloc, tokens);
-    size_t node_count = MIN_MEM * sizeof(Node *) / 4;
-    Node **nodes = CALL(alloc, request, node_count);
-    node_count = Parser_all(nodes, &p, node_count);
-    // tests only use the bump allocator, no gc, as explained above, thus both
-    // static and vm runtime allocator are simply: alloc
-    Vm _vm = Vm_new(alloc, alloc);
-    Vm *vm = &_vm;
-    Ctx ctx = cc(vm, alloc, nodes, node_count);
+    Vm *vm = &pg.__vm;
 
     bool error = false;
-    Vm_run(vm);
     if (!Value_cmp_deep(&vm->registers[0], &c.expected_r0)) {
       printf("\tbad value at r0");
       printf("\n\twant=");
@@ -199,7 +186,8 @@ int main() {
       passed++;
       printf("[+][PASS][Case %zu/%zu] in=`%s` \n", i + 1, len, c.input.p);
     }
-    Vm_destroy(vm);
+
+    pg_destroy(&pg);
   }
 
   printf("[=] %zu/%zu passed, %zu failed\n", passed, len, failed);

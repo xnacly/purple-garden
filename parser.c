@@ -8,18 +8,22 @@
 #define NODE_CAP_GROW 2
 #define NODE_INITIAL_CHILD_SIZE 8
 
-Parser Parser_new(Allocator *alloc, Token **t) {
+Parser Parser_new(Allocator *alloc, Lexer *l) {
   return (Parser){
       .alloc = alloc,
-      .tokens = t,
+      .lexer = l,
       .pos = 0,
-      .cur = t[0],
+      .cur = Lexer_next(l, alloc),
   };
 }
 
 static void advance(Parser *p) {
+#if DEBUG
+  Token_debug(p->cur);
+  puts("");
+#endif
   p->pos++;
-  p->cur = p->tokens[p->pos];
+  p->cur = Lexer_next(p->lexer, p->alloc);
 }
 
 static void consume(Parser *p, TokenType tt) {
@@ -39,7 +43,7 @@ static void consume(Parser *p, TokenType tt) {
 // added to n->children
 static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
   if (n->children_length >= n->children_cap) {
-    size_t new = n->children_cap *NODE_CAP_GROW;
+    size_t new = n->children_cap * NODE_CAP_GROW;
     new = new < NODE_INITIAL_CHILD_SIZE ? NODE_INITIAL_CHILD_SIZE : new;
     Node **old = n->children;
     n->children = CALL(alloc, request, sizeof(Node *) * new);
@@ -52,18 +56,26 @@ static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
   n->children[n->children_length++] = child;
 }
 
-size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
+Node Parser_next(Parser *p) {
+#define MAX_DEPTH 256
   // stack keeps the list(s) we are in, the last element is always the current
   // list, the first (0) is root
-  Node *stack[256] = {0};
+  Node *stack[MAX_DEPTH] = {0};
   stack[0] = &(Node){
-      .type = N_UNKNOWN,
-      .children = nodes,
-      .children_cap = max_nodes,
+      .type = N_ROOT,
+      .children = NULL,
+      .children_cap = 0,
   };
   size_t stack_top = 0;
 
+#pragma GCC diagnostic push
+  // We know what we're doing, so this is fine:
+  //
+  // we assign unknown to all and overwrite these to make sure an invalid
+  // index is not a unassigned memory access.
+#pragma GCC diagnostic ignored "-Woverride-init"
   static void *jump_table[256] = {
+      [0 ... 255] = &&unkown,
       [T_DELIMITOR_LEFT] = &&stmt_begin,
       [T_DELIMITOR_RIGHT] = &&stmt_end,
       [T_BRAKET_LEFT] = &&arr_start,
@@ -78,13 +90,11 @@ size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes) {
       [T_IDENT] = &&ident,
       [T_EOF] = &&eof,
   };
+#pragma GCC diagnostic pop
 
-#define JUMP_NEXT                                                              \
-  do {                                                                         \
-    void *target = jump_table[p->cur->type];                                   \
-    goto *target;                                                              \
-  } while (0)
+#define JUMP_NEXT goto *jump_table[p->cur->type];
 
+  ASSERT(stack_top < MAX_DEPTH, "Stack overflow, max 256 stack depth");
   JUMP_NEXT;
 
 atom: {
@@ -107,9 +117,8 @@ ident: {
 
 stmt_begin: {
   Node *n = CALL(p->alloc, request, sizeof(Node));
-  n->children_length = 0;
-  n->children_cap = 0;
   consume(p, T_DELIMITOR_LEFT);
+  ASSERT(n != NULL, "IDK anymore");
   n->token = p->cur;
   switch (p->cur->type) {
   case T_BUILTIN:
@@ -143,7 +152,13 @@ stmt_end: {
   Node *prev = stack[stack_top];
   stack_top--;
   Node_add_child(p->alloc, stack[stack_top], prev);
-  JUMP_NEXT;
+  // I think we should stop this here if stack_top == 0, right? Thus stopping at
+  // a root parse
+  if (stack_top == 0) {
+    return *stack[0]->children[0];
+  } else {
+    JUMP_NEXT
+  }
 }
 
 arr_start: {
@@ -186,9 +201,14 @@ obj_end: {
   JUMP_NEXT;
 }
 
-eof:
-  ASSERT(!stack_top, "Missing closing delimitor");
-  return stack[0]->children_length;
+eof: // we dont have any more input, return stack top
+  Node *n = stack[stack_top];
+  ASSERT(n->children_length == 0, "Top level sexpr necessary");
+  return *n;
+
+// we want to error here
+unkown:
+  return (Node){.type = N_UNKNOWN};
 }
 
 Str NODE_TYPE_MAP[] = {
@@ -206,19 +226,24 @@ Str NODE_TYPE_MAP[] = {
     [N_BIN] = STRING("N_BIN"),
     [N_CALL] = STRING("N_CALL"),
     // error and end case
-    [N_UNKNOWN] = STRING("N_UNKOWN"),
+    [N_ROOT] = STRING("N_ROOT"),
 };
 
 #if DEBUG
-void Node_debug(Node *n, size_t depth) {
+void Node_debug(const Node *n, size_t depth) {
+  ASSERT(n != NULL, "Node is NULL; THIS SHOULD NEVER HAPPEN");
   for (size_t i = 0; i < depth; i++) {
     putc(' ', stdout);
   }
-  Str_debug(&NODE_TYPE_MAP[n->type]);
+  if (n->type < 0) {
+    Str_debug(&STRING("N_UNKOWN"));
+  } else {
+    Str_debug(&NODE_TYPE_MAP[n->type]);
+  }
   switch (n->type) {
   case N_IDENT:
     Token_debug(n->token);
-    printf("{hash=%zu}", n->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
+    printf("{idx=%lu}", n->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
     break;
   case N_ATOM:
   case N_BIN:

@@ -5,12 +5,14 @@
 
 typedef struct {
   Allocator *alloc;
-  Token **tokens;
+  Lexer *lexer;
   size_t pos;
   Token *cur;
 } Parser;
 
 typedef enum {
+  // error case
+  N_UNKNOWN = -1,
   // strings, numbers, booleans
   N_ATOM,
   // all identifiers
@@ -27,8 +29,8 @@ typedef enum {
   N_BIN,
   // function call
   N_CALL,
-  // error and end case
-  N_UNKNOWN,
+  // root node
+  N_ROOT,
 } NodeType;
 
 extern Str NODE_TYPE_MAP[];
@@ -49,10 +51,9 @@ typedef struct __Node {
   struct __Node **children;
 } Node;
 
-Parser Parser_new(Allocator *alloc, Token **t);
-// Returns the next top level Node
+Parser Parser_new(Allocator *alloc, Lexer *l);
 Node Parser_next(Parser *p);
-size_t Parser_all(Node **nodes, Parser *p, size_t max_nodes);
+
 #if DEBUG
-void Node_debug(Node *n, size_t depth);
+void Node_debug(const Node *n, size_t depth);
 #endif

@@ -31,8 +31,9 @@ Str TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
 
 #if DEBUG
 void Token_debug(Token *token) {
+  ASSERT(token != NULL, "NULL token!");
   ASSERT(token->type <= T_EOF, "Out of bounds type, SHOULD NEVER HAPPEN");
-  putc('[', stdout);
+  printf("[");
   Str_debug(&TOKEN_TYPE_MAP[token->type]);
   putc(']', stdout);
   switch (token->type) {
@@ -43,7 +44,7 @@ void Token_debug(Token *token) {
   case T_IDENT:
     putc('[', stdout);
     Str_debug(&token->string);
-    putc(']', stdout);
+    printf("]{.hash=%lu}", token->string.hash);
     break;
   case T_TRUE:
   case T_FALSE:
@@ -57,6 +58,8 @@ Lexer Lexer_new(Str input) {
   return (Lexer){
       .input = input,
       .pos = 0,
+      .true_hash = Str_hash(&STRING("true")),
+      .false_hash = Str_hash(&STRING("false")),
   };
 }
 
@@ -85,19 +88,20 @@ Token *INTERN_TRUE = &SINGLE_TOK(T_TRUE);
 Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
 Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 
-size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
-  ASSERT(out != NULL, "Failed to allocate token list");
-
+// TODO: lexer needs a hash based string and ident interning model, the current
+// falls apart after around 1 mio identifiers
+Token *Lexer_next(Lexer *l, Allocator *a) {
   // empty input
   if (l->input.len == 0) {
-    out[0] = INTERN_EOF;
-    return 1;
+    return INTERN_EOF;
   }
 
-  size_t true_hash = Str_hash(&STRING("true"));
-  size_t false_hash = Str_hash(&STRING("false"));
-
-  size_t count = 0;
+#pragma GCC diagnostic push
+  // We know what we're doing, so this is fine:
+  //
+  // we assign unknown to all and overwrite these to make sure an invalid
+  // index is not a unassigned memory access.
+#pragma GCC diagnostic ignored "-Woverride-init"
   static void *jump_table[256] = {
       [0 ... 255] = &&unknown,
       [' '] = &&whitespace,
@@ -125,49 +129,44 @@ size_t Lexer_all(Lexer *l, Allocator *a, Token **out) {
       ['}'] = &&curly_right,
       [0] = &&end,
   };
+#pragma GCC diagnostic pop
 
 #define JUMP_TARGET goto *jump_table[(int32_t)l->input.p[l->pos]]
 
   JUMP_TARGET;
 
 delimitor_left:
-  out[count++] = INTERN_DELIMITOR_LEFT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_DELIMITOR_LEFT;
 
 delimitor_right:
-  out[count++] = INTERN_DELIMITOR_RIGHT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_DELIMITOR_RIGHT;
 
 braket_left:
-  out[count++] = INTERN_BRAKET_LEFT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_BRAKET_LEFT;
 
 braket_right:
-  out[count++] = INTERN_BRAKET_RIGHT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_BRAKET_RIGHT;
 
 curly_left:
-  out[count++] = INTERN_CURLY_LEFT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_CURLY_LEFT;
 
 curly_right:
-  out[count++] = INTERN_CURLY_RIGHT;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_CURLY_RIGHT;
 
 builtin: {
   l->pos++;
   // not an ident after @, this is shit
   if (!is_alphanum(cur(l))) {
-    out[count++] = INTERN_EOF;
+    return INTERN_EOF;
   }
   size_t start = l->pos;
-  size_t hash = FNV_OFFSET_BASIS;
+  uint64_t hash = FNV_OFFSET_BASIS;
   for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
@@ -182,40 +181,34 @@ builtin: {
   Token *b = CALL(a, request, sizeof(Token));
   b->string = s;
   b->type = T_BUILTIN;
-  out[count++] = b;
-  JUMP_TARGET;
+  return b;
 }
 
 plus:
-  out[count++] = INTERN_PLUS;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_PLUS;
 
 minus:
-  out[count++] = INTERN_MINUS;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_MINUS;
 
 slash:
-  out[count++] = INTERN_SLASH;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_SLASH;
 
 equal:
-  out[count++] = INTERN_EQUAL;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_EQUAL;
 
 asterisks:
-  out[count++] = INTERN_ASTERISKS;
   l->pos++;
-  JUMP_TARGET;
+  return INTERN_ASTERISKS;
 
 number: {
   size_t start = l->pos;
   size_t i = start;
   bool is_double = false;
-  size_t hash = FNV_OFFSET_BASIS;
+  uint64_t hash = FNV_OFFSET_BASIS;
   for (; i < l->input.len; i++) {
     char cc = l->input.p[i];
     hash ^= cc;
@@ -243,35 +236,34 @@ number: {
     n->type = T_INTEGER;
   }
 
-  out[count++] = n;
-  JUMP_TARGET;
+  return n;
 }
 
 ident: {
   size_t start = l->pos;
-  size_t hash = FNV_OFFSET_BASIS;
+  uint64_t hash = FNV_OFFSET_BASIS;
   for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
   }
 
   size_t len = l->pos - start;
-  Token *t;
-  if (hash == true_hash) {
-    t = INTERN_TRUE;
-  } else if (hash == false_hash) {
-    t = INTERN_FALSE;
+
+  if (hash == l->true_hash) {
+    return INTERN_TRUE;
+  } else if (hash == l->false_hash) {
+    return INTERN_FALSE;
   } else {
-    t = CALL(a, request, sizeof(Token));
+    Token *t = CALL(a, request, sizeof(Token));
     t->type = T_IDENT;
     t->string = (Str){
         .p = l->input.p + start,
         .len = len,
         .hash = hash,
     };
+
+    return t;
   }
-  out[count++] = t;
-  JUMP_TARGET;
 }
 
 // same as string but only with leading '
@@ -279,7 +271,7 @@ quoted: {
   // skip '
   l->pos++;
   size_t start = l->pos;
-  size_t hash = FNV_OFFSET_BASIS;
+  uint64_t hash = FNV_OFFSET_BASIS;
   for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
@@ -294,15 +286,14 @@ quoted: {
       .len = len,
       .hash = hash,
   };
-  out[count++] = t;
-  JUMP_TARGET;
+  return t;
 }
 
 string: {
   // skip "
   l->pos++;
   size_t start = l->pos;
-  size_t hash = FNV_OFFSET_BASIS;
+  uint64_t hash = FNV_OFFSET_BASIS;
   for (char cc = cur(l); cc > 0 && cc != '"'; l->pos++, cc = cur(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
@@ -312,7 +303,7 @@ string: {
     Str slice = Str_slice(&l->input, l->pos, l->input.len);
     fprintf(stderr, "lex: Unterminated string near: '%.*s'", (int)slice.len,
             slice.p);
-    out[count++] = INTERN_EOF;
+    return INTERN_EOF;
   } else {
     Token *t = CALL(a, request, sizeof(Token));
     t->type = T_STRING;
@@ -321,11 +312,10 @@ string: {
         .len = l->pos - start,
         .hash = hash,
     };
-    out[count++] = t;
     // skip "
     l->pos++;
+    return t;
   }
-  JUMP_TARGET;
 }
 
 comment:
@@ -343,8 +333,7 @@ unknown: {
 }
 
 end:
-  out[count++] = INTERN_EOF;
-  return count;
+  return INTERN_EOF;
 }
 
 #undef SINGLE_TOK

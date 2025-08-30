@@ -25,4 +25,5 @@ typedef void (*builtin_function)(Vm *vm);
 
 PG_API Pg pg_init(Vm_Config *conf);
 PG_API uint8_t pg_exec_file(Pg *pg, const char *filename);
+PG_API uint8_t pg_exec_Str(Pg *pg, Str input);
 PG_API void pg_destroy(Pg *pg);

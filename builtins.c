@@ -114,6 +114,9 @@ void builtin_type(Vm *vm) {
       s = STRING("object");
       break;
     default:
+      fputs("@type internal error: unknown value type", stderr);
+      exit(EXIT_FAILURE);
+      break;
     }
   }
 

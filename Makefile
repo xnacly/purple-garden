@@ -1,6 +1,6 @@
 CC ?= gcc
 FLAGS := -std=c23 \
-        -Wall -Wextra -Werror -fdiagnostics-color=always \
+        -Wall -Wextra -Werror -fno-diagnostics-color \
         -fno-common -Winit-self -Wfloat-equal -Wundef -Wshadow \
         -Wpointer-arith -Wcast-align -Wstrict-prototypes \
         -Wstrict-overflow=5 -Wwrite-strings -Waggregate-return \
@@ -8,7 +8,12 @@ FLAGS := -std=c23 \
         -Wno-ignored-qualifiers -Wno-unused-parameter \
         -Wno-unused-function -Wno-unused-variable -Wno-aggregate-return \
         -Wno-override-init \
-        -Wno-unused-command-line-argument -lm
+		-Wno-unused-command-line-argument -lm
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+	FLAGS += -DPLATFORM_DARWIN
+endif
 
 RELEASE_FLAGS := -O3 -flto -fno-semantic-interposition \
                  -fno-asynchronous-unwind-tables -march=native
@@ -41,6 +46,7 @@ PG := ./examples/hello-world.garden
 all: release
 
 DEBUG_EXTRA := -DDEBUG=1 -fsanitize=address,undefined -g3
+TEST_EXTRA := -fsanitize=address,undefined -g3
 RELEASE_EXTRA := -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"'
 BENCH_EXTRA := -DCOMMIT='"BENCH"'
 
@@ -70,9 +76,8 @@ $(BENCH_BIN): LINK_FLAGS := $(RELEASE_FLAGS) $(BENCH_EXTRA)
 $(BENCH_BIN): $(OBJ) | $(BIN_DIR)
 	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@
 
-# Test build (just reuse debug compile flags if needed)
-$(TEST_BIN): COMPILE_FLAGS := 
-$(TEST_BIN): LINK_FLAGS := 
+$(TEST_BIN): COMPILE_FLAGS := $(TEST_EXTRA)
+$(TEST_BIN): LINK_FLAGS := $(TEST_EXTRA)
 $(TEST_BIN): $(TEST_OBJ) | $(BIN_DIR)
 	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@
 

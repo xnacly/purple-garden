@@ -58,8 +58,11 @@ void Token_debug(Token *token);
 typedef struct {
   Str input;
   size_t pos;
+
+  // precomputed hashes for faster boolean lookups
+  size_t true_hash;
+  size_t false_hash;
 } Lexer;
 
 Lexer Lexer_new(Str input);
-Token Lexer_next(Lexer *l);
-size_t Lexer_all(Lexer *l, Allocator *a, Token **out);
+Token *Lexer_next(Lexer *l, Allocator *a);

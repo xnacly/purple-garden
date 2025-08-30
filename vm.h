@@ -31,7 +31,7 @@ typedef enum {
 
 // PERF: maybe _ is too many, but prefetching a recursion depth can have
 // some positive effects on the runtime performance
-#define PREALLOCATE_FREELIST_SIZE 32
+#define PREALLOCATE_FREELIST_SIZE 0
 
 // A frame represents a Scope, a new scope is created upon entering a function -
 // since functions are pure, there is no way to interact with the previous frame
@@ -45,7 +45,7 @@ typedef struct Frame {
   // function
   size_t return_to_bytecode;
   // stores Values by their hash, serving as a variable table
-  Value variable_table[VARIABLE_TABLE_SIZE];
+  List variable_table;
 } Frame;
 
 typedef struct __Vm {

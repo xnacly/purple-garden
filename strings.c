@@ -51,15 +51,14 @@ bool Str_eq(const Str *a, const Str *b) {
 }
 
 void Str_debug(const Str *str) {
-  if (str == NULL)
-    return;
+  ASSERT(str != NULL, "HS");
   printf("%.*s", (int)str->len, str->p);
 }
 
-inline size_t Str_hash(const Str *str) {
+inline uint64_t Str_hash(const Str *str) {
   // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash
   // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV_hash_parameters
-  size_t hash = FNV_OFFSET_BASIS;
+  uint64_t hash = FNV_OFFSET_BASIS;
   for (size_t i = 0; i < str->len; i++) {
     hash ^= str->p[i];
     hash *= FNV_PRIME;
