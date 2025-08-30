@@ -11,6 +11,8 @@ typedef struct {
 } Parser;
 
 typedef enum {
+  // error case
+  N_UNKNOWN = -1,
   // strings, numbers, booleans
   N_ATOM,
   // all identifiers
@@ -29,8 +31,6 @@ typedef enum {
   N_CALL,
   // root node
   N_ROOT,
-  // error case
-  N_UNKNOWN,
 } NodeType;
 
 extern Str NODE_TYPE_MAP[];
@@ -55,5 +55,5 @@ Parser Parser_new(Allocator *alloc, Lexer *l);
 Node Parser_next(Parser *p);
 
 #if DEBUG
-void Node_debug(Node *n, size_t depth);
+void Node_debug(const Node *n, size_t depth);
 #endif

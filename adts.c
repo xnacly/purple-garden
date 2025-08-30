@@ -2,7 +2,6 @@
 
 #include <string.h>
 
-#include "cc.h"
 #include "common.h"
 #include "mem.h"
 
@@ -22,6 +21,7 @@ static void grow(List *l, Allocator *a, size_t to_grow_to) {
   Value *new_mem = CALL(a, request, new_cap * sizeof(Value));
   ASSERT(new_mem != NULL, "List growth failed: %zu -> %zu", old_cap, new_cap);
 
+  // sadly we gotta copy, since we own all values :(
   memcpy(new_mem, l->elements, old_cap * sizeof(Value));
   l->elements = (struct Value *)new_mem;
   l->cap = new_cap;
@@ -47,8 +47,17 @@ void List_insert(List *l, Allocator *a, size_t idx, Value v) {
   l->elements[idx] = v;
 }
 
-// TODO: implement before adding support for V_OBJ
-Map Map_new(size_t cap, Allocator *a);
+Map Map_new(size_t cap, Allocator *a) {
+  // TODO: deal with collisions
+  // TODO: figure out a good default size, 8, 16, 32, 64?
+  // TODO: how does one grow a map, does every key need rehashing?
+  // TODO: should the buckets really be an "array" of Lists? Or does this need a
+  // different internal representation since I want to use it for things like
+  // @std/encoding/json, etc; maybe namespaces need to be implemented
+  // differently from V_OBJ?
+  return (Map){};
+}
+
 void Map_insert(Map *m, Str *s, Value v, Allocator *a);
 Value *Map_get(const Map *m, Str *s);
 bool Map_has(const Map *m, Str *s);

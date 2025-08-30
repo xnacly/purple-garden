@@ -73,17 +73,6 @@ void bump_destroy(void *ctx) {
   free(ctx);
 }
 
-static inline uint64_t pow_ui(uint64_t base, uint64_t exp) {
-  uint64_t result = 1;
-  while (exp) {
-    if (exp & 1)
-      result *= base;
-    base *= base;
-    exp >>= 1;
-  }
-  return result;
-}
-
 Stats bump_stats(void *ctx) {
   BumpCtx *b_ctx = (BumpCtx *)ctx;
   return (Stats){.allocated = b_ctx->total_allocated,

@@ -72,7 +72,7 @@ static void Ctx_free_register(Ctx *ctx, size_t i) {
 
 static size_t runtime_builtin_hashes[MAX_BUILTIN_SIZE + 1];
 
-static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
+static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
   switch (n->type) {
   case N_ATOM: { // TODO: this works but not good enough and its somewhat silly
                  // to think we wouldnt need a collision strategy for buckets
@@ -140,6 +140,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       BC(n->token->type, r);
       Ctx_free_register(ctx, r);
     } else {
+#if DEBUG
+      Node_debug(n, 0);
+#endif
       TODO("compile#N_LIST for Node.children_length > 3 is not implemented");
     }
     break;
@@ -298,16 +301,17 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, Node *n) {
       builtin_function bf = vm->builtins[hash];
       ASSERT(bf != NULL, "Unknown builtin `@%.*s`", (int)s->len, s->p)
 
-      size_t len = n->children_length == 0 ? 1 : n->children_length;
-      size_t registers[len];
-      for (size_t i = 0; i < n->children_length; i++) {
-        compile(alloc, vm, ctx, n->children[i]);
-        size_t r = Ctx_allocate_register(ctx);
-        registers[i] = r;
-        BC(OP_STORE, r);
-      }
-      for (int i = n->children_length - 1; i >= 0; i--) {
-        Ctx_free_register(ctx, registers[i]);
+      if (n->children_length > 0) {
+        size_t registers[n->children_length];
+        for (size_t i = 0; i < n->children_length; i++) {
+          compile(alloc, vm, ctx, n->children[i]);
+          size_t r = Ctx_allocate_register(ctx);
+          registers[i] = r;
+          BC(OP_STORE, r);
+        }
+        for (int i = n->children_length - 1; i >= 0; i--) {
+          Ctx_free_register(ctx, registers[i]);
+        }
       }
 
       BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(n->children_length,

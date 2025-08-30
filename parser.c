@@ -227,15 +227,19 @@ Str NODE_TYPE_MAP[] = {
     [N_CALL] = STRING("N_CALL"),
     // error and end case
     [N_ROOT] = STRING("N_ROOT"),
-    [N_UNKNOWN] = STRING("N_UNKOWN"),
 };
 
 #if DEBUG
-void Node_debug(Node *n, size_t depth) {
+void Node_debug(const Node *n, size_t depth) {
+  ASSERT(n != NULL, "Node is NULL; THIS SHOULD NEVER HAPPEN");
   for (size_t i = 0; i < depth; i++) {
     putc(' ', stdout);
   }
-  Str_debug(&NODE_TYPE_MAP[n->type]);
+  if (n->type < 0) {
+    Str_debug(&STRING("N_UNKOWN"));
+  } else {
+    Str_debug(&NODE_TYPE_MAP[n->type]);
+  }
   switch (n->type) {
   case N_IDENT:
     Token_debug(n->token);

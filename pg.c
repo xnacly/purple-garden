@@ -37,6 +37,8 @@ uint8_t pg_exec_file(Pg *pg, const char *filename) {
 
 void pg_destroy(Pg *pg) {
   Vm_destroy(&pg->__vm);
+  // Since the gc was disabled and the allocator thus wasnt destroyed by the vm,
+  // we will do it here.
   if (!pg->__conf->disable_gc) {
     CALL(pg->__alloc, destroy);
   }

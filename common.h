@@ -23,7 +23,7 @@
       MAX_BUILTIN_SIZE * sizeof(builtin_function)
 #endif
 
-#define REGISTERS 127
+#define REGISTERS 31
 #define CALL_ARGUMENT_STACK 256
 #define VARIABLE_TABLE_SIZE 256
 #define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)

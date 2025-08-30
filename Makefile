@@ -46,6 +46,7 @@ PG := ./examples/hello-world.garden
 all: release
 
 DEBUG_EXTRA := -DDEBUG=1 -fsanitize=address,undefined -g3
+TEST_EXTRA := -fsanitize=address,undefined -g3
 RELEASE_EXTRA := -DCOMMIT='"$(COMMIT)"' -DCOMMIT_MSG='"$(COMMIT_MSG)"'
 BENCH_EXTRA := -DCOMMIT='"BENCH"'
 
@@ -75,8 +76,8 @@ $(BENCH_BIN): LINK_FLAGS := $(RELEASE_FLAGS) $(BENCH_EXTRA)
 $(BENCH_BIN): $(OBJ) | $(BIN_DIR)
 	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@
 
-$(TEST_BIN): COMPILE_FLAGS := 
-$(TEST_BIN): LINK_FLAGS := 
+$(TEST_BIN): COMPILE_FLAGS := $(TEST_EXTRA)
+$(TEST_BIN): LINK_FLAGS := $(TEST_EXTRA)
 $(TEST_BIN): $(TEST_OBJ) | $(BIN_DIR)
 	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@
 
