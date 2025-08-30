@@ -293,8 +293,8 @@ $ wc -l examples/bench.garden
 > This benchmark example is for optimizing tail calls, builtin dispatch and match performance:
 
 ```racket
-(@function comparer [a b] (@match ((= a b) (@assert (= a b)))))
-(@function inc [a] (comparer a a))
+(@fn comparer [a b] (@match ((= a b) (@assert (= a b)))))
+(@fn inc [a] (comparer a a))
 (inc 2.5)
 (inc 2.5)
 (inc 2.5)

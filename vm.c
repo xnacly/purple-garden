@@ -20,7 +20,7 @@ Str OP_MAP[256] = {
     [OP_NEW] = STRING("NEW"),         [OP_SIZE] = STRING("SIZE"),
 };
 
-static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
+static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE] = {0};
 
 inline void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
   vm->builtins[Str_hash(&name) & MAX_BUILTIN_SIZE_MASK] = bf;
@@ -130,7 +130,7 @@ int Vm_run(Vm *vm) {
       vm->size_hint = arg;
       break;
     case OP_NEW: {
-      Value v = (Value){};
+      Value v = (Value){0};
       switch ((VM_New)arg) {
       case VM_NEW_ARRAY:
         v.type = V_ARRAY;

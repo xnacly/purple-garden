@@ -44,7 +44,7 @@ void ByteCodeBuilder_insert_arg(ByteCodeBuilder *bcb, size_t idx, uint32_t arg);
 // hashes
 typedef struct Ctx {
   bool registers[REGISTERS + 1];
-  size_t *global_hash_buckets;
+  size_t global_hash_buckets[GLOBAL_SIZE];
   size_t register_allocated_count;
   CtxFunction hash_to_function[MAX_BUILTIN_SIZE];
   ByteCodeBuilder *bcb;

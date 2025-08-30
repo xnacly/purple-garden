@@ -11,7 +11,7 @@ typedef struct {
 #define PRINT_DISASM_ON_ERR 0
 
 #define VAL(...)                                                               \
-  (Value) { __VA_ARGS__ }
+  (Value) { .is_some = false, __VA_ARGS__ }
 
 #define CASE(in, r0)                                                           \
   {                                                                            \

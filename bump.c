@@ -15,8 +15,8 @@
 // BumpResize allocator header
 //
 // The bump allocator is implemented as such, so a "regrow" (needing the next
-// block) doesnt invalidate all previously handed out pointers.
-//
+// block) doesnt invalidate all previously handed out pointers. ALWAYS zero all
+// handed out memory yourself
 typedef struct {
   // List of blocks the bump allocator uses to hand out memory
   void *blocks[BUMP_MAX_BLOCKS];
@@ -90,7 +90,7 @@ Allocator *bump_init(size_t min_size, uint64_t max_size) {
 
   BumpCtx *ctx = malloc(sizeof(BumpCtx));
   ASSERT(ctx != NULL, "failed to bump allocator context");
-  *ctx = (BumpCtx){};
+  *ctx = (BumpCtx){0};
   ctx->size = min_size < BUMP_MIN_START ? BUMP_MIN_START : min_size;
   ctx->max = max_size;
   ctx->blocks[0] = malloc(ctx->size);
@@ -99,6 +99,7 @@ Allocator *bump_init(size_t min_size, uint64_t max_size) {
 
   Allocator *a = malloc(sizeof(Allocator));
   ASSERT(a != NULL, "failed to alloc bump allocator");
+  *a = (Allocator){0};
   a->ctx = (void *)ctx;
   a->destroy = bump_destroy;
   a->request = bump_request;

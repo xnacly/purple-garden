@@ -17,6 +17,7 @@ endif
 
 RELEASE_FLAGS := -O3 -flto -fno-semantic-interposition \
                  -fno-asynchronous-unwind-tables -march=native
+# -g3 if you want to run valgrind on the release binary
 
 COMMIT := $(shell git rev-parse --short HEAD)
 COMMIT_MSG := $(shell git log -1 --pretty=format:'hash=`%H`\nauthor=`%an`\nauthor_email=`%ae`\ncommit_date=`%cd`\ncommit_msg=`%s`')

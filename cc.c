@@ -22,6 +22,7 @@
 // runtime values
 inline static Value *token_to_value(Token *t, Allocator *a) {
   Value *v = CALL(a, request, sizeof(Value));
+  *v = (Value){0};
   switch (t->type) {
   case T_STRING:
   case T_IDENT:
@@ -420,7 +421,7 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
   Ctx ctx = {
       .register_allocated_count = 1,
       .registers = {0},
-      .global_hash_buckets = CALL(alloc, request, sizeof(size_t) * GLOBAL_SIZE),
+      .global_hash_buckets = {0},
       .hash_to_function = {},
       .bcb = &bcb,
   };

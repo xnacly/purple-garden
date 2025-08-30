@@ -13,6 +13,7 @@
 #include "lexer.h"
 #include "mem.h"
 #include "parser.h"
+#include "strings.h"
 #include "vm.h"
 
 #define VERBOSE_PUTS(fmt, ...)                                                 \
@@ -146,9 +147,9 @@ int main(int argc, char **argv) {
   }
   VERBOSE_PUTS("main::Args_parse: Parsed arguments");
 
-  Str input;
+  Str input = STRING_EMPTY;
   if (a.run != NULL && a.run[0] != 0) {
-    input = (Str){.p = (const uint8_t *)a.run, .len = strlen(a.run)};
+    input = (Str){.p = (const uint8_t *)a.run, .len = strlen(a.run), .hash = 0};
   } else {
     input = IO_read_file_to_string(a.filename);
     VERBOSE_PUTS("io::IO_read_file_to_string: mmaped input of size=%uB",

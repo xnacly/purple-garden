@@ -99,6 +99,7 @@ Node Parser_next(Parser *p) {
 
 atom: {
   Node *n = CALL(p->alloc, request, sizeof(Node));
+  *n = (Node){0};
   n->type = N_ATOM;
   n->token = p->cur;
   advance(p);
@@ -108,6 +109,7 @@ atom: {
 
 ident: {
   Node *n = CALL(p->alloc, request, sizeof(Node));
+  *n = (Node){0};
   n->type = N_IDENT;
   n->token = p->cur;
   advance(p);
@@ -117,6 +119,7 @@ ident: {
 
 stmt_begin: {
   Node *n = CALL(p->alloc, request, sizeof(Node));
+  *n = (Node){0};
   consume(p, T_DELIMITOR_LEFT);
   ASSERT(n != NULL, "IDK anymore");
   n->token = p->cur;
@@ -163,6 +166,7 @@ stmt_end: {
 
 arr_start: {
   Node *n = CALL(p->alloc, request, sizeof(Node));
+  *n = (Node){0};
   n->children_length = 0;
   n->children_cap = 0;
   n->type = N_ARRAY;
@@ -183,6 +187,7 @@ arr_end: {
 
 obj_start: {
   Node *n = CALL(p->alloc, request, sizeof(Node));
+  *n = (Node){0};
   n->children_length = 0;
   n->children_cap = 0;
   n->type = N_OBJECT;
