@@ -23,7 +23,7 @@ static void grow(List *l, Allocator *a, size_t to_grow_to) {
 
   // sadly we gotta copy, since we own all values :(
   memcpy(new_mem, l->elements, old_cap * sizeof(Value));
-  l->elements = (struct Value *)new_mem;
+  l->elements = new_mem;
   l->cap = new_cap;
 }
 
