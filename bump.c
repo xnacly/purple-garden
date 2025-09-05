@@ -44,8 +44,10 @@ void *bump_request(void *ctx, size_t size) {
   size_t align = sizeof(void *);
   uint64_t aligned_pos = (b_ctx->len + align - 1) & ~(align - 1);
 
-  ASSERT(b_ctx->total_allocated < b_ctx->max,
-         "Bump allocator exceeded max_size");
+  if (b_ctx->max > 0) {
+    ASSERT(b_ctx->total_allocated < b_ctx->max,
+           "Bump allocator exceeded max_size");
+  }
 
   if (aligned_pos + size > b_ctx->size) {
     ASSERT(b_ctx->pos + 1 < BUMP_MAX_BLOCKS, "Out of block size");
@@ -72,7 +74,7 @@ void *bump_request(void *ctx, size_t size) {
 void bump_destroy(void *ctx) {
   ASSERT(ctx != NULL, "bump_destroy on already destroyed allocator");
   BumpCtx *b_ctx = (BumpCtx *)ctx;
-  for (size_t i = 0; i < b_ctx->pos; i++) {
+  for (size_t i = 0; i <= b_ctx->pos; i++) {
     free(b_ctx->blocks[i]);
     b_ctx->blocks[i] = NULL;
   }

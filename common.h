@@ -29,6 +29,7 @@
 #define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
 
 #define UNLIKELY(condition) __builtin_expect(condition, 0)
+// not compiled out in release builds
 #define ASSERT(EXP, fmt, ...)                                                  \
   if (!(UNLIKELY(EXP))) {                                                      \
     fprintf(stderr,                                                            \
