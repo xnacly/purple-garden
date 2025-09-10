@@ -2,6 +2,8 @@
 #include "common.h"
 #include "mem.h"
 
+// TODO: replace handrolled growing array list with LIST_new
+
 ByteCodeBuilder ByteCodeBuilder_new(Allocator *a) {
   size_t cap = INIT_BYTECODE_SIZE;
   return (ByteCodeBuilder){

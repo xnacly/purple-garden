@@ -1,6 +1,8 @@
 #include "builder.h"
 #include <string.h>
 
+// TODO: replace handrolled growing array list with LIST_new
+
 #define BUILDER_DEFAULT_SIZE 256
 
 Builder Builder_new(Allocator *alloc, size_t size) {

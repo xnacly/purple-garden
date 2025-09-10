@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <sys/cdefs.h>
 
+// TODO: replace handrolled growing array list with LIST_new
+
 #define NODE_CAP_GROW 2
 #define NODE_INITIAL_CHILD_SIZE 8
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "adts.h"
 #include "common.h"
 #include <stdint.h>
 
@@ -45,7 +46,7 @@ typedef struct Frame {
   // function
   size_t return_to_bytecode;
   // stores Values by their hash, serving as a variable table
-  List variable_table;
+  LIST_Value variable_table;
 } Frame;
 
 typedef struct __Vm {

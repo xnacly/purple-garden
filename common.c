@@ -93,7 +93,7 @@ void Value_debug(const Value *v) {
   case V_ARRAY: {
     printf("(");
     for (size_t i = 0; i < v->array.len; i++) {
-      Value v_at_i = List_get(&v->array, i);
+      Value v_at_i = LIST_get(&v->array, i);
       Value_debug(&v_at_i);
       if (i < v->array.len - 1) {
         putc(' ', stdout);
