@@ -1,4 +1,3 @@
-#include "assert.h"
 #include <stdlib.h>
 
 #include "cc.h"
@@ -60,9 +59,8 @@ static size_t Ctx_allocate_register(Ctx *ctx) {
 }
 
 static void Ctx_free_register(Ctx *ctx, size_t i) {
-  assert(i < ctx->register_allocated_count &&
-         "cc: register index out of bounds");
-  assert(ctx->registers[i] && "cc: attempting to free unallocated register");
+  ASSERT(i < ctx->register_allocated_count, "cc: register index out of bounds");
+  ASSERT(ctx->registers[i], "cc: attempting to free unallocated register");
   ctx->register_allocated_count--;
 #if DEBUG
   printf("freeing r%zu\n", ctx->register_allocated_count);

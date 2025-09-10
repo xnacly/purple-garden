@@ -5,16 +5,15 @@
 #include "common.h"
 #include "mem.h"
 
-#define LIST_DEFAULT_CAP 8
-#define LIST_GROW_MULTIPLIER 1.5f
+#define LIST_DEFAULT_SIZE 8
 
-List List_new(size_t cap, Allocator *a);
+List List_new(Allocator *a);
+List List_new_with_size(uint32_t cap, Allocator *a);
 void List_append(List *l, Allocator *a, Value v);
 Value List_get(const List *l, size_t idx);
 void List_insert(List *l, Allocator *a, size_t idx, Value v);
 
-#define MAP_DEFAULT_SIZE 16
-#define MAP_GROW_MULTIPLIER 1.5f
+#define MAP_DEFAULT_SIZE 8
 
 Map Map_new(size_t cap, Allocator *a);
 void Map_insert(Map *m, Str *s, Value v, Allocator *a);

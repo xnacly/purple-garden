@@ -62,7 +62,7 @@ void freelist_preallocate(FrameFreeList *fl) {
   for (int i = 0; i < PREALLOCATE_FREELIST_SIZE; i++) {
     Frame *frame = CALL(fl->alloc, request, sizeof(Frame));
     *frame = (Frame){0};
-    frame->variable_table = List_new(8, fl->alloc);
+    frame->variable_table = List_new(fl->alloc);
     frame->prev = fl->head;
     fl->head = frame;
   }
@@ -90,7 +90,7 @@ void freelist_push(FrameFreeList *fl, Frame *frame) {
 Frame *freelist_pop(FrameFreeList *fl) {
   if (!fl->head) {
     Frame *f = CALL(fl->alloc, request, sizeof(Frame));
-    f->variable_table = List_new(8, fl->alloc);
+    f->variable_table = List_new(fl->alloc);
     return f;
   }
   Frame *f = fl->head;
@@ -137,10 +137,11 @@ int Vm_run(Vm *vm) {
       case VM_NEW_ARRAY:
         v.type = V_ARRAY;
         if (vm->size_hint != 0) {
-          v.array = List_new(vm->size_hint, vm->alloc);
+          // TODO: replace with List_new_with_size once implemented; use
+          // Vm.size_hint
+          v.array = List_new(vm->alloc);
         } else {
           v.array = (List){
-              .cap = 0,
               .len = 0,
           };
         }
@@ -276,7 +277,7 @@ int Vm_run(Vm *vm) {
       vm->arg_offset = DECODE_ARG_OFFSET(arg);
       break;
     case OP_BUILTIN: {
-      // at this point all builtins are just syscalls into an array of
+      // at this point all builtins are just "syscalls" into an array of
       // function pointers
       ((builtin_function)vm->builtins[arg])(vm);
       vm->arg_count = 1;

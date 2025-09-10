@@ -1,4 +1,3 @@
-#include "adts.h"
 #include "cc.h"
 #include "common.h"
 #include "mem.h"
@@ -13,8 +12,10 @@ ByteCodeBuilder ByteCodeBuilder_new(Allocator *a) {
   };
 }
 
+#define GROWTH 2
+
 static void grow(ByteCodeBuilder *bcb, Allocator *a) {
-  size_t new_cap = bcb->cap * LIST_GROW_MULTIPLIER;
+  size_t new_cap = bcb->cap * GROWTH;
   uint32_t *old = bcb->buffer;
   bcb->buffer = CALL(a, request, sizeof(uint32_t) * new_cap);
   memcpy(bcb->buffer, old, sizeof(uint32_t) * bcb->len);

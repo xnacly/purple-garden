@@ -64,6 +64,8 @@ typedef enum {
   V_OBJ,
 } ValueType;
 
+#define LIST_BLOCK_COUNT 16
+
 // List is purple gardens internal array representation. It is implemented as a
 // growing array and can be configured via the LIST_* macros. It owns its
 // values. Can be used like so:
@@ -80,12 +82,12 @@ typedef enum {
 //     );
 //     Value array = (Value){.type = V_ARRAY, .array = l};
 //
-// List will be based on zigs segmented list and has the advantage of not
+// List is based on zigs segmented list and has the advantage of not
 // needing to copy its previous members on growing
 typedef struct {
-  uint32_t cap;
-  uint32_t len;
-  Value *elements;
+  uint64_t len;
+  // TODO: Is LIST_BLOCK_COUNT enough with a growth rate of 2?
+  Value *blocks[LIST_BLOCK_COUNT];
   // TODO:
   // https://github.com/ziglang/zig/blob/e17a050bc695f7d117b89adb1d258813593ca111/lib/std/segmented_list.zig
   // and https://danielchasehooper.com/posts/segment_array/
@@ -100,7 +102,8 @@ typedef struct {
   List *buckets;
 } Map;
 
-// TODO: make this smaller, its necessary; NaN-Boxing
+// TODO: make this smaller, its really is necessary (32 bytes and 8 byte padding
+// IS WAY too large); see NaN-Boxing
 
 // Value represents a value known to the runtime
 typedef struct Value {

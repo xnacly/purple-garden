@@ -1,10 +1,10 @@
-#include <sys/types.h>
 #define _GNU_SOURCE
 #include "common.h"
 #include "mem.h"
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #define BUMP_MIN_START 512

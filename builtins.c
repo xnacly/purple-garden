@@ -1,4 +1,5 @@
 #include "builtins.h"
+#include "adts.h"
 #include "common.h"
 
 static void print_value(const Value *v) {
@@ -31,7 +32,8 @@ static void print_value(const Value *v) {
   case V_ARRAY:
     printf("[");
     for (size_t i = 0; i < v->array.len; i++) {
-      print_value(&((Value *)v->array.elements)[i]);
+      Value e = List_get(&v->array, i);
+      print_value(&e);
       if (i + 1 < v->array.len) {
         printf(", ");
       }
