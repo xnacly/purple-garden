@@ -2,7 +2,6 @@
 // packages, maps, arrays) usage
 #pragma once
 
-#include "common.h"
 #include "mem.h"
 #include "strings.h"
 #include <string.h>
@@ -58,9 +57,7 @@ struct ListIdx idx_to_block_idx(size_t idx);
   ({                                                                           \
     ASSERT(IDX < (LIST)->len, "List_get out of bounds");                       \
     struct ListIdx b_idx = idx_to_block_idx(IDX);                              \
-    Value *block = (LIST)->blocks[b_idx.block];                                \
-    ASSERT(block != NULL, "List_get: block not allocated");                    \
-    block[b_idx.block_idx];                                                    \
+    (LIST)->blocks[b_idx.block][b_idx.block_idx];                              \
   })
 
 #define LIST_insert(LIST, ALLOC, IDX, ELEM)                                    \
@@ -104,7 +101,14 @@ struct ListIdx idx_to_block_idx(size_t idx);
 
 #define MAP_DEFAULT_SIZE 8
 
+// forward declared so the compiler knows a thing or
+// two about a thing or two
+typedef struct Value Value;
+typedef struct Map Map;
+
 Map Map_new(size_t cap, Allocator *a);
 void Map_insert(Map *m, Str *s, Value v, Allocator *a);
-Value *Map_get(const Map *m, Str *s);
-bool Map_has(const Map *m, Str *s);
+void Map_insert_hash(Map *m, uint32_t hash, Value v, Allocator *a);
+Value Map_get(const Map *m, Str *s);
+Value Map_get_hash(const Map *m, uint32_t hash);
+void Map_clear(Map *m);

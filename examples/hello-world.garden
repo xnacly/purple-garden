@@ -2,7 +2,4 @@
 
 ; @println is a predefined function responsible for writing to stdout 
 ; builtins are specifically called via @<builtin>
-
-; BUG: this doesnt work since segmented lists arent that 
-; nice of a bucket backing for a hashmap :(
-(@let v "hello")
+(@println "Hello World")

@@ -51,9 +51,6 @@
 
 extern Str VALUE_TYPE_MAP[];
 
-typedef struct Value Value; // forward declared so the compiler knows a thing or
-                            // two about a thing or two
-
 typedef enum {
   V_NONE,
   V_STR,
@@ -67,17 +64,6 @@ typedef enum {
 
 LIST_TYPE(Value);
 
-typedef struct {
-  Str *key;
-  // TODO: make this owned
-  struct Value *v;
-} MapEntry;
-LIST_TYPE(MapEntry);
-typedef struct {
-  LIST_MapEntry entries;
-  uint64_t cap;
-} Map;
-
 // TODO: make this smaller, its really is necessary (32 bytes and 8 byte padding
 // IS WAY too large); see NaN-Boxing
 
@@ -87,21 +73,27 @@ typedef struct Value {
   unsigned int is_some : 1;
   unsigned int type : 3;
   union {
-    Str string;
-    // This currently sucks balls
-    LIST_Value array;
-    Map obj;
+    const Str *string;
+    LIST_Value *array;
+    Map *obj;
     double floating;
     int64_t integer;
   };
 } Value;
 
+typedef struct Map {
+  LIST_Value entries;
+  uint64_t cap;
+} Map;
+
 // global values that compiler, optimiser and vm use, often mapped to global
 // pool indexes 0,1,2
-__attribute__((unused)) static Value *INTERNED_FALSE =
+__attribute__((unused)) static const Value *INTERNED_FALSE =
     &(Value){.type = V_FALSE};
-__attribute__((unused)) static Value *INTERNED_TRUE = &(Value){.type = V_TRUE};
-__attribute__((unused)) static Value *INTERNED_NONE = &(Value){.type = V_NONE};
+__attribute__((unused)) static const Value *INTERNED_TRUE =
+    &(Value){.type = V_TRUE};
+__attribute__((unused)) static const Value *INTERNED_NONE =
+    &(Value){.type = V_NONE};
 
 bool Value_cmp(const Value *a, const Value *b);
 void Value_debug(const Value *v);

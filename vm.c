@@ -62,7 +62,7 @@ void freelist_preallocate(FrameFreeList *fl) {
   for (int i = 0; i < PREALLOCATE_FREELIST_SIZE; i++) {
     Frame *frame = CALL(fl->alloc, request, sizeof(Frame));
     *frame = (Frame){0};
-    frame->variable_table = LIST_new(Value, fl->alloc);
+    frame->variable_table = Map_new(VARIABLE_TABLE_SIZE, fl->alloc);
     frame->prev = fl->head;
     fl->head = frame;
   }
@@ -74,9 +74,8 @@ static size_t frame_count = 1;
 
 void freelist_push(FrameFreeList *fl, Frame *frame) {
   frame->prev = fl->head;
-  // memset(frame->variable_table, 0, sizeof(frame->variable_table));
+  memset(&frame->variable_table.entries, 0, sizeof(frame->variable_table));
   frame->return_to_bytecode = 0;
-  frame->variable_table.len = 0;
   fl->head = frame;
 }
 
@@ -90,7 +89,7 @@ void freelist_push(FrameFreeList *fl, Frame *frame) {
 Frame *freelist_pop(FrameFreeList *fl) {
   if (!fl->head) {
     Frame *f = CALL(fl->alloc, request, sizeof(Frame));
-    f->variable_table = LIST_new(Value, fl->alloc);
+    f->variable_table = Map_new(VARIABLE_TABLE_SIZE, fl->alloc);
     return f;
   }
   Frame *f = fl->head;
@@ -139,11 +138,15 @@ int Vm_run(Vm *vm) {
         if (vm->size_hint != 0) {
           // TODO: replace with List_new_with_size once implemented; use
           // Vm.size_hint
-          v.array = LIST_new(Value, vm->alloc);
+          LIST_Value *lv = CALL(vm->alloc, request, sizeof(LIST_Value));
+          *lv = LIST_new(Value, vm->alloc);
+          v.array = lv;
         } else {
-          v.array = (LIST_Value){
+          LIST_Value *lv = CALL(vm->alloc, request, sizeof(LIST_Value));
+          *lv = (LIST_Value){
               .len = 0,
           };
+          v.array = lv;
         }
         break;
       default:
@@ -155,7 +158,7 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_APPEND:
-      LIST_append(&vm->registers[arg].array, vm->alloc, vm->registers[0]);
+      LIST_append(vm->registers[arg].array, vm->alloc, vm->registers[0]);
       break;
     case OP_LOADG:
       vm->registers[0] = vm->globals[arg];
@@ -167,7 +170,7 @@ int Vm_run(Vm *vm) {
       // bounds checking and checking for variable validity is performed at
       // compile time, but we still have to check if the variable is available
       // in the current scope...
-      Value v = LIST_get(&vm->frame->variable_table, arg);
+      Value v = Map_get_hash(&vm->frame->variable_table, arg);
       if (v.type == V_NONE) {
         VM_ERR("Undefined variable with hash %i", arg);
       }
@@ -178,15 +181,18 @@ int Vm_run(Vm *vm) {
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      LIST_insert(&vm->frame->variable_table, vm->alloc, arg, vm->registers[0]);
+      Map_insert_hash(&vm->frame->variable_table, arg, vm->registers[0],
+                      vm->alloc);
       break;
     case OP_ADD: {
       Value *left = &vm->registers[0];
       Value *right = &vm->registers[arg];
       if (left->type == V_STR && right->type == V_STR) {
+        Str *s = CALL(vm->alloc, request, sizeof(Str));
+        *s = Str_concat(right->string, left->string, vm->alloc);
         vm->registers[0] = (Value){
             .type = V_STR,
-            .string = Str_concat(&right->string, &left->string, vm->alloc),
+            .string = s,
         };
       } else if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
         vm->registers[0].floating =

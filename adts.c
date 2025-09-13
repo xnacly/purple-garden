@@ -52,3 +52,32 @@ struct ListIdx idx_to_block_idx(size_t idx) {
   r.block_idx = idx - start_index_of_block;
   return r;
 }
+
+#include "common.h"
+
+// TODO: needs collision handling asap
+Map Map_new(size_t cap, Allocator *a) {
+  Map m = {.entries = {0}, .cap = cap};
+  m.entries = LIST_new(Value, a);
+  for (size_t i = 0; i < cap; i++) {
+    LIST_append(&m.entries, a, *INTERNED_NONE);
+  }
+  return m;
+}
+
+void Map_insert_hash(Map *m, uint32_t hash, Value v, Allocator *a) {
+  uint32_t normalized = hash % m->cap;
+  LIST_insert(&m->entries, a, normalized, v);
+}
+
+Value Map_get_hash(const Map *m, uint32_t hash) {
+  uint32_t normalized = hash % m->cap;
+  return LIST_get(&m->entries, normalized);
+}
+
+void Map_clear(Map *m) {
+  for (size_t i = 0; i < LIST_BLOCK_COUNT; i++) {
+    m->entries.blocks[i] = NULL;
+  }
+  m->entries.len = 0;
+}

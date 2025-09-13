@@ -24,8 +24,10 @@ inline static Value token_to_value(Token *t, Allocator *a) {
   switch (t->type) {
   case T_STRING:
   case T_IDENT:
+    Str *s = CALL(a, request, sizeof(Str));
+    *s = t->string;
     v.type = V_STR;
-    v.string = t->string;
+    v.string = s;
     break;
   case T_TRUE:
     v.type = V_TRUE;
@@ -400,6 +402,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
   }
 }
 
+// Creates a compiler builtin
 #define NEW_CC_BUILTIN(NAME, ENUM_VARIANT)                                     \
   runtime_builtin_hashes[Str_hash(&STRING(NAME)) & MAX_BUILTIN_SIZE_MASK] =    \
       COMPILE_BUILTIN_##ENUM_VARIANT;

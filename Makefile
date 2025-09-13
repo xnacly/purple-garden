@@ -1,6 +1,6 @@
 CC ?= gcc
 FLAGS := -std=c23 \
-        -Wall -Wextra -Werror -fno-diagnostics-color \
+        -Wall -Wextra -Werror -fdiagnostics-color \
         -fno-common -Winit-self -Wfloat-equal -Wundef -Wshadow \
         -Wpointer-arith -Wcast-align -Wstrict-prototypes \
         -Wstrict-overflow=5 -Wwrite-strings -Waggregate-return \

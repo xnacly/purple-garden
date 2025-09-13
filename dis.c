@@ -3,6 +3,8 @@
 #include "strings.h"
 #include "vm.h"
 
+// TODO: rework all of this
+
 void disassemble(const Vm *vm, const Ctx *ctx) {
   if (vm->global_len > 0) {
     printf("__globals:\n\t");
@@ -11,7 +13,7 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
       Value_debug(&v);
       printf("; {idx=%zu", i);
       if (v.type == V_STR) {
-        printf(",hash=%lu", v.string.hash & GLOBAL_SIZE_MASK);
+        printf(",hash=%lu", v.string->hash & GLOBAL_SIZE_MASK);
       }
       printf("}\n\t");
     }

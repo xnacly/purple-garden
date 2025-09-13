@@ -20,12 +20,12 @@ typedef struct __Str {
   const uint8_t *p;
 } Str;
 
-#define FNV_OFFSET_BASIS 0xcbf29ce484222325
-#define FNV_PRIME 0x00000100000001b3
-
 #define STRING(str)                                                            \
   ((Str){.len = sizeof(str) - 1, .p = (const uint8_t *)str, .hash = 0})
 #define STRING_EMPTY ((Str){.len = 0, .p = NULL, .hash = 0})
+
+#define FNV_OFFSET_BASIS 0xcbf29ce484222325
+#define FNV_PRIME 0x00000100000001b3
 
 char Str_get(const Str *str, size_t index);
 Str Str_from(const char *s);

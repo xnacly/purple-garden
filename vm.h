@@ -38,15 +38,13 @@ typedef enum {
 // since functions are pure, there is no way to interact with the previous frame
 // inside of a function, the pointer is kept to allow the runtime to restore the
 // scope state to its state before entering the functions scope
-//
-// WARNING: do not stack allocate, since variable_table can be huge
 typedef struct Frame {
   struct Frame *prev;
   // returning out of scope, we need to jump back to the callsite of the
   // function
   size_t return_to_bytecode;
   // stores Values by their hash, serving as a variable table
-  LIST_Value variable_table;
+  Map variable_table;
 } Frame;
 
 typedef struct __Vm {
