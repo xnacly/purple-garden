@@ -21,7 +21,7 @@
 // token_to_value converts tokens, such as strings, boolean and numbers to
 // runtime values
 inline static Value token_to_value(Token *t, Allocator *a) {
-  Value v = (Value){0};
+  Value v;
   switch (t->type) {
   case T_STRING:
   case T_IDENT:

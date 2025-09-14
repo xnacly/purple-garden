@@ -162,7 +162,11 @@ int Vm_run(Vm *vm) {
       // bounds checking and checking for variable validity is performed at
       // compile time, but we still have to check if the variable is available
       // in the current scope...
-      Value v = Map_get_hash(&vm->frame->variable_table, arg);
+      Value v = LIST_get_UNSAFE(
+          &vm->frame->variable_table.entries,
+          arg); // PERF: we are using LIST primitives, since we
+                // do the cap calculation already in cc, thus we can skip
+                // anything the map abstraction has to offer
       if (v.type == V_NONE) {
         VM_ERR("Undefined variable with hash %i", arg);
       }
@@ -173,8 +177,9 @@ int Vm_run(Vm *vm) {
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      Map_insert_hash(&vm->frame->variable_table, arg, vm->registers[0],
-                      vm->alloc);
+      // PERF: see OP_LOADV
+      LIST_insert_UNSAFE(&vm->frame->variable_table.entries, arg,
+                         vm->registers[0]);
       break;
     case OP_ADD: {
       Value *left = &vm->registers[0];

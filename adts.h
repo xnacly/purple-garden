@@ -41,7 +41,6 @@ struct ListIdx idx_to_block_idx(size_t idx);
           CALL(ALLOC, request, LIST_BLOCK_COUNT * sizeof(void *));             \
       ASSERT((LIST)->blocks != NULL,                                           \
              "LIST_append: block array allocation failed");                    \
-      memset((LIST)->blocks, 0, LIST_BLOCK_COUNT * sizeof(void *));            \
     }                                                                          \
                                                                                \
     struct ListIdx bi = idx_to_block_idx((LIST)->len);                         \

@@ -57,12 +57,11 @@ struct ListIdx idx_to_block_idx(size_t idx) {
 
 // TODO: needs collision handling asap
 Map Map_new(size_t cap, Allocator *a) {
-  Map m = {.entries = {0}, .cap = cap};
+  Map m = {.cap = cap};
 
   // allocate block pointers array
   m.entries.blocks = CALL(a, request, LIST_BLOCK_COUNT * sizeof(Value *));
   ASSERT(m.entries.blocks != NULL, "Map_new: block array allocation failed");
-  memset(m.entries.blocks, 0, LIST_BLOCK_COUNT * sizeof(Value *));
 
   m.entries.type_size = sizeof(Value);
   m.entries.len = 0;
@@ -87,12 +86,12 @@ Map Map_new(size_t cap, Allocator *a) {
   return m;
 }
 
-void Map_insert_hash(Map *m, uint32_t hash, Value v, Allocator *a) {
+inline void Map_insert_hash(Map *m, uint32_t hash, Value v, Allocator *a) {
   uint32_t normalized = hash % m->cap;
   LIST_insert_UNSAFE(&m->entries, normalized, v);
 }
 
-Value Map_get_hash(const Map *m, uint32_t hash) {
+inline Value Map_get_hash(const Map *m, uint32_t hash) {
   uint32_t normalized = hash % m->cap;
   return LIST_get_UNSAFE(&m->entries, normalized);
 }

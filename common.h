@@ -52,7 +52,8 @@
   })
 
 #define UNLIKELY(condition) __builtin_expect(condition, 0)
-// not compiled out in release builds
+// TODO: not compiled out in release builds; rework this into a panic system and
+// compile asserts out for release
 #define ASSERT(EXP, fmt, ...)                                                  \
   if (!(UNLIKELY(EXP))) {                                                      \
     fprintf(stderr,                                                            \
@@ -86,8 +87,7 @@ typedef enum {
 
 LIST_TYPE(Value);
 
-// TODO: make this smaller, its really is necessary (32 bytes and 8 byte padding
-// IS WAY too large); see NaN-Boxing
+// TODO: should this be smaller?
 
 // Value represents a value known to the runtime
 typedef struct Value {

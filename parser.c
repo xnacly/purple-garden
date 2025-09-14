@@ -4,14 +4,10 @@
 #include "lexer.h"
 #include "strings.h"
 #include <stdlib.h>
-#include <sys/cdefs.h>
-
-#define NODE_CAP_GROW 2
-#define NODE_INITIAL_CHILD_SIZE 8
 
 #define NODE_NEW(TYPE, TOKEN)                                                  \
   ({                                                                           \
-    Node __n = (Node){0};                                                      \
+    Node __n;                                                                  \
     __n.type = TYPE;                                                           \
     __n.token = TOKEN;                                                         \
     __n.children = LIST_new(Node);                                             \
@@ -27,7 +23,7 @@ Parser Parser_new(Allocator *alloc, Lexer *l) {
   };
 }
 
-static void advance(Parser *p) {
+static inline void advance(Parser *p) {
 #if DEBUG
   Token_debug(p->cur);
   puts("");
@@ -36,7 +32,7 @@ static void advance(Parser *p) {
   p->cur = Lexer_next(p->lexer, p->alloc);
 }
 
-static void consume(Parser *p, TokenType tt) {
+static inline void consume(Parser *p, TokenType tt) {
   if (UNLIKELY(p->cur->type != tt)) {
     printf("purple-garden: Unexpected token, wanted: ");
     Str_debug(&TOKEN_TYPE_MAP[tt]);
@@ -45,6 +41,7 @@ static void consume(Parser *p, TokenType tt) {
     putc('\n', stdout);
     return;
   }
+
   advance(p);
 }
 
@@ -52,7 +49,7 @@ Node Parser_next(Parser *p) {
 #define MAX_DEPTH 256
   // stack keeps the list(s) we are in, the last element is always the current
   // list, the first (0) is root
-  Node stack[MAX_DEPTH] = {0};
+  Node stack[MAX_DEPTH];
   stack[0] = (Node){
       .type = N_ROOT,
       .children = LIST_new(Node),
@@ -141,7 +138,7 @@ stmt_end: {
   // I think we should stop this here if stack_top == 0, right? Thus stopping at
   // a root parse
   if (stack_top == 0) {
-    return LIST_get(&stack[0].children, 0);
+    return LIST_get_UNSAFE(&stack[0].children, 0);
   } else {
     JUMP_NEXT
   }
