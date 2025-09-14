@@ -98,6 +98,11 @@ release: $(RELEASE_BIN)
 bench: $(BENCH_BIN)
 	./$(BENCH_BIN) +V $(PG)
 
+profile: $(RELEASE_BIN)
+	rm -fr *.data
+	perf record --call-graph dwarf ./build/purple_garden examples/bench.garden
+	hotspot
+
 test: $(TEST_BIN)
 	./$(TEST_BIN)
 
