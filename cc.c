@@ -468,8 +468,8 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
   ASSERT(ctx.register_allocated_count == 1,
          "Not all registers were freed, compiler bug!");
 
-  vm->bytecode = ctx.bcb->buffer;
-  vm->bytecode_len = ctx.bcb->len;
+  vm->bytecode = ByteCodeBuilder_to_buffer(ctx.bcb);
+  vm->bytecode_len = ctx.bcb->buffer.len;
   return ctx;
 }
 

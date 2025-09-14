@@ -7,7 +7,7 @@
 // #define VERBOSE_ALLOCATOR 1
 
 // 50KB
-#define GC_MIN_HEAP 161 * 1024
+#define GC_MIN_HEAP 50 * 1024
 
 typedef struct {
   size_t current;

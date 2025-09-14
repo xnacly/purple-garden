@@ -11,8 +11,7 @@
 #define DEBUG 0
 #endif
 
-// 128 instruction pairs amount to around 1KB memory usage
-#define INIT_BYTECODE_SIZE 128 * 2
+#define INIT_BYTECODE_SIZE 256
 #define GLOBAL_SIZE 512
 #define GLOBAL_SIZE_MASK (GLOBAL_SIZE - 1)
 #define MAX_BUILTIN_SIZE 1024
@@ -28,6 +27,29 @@
 #define CALL_ARGUMENT_STACK 256
 #define VARIABLE_TABLE_SIZE 256
 #define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
+
+#define DBG(EXPR)                                                              \
+  ({                                                                           \
+    _Pragma("GCC diagnostic push")                                             \
+        _Pragma("GCC diagnostic ignored \"-Wformat\"") __auto_type _val =      \
+            (EXPR);                                                            \
+    fprintf(stderr, "[%s:%d] %s = ", __FILE__, __LINE__, #EXPR);               \
+    _Generic(_val,                                                             \
+        int: fprintf(stderr, "%d\n", _val),                                    \
+        long: fprintf(stderr, "%ld\n", _val),                                  \
+        long long: fprintf(stderr, "%lld\n", _val),                            \
+        unsigned: fprintf(stderr, "%u\n", _val),                               \
+        unsigned long: fprintf(stderr, "%lu\n", _val),                         \
+        unsigned long long: fprintf(stderr, "%llu\n", _val),                   \
+        float: fprintf(stderr, "%f\n", _val),                                  \
+        double: fprintf(stderr, "%f\n", _val),                                 \
+        const char *: fprintf(stderr, "\"%s\"\n", _val),                       \
+        char *: fprintf(stderr, "\"%s\"\n", _val),                             \
+        struct ListIdx: fprintf(stderr,                                        \
+                                "ListIdx {.block=%u, .block_idx=%u}\n", _val), \
+        default: fprintf(stderr, "<unprintable>\n"));                          \
+    _Pragma("GCC diagnostic pop") _val;                                        \
+  })
 
 #define UNLIKELY(condition) __builtin_expect(condition, 0)
 // not compiled out in release builds

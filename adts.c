@@ -58,22 +58,43 @@ struct ListIdx idx_to_block_idx(size_t idx) {
 // TODO: needs collision handling asap
 Map Map_new(size_t cap, Allocator *a) {
   Map m = {.entries = {0}, .cap = cap};
-  m.entries = LIST_new(Value);
-  for (size_t i = 0; i < cap; i++) {
-    LIST_append(&m.entries, a, *INTERNED_NONE);
+
+  // allocate block pointers array
+  m.entries.blocks = CALL(a, request, LIST_BLOCK_COUNT * sizeof(Value *));
+  ASSERT(m.entries.blocks != NULL, "Map_new: block array allocation failed");
+  memset(m.entries.blocks, 0, LIST_BLOCK_COUNT * sizeof(Value *));
+
+  m.entries.type_size = sizeof(Value);
+  m.entries.len = 0;
+
+  size_t remaining = cap;
+
+  for (size_t b = 0; b < LIST_BLOCK_COUNT && remaining > 0; b++) {
+    size_t block_size = LIST_DEFAULT_SIZE << b;
+    size_t to_alloc = remaining < block_size ? remaining : block_size;
+
+    m.entries.blocks[b] = CALL(a, request, to_alloc * sizeof(Value));
+    ASSERT(m.entries.blocks[b] != NULL, "Map_new: block allocation failed");
+
+    for (size_t i = 0; i < to_alloc; i++) {
+      m.entries.blocks[b][i] = *INTERNED_NONE;
+    }
+
+    remaining -= to_alloc;
+    m.entries.len += to_alloc;
   }
+
   return m;
 }
 
 void Map_insert_hash(Map *m, uint32_t hash, Value v, Allocator *a) {
   uint32_t normalized = hash % m->cap;
-  struct ListIdx idx = idx_to_block_idx(normalized);
-  (&m->entries)->blocks[idx.block][idx.block_idx] = v;
+  LIST_insert_UNSAFE(&m->entries, normalized, v);
 }
 
 Value Map_get_hash(const Map *m, uint32_t hash) {
   uint32_t normalized = hash % m->cap;
-  return LIST_get(&m->entries, normalized);
+  return LIST_get_UNSAFE(&m->entries, normalized);
 }
 
 void Map_clear(Map *m) {
