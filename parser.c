@@ -1,14 +1,22 @@
 #include "parser.h"
+#include "adts.h"
 #include "common.h"
 #include "lexer.h"
 #include "strings.h"
 #include <stdlib.h>
 #include <sys/cdefs.h>
 
-// TODO: replace handrolled growing array list with LIST_new
-
 #define NODE_CAP_GROW 2
 #define NODE_INITIAL_CHILD_SIZE 8
+
+#define NODE_NEW(TYPE, TOKEN)                                                  \
+  ({                                                                           \
+    Node __n = (Node){0};                                                      \
+    __n.type = TYPE;                                                           \
+    __n.token = TOKEN;                                                         \
+    __n.children = LIST_new(Node);                                             \
+    __n;                                                                       \
+  })
 
 Parser Parser_new(Allocator *alloc, Lexer *l) {
   return (Parser){
@@ -40,33 +48,14 @@ static void consume(Parser *p, TokenType tt) {
   advance(p);
 }
 
-// attempts to efficiently grow n->children, since lists are the main
-// datastructure of purple garden - should be called before each new children
-// added to n->children
-static void Node_add_child(Allocator *alloc, Node *n, Node *child) {
-  if (n->children_length >= n->children_cap) {
-    size_t new = n->children_cap * NODE_CAP_GROW;
-    new = new < NODE_INITIAL_CHILD_SIZE ? NODE_INITIAL_CHILD_SIZE : new;
-    Node **old = n->children;
-    n->children = CALL(alloc, request, sizeof(Node *) * new);
-    if (old != NULL) {
-      memcpy(n->children, old, sizeof(Node *) * n->children_length);
-    }
-    n->children_cap = new;
-  }
-
-  n->children[n->children_length++] = child;
-}
-
 Node Parser_next(Parser *p) {
 #define MAX_DEPTH 256
   // stack keeps the list(s) we are in, the last element is always the current
   // list, the first (0) is root
-  Node *stack[MAX_DEPTH] = {0};
-  stack[0] = &(Node){
+  Node stack[MAX_DEPTH] = {0};
+  stack[0] = (Node){
       .type = N_ROOT,
-      .children = NULL,
-      .children_cap = 0,
+      .children = LIST_new(Node),
   };
   size_t stack_top = 0;
 
@@ -100,34 +89,26 @@ Node Parser_next(Parser *p) {
   JUMP_NEXT;
 
 atom: {
-  Node *n = CALL(p->alloc, request, sizeof(Node));
-  *n = (Node){0};
-  n->type = N_ATOM;
-  n->token = p->cur;
+  Node n = NODE_NEW(N_ATOM, p->cur);
   advance(p);
-  Node_add_child(p->alloc, stack[stack_top], n);
+  LIST_append(&stack[stack_top].children, p->alloc, n);
   JUMP_NEXT;
 }
 
 ident: {
-  Node *n = CALL(p->alloc, request, sizeof(Node));
-  *n = (Node){0};
-  n->type = N_IDENT;
-  n->token = p->cur;
+  Node n = NODE_NEW(N_IDENT, p->cur);
   advance(p);
-  Node_add_child(p->alloc, stack[stack_top], n);
+  LIST_append(&stack[stack_top].children, p->alloc, n);
   JUMP_NEXT;
 }
 
 stmt_begin: {
-  Node *n = CALL(p->alloc, request, sizeof(Node));
-  *n = (Node){0};
+  Node n = NODE_NEW(N_UNKNOWN, p->cur);
   consume(p, T_DELIMITOR_LEFT);
-  ASSERT(n != NULL, "IDK anymore");
-  n->token = p->cur;
+  n.token = p->cur;
   switch (p->cur->type) {
   case T_BUILTIN:
-    n->type = N_BUILTIN;
+    n.type = N_BUILTIN;
     advance(p);
     break;
   case T_PLUS:
@@ -135,16 +116,16 @@ stmt_begin: {
   case T_ASTERISKS:
   case T_SLASH:
   case T_EQUAL:
-    n->type = N_BIN;
+    n.type = N_BIN;
     advance(p);
     break;
   case T_IDENT: {
-    n->type = N_CALL;
+    n.type = N_CALL;
     advance(p);
     break;
   }
   default:
-    n->type = N_LIST;
+    n.type = N_LIST;
   }
   stack_top++;
   stack[stack_top] = n;
@@ -154,24 +135,20 @@ stmt_begin: {
 stmt_end: {
   ASSERT(stack_top != 0, "Unexpected expr end");
   consume(p, T_DELIMITOR_RIGHT);
-  Node *prev = stack[stack_top];
+  Node prev = stack[stack_top];
   stack_top--;
-  Node_add_child(p->alloc, stack[stack_top], prev);
+  LIST_append(&stack[stack_top].children, p->alloc, prev);
   // I think we should stop this here if stack_top == 0, right? Thus stopping at
   // a root parse
   if (stack_top == 0) {
-    return *stack[0]->children[0];
+    return LIST_get(&stack[0].children, 0);
   } else {
     JUMP_NEXT
   }
 }
 
 arr_start: {
-  Node *n = CALL(p->alloc, request, sizeof(Node));
-  *n = (Node){0};
-  n->children_length = 0;
-  n->children_cap = 0;
-  n->type = N_ARRAY;
+  Node n = NODE_NEW(N_ARRAY, p->cur);
   consume(p, T_BRAKET_LEFT);
   stack_top++;
   stack[stack_top] = n;
@@ -181,18 +158,14 @@ arr_start: {
 arr_end: {
   ASSERT(stack_top != 0, "Unexpected array end");
   consume(p, T_BRAKET_RIGHT);
-  Node *prev = stack[stack_top];
+  Node prev = stack[stack_top];
   stack_top--;
-  Node_add_child(p->alloc, stack[stack_top], prev);
+  LIST_append(&stack[stack_top].children, p->alloc, prev);
   JUMP_NEXT;
 }
 
 obj_start: {
-  Node *n = CALL(p->alloc, request, sizeof(Node));
-  *n = (Node){0};
-  n->children_length = 0;
-  n->children_cap = 0;
-  n->type = N_OBJECT;
+  Node n = NODE_NEW(N_OBJECT, p->cur);
   consume(p, T_CURLY_LEFT);
   stack_top++;
   stack[stack_top] = n;
@@ -202,16 +175,16 @@ obj_start: {
 obj_end: {
   ASSERT(stack_top != 0, "Unexpected obj end");
   consume(p, T_CURLY_RIGHT);
-  Node *prev = stack[stack_top];
+  Node prev = stack[stack_top];
   stack_top--;
-  Node_add_child(p->alloc, stack[stack_top], prev);
+  LIST_append(&stack[stack_top].children, p->alloc, prev);
   JUMP_NEXT;
 }
 
 eof: // we dont have any more input, return stack top
-  Node *n = stack[stack_top];
-  ASSERT(n->children_length == 0, "Top level sexpr necessary");
-  return *n;
+  Node n = stack[stack_top];
+  ASSERT(n.children.len == 0, "Top level sexpr necessary");
+  return n;
 
 // we want to error here
 unkown:
@@ -265,18 +238,19 @@ void Node_debug(const Node *n, size_t depth) {
   default:
     break;
   }
-  if (n->children_length) {
+  if (n->children.len) {
     putc('(', stdout);
     putc('\n', stdout);
   }
-  for (size_t i = 0; i < n->children_length; i++) {
-    Node_debug(n->children[i], depth + 1);
-    if (i + 1 < n->children_length) {
+  for (size_t i = 0; i < n->children.len; i++) {
+    Node ni = LIST_get(&n->children, i);
+    Node_debug(&ni, depth + 1);
+    if (i + 1 < n->children.len) {
       putc(',', stdout);
     }
     putc('\n', stdout);
   }
-  if (n->children_length) {
+  if (n->children.len) {
     for (size_t i = 0; i < depth; i++) {
       putc(' ', stdout);
     }

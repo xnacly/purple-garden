@@ -215,6 +215,7 @@ int main(int argc, char **argv) {
   } else {
     vm.alloc = xcgc_init(&vm, GC_MIN_HEAP, 0);
   }
+
   int runtime_code = Vm_run(&vm);
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
 

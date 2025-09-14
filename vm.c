@@ -69,22 +69,14 @@ void freelist_preallocate(FrameFreeList *fl) {
 }
 
 #if DEBUG
-static size_t frame_count = 1;
+static uint64_t frame_count = 1;
 #endif
 
 void freelist_push(FrameFreeList *fl, Frame *frame) {
   frame->prev = fl->head;
-  memset(&frame->variable_table.entries, 0, sizeof(frame->variable_table));
   frame->return_to_bytecode = 0;
   fl->head = frame;
 }
-
-#define NEW(...)                                                               \
-  ({                                                                           \
-    Value *__v = CALL(vm->alloc, request, sizeof(Value));                      \
-    *__v = (Value)__VA_ARGS__;                                                 \
-    __v;                                                                       \
-  })
 
 Frame *freelist_pop(FrameFreeList *fl) {
   if (!fl->head) {
@@ -139,7 +131,7 @@ int Vm_run(Vm *vm) {
           // TODO: replace with List_new_with_size once implemented; use
           // Vm.size_hint
           LIST_Value *lv = CALL(vm->alloc, request, sizeof(LIST_Value));
-          *lv = LIST_new(Value, vm->alloc);
+          *lv = LIST_new(Value);
           v.array = lv;
         } else {
           LIST_Value *lv = CALL(vm->alloc, request, sizeof(LIST_Value));

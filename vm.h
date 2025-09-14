@@ -78,7 +78,7 @@ typedef struct __Vm {
 
   Allocator *alloc;
 #if DEBUG
-  size_t instruction_counter[256];
+  uint64_t instruction_counter[256];
 #endif
 } Vm;
 

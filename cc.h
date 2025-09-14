@@ -21,7 +21,7 @@ typedef enum {
 } COMPILE_BUILTIN;
 
 typedef struct CtxFunction {
-  Str *name;
+  Str name;
   size_t size;
   size_t bytecode_index;
   size_t argument_count;

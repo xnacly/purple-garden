@@ -58,7 +58,7 @@ struct ListIdx idx_to_block_idx(size_t idx) {
 // TODO: needs collision handling asap
 Map Map_new(size_t cap, Allocator *a) {
   Map m = {.entries = {0}, .cap = cap};
-  m.entries = LIST_new(Value, a);
+  m.entries = LIST_new(Value);
   for (size_t i = 0; i < cap; i++) {
     LIST_append(&m.entries, a, *INTERNED_NONE);
   }
@@ -67,7 +67,8 @@ Map Map_new(size_t cap, Allocator *a) {
 
 void Map_insert_hash(Map *m, uint32_t hash, Value v, Allocator *a) {
   uint32_t normalized = hash % m->cap;
-  LIST_insert(&m->entries, a, normalized, v);
+  struct ListIdx idx = idx_to_block_idx(normalized);
+  (&m->entries)->blocks[idx.block][idx.block_idx] = v;
 }
 
 Value Map_get_hash(const Map *m, uint32_t hash) {

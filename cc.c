@@ -1,5 +1,6 @@
 #include <stdlib.h>
 
+#include "adts.h"
 #include "cc.h"
 #include "common.h"
 #include "lexer.h"
@@ -128,15 +129,18 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
   }
   case N_BIN: {
     // single argument is just a return of that value
-    if (n->children_length == 1) {
+    if (n->children.len == 1) {
+      Node child = LIST_get(&n->children, 0);
       // PERF: arithmetic optimisations like n+0=n; n*0=0; n*1=n, etc
-      compile(alloc, vm, ctx, n->children[0]);
-    } else if (n->children_length == 2) {
+      compile(alloc, vm, ctx, &child);
+    } else if (n->children.len == 2) {
+      Node lhs = LIST_get(&n->children, 0);
       // two arguments is easy to compile, just load and add two Values
-      compile(alloc, vm, ctx, n->children[0]);
+      compile(alloc, vm, ctx, &lhs);
       size_t r = Ctx_allocate_register(ctx);
       BC(OP_STORE, r);
-      compile(alloc, vm, ctx, n->children[1]);
+      Node rhs = LIST_get(&n->children, 1);
+      compile(alloc, vm, ctx, &rhs);
       BC(n->token->type, r);
       Ctx_free_register(ctx, r);
     } else {
@@ -154,8 +158,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     if (b != 0) {
       switch (b) {
       case COMPILE_BUILTIN_ASSERT: { // (@assert <s-expr>)
-        for (size_t i = 0; i < n->children_length; i++) {
-          compile(alloc, vm, ctx, n->children[i]);
+        for (size_t i = 0; i < n->children.len; i++) {
+          Node child = LIST_get(&n->children, i);
+          compile(alloc, vm, ctx, &child);
         }
         BC(OP_ASSERT, 0);
         break;
@@ -169,31 +174,32 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
                                     //  (<condition> <s-expr's>) ; case 2
                                     //  (<s-expr's>) ; default case
                                     //  )
-        ASSERT(n->children_length >= 1,
-               "Need at least one case for a match expr")
+
+        size_t len = n->children.len;
+        ASSERT(len >= 1, "Need at least one case for a match expr")
 
         // used for jumping to the end of the match statement once a case is
         // done
-        int backfill_slots[n->children_length];
+        int backfill_slots[len];
         bool encountered_default_cause = false;
 
         // iterating over cases
-        for (size_t i = 0; i < n->children_length; i++) {
-          Node *cur_case = n->children[i];
+        for (size_t i = 0; i < len; i++) {
+          Node cur_case = LIST_get(&n->children, i);
 
-          if (cur_case->children_length > 1) {
-            Node *cur_condition = cur_case->children[0];
-            Node *cur_body = cur_case->children[1];
-            compile(alloc, vm, ctx, cur_condition);
+          if (cur_case.children.len > 1) {
+            Node cur_condition = LIST_get(&cur_case.children, 0);
+            Node cur_body = LIST_get(&cur_case.children, 1);
+            compile(alloc, vm, ctx, &cur_condition);
             size_t last_case_start = BC_LEN;
             // jump to next case conditional if conditional above is false
             BC(OP_JMPF, 0xAFFEDEAD);
 
-            compile(alloc, vm, ctx, cur_body);
+            compile(alloc, vm, ctx, &cur_body);
 
             // only jmp to end of match statement if not already at the end,
             // since we are inside of the body of a case
-            if (i != n->children_length - 1) {
+            if (i != len - 1) {
               backfill_slots[i] = BC_LEN;
               BC(OP_JMP, 0xAFFEDEAD);
             }
@@ -203,13 +209,13 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
                    "Only a single default case allowed")
             // default case has a singular children, being executed if all other
             // cases do not match
-            compile(alloc, vm, ctx, cur_case);
+            compile(alloc, vm, ctx, &cur_case);
             encountered_default_cause = true;
           }
         }
 
         // backfill jumps to the end of the switch statement
-        for (size_t i = 0; i < n->children_length - 1; i++) {
+        for (size_t i = 0; i < len - 1; i++) {
           int jump_argument_location = backfill_slots[i];
           if (jump_argument_location) {
             ByteCodeBuilder_insert_arg(ctx->bcb, jump_argument_location,
@@ -220,24 +226,24 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
         break;
       }
       case COMPILE_BUILTIN_FUNCTION: { // (@function <name> [<args>] <s-expr's>)
-        ASSERT(n->children_length >= 2,
-               "@function expects <name> [<arguments>] [body]");
-        Str *name = &n->children[0]->token->string;
-        size_t hash = name->hash & MAX_BUILTIN_SIZE_MASK;
-        Node **params = n->children[1]->children;
-        size_t param_len = n->children[1]->children_length;
+        size_t len = n->children.len;
+        ASSERT(len >= 2, "@function expects <name> [<arguments>] [body]");
+        Str name = LIST_get(&n->children, 0).token->string;
+        size_t hash = name.hash & MAX_BUILTIN_SIZE_MASK;
+        LIST_Node params = LIST_get(&n->children, 1).children;
+        size_t param_len = params.len;
 
         CtxFunction function_ctx = {
-            .name = &n->children[0]->token->string,
+            .name = name,
             .bytecode_index = BC_LEN,
             .argument_count = param_len,
         };
         ctx->hash_to_function[hash] = function_ctx;
 
         // PERF: optimisation for removing empty functions
-        if (n->children_length == 2) {
+        if (len == 2) {
           DEBUG_PUTS("Removing body of empty `%.*s` function",
-                     (int)function_ctx.name->len, function_ctx.name->p);
+                     (int)function_ctx.name.len, function_ctx.name.p);
           return;
         }
 
@@ -255,26 +261,27 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
         // parameters = [ a  b  c]
         // arguments  = [ 1  2  3]
         for (size_t i = 0; i < param_len; i++) {
-          Node *param = params[i];
-          ASSERT(param->type == N_IDENT,
+          Node param = LIST_get(&params, i);
+          ASSERT(param.type == N_IDENT,
                  "Expected identifier as function parameter in `%.*s` "
                  "definition, got `%.*s`",
-                 (int)name->len, name->p, (int)NODE_TYPE_MAP[param->type].len,
-                 NODE_TYPE_MAP[param->type].p);
+                 (int)name.len, name.p, (int)NODE_TYPE_MAP[param.type].len,
+                 NODE_TYPE_MAP[param.type].p);
 
           // PERF: changing args to start from r1 to starting from r0,
           // thus saving a single OP_LOAD for each function invocation
           BC(OP_LOAD, i + 1);
-          BC(OP_VAR, param->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
+          BC(OP_VAR, param.token->string.hash & VARIABLE_TABLE_SIZE_MASK);
         }
 
         // compiling the body, returning a value is free since its just in
         // r0
-        if (n->children_length > 2) {
-          for (size_t i = 2; i < n->children_length; i++) {
+        if (len > 2) {
+          for (size_t i = 2; i < len; i++) {
             // PERF: if last Node is N_CALL think about reusing call
             // frames (TCO)
-            compile(alloc, vm, ctx, n->children[i]);
+            Node body_expr = LIST_get(&n->children, i);
+            compile(alloc, vm, ctx, &body_expr);
           }
         }
 
@@ -284,12 +291,14 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
         break;
       }
       case COMPILE_BUILTIN_LET: { // (@len <var-name> <var-value>)
-        ASSERT(n->children_length == 2,
+        size_t len = n->children.len;
+        ASSERT(len == 2,
                "@let requires two arguments: `@let "
                "<var-name> <var-value>`, got %zu",
-               n->children_length);
-        compile(alloc, vm, ctx, n->children[1]);
-        Token *ident = n->children[0]->token;
+               len);
+        Node rhs = LIST_get(&n->children, 1);
+        compile(alloc, vm, ctx, &rhs);
+        Token *ident = LIST_get(&n->children, 0).token;
         size_t hash = ident->string.hash & VARIABLE_TABLE_SIZE_MASK;
         BC(OP_VAR, hash);
         break;
@@ -297,63 +306,66 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       default:
       }
     } else { // calling a builtin function thats not a compile time construct
+      size_t len = n->children.len;
       size_t hash = s->hash & MAX_BUILTIN_SIZE_MASK;
       builtin_function bf = vm->builtins[hash];
       ASSERT(bf != NULL, "Unknown builtin `@%.*s`", (int)s->len, s->p)
 
-      if (n->children_length > 0) {
-        size_t registers[n->children_length];
-        for (size_t i = 0; i < n->children_length; i++) {
-          compile(alloc, vm, ctx, n->children[i]);
+      if (len > 0) {
+        size_t registers[len];
+        for (size_t i = 0; i < len; i++) {
+          Node argument = LIST_get(&n->children, i);
+          compile(alloc, vm, ctx, &argument);
           size_t r = Ctx_allocate_register(ctx);
           registers[i] = r;
           BC(OP_STORE, r);
         }
-        for (int i = n->children_length - 1; i >= 0; i--) {
+        for (int i = len - 1; i >= 0; i--) {
           Ctx_free_register(ctx, registers[i]);
         }
       }
 
-      BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(n->children_length,
-                                              ctx->register_allocated_count));
+      BC(OP_ARGS,
+         ENCODE_ARG_COUNT_AND_OFFSET(len, ctx->register_allocated_count));
       BC(OP_BUILTIN, hash);
     }
     break;
   }
   case N_CALL: { // function call site (<name> <args>)
     Str *name = &n->token->string;
+    size_t len = n->children.len;
     CtxFunction *func =
         &ctx->hash_to_function[name->hash & MAX_BUILTIN_SIZE_MASK];
-    ASSERT(func->name != NULL, "Undefined function `%.*s`", (int)name->len,
+    ASSERT(func->name.len != 0, "Undefined function `%.*s`", (int)name->len,
            name->p)
-    ASSERT(n->children_length == func->argument_count,
-           "`%.*s` wants %zu arguments, got %zu", (int)func->name->len,
-           func->name->p, func->argument_count, n->children_length);
+    ASSERT(len == func->argument_count, "`%.*s` wants %zu arguments, got %zu",
+           (int)func->name.len, func->name.p, func->argument_count, len);
 
     // PERF: optimisation to remove calls to empty functions, since their
     // definition is also removed
     if (!func->size) {
       DEBUG_PUTS("Removing call to empty `%.*s` function (size=%zu)",
-                 (int)func->name->len, func->name->p, func->size);
+                 (int)func->name.len, func->name.p, func->size);
       return;
     }
 
-    size_t children_length = n->children_length < 1 ? 1 : n->children_length;
+    size_t children_length = len < 1 ? 1 : len;
     // we compile all arguments to bytecode one by one by one
     size_t registers[children_length];
-    for (size_t i = 0; i < n->children_length; i++) {
-      compile(alloc, vm, ctx, n->children[i]);
+    for (size_t i = 0; i < len; i++) {
+      Node child = LIST_get(&n->children, i);
+      compile(alloc, vm, ctx, &child);
       size_t r = Ctx_allocate_register(ctx);
       registers[i] = r;
       BC(OP_STORE, r);
     }
 
-    for (int i = n->children_length - 1; i >= 0; i--) {
+    for (int i = len - 1; i >= 0; i--) {
       Ctx_free_register(ctx, registers[i]);
     }
 
-    BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(n->children_length,
-                                            ctx->register_allocated_count));
+    BC(OP_ARGS,
+       ENCODE_ARG_COUNT_AND_OFFSET(len, ctx->register_allocated_count));
     BC(OP_CALL, func->bytecode_index);
     break;
   }
@@ -363,7 +375,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
   }
   case N_LIST: // Lists are just sugar for arrays, same same
   case N_ARRAY: {
-    size_t size = n->children_length;
+    size_t size = n->children.len;
     // fast path for empty array
     if (size != 0) {
       // size hint is placed in r0 to instruct the OP_NEW to use the allocation
@@ -381,7 +393,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       BC(OP_STORE, list_register);
 
       for (size_t i = 0; i < size; i++) {
-        compile(alloc, vm, ctx, n->children[i]);
+        Node member = LIST_get(&n->children, i);
+        compile(alloc, vm, ctx, &member);
         BC(OP_APPEND, list_register);
       }
 
@@ -433,12 +446,14 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
     }
 
     if (n.type == N_ROOT) {
-      for (size_t i = 0; i < n.children_length; i++) {
+
+      for (size_t i = 0; i < n.children.len; i++) {
 #if DEBUG
         Node_debug(&n, 0);
         puts("");
 #endif
-        compile(alloc, vm, &ctx, n.children[i]);
+        Node child = LIST_get(&n.children, i);
+        compile(alloc, vm, &ctx, &child);
       }
       break;
     } else {
