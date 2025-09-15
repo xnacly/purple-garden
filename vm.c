@@ -58,11 +58,34 @@ typedef struct {
   Allocator *alloc;
 } FrameFreeList;
 
+LIST_Value create_variable_table(Allocator *a) {
+  LIST_Value lv = LIST_new(Value);
+
+  size_t remaining = VARIABLE_TABLE_SIZE;
+
+  lv.blocks = CALL(a, request, LIST_BLOCK_COUNT * sizeof(MapEntry *));
+  ASSERT(lv.blocks != NULL,
+         "create_variable_table: block array allocation failed");
+
+  for (size_t b = 0; remaining > 0; b++) {
+    size_t block_size = LIST_DEFAULT_SIZE << b; // 8,16,32,64,128,256...
+    size_t to_alloc = remaining < block_size ? remaining : block_size;
+
+    lv.blocks[b] = CALL(a, request, to_alloc * sizeof(Value));
+    ASSERT(lv.blocks[b] != NULL,
+           "create_variable_table: block allocation failed");
+    remaining -= to_alloc;
+    lv.len += to_alloc;
+  }
+
+  return lv;
+}
+
 void freelist_preallocate(FrameFreeList *fl) {
   for (int i = 0; i < PREALLOCATE_FREELIST_SIZE; i++) {
     Frame *frame = CALL(fl->alloc, request, sizeof(Frame));
     *frame = (Frame){0};
-    frame->variable_table = Map_new(VARIABLE_TABLE_SIZE, fl->alloc);
+    frame->variable_table = create_variable_table(fl->alloc);
     frame->prev = fl->head;
     fl->head = frame;
   }
@@ -81,7 +104,7 @@ void freelist_push(FrameFreeList *fl, Frame *frame) {
 Frame *freelist_pop(FrameFreeList *fl) {
   if (!fl->head) {
     Frame *f = CALL(fl->alloc, request, sizeof(Frame));
-    f->variable_table = Map_new(VARIABLE_TABLE_SIZE, fl->alloc);
+    f->variable_table = create_variable_table(fl->alloc);
     return f;
   }
   Frame *f = fl->head;
@@ -163,7 +186,7 @@ int Vm_run(Vm *vm) {
       // compile time, but we still have to check if the variable is available
       // in the current scope...
       Value v = LIST_get_UNSAFE(
-          &vm->frame->variable_table.entries,
+          &vm->frame->variable_table,
           arg); // PERF: we are using LIST primitives, since we
                 // do the cap calculation already in cc, thus we can skip
                 // anything the map abstraction has to offer
@@ -178,8 +201,7 @@ int Vm_run(Vm *vm) {
       break;
     case OP_VAR:
       // PERF: see OP_LOADV
-      LIST_insert_UNSAFE(&vm->frame->variable_table.entries, arg,
-                         vm->registers[0]);
+      LIST_insert_UNSAFE(&vm->frame->variable_table, arg, vm->registers[0]);
       break;
     case OP_ADD: {
       Value *left = &vm->registers[0];

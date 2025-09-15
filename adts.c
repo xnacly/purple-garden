@@ -1,5 +1,6 @@
 #include "adts.h"
 
+#include <stdint.h>
 #include <string.h>
 
 struct ListIdx idx_to_block_idx(size_t idx) {
@@ -55,15 +56,13 @@ struct ListIdx idx_to_block_idx(size_t idx) {
 
 #include "common.h"
 
-// TODO: needs collision handling asap
 Map Map_new(size_t cap, Allocator *a) {
   Map m = {.cap = cap};
 
-  // allocate block pointers array
-  m.entries.blocks = CALL(a, request, LIST_BLOCK_COUNT * sizeof(Value *));
+  m.entries.blocks = CALL(a, request, LIST_BLOCK_COUNT * sizeof(MapEntry *));
   ASSERT(m.entries.blocks != NULL, "Map_new: block array allocation failed");
 
-  m.entries.type_size = sizeof(Value);
+  m.entries.type_size = sizeof(MapEntry);
   m.entries.len = 0;
 
   size_t remaining = cap;
@@ -72,11 +71,11 @@ Map Map_new(size_t cap, Allocator *a) {
     size_t block_size = LIST_DEFAULT_SIZE << b;
     size_t to_alloc = remaining < block_size ? remaining : block_size;
 
-    m.entries.blocks[b] = CALL(a, request, to_alloc * sizeof(Value));
+    m.entries.blocks[b] = CALL(a, request, to_alloc * sizeof(MapEntry));
     ASSERT(m.entries.blocks[b] != NULL, "Map_new: block allocation failed");
 
     for (size_t i = 0; i < to_alloc; i++) {
-      m.entries.blocks[b][i] = *INTERNED_NONE;
+      m.entries.blocks[b][i] = (MapEntry){0};
     }
 
     remaining -= to_alloc;
@@ -86,19 +85,36 @@ Map Map_new(size_t cap, Allocator *a) {
   return m;
 }
 
-inline void Map_insert_hash(Map *m, uint32_t hash, Value v, Allocator *a) {
-  uint32_t normalized = hash % m->cap;
-  LIST_insert_UNSAFE(&m->entries, normalized, v);
+inline void Map_insert_hash(Map *m, uint32_t hash, Value v) {
+  size_t idx = hash % m->cap;
+
+  for (size_t probe = 0; probe < m->cap; probe++) {
+    size_t current = (idx + probe) % m->cap;
+    MapEntry e = LIST_get_UNSAFE(&m->entries, current);
+
+    // Empty slot or same hash → insert/update
+    if (e.hash == 0 || e.hash == hash) {
+      e.hash = hash;
+      e.value = v;
+      return;
+    }
+  }
+
+  ASSERT(false, "Map_insert_hash: table is full!");
 }
 
 inline Value Map_get_hash(const Map *m, uint32_t hash) {
-  uint32_t normalized = hash % m->cap;
-  return LIST_get_UNSAFE(&m->entries, normalized);
-}
+  size_t idx = hash % m->cap;
 
-void Map_clear(Map *m) {
-  for (size_t i = 0; i < LIST_BLOCK_COUNT; i++) {
-    m->entries.blocks[i] = NULL;
+  for (size_t probe = 0; probe < m->cap; probe++) {
+    size_t current = (idx + probe) % m->cap;
+    MapEntry e = LIST_get_UNSAFE(&m->entries, current);
+
+    if (e.hash == 0)
+      return *INTERNED_NONE; // empty slot → not found
+    if (e.hash == hash)
+      return e.value; // found
   }
-  m->entries.len = 0;
+
+  return *INTERNED_NONE; // not found after full table scan
 }

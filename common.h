@@ -103,8 +103,14 @@ typedef struct Value {
   };
 } Value;
 
+typedef struct {
+  uint32_t hash;
+  Value value;
+} MapEntry;
+LIST_TYPE(MapEntry);
+
 typedef struct Map {
-  LIST_Value entries;
+  LIST_MapEntry entries;
   uint64_t cap;
 } Map;
 
