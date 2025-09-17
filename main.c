@@ -70,6 +70,7 @@ Args Args_parse(int argc, char **argv) {
           {.name = "block-allocator",
            .short_name = 'b',
            .type = SIX_LONG,
+           .l = GC_MIN_HEAP,
            .description =
                "use block allocator with size instead of garbage collection"},
       [__AOT] = {.name = "aot-functions",
@@ -113,7 +114,6 @@ Args Args_parse(int argc, char **argv) {
   }
   a.block_allocator = s.flags[__BLOCK_ALLOC].l;
   a.aot_functions = s.flags[__AOT].b;
-  // a.disassemble = s.flags[__DISASSEMBLE].b;
   a.disassemble = s.flags[__DISASSEMBLE].b;
   a.memory_usage = s.flags[__MEMORY_USAGE].b;
   a.run = s.flags[__RUN].s;
@@ -170,14 +170,6 @@ int main(int argc, char **argv) {
   VERBOSE_PUTS("mem::init: Allocated memory block of size=%zuB", MIN_MEM);
   Lexer lexer = Lexer_new(input);
   Parser parser = Parser_new(pipeline_allocator, &lexer);
-
-  // TODO: move this into parser::advance
-  // VERBOSE_PUTS("lexer::Lexer_all: lexed tokens count=%zu (%zuB)", count,
-  // count * sizeof(Token *));
-  //
-  // TODO: move this into cc::cc (replacing node iteration with something like
-  // parser::next) VERBOSE_PUTS("parser::Parser_next created AST with
-  // node_count=%zu", node_count);
 
   // alloc is NULL here, because we are setting it later on, depending on the
   // cli configuration
