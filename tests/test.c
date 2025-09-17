@@ -36,7 +36,7 @@ bool Value_cmp_deep(const Value *a, const Value *b) {
 
   switch (a->type) {
   case V_STR:
-    return Str_eq(&a->string, &b->string);
+    return Str_eq(a->string, b->string);
   case V_DOUBLE:
     double diff = a->floating - b->floating;
 #define PREC 1e-9
@@ -69,7 +69,7 @@ int main() {
     CASE((@test_return 0.1415), VAL(.type = V_DOUBLE, .floating = 0.1415)),
 
     CASE((@test_return "string"),
-         VAL(.type = V_STR, .string = STRING("string"))),
+         VAL(.type = V_STR, .string = &STRING("string"))),
     {
         .input = ((Str){.len = sizeof("(@test_return 'quoted)"
                                       "\0") -
@@ -78,8 +78,8 @@ int main() {
                                               "\0"}),
         .expected_r0 =
             (Value){.type = V_STR,
-                    .string = ((Str){.len = sizeof("quoted") - 1,
-                                     .p = (const uint8_t *)"quoted"})},
+                    .string = &((Str){.len = sizeof("quoted") - 1,
+                                      .p = (const uint8_t *)"quoted"})},
     },
     // TODO: this is for future me to implement
     // CASE("escaped string\"", BC(OP_LOAD, 0), VAL(.type = V_STRING, .string
@@ -88,7 +88,8 @@ int main() {
     // checking if boolean interning works
     CASE((@test_return true)(@test_return false)(@test_return false),
          VAL(.type = V_FALSE)),
-    CASE((@test_return "hello"), VAL(.type = V_STR, .string = STRING("hello"))),
+    CASE((@test_return "hello"),
+         VAL(.type = V_STR, .string = &STRING("hello"))),
 
     // too large integer and double values
     // https://github.com/xNaCly/purple-garden/issues/1
@@ -132,7 +133,7 @@ int main() {
 
     // variables
     CASE((@let name "user")(@test_return name),
-         VAL(.type = V_STR, .string = STRING("user"))),
+         VAL(.type = V_STR, .string = &STRING("user"))),
     CASE((@let age 25)(@test_return age), VAL(.type = V_INT, .integer = 25)),
 
     // functions

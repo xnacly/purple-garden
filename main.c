@@ -215,6 +215,7 @@ int main(int argc, char **argv) {
   } else {
     vm.alloc = xcgc_init(&vm, GC_MIN_HEAP, 0);
   }
+
   int runtime_code = Vm_run(&vm);
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
 
@@ -229,6 +230,8 @@ int main(int argc, char **argv) {
     bytecode_stats(&vm);
   }
 
+  // BUG: does this interfer with not setting vm.alloc to NULL if __BLOCK_ALLOC
+  // > 0?; could result in double free OR use after free I think.
   CALL(pipeline_allocator, destroy);
   free(pipeline_allocator);
   VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");

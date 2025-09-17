@@ -1,5 +1,6 @@
 #pragma once
 
+#include "adts.h"
 #include "mem.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -10,8 +11,7 @@
 #define DEBUG 0
 #endif
 
-// 128 instruction pairs amount to around 1KB memory usage
-#define INIT_BYTECODE_SIZE 128 * 2
+#define INIT_BYTECODE_SIZE 256
 #define GLOBAL_SIZE 512
 #define GLOBAL_SIZE_MASK (GLOBAL_SIZE - 1)
 #define MAX_BUILTIN_SIZE 1024
@@ -28,7 +28,32 @@
 #define VARIABLE_TABLE_SIZE 256
 #define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
 
+#define DBG(EXPR)                                                              \
+  ({                                                                           \
+    _Pragma("GCC diagnostic push")                                             \
+        _Pragma("GCC diagnostic ignored \"-Wformat\"") __auto_type _val =      \
+            (EXPR);                                                            \
+    fprintf(stderr, "[%s:%d] %s = ", __FILE__, __LINE__, #EXPR);               \
+    _Generic(_val,                                                             \
+        int: fprintf(stderr, "%d\n", _val),                                    \
+        long: fprintf(stderr, "%ld\n", _val),                                  \
+        long long: fprintf(stderr, "%lld\n", _val),                            \
+        unsigned: fprintf(stderr, "%u\n", _val),                               \
+        unsigned long: fprintf(stderr, "%lu\n", _val),                         \
+        unsigned long long: fprintf(stderr, "%llu\n", _val),                   \
+        float: fprintf(stderr, "%f\n", _val),                                  \
+        double: fprintf(stderr, "%f\n", _val),                                 \
+        const char *: fprintf(stderr, "\"%s\"\n", _val),                       \
+        char *: fprintf(stderr, "\"%s\"\n", _val),                             \
+        struct ListIdx: fprintf(stderr,                                        \
+                                "ListIdx {.block=%u, .block_idx=%u}\n", _val), \
+        default: fprintf(stderr, "<unprintable>\n"));                          \
+    _Pragma("GCC diagnostic pop") _val;                                        \
+  })
+
 #define UNLIKELY(condition) __builtin_expect(condition, 0)
+// TODO: not compiled out in release builds; rework this into a panic system and
+// compile asserts out for release
 #define ASSERT(EXP, fmt, ...)                                                  \
   if (!(UNLIKELY(EXP))) {                                                      \
     fprintf(stderr,                                                            \
@@ -49,9 +74,6 @@
 
 extern Str VALUE_TYPE_MAP[];
 
-typedef struct Value Value; // forward declared so the compiler knows a thing or
-                            // two about a thing or two
-
 typedef enum {
   V_NONE,
   V_STR,
@@ -63,43 +85,9 @@ typedef enum {
   V_OBJ,
 } ValueType;
 
-// List is purple gardens internal array representation. It is implemented as a
-// growing array and can be configured via the LIST_* macros. It owns its
-// values. Can be used like so:
-//
-//     #include "adts.h"
-//
-//     List l = List_new(8, vm->alloc);
-//     List_append(&l, *INTERNED_TRUE, vm->alloc);
-//     List_append(&l, *INTERNED_NONE, vm->alloc);
-//     List_append(
-//         &l, (Value){.type = V_STR, .is_some = true, .string =
-//         STRING("HOLA")},
-//         vm->alloc
-//     );
-//     Value array = (Value){.type = V_ARRAY, .array = l};
-//
-// List will be based on zigs segmented list and has the advantage of not
-// needing to copy its previous members on growing
-typedef struct {
-  uint32_t cap;
-  uint32_t len;
-  Value *elements;
-  // TODO:
-  // https://github.com/ziglang/zig/blob/e17a050bc695f7d117b89adb1d258813593ca111/lib/std/segmented_list.zig
-  // and https://danielchasehooper.com/posts/segment_array/
-} List;
+LIST_TYPE(Value);
 
-// Map is purple gardens internal hash map representation. It is implemented as
-// a list of buckets, in which each bucket is a List, thus enabling hash
-// collision resolving. Can be configured via the MAP_* macros. It owns its
-// values.
-typedef struct {
-  size_t size;
-  List *buckets;
-} Map;
-
-// TODO: make this smaller, its necessary; NaN-Boxing
+// TODO: should this be smaller?
 
 // Value represents a value known to the runtime
 typedef struct Value {
@@ -107,20 +95,33 @@ typedef struct Value {
   unsigned int is_some : 1;
   unsigned int type : 3;
   union {
-    Str string;
-    List array;
-    Map obj;
+    const Str *string;
+    LIST_Value *array;
+    Map *obj;
     double floating;
     int64_t integer;
   };
 } Value;
 
+typedef struct {
+  uint32_t hash;
+  Value value;
+} MapEntry;
+LIST_TYPE(MapEntry);
+
+typedef struct Map {
+  LIST_MapEntry entries;
+  uint64_t cap;
+} Map;
+
 // global values that compiler, optimiser and vm use, often mapped to global
 // pool indexes 0,1,2
-__attribute__((unused)) static Value *INTERNED_FALSE =
+__attribute__((unused)) static const Value *INTERNED_FALSE =
     &(Value){.type = V_FALSE};
-__attribute__((unused)) static Value *INTERNED_TRUE = &(Value){.type = V_TRUE};
-__attribute__((unused)) static Value *INTERNED_NONE = &(Value){.type = V_NONE};
+__attribute__((unused)) static const Value *INTERNED_TRUE =
+    &(Value){.type = V_TRUE};
+__attribute__((unused)) static const Value *INTERNED_NONE =
+    &(Value){.type = V_NONE};
 
 bool Value_cmp(const Value *a, const Value *b);
 void Value_debug(const Value *v);

@@ -3,6 +3,8 @@
 #include "strings.h"
 #include "vm.h"
 
+// TODO: rework all of this
+
 void disassemble(const Vm *vm, const Ctx *ctx) {
   if (vm->global_len > 0) {
     printf("__globals:\n\t");
@@ -11,7 +13,7 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
       Value_debug(&v);
       printf("; {idx=%zu", i);
       if (v.type == V_STR) {
-        printf(",hash=%lu", v.string.hash & GLOBAL_SIZE_MASK);
+        printf(",hash=%lu", v.string->hash & GLOBAL_SIZE_MASK);
       }
       printf("}\n\t");
     }
@@ -25,12 +27,12 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
       if (ctx_available) {
         for (size_t j = 0; j < MAX_BUILTIN_SIZE; j++) {
           CtxFunction func = ctx->hash_to_function[j];
-          if (func.bytecode_index == i && func.name != NULL) {
+          if (func.bytecode_index == i && func.name.len > 0) {
             if (func.bytecode_index != 0) {
               puts("");
             }
             printf("\n; %.*s::{args=%zu,size=%zu}\n__0x%06zX[%04zX]: ",
-                   (int)func.name->len, func.name->p, func.argument_count,
+                   (int)func.name.len, func.name.p, func.argument_count,
                    func.size, i, j);
           }
         }
@@ -71,9 +73,9 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
       case OP_CALL: {
         for (size_t j = 0; j < MAX_BUILTIN_SIZE; j++) {
           CtxFunction func = ctx->hash_to_function[j];
-          if (func.bytecode_index == arg && func.name != NULL) {
+          if (func.bytecode_index == arg && func.name.len > 0) {
             printf("; <");
-            Str_debug(func.name);
+            Str_debug(&func.name);
             printf("> $%zu", func.argument_count);
           }
         }

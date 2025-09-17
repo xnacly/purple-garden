@@ -19,7 +19,7 @@ void builtin_dbg(Vm *vm) {
 
   // RETURN puts its inner value into the return register of the virtual machine
   RETURN((Value){.type = V_STR,
-                 .string = STRING("hello from the embedding context")});
+                 .string = &STRING("hello from the embedding context")});
 }
 
 int main(void) {

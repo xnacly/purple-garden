@@ -1,6 +1,6 @@
 CC ?= gcc
 FLAGS := -std=c23 \
-        -Wall -Wextra -Werror -fno-diagnostics-color \
+        -Wall -Wextra -Werror -fdiagnostics-color \
         -fno-common -Winit-self -Wfloat-equal -Wundef -Wshadow \
         -Wpointer-arith -Wcast-align -Wstrict-prototypes \
         -Wstrict-overflow=5 -Wwrite-strings -Waggregate-return \
@@ -97,6 +97,11 @@ release: $(RELEASE_BIN)
 
 bench: $(BENCH_BIN)
 	./$(BENCH_BIN) +V $(PG)
+
+profile: $(RELEASE_BIN)
+	rm -fr *.data
+	perf record --call-graph dwarf ./build/purple_garden examples/bench.garden
+	hotspot
 
 test: $(TEST_BIN)
 	./$(TEST_BIN)

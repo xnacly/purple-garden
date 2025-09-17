@@ -62,35 +62,28 @@ void freelist_preallocate(FrameFreeList *fl) {
   for (int i = 0; i < PREALLOCATE_FREELIST_SIZE; i++) {
     Frame *frame = CALL(fl->alloc, request, sizeof(Frame));
     *frame = (Frame){0};
-    frame->variable_table = List_new(8, fl->alloc);
+    frame->variable_table =
+        CALL(fl->alloc, request, sizeof(Value) * VARIABLE_TABLE_SIZE);
     frame->prev = fl->head;
     fl->head = frame;
   }
 }
 
 #if DEBUG
-static size_t frame_count = 1;
+static uint64_t frame_count = 1;
 #endif
 
 void freelist_push(FrameFreeList *fl, Frame *frame) {
   frame->prev = fl->head;
-  // memset(frame->variable_table, 0, sizeof(frame->variable_table));
   frame->return_to_bytecode = 0;
-  frame->variable_table.len = 0;
   fl->head = frame;
 }
-
-#define NEW(...)                                                               \
-  ({                                                                           \
-    Value *__v = CALL(vm->alloc, request, sizeof(Value));                      \
-    *__v = (Value)__VA_ARGS__;                                                 \
-    __v;                                                                       \
-  })
 
 Frame *freelist_pop(FrameFreeList *fl) {
   if (!fl->head) {
     Frame *f = CALL(fl->alloc, request, sizeof(Frame));
-    f->variable_table = List_new(8, fl->alloc);
+    f->variable_table =
+        CALL(fl->alloc, request, sizeof(Value) * VARIABLE_TABLE_SIZE);
     return f;
   }
   Frame *f = fl->head;
@@ -137,12 +130,17 @@ int Vm_run(Vm *vm) {
       case VM_NEW_ARRAY:
         v.type = V_ARRAY;
         if (vm->size_hint != 0) {
-          v.array = List_new(vm->size_hint, vm->alloc);
+          // TODO: replace with List_new_with_size once implemented; use
+          // Vm.size_hint
+          LIST_Value *lv = CALL(vm->alloc, request, sizeof(LIST_Value));
+          *lv = LIST_new(Value);
+          v.array = lv;
         } else {
-          v.array = (List){
-              .cap = 0,
+          LIST_Value *lv = CALL(vm->alloc, request, sizeof(LIST_Value));
+          *lv = (LIST_Value){
               .len = 0,
           };
+          v.array = lv;
         }
         break;
       default:
@@ -154,7 +152,7 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_APPEND:
-      List_append(&vm->registers[arg].array, vm->alloc, vm->registers[0]);
+      LIST_append(vm->registers[arg].array, vm->alloc, vm->registers[0]);
       break;
     case OP_LOADG:
       vm->registers[0] = vm->globals[arg];
@@ -166,7 +164,7 @@ int Vm_run(Vm *vm) {
       // bounds checking and checking for variable validity is performed at
       // compile time, but we still have to check if the variable is available
       // in the current scope...
-      Value v = List_get(&vm->frame->variable_table, arg);
+      Value v = vm->frame->variable_table[arg];
       if (v.type == V_NONE) {
         VM_ERR("Undefined variable with hash %i", arg);
       }
@@ -177,15 +175,17 @@ int Vm_run(Vm *vm) {
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      List_insert(&vm->frame->variable_table, vm->alloc, arg, vm->registers[0]);
+      vm->frame->variable_table[arg] = vm->registers[0];
       break;
     case OP_ADD: {
       Value *left = &vm->registers[0];
       Value *right = &vm->registers[arg];
       if (left->type == V_STR && right->type == V_STR) {
+        Str *s = CALL(vm->alloc, request, sizeof(Str));
+        *s = Str_concat(right->string, left->string, vm->alloc);
         vm->registers[0] = (Value){
             .type = V_STR,
-            .string = Str_concat(&right->string, &left->string, vm->alloc),
+            .string = s,
         };
       } else if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
         vm->registers[0].floating =
@@ -276,7 +276,7 @@ int Vm_run(Vm *vm) {
       vm->arg_offset = DECODE_ARG_OFFSET(arg);
       break;
     case OP_BUILTIN: {
-      // at this point all builtins are just syscalls into an array of
+      // at this point all builtins are just "syscalls" into an array of
       // function pointers
       ((builtin_function)vm->builtins[arg])(vm);
       vm->arg_count = 1;

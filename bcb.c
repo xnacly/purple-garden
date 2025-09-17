@@ -1,37 +1,56 @@
 #include "adts.h"
 #include "cc.h"
-#include "common.h"
 #include "mem.h"
+#include <stdint.h>
+#include <string.h>
 
 ByteCodeBuilder ByteCodeBuilder_new(Allocator *a) {
-  size_t cap = INIT_BYTECODE_SIZE;
-  return (ByteCodeBuilder){
-      .alloc = a,
-      .cap = cap,
-      .buffer = (uint32_t *)CALL(a, request, cap * sizeof(uint32_t)),
-      .len = 0,
+  ByteCodeBuilder bcb = {.alloc = a, .buffer = LIST_new(uint32_t)};
+
+  // we preallocate here so middle large scripts dont require many newblock
+  // operations, S of n blocks is: LIST_DEFAULT_SIZE * (2^i - 1); for 6 thats
+  // around 504 fields or 252 instruction and argument pairs
+#define PREALLOCATE_BLOCKS_IN_BUFFER 6
+  bcb.buffer.blocks = CALL(a, request, LIST_BLOCK_COUNT * sizeof(uint32_t *));
+  for (size_t i = 0; i < PREALLOCATE_BLOCKS_IN_BUFFER; i++) {
+    bcb.buffer.blocks[i] =
+        CALL(a, request, (LIST_DEFAULT_SIZE << i) * sizeof(uint32_t));
   };
+
+  return bcb;
 }
 
-static void grow(ByteCodeBuilder *bcb, Allocator *a) {
-  size_t new_cap = bcb->cap * LIST_GROW_MULTIPLIER;
-  uint32_t *old = bcb->buffer;
-  bcb->buffer = CALL(a, request, sizeof(uint32_t) * new_cap);
-  memcpy(bcb->buffer, old, sizeof(uint32_t) * bcb->len);
-  bcb->cap = new_cap;
+inline void ByteCodeBuilder_add(ByteCodeBuilder *bcb, uint32_t op,
+                                uint32_t arg) {
+  LIST_append(&bcb->buffer, bcb->alloc, op);
+  LIST_append(&bcb->buffer, bcb->alloc, arg);
 }
 
-void ByteCodeBuilder_add(ByteCodeBuilder *bcb, uint32_t op, uint32_t arg) {
-  if (bcb->len + 2 > bcb->cap) {
-    grow(bcb, bcb->alloc);
+inline void ByteCodeBuilder_insert_arg(ByteCodeBuilder *bcb, size_t idx,
+                                       uint32_t arg) {
+  LIST_insert_UNSAFE(&bcb->buffer, idx + 1, arg);
+}
+
+uint32_t *ByteCodeBuilder_to_buffer(const ByteCodeBuilder *bcb) {
+  size_t size = bcb->buffer.len * sizeof(uint32_t);
+  LIST_uint32_t l = bcb->buffer;
+  if (l.blocks == NULL || l.len == 0)
+    return NULL;
+
+  uint32_t *flat = CALL(bcb->alloc, request, size);
+  size_t offset = 0;
+
+  for (size_t block = 0; block < LIST_BLOCK_COUNT && offset < l.len; block++) {
+    if (l.blocks[block] == NULL)
+      continue;
+
+    size_t block_size = LIST_DEFAULT_SIZE << block;
+    size_t remaining = l.len - offset;
+    size_t to_copy = remaining < block_size ? remaining : block_size;
+
+    memcpy(flat + offset, l.blocks[block], to_copy * sizeof(uint32_t));
+    offset += to_copy;
   }
 
-  bcb->buffer[bcb->len++] = op;
-  bcb->buffer[bcb->len++] = arg;
-}
-
-void ByteCodeBuilder_insert_arg(ByteCodeBuilder *bcb, size_t idx,
-                                uint32_t arg) {
-  ASSERT(idx + 1 < bcb->len, "Can't insert out of allocation bounds");
-  bcb->buffer[idx + 1] = arg;
+  return flat;
 }

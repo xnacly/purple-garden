@@ -2,13 +2,9 @@
 #define MEM_H
 
 #include <stddef.h>
+#include <stdint.h>
 
-#ifdef DEBUG
-// #if DEBUG
 // #define VERBOSE_ALLOCATOR 1
-// #endif
-#else
-#endif
 
 // 50KB
 #define GC_MIN_HEAP 50 * 1024
@@ -39,7 +35,7 @@ typedef struct {
 //
 //
 //  #define ALLOC_HEAP_SIZE = 1024
-//  Allocator alloc_bump = bump_init(ALLOC_HEAP_SIZE);
+//  Allocator alloc_bump = bump_init(ALLOC_HEAP_SIZE, ALLOC_HEAP_SIZE*2);
 //
 //  size_t some_block_size = 16;
 //  void *some_block = alloc_bump.request(alloc_bump.ctx, some_block_size);
@@ -61,7 +57,7 @@ typedef struct {
   void (*destroy)(void *ctx);
 } Allocator;
 
-Allocator *bump_init(size_t min_size, size_t max_size);
+Allocator *bump_init(uint64_t min_size, uint64_t max_size);
 Allocator *xcgc_init(void *vm, size_t min_size, size_t max_size);
 
 #endif
