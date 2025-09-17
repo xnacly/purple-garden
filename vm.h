@@ -30,7 +30,7 @@ typedef enum {
   VM_NEW_OBJ,
 } VM_New;
 
-// PERF: maybe _ is too many, but prefetching a recursion depth can have
+// PERF: maybe `n` is too many, but prefetching a recursion depth can have
 // some positive effects on the runtime performance
 #define PREALLOCATE_FREELIST_SIZE 0
 
@@ -44,10 +44,7 @@ typedef struct Frame {
   // function
   size_t return_to_bytecode;
   // stores Values by their hash, serving as a variable table
-  LIST_Value variable_table; // TODO: use a different Map impl for this; since
-                             // we keep 256 variables in the current scope at
-                             // max; we compute all caps at compile time and we
-                             // dont need any collision checking at this point
+  Value *variable_table;
 } Frame;
 
 typedef struct __Vm {
