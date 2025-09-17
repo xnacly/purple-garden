@@ -307,8 +307,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       }
     } else { // calling a builtin function thats not a compile time construct
       size_t len = n->children.len;
-      size_t hash = s->hash & MAX_BUILTIN_SIZE_MASK;
-      builtin_function bf = vm->builtins[hash];
+      // TODO: once namespaces drop (only the compile time ones; walk the
+      // namespaces and replace bf with the resolved function pointer)
+      builtin_function bf = vm->builtins[s->hash & MAX_BUILTIN_SIZE_MASK];
       ASSERT(bf != NULL, "Unknown builtin `@%.*s`", (int)s->len, s->p)
 
       if (len > 0) {
@@ -327,7 +328,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
       BC(OP_ARGS,
          ENCODE_ARG_COUNT_AND_OFFSET(len, ctx->register_allocated_count));
-      BC(OP_BUILTIN, hash);
+      BC(OP_BUILTIN, (size_t)bf);
     }
     break;
   }

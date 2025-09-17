@@ -278,7 +278,7 @@ int Vm_run(Vm *vm) {
     case OP_BUILTIN: {
       // at this point all builtins are just "syscalls" into an array of
       // function pointers
-      ((builtin_function)vm->builtins[arg])(vm);
+      ((builtin_function)(size_t)arg)(vm);
       vm->arg_count = 1;
       vm->arg_offset = 0;
       break;

@@ -18,9 +18,10 @@ typedef struct {
 } GcCtx;
 
 static void xcgc_run(GcCtx *c) {
-  // TODO: 1. add a bump allocator with 2kb for frames, separate from the gc
-  // TODO: 2. add the Str tag for heap strings
-  // TODO: 3. scan roots (variable table entries, registers)
+  // TODO:
+  // 1. scan roots in the VM
+  // 2. copy reachable objects to to_space
+  // 3. update all pointers via forwarding
   ASSERT(0, "xcgc collection is not implemented yet")
 }
 
@@ -70,7 +71,7 @@ Stats gc_stats(void *ctx) {
 // algorithm based on Cheney's copying collector - now xnacly's copying
 // collector (xcgc), see: https://dl.acm.org/doi/10.1145/362790.362798 and
 // https://en.wikipedia.org/wiki/Cheney%27s_algorithm. With mostly separate
-// stages and only stopping the world for the smalles time possible,
+// stages and only stopping the world for the smallest time possible,
 // specifically only while moving from the from-space to the to-space.
 Allocator *xcgc_init(void *vm, size_t min_size, size_t max_size) {
   GcCtx *ctx = malloc(sizeof(GcCtx));

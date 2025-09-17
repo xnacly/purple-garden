@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
            s.allocated / 1024.0, percent);
   }
 
-  if (a.block_allocator > 0) {
+  if (a.block_allocator != GC_MIN_HEAP) {
     VERBOSE_PUTS(
         "vm: got --block-allocator, using bump allocator with size %zuB/%zuKB",
         a.block_allocator * 1024, a.block_allocator);
