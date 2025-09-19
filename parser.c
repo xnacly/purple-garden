@@ -3,7 +3,6 @@
 #include "common.h"
 #include "lexer.h"
 #include "strings.h"
-#include <stdlib.h>
 
 #define NODE_NEW(TYPE, TOKEN)                                                  \
   ({                                                                           \
@@ -45,6 +44,116 @@ static inline void consume(Parser *p, TokenType tt) {
   advance(p);
 }
 
+Node Parser_atom(Parser *p) {
+  Node n;
+  switch (p->cur->type) {
+  case T_IDENT:
+    n = (Node){.type = N_ATOM, .token = p->cur};
+    break;
+  case T_DOUBLE:
+  case T_INTEGER:
+  case T_STRING:
+  case T_TRUE:
+  case T_FALSE:
+    n = (Node){.type = N_ATOM, .token = p->cur};
+  case T_EOF:
+  default:
+    // TODO: error handling
+    break;
+  }
+  advance(p);
+
+  return n;
+}
+
+Node Parser_builtin(Parser *p) {
+  Token *name = p->cur;
+  consume(p, T_BUILTIN);
+  Node builtin = {.type = N_BUILTIN, .children = LIST_new(Node)};
+  if (p->cur->type == T_SLASH) {
+    // TODO: has path / namespace
+  }
+
+  while (p->cur->type != T_DELIMITOR_RIGHT) {
+    Node n = Parser_next(p);
+    LIST_append(&builtin.children, p->alloc, n);
+  }
+
+  return builtin;
+}
+
+Node Parser_obj(Parser *p) {
+  consume(p, T_CURLY_LEFT);
+
+  Node stmt;
+  switch (p->cur->type) {
+  case T_EOF:
+  default:
+    // TODO: error handling
+    break;
+  }
+
+  consume(p, T_CURLY_RIGHT);
+  return stmt;
+}
+
+Node Parser_array(Parser *p) {
+  consume(p, T_BRAKET_LEFT);
+
+  Node stmt;
+  switch (p->cur->type) {
+  case T_EOF:
+  default:
+    // TODO: error handling
+    break;
+  }
+
+  consume(p, T_BRAKET_RIGHT);
+  return stmt;
+}
+
+// Handles everything inside of s-expr: (<sexpr>)
+Node Parser_stmt(Parser *p) {
+  consume(p, T_DELIMITOR_LEFT);
+
+  Node stmt;
+  switch (p->cur->type) {
+  case T_EOF:
+  default:
+    // TODO: error handling
+    break;
+  }
+
+  consume(p, T_DELIMITOR_RIGHT);
+  return stmt;
+}
+
+Node Parser_next(Parser *p) {
+  Node n;
+  switch (p->cur->type) {
+  case T_IDENT:
+  case T_DOUBLE:
+  case T_INTEGER:
+  case T_STRING:
+  case T_TRUE:
+  case T_FALSE:
+    return Parser_atom(p);
+  case T_DELIMITOR_LEFT:
+    return Parser_stmt(p);
+  case T_BRAKET_LEFT:
+    return Parser_array(p);
+  case T_CURLY_LEFT:
+    return Parser_obj(p);
+  case T_EOF:
+  default:
+    // TODO: error handling
+    break;
+  };
+
+  return n;
+}
+
+/*
 Node Parser_next(Parser *p) {
 #define MAX_DEPTH 256
   // stack keeps the list(s) we are in, the last element is always the current
@@ -187,6 +296,7 @@ eof: // we dont have any more input, return stack top
 unkown:
   return (Node){.type = N_UNKNOWN};
 }
+*/
 
 Str NODE_TYPE_MAP[] = {
     // strings, numbers, booleans

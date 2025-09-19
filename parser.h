@@ -3,13 +3,6 @@
 #include "lexer.h"
 #include "mem.h"
 
-typedef struct {
-  Allocator *alloc;
-  Lexer *lexer;
-  size_t pos;
-  Token *cur;
-} Parser;
-
 typedef enum {
   // error case
   N_UNKNOWN = -1,
@@ -48,8 +41,24 @@ typedef struct Node {
   LIST_Node children;
 } Node;
 
+typedef struct Parser Parser;
+typedef struct Parser {
+  Allocator *alloc;
+  Lexer *lexer;
+  size_t pos;
+  Token *cur;
+} Parser;
+
 Parser Parser_new(Allocator *alloc, Lexer *l);
 Node Parser_next(Parser *p);
+
+// necessary for recursive descent parser
+Node Parser_array(Parser *p);
+Node Parser_atom(Parser *p);
+Node Parser_builtin(Parser *p);
+Node Parser_next(Parser *p);
+Node Parser_obj(Parser *p);
+Node Parser_stmt(Parser *p);
 
 #if DEBUG
 void Node_debug(const Node *n, size_t depth);
