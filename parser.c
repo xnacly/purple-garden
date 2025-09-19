@@ -44,6 +44,10 @@ static inline void consume(Parser *p, TokenType tt) {
   advance(p);
 }
 
+// TODO: remove once parser is rewritten
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+
 Node Parser_atom(Parser *p) {
   Node n;
   switch (p->cur->type) {
@@ -147,11 +151,11 @@ Node Parser_next(Parser *p) {
   case T_EOF:
   default:
     // TODO: error handling
-    break;
+    return (Node){.type = N_UNKNOWN};
   };
-
-  return n;
 }
+
+#pragma GCC diagnostic pop
 
 /*
 Node Parser_next(Parser *p) {
