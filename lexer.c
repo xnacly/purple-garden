@@ -181,6 +181,7 @@ builtin: {
       .hash = hash,
   };
   Token *b = CALL(a, request, sizeof(Token));
+  *b = (Token){0};
   b->string = s;
   b->type = T_BUILTIN;
   return b;
@@ -227,6 +228,7 @@ number: {
 
   l->pos = i;
   Token *n = CALL(a, request, sizeof(Token));
+  *n = (Token){0};
   n->string = (Str){
       .p = l->input.p + start,
       .len = i - start,
@@ -257,6 +259,7 @@ ident: {
     return INTERN_FALSE;
   } else {
     Token *t = CALL(a, request, sizeof(Token));
+    *t = (Token){0};
     t->type = T_IDENT;
     t->string = (Str){
         .p = l->input.p + start,
@@ -280,8 +283,8 @@ quoted: {
   }
 
   size_t len = l->pos - start;
-  Token *t;
-  t = CALL(a, request, sizeof(Token));
+  Token *t = CALL(a, request, sizeof(Token));
+  *t = (Token){0};
   t->type = T_STRING;
   t->string = (Str){
       .p = l->input.p + start,
@@ -308,6 +311,7 @@ string: {
     return INTERN_EOF;
   } else {
     Token *t = CALL(a, request, sizeof(Token));
+    *t = (Token){0};
     t->type = T_STRING;
     t->string = (Str){
         .p = l->input.p + start,

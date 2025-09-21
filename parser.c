@@ -6,7 +6,7 @@
 
 #define NODE_NEW(TYPE, TOKEN)                                                  \
   ({                                                                           \
-    Node __n;                                                                  \
+    Node __n = {0};                                                            \
     __n.type = TYPE;                                                           \
     __n.token = TOKEN;                                                         \
     __n.children = LIST_new(Node);                                             \
@@ -45,12 +45,8 @@ static inline void consume(Parser *p, TokenType tt) {
   advance(p);
 }
 
-// TODO: remove once parser is rewritten
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wuninitialized"
-
 Node Parser_atom(Parser *p) {
-  Node n;
+  Node n = {0};
   switch (p->cur->type) {
   case T_IDENT:
     n = (Node){.type = N_IDENT, .token = p->cur};
@@ -65,6 +61,7 @@ Node Parser_atom(Parser *p) {
   case T_EOF:
   default:
     // TODO: error handling: Wanted an atom, got %q
+    ASSERT(0, "cant happen");
     break;
   }
   advance(p);
@@ -80,9 +77,9 @@ Node Parser_builtin(Parser *p) {
   };
   consume(p, T_BUILTIN);
 
-  if (p->cur->type == T_SLASH) {
-    // TODO: has path / namespace, call Parser_path here
-  }
+  // TODO: has path / namespace, call Parser_path here
+  // if (p->cur->type == T_SLASH) {
+  // }
 
   while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
     Node n = Parser_next(p);
@@ -92,6 +89,7 @@ Node Parser_builtin(Parser *p) {
   return builtin;
 }
 
+// { <key> <value> } both values can be anything we want them to be
 Node Parser_obj(Parser *p) {
   Node obj = NODE_NEW(N_OBJECT, p->cur);
   consume(p, T_CURLY_LEFT);
@@ -140,9 +138,29 @@ Node Parser_stmt(Parser *p) {
     return n;
   }
 
-  Node stmt = {0};
+  Node stmt;
 
   switch (p->cur->type) {
+  case T_IDENT:
+    stmt = NODE_NEW(N_CALL, p->cur);
+    advance(p);
+    while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
+      Node n = Parser_next(p);
+      LIST_append(&stmt.children, p->alloc, n);
+    }
+    break;
+  case T_PLUS:
+  case T_MINUS:
+  case T_ASTERISKS:
+  case T_SLASH:
+  case T_EQUAL:
+    stmt = NODE_NEW(N_BIN, p->cur);
+    advance(p);
+    while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
+      Node n = Parser_next(p);
+      LIST_append(&stmt.children, p->alloc, n);
+    }
+    break;
   case T_BUILTIN:
     stmt = Parser_builtin(p);
     break;
@@ -157,7 +175,6 @@ Node Parser_stmt(Parser *p) {
 }
 
 Node Parser_next(Parser *p) {
-  Node n;
   switch (p->cur->type) {
   case T_IDENT:
   case T_DOUBLE:
@@ -173,13 +190,14 @@ Node Parser_next(Parser *p) {
   case T_CURLY_LEFT:
     return Parser_obj(p);
   case T_EOF:
+    Node n = {0};
+    n.type = N_UNKNOWN;
+    return n;
   default:
     // TODO: error handling:
-    return (Node){.type = N_UNKNOWN};
+    ASSERT(0, "EDGE CASE")
   };
 }
-
-#pragma GCC diagnostic pop
 
 Str NODE_TYPE_MAP[] = {
     // strings, numbers, booleans
