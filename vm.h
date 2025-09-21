@@ -47,6 +47,10 @@ typedef struct Frame {
   Value *variable_table;
 } Frame;
 
+typedef struct __Vm Vm;
+// Represents the type signature for a builtin function
+typedef void (*builtin_function)(Vm *vm);
+
 typedef struct __Vm {
   uint32_t global_len;
   // globals represents the global pool created by the bytecode compiler
@@ -73,17 +77,13 @@ typedef struct __Vm {
   // used for container sizes and stuff
   uint32_t size_hint;
 
-  // i have to type erase here :(
-  void **builtins;
+  builtin_function *builtins;
 
   Allocator *alloc;
 #if DEBUG
   uint64_t instruction_counter[256];
 #endif
 } Vm;
-
-// Represents the type signature for a builtin function
-typedef void (*builtin_function)(Vm *vm);
 
 #define GLOBAL_FALSE 0
 #define GLOBAL_TRUE 1

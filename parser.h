@@ -22,8 +22,6 @@ typedef enum {
   N_BIN,
   // function call
   N_CALL,
-  // root node
-  N_ROOT,
 } NodeType;
 
 extern Str NODE_TYPE_MAP[];

@@ -31,8 +31,10 @@ Str TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
 
 #if DEBUG
 void Token_debug(Token *token) {
-  ASSERT(token != NULL, "NULL token!");
-  ASSERT(token->type <= T_EOF, "Out of bounds type, SHOULD NEVER HAPPEN");
+  if (token == NULL) {
+    printf("<UNKOWN_TOKEN>");
+    return;
+  }
   printf("[");
   Str_debug(&TOKEN_TYPE_MAP[token->type]);
   putc(']', stdout);

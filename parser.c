@@ -24,13 +24,14 @@ Parser Parser_new(Allocator *alloc, Lexer *l) {
 
 static inline void advance(Parser *p) {
 #if DEBUG
-  Token_debug(p->cur);
-  puts("");
+  // Token_debug(p->cur);
+  // puts("");
 #endif
   p->pos++;
   p->cur = Lexer_next(p->lexer, p->alloc);
 }
 
+// TODO: add custom error message here
 static inline void consume(Parser *p, TokenType tt) {
   if (UNLIKELY(p->cur->type != tt)) {
     printf("purple-garden: Unexpected token, wanted: ");
@@ -52,7 +53,7 @@ Node Parser_atom(Parser *p) {
   Node n;
   switch (p->cur->type) {
   case T_IDENT:
-    n = (Node){.type = N_ATOM, .token = p->cur};
+    n = (Node){.type = N_IDENT, .token = p->cur};
     break;
   case T_DOUBLE:
   case T_INTEGER:
@@ -60,9 +61,10 @@ Node Parser_atom(Parser *p) {
   case T_TRUE:
   case T_FALSE:
     n = (Node){.type = N_ATOM, .token = p->cur};
+    break;
   case T_EOF:
   default:
-    // TODO: error handling
+    // TODO: error handling: Wanted an atom, got %q
     break;
   }
   advance(p);
@@ -71,14 +73,18 @@ Node Parser_atom(Parser *p) {
 }
 
 Node Parser_builtin(Parser *p) {
-  Token *name = p->cur;
+  Node builtin = {
+      .type = N_BUILTIN,
+      .token = p->cur,
+      .children = LIST_new(Node),
+  };
   consume(p, T_BUILTIN);
-  Node builtin = {.type = N_BUILTIN, .children = LIST_new(Node)};
+
   if (p->cur->type == T_SLASH) {
-    // TODO: has path / namespace
+    // TODO: has path / namespace, call Parser_path here
   }
 
-  while (p->cur->type != T_DELIMITOR_RIGHT) {
+  while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
     Node n = Parser_next(p);
     LIST_append(&builtin.children, p->alloc, n);
   }
@@ -87,41 +93,59 @@ Node Parser_builtin(Parser *p) {
 }
 
 Node Parser_obj(Parser *p) {
+  Node obj = NODE_NEW(N_OBJECT, p->cur);
   consume(p, T_CURLY_LEFT);
 
-  Node stmt;
-  switch (p->cur->type) {
-  case T_EOF:
-  default:
-    // TODO: error handling
-    break;
+  while (p->cur->type != T_EOF && p->cur->type != T_CURLY_RIGHT) {
+    // Key can be anything, i dont care, runtime error, because sometimes we do
+    // want dynamic keys, like (+ "user_" name), which would resolve to
+    // something like "user_xyz" at runtime, thus setting the corresponding key.
+    Node key = Parser_next(p);
+    LIST_append(&obj.children, p->alloc, key);
+    // Value can also be anything, we are just building a dynamic hashmap like
+    // container
+    Node val = Parser_next(p);
+    LIST_append(&obj.children, p->alloc, val);
   }
 
   consume(p, T_CURLY_RIGHT);
-  return stmt;
+  return obj;
 }
 
 Node Parser_array(Parser *p) {
   consume(p, T_BRAKET_LEFT);
 
-  Node stmt;
-  switch (p->cur->type) {
-  case T_EOF:
-  default:
-    // TODO: error handling
-    break;
+  Node array = (Node){
+      .type = N_ARRAY,
+      .token = p->cur,
+      .children = LIST_new(Node),
+  };
+
+  while (p->cur->type != T_EOF && p->cur->type != T_BRAKET_RIGHT) {
+    Node n = Parser_next(p);
+    LIST_append(&array.children, p->alloc, n);
   }
 
   consume(p, T_BRAKET_RIGHT);
-  return stmt;
+  return array;
 }
 
 // Handles everything inside of s-expr: (<sexpr>)
 Node Parser_stmt(Parser *p) {
   consume(p, T_DELIMITOR_LEFT);
 
-  Node stmt;
+  if (p->cur->type == T_DELIMITOR_RIGHT) {
+    Node n = NODE_NEW(N_ARRAY, p->cur);
+    advance(p);
+    return n;
+  }
+
+  Node stmt = {0};
+
   switch (p->cur->type) {
+  case T_BUILTIN:
+    stmt = Parser_builtin(p);
+    break;
   case T_EOF:
   default:
     // TODO: error handling
@@ -150,157 +174,12 @@ Node Parser_next(Parser *p) {
     return Parser_obj(p);
   case T_EOF:
   default:
-    // TODO: error handling
+    // TODO: error handling:
     return (Node){.type = N_UNKNOWN};
   };
 }
 
 #pragma GCC diagnostic pop
-
-/*
-Node Parser_next(Parser *p) {
-#define MAX_DEPTH 256
-  // stack keeps the list(s) we are in, the last element is always the current
-  // list, the first (0) is root
-  Node stack[MAX_DEPTH];
-  stack[0] = (Node){
-      .type = N_ROOT,
-      .children = LIST_new(Node),
-  };
-  size_t stack_top = 0;
-
-#pragma GCC diagnostic push
-  // We know what we're doing, so this is fine:
-  //
-  // we assign unknown to all and overwrite these to make sure an invalid
-  // index is not a unassigned memory access.
-#pragma GCC diagnostic ignored "-Woverride-init"
-  static void *jump_table[256] = {
-      [0 ... 255] = &&unkown,
-      [T_DELIMITOR_LEFT] = &&stmt_begin,
-      [T_DELIMITOR_RIGHT] = &&stmt_end,
-      [T_BRAKET_LEFT] = &&arr_start,
-      [T_BRAKET_RIGHT] = &&arr_end,
-      [T_CURLY_LEFT] = &&obj_start,
-      [T_CURLY_RIGHT] = &&obj_end,
-      [T_STRING] = &&atom,
-      [T_TRUE] = &&atom,
-      [T_FALSE] = &&atom,
-      [T_DOUBLE] = &&atom,
-      [T_INTEGER] = &&atom,
-      [T_IDENT] = &&ident,
-      [T_EOF] = &&eof,
-  };
-#pragma GCC diagnostic pop
-
-#define JUMP_NEXT goto *jump_table[p->cur->type];
-
-  ASSERT(stack_top < MAX_DEPTH, "Stack overflow, max 256 stack depth");
-  JUMP_NEXT;
-
-atom: {
-  Node n = NODE_NEW(N_ATOM, p->cur);
-  advance(p);
-  LIST_append(&stack[stack_top].children, p->alloc, n);
-  JUMP_NEXT;
-}
-
-ident: {
-  Node n = NODE_NEW(N_IDENT, p->cur);
-  advance(p);
-  LIST_append(&stack[stack_top].children, p->alloc, n);
-  JUMP_NEXT;
-}
-
-stmt_begin: {
-  Node n = NODE_NEW(N_UNKNOWN, p->cur);
-  consume(p, T_DELIMITOR_LEFT);
-  n.token = p->cur;
-  switch (p->cur->type) {
-  case T_BUILTIN:
-    n.type = N_BUILTIN;
-    advance(p);
-    break;
-  case T_PLUS:
-  case T_MINUS:
-  case T_ASTERISKS:
-  case T_SLASH:
-  case T_EQUAL:
-    n.type = N_BIN;
-    advance(p);
-    break;
-  case T_IDENT: {
-    n.type = N_CALL;
-    advance(p);
-    break;
-  }
-  default:
-    n.type = N_LIST;
-  }
-  stack_top++;
-  stack[stack_top] = n;
-  JUMP_NEXT;
-}
-
-stmt_end: {
-  ASSERT(stack_top != 0, "Unexpected expr end");
-  consume(p, T_DELIMITOR_RIGHT);
-  Node prev = stack[stack_top];
-  stack_top--;
-  LIST_append(&stack[stack_top].children, p->alloc, prev);
-  // I think we should stop this here if stack_top == 0, right? Thus stopping at
-  // a root parse
-  if (stack_top == 0) {
-    return LIST_get_UNSAFE(&stack[0].children, 0);
-  } else {
-    JUMP_NEXT
-  }
-}
-
-arr_start: {
-  Node n = NODE_NEW(N_ARRAY, p->cur);
-  consume(p, T_BRAKET_LEFT);
-  stack_top++;
-  stack[stack_top] = n;
-  JUMP_NEXT;
-}
-
-arr_end: {
-  ASSERT(stack_top != 0, "Unexpected array end");
-  consume(p, T_BRAKET_RIGHT);
-  Node prev = stack[stack_top];
-  stack_top--;
-  LIST_append(&stack[stack_top].children, p->alloc, prev);
-  JUMP_NEXT;
-}
-
-obj_start: {
-  Node n = NODE_NEW(N_OBJECT, p->cur);
-  consume(p, T_CURLY_LEFT);
-  stack_top++;
-  stack[stack_top] = n;
-  JUMP_NEXT;
-}
-
-obj_end: {
-  ASSERT(stack_top != 0, "Unexpected obj end");
-  consume(p, T_CURLY_RIGHT);
-  Node prev = stack[stack_top];
-  stack_top--;
-  LIST_append(&stack[stack_top].children, p->alloc, prev);
-  JUMP_NEXT;
-}
-
-eof: // we dont have any more input, return stack top
-  Node n = stack[stack_top];
-  ASSERT(n.children.len == 0, "Top level sexpr necessary");
-  return n;
-
-// we want to error here
-unkown:
-  return (Node){.type = N_UNKNOWN};
-}
-*/
 
 Str NODE_TYPE_MAP[] = {
     // strings, numbers, booleans
@@ -316,8 +195,6 @@ Str NODE_TYPE_MAP[] = {
     // operator, like +-*/%
     [N_BIN] = STRING("N_BIN"),
     [N_CALL] = STRING("N_CALL"),
-    // error and end case
-    [N_ROOT] = STRING("N_ROOT"),
 };
 
 #if DEBUG
@@ -327,7 +204,7 @@ void Node_debug(const Node *n, size_t depth) {
     putc(' ', stdout);
   }
   if (n->type < 0) {
-    Str_debug(&STRING("N_UNKOWN"));
+    Str_debug(&STRING("N_UNKNOWN"));
   } else {
     Str_debug(&NODE_TYPE_MAP[n->type]);
   }

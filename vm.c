@@ -23,14 +23,15 @@ Str OP_MAP[256] = {
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE] = {0};
 
 inline void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
-  vm->builtins[Str_hash(&name) & MAX_BUILTIN_SIZE_MASK] = bf;
+  uint64_t hashed = Str_hash(&name) & MAX_BUILTIN_SIZE_MASK;
+  vm->builtins[hashed] = bf;
 }
 
 Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
   Vm vm = {0};
   vm.alloc = alloc;
 
-  vm.builtins = (void **)BUILTIN_MAP;
+  vm.builtins = BUILTIN_MAP;
 
   vm.globals = CALL(static_alloc, request, (sizeof(Value) * GLOBAL_SIZE));
   vm.globals[GLOBAL_FALSE] = *INTERNED_FALSE;
@@ -64,6 +65,7 @@ void freelist_preallocate(FrameFreeList *fl) {
     *frame = (Frame){0};
     frame->variable_table =
         CALL(fl->alloc, request, sizeof(Value) * VARIABLE_TABLE_SIZE);
+    memset(frame->variable_table, 0, sizeof(Value) * VARIABLE_TABLE_SIZE);
     frame->prev = fl->head;
     fl->head = frame;
   }
@@ -84,6 +86,7 @@ Frame *freelist_pop(FrameFreeList *fl) {
     Frame *f = CALL(fl->alloc, request, sizeof(Frame));
     f->variable_table =
         CALL(fl->alloc, request, sizeof(Value) * VARIABLE_TABLE_SIZE);
+    memset(f->variable_table, 0, sizeof(Value) * VARIABLE_TABLE_SIZE);
     return f;
   }
   Frame *f = fl->head;
@@ -130,8 +133,6 @@ int Vm_run(Vm *vm) {
       case VM_NEW_ARRAY:
         v.type = V_ARRAY;
         if (vm->size_hint != 0) {
-          // TODO: replace with List_new_with_size once implemented; use
-          // Vm.size_hint
           LIST_Value *lv = CALL(vm->alloc, request, sizeof(LIST_Value));
           *lv = LIST_new(Value);
           v.array = lv;
@@ -278,7 +279,7 @@ int Vm_run(Vm *vm) {
     case OP_BUILTIN: {
       // at this point all builtins are just "syscalls" into an array of
       // function pointers
-      ((builtin_function)(size_t)arg)(vm);
+      ((builtin_function)vm->builtins[arg])(vm);
       vm->arg_count = 1;
       vm->arg_offset = 0;
       break;

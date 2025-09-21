@@ -152,8 +152,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     break;
   }
   case N_BUILTIN: {
-    Str *s = &n->token->string;
-    int b = runtime_builtin_hashes[s->hash & MAX_BUILTIN_SIZE_MASK];
+    Str s = n->token->string;
+    int b = runtime_builtin_hashes[s.hash & MAX_BUILTIN_SIZE_MASK];
     // compile time "pseudo" builtins
     if (b != 0) {
       switch (b) {
@@ -307,10 +307,12 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       }
     } else { // calling a builtin function thats not a compile time construct
       size_t len = n->children.len;
-      // TODO: once namespaces drop (only the compile time ones; walk the
-      // namespaces and replace bf with the resolved function pointer)
-      builtin_function bf = vm->builtins[s->hash & MAX_BUILTIN_SIZE_MASK];
-      ASSERT(bf != NULL, "Unknown builtin `@%.*s`", (int)s->len, s->p)
+      // TODO: once namespaces drop (only the compile time ones) walk the
+      // namespaces and replace bf with the idx into builtin_function which
+      // contains the resolved pointer to said function
+      size_t idx = s.hash & MAX_BUILTIN_SIZE_MASK;
+      builtin_function bf = vm->builtins[idx];
+      ASSERT(bf != NULL, "Unknown builtin `@%.*s`", (int)s.len, s.p)
 
       if (len > 0) {
         size_t registers[len];
@@ -328,7 +330,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
       BC(OP_ARGS,
          ENCODE_ARG_COUNT_AND_OFFSET(len, ctx->register_allocated_count));
-      BC(OP_BUILTIN, (size_t)bf);
+      BC(OP_BUILTIN, idx);
     }
     break;
   }
@@ -371,6 +373,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     break;
   }
   case N_OBJECT: {
+    // TODO: its time, see N_LIST|N_ARRAY
     ASSERT(0, "N_OBJECT: Unimplemented");
     break;
   }
@@ -446,24 +449,11 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
       break;
     }
 
-    if (n.type == N_ROOT) {
-
-      for (size_t i = 0; i < n.children.len; i++) {
 #if DEBUG
-        Node_debug(&n, 0);
-        puts("");
+    Node_debug(&n, 0);
+    puts("");
 #endif
-        Node child = LIST_get(&n.children, i);
-        compile(alloc, vm, &ctx, &child);
-      }
-      break;
-    } else {
-#if DEBUG
-      Node_debug(&n, 0);
-      puts("");
-#endif
-      compile(alloc, vm, &ctx, &n);
-    }
+    compile(alloc, vm, &ctx, &n);
   }
 
   ASSERT(ctx.register_allocated_count == 1,
