@@ -41,15 +41,15 @@ struct ListIdx idx_to_block_idx(size_t idx) {
   //     -> block 1 24+8=32-> MSB pos 5 -> block 2
 
   // shifting the geometric series so 2^i aligns with idx
-  size_t adjusted = idx + LIST_DEFAULT_SIZE;
-  size_t msb_pos = 63 - __builtin_clzll(adjusted);
+  uint64_t adjusted = idx + LIST_DEFAULT_SIZE;
+  uint64_t msb_pos = 63 - __builtin_clzll(adjusted);
 
   //   log2(LIST_DEFAULT_SIZE) = 3 for LIST_DEFAULT_SIZE = 8
 #define LOG2_OF_LIST_DEFAULT_SIZE 3
   // first block is LIST_DEFAULT_SIZE wide, this normalizes
   r.block = msb_pos - LOG2_OF_LIST_DEFAULT_SIZE;
 
-  size_t start_index_of_block = LIST_DEFAULT_SIZE * ((1UL << r.block) - 1);
+  uint64_t start_index_of_block = LIST_DEFAULT_SIZE * ((1UL << r.block) - 1);
   r.block_idx = idx - start_index_of_block;
   return r;
 }

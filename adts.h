@@ -26,9 +26,9 @@
 
 struct ListIdx {
   // which block to use for the indexing
-  size_t block;
+  uint64_t block;
   // the idx into said block
-  size_t block_idx;
+  uint64_t block_idx;
 };
 
 struct ListIdx idx_to_block_idx(size_t idx);
@@ -47,7 +47,7 @@ struct ListIdx idx_to_block_idx(size_t idx);
                                                                                \
     /* allocate the specific block if needed */                                \
     if ((LIST)->blocks[bi.block] == NULL) {                                    \
-      size_t block_size = LIST_DEFAULT_SIZE << bi.block;                       \
+      uint64_t block_size = LIST_DEFAULT_SIZE << bi.block;                     \
       (LIST)->blocks[bi.block] =                                               \
           CALL(ALLOC, request, block_size * (LIST)->type_size);                \
       ASSERT((LIST)->blocks[bi.block] != NULL,                                 \

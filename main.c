@@ -14,6 +14,7 @@
 #include "mem.h"
 #include "parser.h"
 #include "strings.h"
+#include "unistd.h"
 #include "vm.h"
 
 #define VERBOSE_PUTS(fmt, ...)                                                 \
