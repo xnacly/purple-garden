@@ -12,15 +12,6 @@
 #define BC(CODE, ARG) ByteCodeBuilder_add(ctx->bcb, CODE, ARG)
 #define BC_LEN ctx->bcb->buffer.len
 
-typedef enum {
-  COMPILE_BUILTIN_UNKNOWN = 0,
-  COMPILE_BUILTIN_LET,
-  COMPILE_BUILTIN_FUNCTION,
-  COMPILE_BUILTIN_ASSERT,
-  COMPILE_BUILTIN_NONE,
-  COMPILE_BUILTIN_MATCH,
-} COMPILE_BUILTIN;
-
 typedef struct CtxFunction {
   Str name;
   size_t size;

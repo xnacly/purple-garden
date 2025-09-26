@@ -3,6 +3,31 @@
 #include "lexer.h"
 #include "mem.h"
 
+#if DEBUG
+static size_t call_depth = 0;
+#define TRACE(FUNC)                                                            \
+  ({                                                                           \
+    call_depth++;                                                              \
+    printf("%*s -> " #FUNC "#%.*s\n", (int)call_depth * 2, "",                 \
+           (int)TOKEN_TYPE_MAP[p->cur->type].len,                              \
+           TOKEN_TYPE_MAP[p->cur->type].p);                                    \
+    Node __n = (FUNC)(p);                                                      \
+    call_depth--;                                                              \
+    __n;                                                                       \
+  })
+#else
+#define TRACE(FUNC) FUNC(p)
+#endif
+
+#define NODE_NEW(TYPE, TOKEN)                                                  \
+  ({                                                                           \
+    Node __n = {0};                                                            \
+    __n.type = TYPE;                                                           \
+    __n.token = TOKEN;                                                         \
+    __n.children = LIST_new(Node);                                             \
+    __n;                                                                       \
+  })
+
 typedef enum {
   // error case
   N_UNKNOWN = -1,
@@ -16,8 +41,12 @@ typedef enum {
   N_OBJECT,
   // main data structure
   N_LIST,
-  // builtins, like @println, @len, @let, @function, etc
-  N_BUILTIN,
+  // creating variables
+  N_VAR,
+  // defining functions
+  N_FN,
+  // conditional logic
+  N_MATCH,
   // operator, like +-*/%=
   N_BIN,
   // function call
@@ -53,7 +82,6 @@ Node Parser_next(Parser *p);
 // necessary for recursive descent parser
 Node Parser_array(Parser *p);
 Node Parser_atom(Parser *p);
-Node Parser_builtin(Parser *p);
 Node Parser_next(Parser *p);
 Node Parser_obj(Parser *p);
 Node Parser_stmt(Parser *p);

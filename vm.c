@@ -15,9 +15,9 @@ Str OP_MAP[256] = {
     [OP_LOADV] = STRING("LOADV"),     [OP_ARGS] = STRING("ARGS"),
     [OP_BUILTIN] = STRING("BUILTIN"), [OP_LEAVE] = STRING("LEAVE"),
     [OP_CALL] = STRING("CALL"),       [OP_JMP] = STRING("JMP"),
-    [OP_ASSERT] = STRING("ASSERT"),   [OP_LOADG] = STRING("LOADG"),
-    [OP_JMPF] = STRING("JMPF"),       [OP_APPEND] = STRING("APPEND"),
-    [OP_NEW] = STRING("NEW"),         [OP_SIZE] = STRING("SIZE"),
+    [OP_LOADG] = STRING("LOADG"),     [OP_JMPF] = STRING("JMPF"),
+    [OP_APPEND] = STRING("APPEND"),   [OP_NEW] = STRING("NEW"),
+    [OP_SIZE] = STRING("SIZE"),
 };
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE] = {0};
@@ -315,12 +315,6 @@ int Vm_run(Vm *vm) {
     case OP_JMP: {
       vm->pc = arg;
       continue;
-    }
-    case OP_ASSERT: {
-      if (vm->registers[0].type != V_TRUE) {
-        VM_ERR("Assertion failed, value is not true")
-      }
-      break;
     }
     default:
       VM_ERR("Unimplemented instruction `%.*s`", (int)OP_MAP[op].len,

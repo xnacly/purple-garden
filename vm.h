@@ -161,11 +161,6 @@ typedef enum {
   // Jumps to bc in bytecode index, does no bounds checking
   OP_JMP,
 
-  // OP_ASSERT
-  //
-  // stops execution with error message if r0 evals to false
-  OP_ASSERT,
-
   // LOADG rANY
   //
   // LOADG a global from the const table to r0

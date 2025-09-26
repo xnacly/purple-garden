@@ -4,30 +4,13 @@
 #include "lexer.h"
 #include "strings.h"
 
-#if DEBUG
-static size_t call_depth = 0;
-#define TRACE(FUNC)                                                            \
-  ({                                                                           \
-    call_depth++;                                                              \
-    printf("%*s -> " #FUNC "#%.*s\n", (int)call_depth * 2, "",                 \
-           (int)TOKEN_TYPE_MAP[p->cur->type].len,                              \
-           TOKEN_TYPE_MAP[p->cur->type].p);                                    \
-    Node __n = (FUNC)(p);                                                      \
-    call_depth--;                                                              \
-    __n;                                                                       \
-  })
-#else
-#define TRACE(FUNC) FUNC(p)
-#endif
-
-#define NODE_NEW(TYPE, TOKEN)                                                  \
-  ({                                                                           \
-    Node __n = {0};                                                            \
-    __n.type = TYPE;                                                           \
-    __n.token = TOKEN;                                                         \
-    __n.children = LIST_new(Node);                                             \
-    __n;                                                                       \
-  })
+Str NODE_TYPE_MAP[] = {
+    [N_ATOM] = STRING("N_ATOM"),   [N_IDENT] = STRING("N_IDENT"),
+    [N_ARRAY] = STRING("N_ARRAY"), [N_OBJECT] = STRING("N_OBJECT"),
+    [N_LIST] = STRING("N_LIST"),   [N_VAR] = STRING("N_VAR"),
+    [N_FN] = STRING("N_FN"),       [N_MATCH] = STRING("N_MATCH"),
+    [N_BIN] = STRING("N_BIN"),     [N_CALL] = STRING("N_CALL"),
+};
 
 Parser Parser_new(Allocator *alloc, Lexer *l) {
   return (Parser){
@@ -48,7 +31,8 @@ static inline void advance(Parser *p) {
 }
 
 // TODO: add custom error message here
-static inline void consume(Parser *p, TokenType tt) {
+static inline Token *consume(Parser *p, TokenType tt) {
+  ASSERT(p->cur != NULL, "NULLPOINTER");
   if (p->cur->type != tt) {
     printf("Unexpected Token %.*s, wanted %.*s\n",
            (int)TOKEN_TYPE_MAP[p->cur->type].len,
@@ -56,7 +40,9 @@ static inline void consume(Parser *p, TokenType tt) {
            TOKEN_TYPE_MAP[tt].p);
     ASSERT(0, "");
   }
+  Token *last = p->cur;
   advance(p);
+  return last;
 }
 
 Node Parser_atom(Parser *p) {
@@ -81,28 +67,6 @@ Node Parser_atom(Parser *p) {
   advance(p);
 
   return n;
-}
-
-Node Parser_builtin(Parser *p) {
-  Node builtin = {
-      .type = N_BUILTIN,
-      .token = p->cur,
-      .children = LIST_new(Node),
-  };
-  consume(p, T_BUILTIN);
-
-  // TODO: has path / namespace, call Parser_path here
-  // if (p->cur->type == T_SLASH) {
-  // }
-
-  while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
-    Node n = TRACE(Parser_next);
-    if (n.type != N_UNKNOWN) {
-      LIST_append(&builtin.children, p->alloc, n);
-    }
-  }
-
-  return builtin;
 }
 
 // { <key> <value> } both values can be anything we want them to be
@@ -157,6 +121,14 @@ Node Parser_stmt(Parser *p) {
   Node stmt;
 
   switch (p->cur->type) {
+  case T_VAR: {
+    Node var = NODE_NEW(N_VAR, p->cur);
+    advance(p);
+    Token *ident = consume(p, T_IDENT);
+    Node value = Parser_next(p);
+    LIST_append(&var.children, p->alloc, value);
+    break;
+  }
   case T_IDENT:
     stmt = NODE_NEW(N_CALL, p->cur);
     advance(p);
@@ -176,9 +148,6 @@ Node Parser_stmt(Parser *p) {
       Node n = TRACE(Parser_next);
       LIST_append(&stmt.children, p->alloc, n);
     }
-    break;
-  case T_BUILTIN:
-    stmt = TRACE(Parser_builtin);
     break;
   case T_EOF:
   default:
@@ -215,22 +184,6 @@ Node Parser_next(Parser *p) {
   };
 }
 
-Str NODE_TYPE_MAP[] = {
-    // strings, numbers, booleans
-    [N_ATOM] = STRING("N_ATOM"),
-    //
-    [N_IDENT] = STRING("N_IDENT"),
-    [N_ARRAY] = STRING("N_ARRAY"),
-    [N_OBJECT] = STRING("N_OBJECT"),
-    // main data structure
-    [N_LIST] = STRING("N_LIST"),
-    // builtin call
-    [N_BUILTIN] = STRING("N_BUILTIN"),
-    // operator, like +-*/%
-    [N_BIN] = STRING("N_BIN"),
-    [N_CALL] = STRING("N_CALL"),
-};
-
 #if DEBUG
 void Node_debug(const Node *n, size_t depth) {
   ASSERT(n != NULL, "Node is NULL; THIS SHOULD NEVER HAPPEN");
@@ -249,7 +202,6 @@ void Node_debug(const Node *n, size_t depth) {
     break;
   case N_ATOM:
   case N_BIN:
-  case N_BUILTIN:
     Token_debug(n->token);
     break;
   case N_CALL:
