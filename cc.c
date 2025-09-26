@@ -169,10 +169,11 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
         BC(OP_LOADG, GLOBAL_NONE);
         break;
       }
+        // TODO: unsupported
       case COMPILE_BUILTIN_MATCH: { // (@match
                                     //  (<condition> <s-expr's>) ; case 1
                                     //  (<condition> <s-expr's>) ; case 2
-                                    //  (<s-expr's>) ; default case
+                                    //  Node ; default case
                                     //  )
 
         size_t len = n->children.len;

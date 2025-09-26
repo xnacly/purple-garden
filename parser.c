@@ -4,6 +4,22 @@
 #include "lexer.h"
 #include "strings.h"
 
+#if DEBUG
+static size_t call_depth = 0;
+#define TRACE(FUNC)                                                            \
+  ({                                                                           \
+    call_depth++;                                                              \
+    printf("%*s -> " #FUNC "#%.*s\n", (int)call_depth * 2, "",                 \
+           (int)TOKEN_TYPE_MAP[p->cur->type].len,                              \
+           TOKEN_TYPE_MAP[p->cur->type].p);                                    \
+    Node __n = (FUNC)(p);                                                      \
+    call_depth--;                                                              \
+    __n;                                                                       \
+  })
+#else
+#define TRACE(FUNC) FUNC(p)
+#endif
+
 #define NODE_NEW(TYPE, TOKEN)                                                  \
   ({                                                                           \
     Node __n = {0};                                                            \
@@ -33,15 +49,13 @@ static inline void advance(Parser *p) {
 
 // TODO: add custom error message here
 static inline void consume(Parser *p, TokenType tt) {
-  if (UNLIKELY(p->cur->type != tt)) {
-    printf("purple-garden: Unexpected token, wanted: ");
-    Str_debug(&TOKEN_TYPE_MAP[tt]);
-    printf(", got: ");
-    Str_debug(&TOKEN_TYPE_MAP[p->cur->type]);
-    putc('\n', stdout);
-    return;
+  if (p->cur->type != tt) {
+    printf("Unexpected Token %.*s, wanted %.*s\n",
+           (int)TOKEN_TYPE_MAP[p->cur->type].len,
+           TOKEN_TYPE_MAP[p->cur->type].p, (int)TOKEN_TYPE_MAP[tt].len,
+           TOKEN_TYPE_MAP[tt].p);
+    ASSERT(0, "");
   }
-
   advance(p);
 }
 
@@ -82,8 +96,10 @@ Node Parser_builtin(Parser *p) {
   // }
 
   while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
-    Node n = Parser_next(p);
-    LIST_append(&builtin.children, p->alloc, n);
+    Node n = TRACE(Parser_next);
+    if (n.type != N_UNKNOWN) {
+      LIST_append(&builtin.children, p->alloc, n);
+    }
   }
 
   return builtin;
@@ -98,11 +114,11 @@ Node Parser_obj(Parser *p) {
     // Key can be anything, i dont care, runtime error, because sometimes we do
     // want dynamic keys, like (+ "user_" name), which would resolve to
     // something like "user_xyz" at runtime, thus setting the corresponding key.
-    Node key = Parser_next(p);
+    Node key = TRACE(Parser_next);
     LIST_append(&obj.children, p->alloc, key);
     // Value can also be anything, we are just building a dynamic hashmap like
     // container
-    Node val = Parser_next(p);
+    Node val = TRACE(Parser_next);
     LIST_append(&obj.children, p->alloc, val);
   }
 
@@ -120,7 +136,7 @@ Node Parser_array(Parser *p) {
   };
 
   while (p->cur->type != T_EOF && p->cur->type != T_BRAKET_RIGHT) {
-    Node n = Parser_next(p);
+    Node n = TRACE(Parser_next);
     LIST_append(&array.children, p->alloc, n);
   }
 
@@ -145,7 +161,7 @@ Node Parser_stmt(Parser *p) {
     stmt = NODE_NEW(N_CALL, p->cur);
     advance(p);
     while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
-      Node n = Parser_next(p);
+      Node n = TRACE(Parser_next);
       LIST_append(&stmt.children, p->alloc, n);
     }
     break;
@@ -157,12 +173,12 @@ Node Parser_stmt(Parser *p) {
     stmt = NODE_NEW(N_BIN, p->cur);
     advance(p);
     while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
-      Node n = Parser_next(p);
+      Node n = TRACE(Parser_next);
       LIST_append(&stmt.children, p->alloc, n);
     }
     break;
   case T_BUILTIN:
-    stmt = Parser_builtin(p);
+    stmt = TRACE(Parser_builtin);
     break;
   case T_EOF:
   default:
@@ -182,13 +198,13 @@ Node Parser_next(Parser *p) {
   case T_STRING:
   case T_TRUE:
   case T_FALSE:
-    return Parser_atom(p);
+    return TRACE(Parser_atom);
   case T_DELIMITOR_LEFT:
-    return Parser_stmt(p);
+    return TRACE(Parser_stmt);
   case T_BRAKET_LEFT:
-    return Parser_array(p);
+    return TRACE(Parser_array);
   case T_CURLY_LEFT:
-    return Parser_obj(p);
+    return TRACE(Parser_obj);
   case T_EOF:
     Node n = {0};
     n.type = N_UNKNOWN;
