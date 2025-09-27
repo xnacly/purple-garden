@@ -216,36 +216,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     break;
   }
     /*
-case N_: {
-Str s = n->token->string;
-size_t len = n->children.len;
-// TODO: once namespaces drop (only the compile time ones) walk the
-// namespaces and replace bf with the idx into builtin_function which
-// contains the resolved pointer to said function
-size_t idx = s.hash & MAX_BUILTIN_SIZE_MASK;
-builtin_function bf = vm->builtins[idx];
-ASSERT(bf != NULL, "Unknown builtin `@%.*s`", (int)s.len, s.p)
-
-if (len > 0) {
-size_t registers[len];
-for (size_t i = 0; i < len; i++) {
-Node argument = LIST_get(&n->children, i);
-compile(alloc, vm, ctx, &argument);
-size_t r = Ctx_allocate_register(ctx);
-registers[i] = r;
-BC(OP_STORE, r);
-}
-for (int i = len - 1; i >= 0; i--) {
-Ctx_free_register(ctx, registers[i]);
-}
-}
-
-BC(OP_ARGS,
-ENCODE_ARG_COUNT_AND_OFFSET(len, ctx->register_allocated_count));
-BC(OP_BUILTIN, idx);
-break;
-
-// TODO: outdated, needs to be ported:
+// TODO: outdated, needs to be ported !!!!!!!!
 
 if (b != 0) {
 switch (b) {
@@ -309,24 +280,27 @@ break;
 } else { // calling a builtin function thats not a compile time construct
 }
   }*/
-  case N_CALL: { // function call site (<name> <args>)
-    // TODO: distinguish between a user call and a runtime builtin call by
-    // checking if the hash of the ident is in the vm->builtins[<idx>] block
+  case N_CALL: { // function call site (<name|builtin> <args>)
     Str *name = &n->token->string;
     size_t len = n->children.len;
-    CtxFunction *func =
-        &ctx->hash_to_function[name->hash & MAX_BUILTIN_SIZE_MASK];
-    ASSERT(func->name.len != 0, "Undefined function `%.*s`", (int)name->len,
-           name->p)
-    ASSERT(len == func->argument_count, "`%.*s` wants %zu arguments, got %zu",
-           (int)func->name.len, func->name.p, func->argument_count, len);
+    size_t idx = name->hash & MAX_BUILTIN_SIZE_MASK;
 
-    // PERF: optimisation to remove calls to empty functions, since their
-    // definition is also removed
-    if (!func->size) {
-      DEBUG_PUTS("Removing call to empty `%.*s` function (size=%zu)",
-                 (int)func->name.len, func->name.p, func->size);
-      return;
+    builtin_function bf = vm->builtins[idx];
+    CtxFunction *func = NULL;
+    if (bf == NULL) {
+      func = &ctx->hash_to_function[idx];
+      ASSERT(func->name.len != 0, "Undefined function `%.*s`", (int)name->len,
+             name->p)
+      ASSERT(len == func->argument_count, "`%.*s` wants %zu arguments, got %zu",
+             (int)func->name.len, func->name.p, func->argument_count, len);
+
+      // PERF: optimisation to remove calls to empty functions, since their
+      // definition is also removed
+      if (!func->size) {
+        DEBUG_PUTS("Removing call to empty `%.*s` function (size=%zu)",
+                   (int)func->name.len, func->name.p, func->size);
+        return;
+      }
     }
 
     size_t children_length = len < 1 ? 1 : len;
@@ -346,7 +320,11 @@ break;
 
     BC(OP_ARGS,
        ENCODE_ARG_COUNT_AND_OFFSET(len, ctx->register_allocated_count));
-    BC(OP_CALL, func->bytecode_index);
+    if (bf == NULL) {
+      BC(OP_CALL, func->bytecode_index);
+    } else {
+      BC(OP_BUILTIN, idx);
+    }
     break;
   }
   case N_OBJECT: {

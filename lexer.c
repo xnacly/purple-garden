@@ -33,7 +33,7 @@ Str TOKEN_TYPE_MAP[] = {
     [T_EOF] = STRING("T_EOF"),
 };
 
-static Token *compiletime_hashes[MAX_BUILTIN_SIZE];
+static Token *compiletime_hashes[MAX_BUILTIN_SIZE] = {0};
 
 // we can "intern" these, since all of them are the same, regardless of position
 Token *INTERN_DELIMITOR_LEFT = &SINGLE_TOK(T_DELIMITOR_LEFT);
@@ -51,7 +51,7 @@ Token *INTERN_TRUE = &SINGLE_TOK(T_TRUE);
 Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
 Token *INTERN_VAR = &SINGLE_TOK(T_VAR);
 Token *INTERN_FN = &SINGLE_TOK(T_FN);
-Token *INTERN_MATCH = &SINGLE_TOK(T_FN);
+Token *INTERN_MATCH = &SINGLE_TOK(T_MATCH);
 Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 
 Lexer Lexer_new(Str input) {
@@ -219,17 +219,14 @@ ident: {
     hash *= FNV_PRIME;
   }
 
-  size_t len = l->pos - start;
-
   Token *tt = compiletime_hashes[hash & MAX_BUILTIN_SIZE_MASK];
 
   if (tt == NULL) {
-    Token *t = CALL(a, request, sizeof(Token));
-    *t = (Token){0};
-    t->type = T_IDENT;
-    t->string = (Str){
+    tt = CALL(a, request, sizeof(Token));
+    tt->type = T_IDENT;
+    tt->string = (Str){
         .p = l->input.p + start,
-        .len = len,
+        .len = l->pos - start,
         .hash = hash,
     };
   }
