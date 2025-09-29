@@ -24,13 +24,18 @@
   [1 2 3 4 5 6]
   ; different type lists
   [1 "hello" "world" true false]
+  ; indexing into lists
+  [161]/0 
+
 )
 
+
+
 ;; objects
-; (var obj { 'user-name "dummy" })
-; (println obj) ; { user-name: "dummy" }
-; (var obj/user-name "xnacly")
-; (println 
-;   obj ; { user-name: "xnacly" }
-;   obj/user-name ; "xnacly"
-; )
+(var obj { 'user-name "dummy" })
+(println obj) ; { user-name: "dummy" }
+(var obj/user-name "xnacly")
+(println 
+  obj ; { user-name: "xnacly" }
+  obj/user-name ; "xnacly"
+)

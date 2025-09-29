@@ -7,10 +7,10 @@
 static size_t call_depth = 0;
 #define TRACE(FUNC)                                                            \
   ({                                                                           \
-    call_depth++;                                                              \
-    printf("%*s -> " #FUNC "#%.*s\n", (int)call_depth, "",                     \
+    printf("%*s->" #FUNC "#%.*s\n", (int)call_depth, "",                       \
            (int)TOKEN_TYPE_MAP[p->cur->type].len,                              \
            TOKEN_TYPE_MAP[p->cur->type].p);                                    \
+    call_depth++;                                                              \
     Node __n = (FUNC)(p);                                                      \
     call_depth--;                                                              \
     __n;                                                                       \
@@ -51,6 +51,9 @@ typedef enum {
   N_BIN,
   // function call
   N_CALL,
+  // path to a namespace, object or array index, like std/fmt/println or
+  // std/os/env/USER
+  N_PATH,
 } NodeType;
 
 extern Str NODE_TYPE_MAP[];

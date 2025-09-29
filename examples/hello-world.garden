@@ -1,4 +1,6 @@
 ; vim: filetype=racket
 
 ; println is a predefined function responsible for writing to stdout 
-(println "Hello World")
+(assert (= [187]/0 187))
+(var x [0 0 161 0 0 ])
+(assert (= x/2 161))

@@ -10,6 +10,7 @@ Str NODE_TYPE_MAP[] = {
     [N_LIST] = STRING("N_LIST"),   [N_VAR] = STRING("N_VAR"),
     [N_FN] = STRING("N_FN"),       [N_MATCH] = STRING("N_MATCH"),
     [N_BIN] = STRING("N_BIN"),     [N_CALL] = STRING("N_CALL"),
+    [N_PATH] = STRING("N_PATH"),
 };
 
 Parser Parser_new(Allocator *alloc, Lexer *l) {
@@ -23,8 +24,8 @@ Parser Parser_new(Allocator *alloc, Lexer *l) {
 
 static inline void advance(Parser *p) {
 #if DEBUG
-  // Token_debug(p->cur);
-  // puts("");
+  Token_debug(p->cur);
+  puts("");
 #endif
   p->pos++;
   p->cur = Lexer_next(p->lexer, p->alloc);
@@ -172,6 +173,31 @@ Node Parser_stmt(Parser *p) {
 
 Node Parser_next(Parser *p) {
   switch (p->cur->type) {
+  case T_SLASH: {
+    Node path = NODE_NEW(N_PATH, p->cur);
+    advance(p);
+
+    while (p->cur->type != T_EOF) {
+      if (p->cur->type == T_IDENT) {
+        Node path_ident = (Node){.type = N_IDENT, .token = p->cur};
+        LIST_append(&path.children, p->alloc, path_ident);
+      } else if (p->cur->type == T_INTEGER) {
+        Node atom = (Node){.type = N_ATOM, .token = p->cur};
+        LIST_append(&path.children, p->alloc, atom);
+      } else {
+        // TODO: error handling
+        ASSERT(0, "Want IDENT or INTEGER in path")
+      }
+
+      advance(p);
+      if (p->cur->type != T_SLASH) {
+        break;
+      }
+      consume(p, T_SLASH);
+    }
+
+    return path;
+  }
   case T_IDENT:
   case T_DOUBLE:
   case T_INTEGER:

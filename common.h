@@ -40,8 +40,8 @@
     exit(EXIT_FAILURE);                                                        \
   }
 
-#define TODO(fmt, ...)                                                         \
-  fprintf(stderr, "TODO: " fmt " failed in " __FILE__ ":%d\n", ##__VA_ARGS__,  \
+#define TODO(MSG)                                                              \
+  fprintf(stderr, "TODO: %s in %s %s:%d\n", MSG, __func__, __FILE__,           \
           __LINE__);                                                           \
   exit(EXIT_FAILURE);
 
