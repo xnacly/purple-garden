@@ -2,6 +2,8 @@
 #include "adts.h"
 #include "common.h"
 
+// TODO: port this to the exception system once its implemented
+
 static void print_value(const Value *v) {
   if (v->is_some) {
     printf("Option/Some(");
@@ -67,7 +69,7 @@ void builtin_println(Vm *vm) {
 }
 
 void builtin_len(Vm *vm) {
-  ASSERT(vm->arg_count == 1, "@len only works for a singular argument")
+  ASSERT(vm->arg_count == 1, "len only works for a singular argument")
   const Value *a = &ARG(0);
   size_t len = 0;
   if (a->type == V_STR) {
@@ -78,7 +80,7 @@ void builtin_len(Vm *vm) {
     len = a->obj.size;
   }*/
   else {
-    fputs("@len only strings and lists have a length", stderr);
+    fputs("len only strings and lists have a length", stderr);
     exit(EXIT_FAILURE);
   }
 
@@ -96,7 +98,7 @@ static const Str *OBJ = &STRING("obj");
 static const Str *ARR = &STRING("array");
 
 void builtin_type(Vm *vm) {
-  ASSERT(vm->arg_count == 1, "@type only works for a singular argument")
+  ASSERT(vm->arg_count == 1, "type only works for a singular argument")
   uint16_t offset = vm->arg_offset;
   const Str *s;
   const Value *a = &ARG(0);
@@ -125,7 +127,7 @@ void builtin_type(Vm *vm) {
       s = OBJ;
       break;
     default:
-      fputs("@type internal error: unknown value type", stderr);
+      fputs("type internal error: unknown value type", stderr);
       exit(EXIT_FAILURE);
       break;
     }
@@ -138,8 +140,16 @@ void builtin_type(Vm *vm) {
 }
 
 void builtin_Some(Vm *vm) {
-  ASSERT(vm->arg_count == 1, "@Some only works for a singular argument")
+  ASSERT(vm->arg_count == 1, "Some only works for a singular argument")
   Value inner = ARG(0);
   inner.is_some = true;
   RETURN(inner);
+}
+
+void builtin_None(Vm *vm) { RETURN(*INTERNED_NONE); }
+
+void builtin_assert(Vm *vm) {
+  ASSERT(vm->arg_count == 1, "assert can't compare nothing")
+  Value v = ARG(0);
+  ASSERT(v.type = V_TRUE, "Assertion failed");
 }

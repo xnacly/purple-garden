@@ -8,7 +8,7 @@ static size_t call_depth = 0;
 #define TRACE(FUNC)                                                            \
   ({                                                                           \
     call_depth++;                                                              \
-    printf("%*s -> " #FUNC "#%.*s\n", (int)call_depth * 2, "",                 \
+    printf("%*s -> " #FUNC "#%.*s\n", (int)call_depth, "",                     \
            (int)TOKEN_TYPE_MAP[p->cur->type].len,                              \
            TOKEN_TYPE_MAP[p->cur->type].p);                                    \
     Node __n = (FUNC)(p);                                                      \

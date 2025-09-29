@@ -150,29 +150,29 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     break;
   }
   case N_VAR: {
-    Token *name = LIST_get(&n->children, 0).token;
-    size_t hash = name->string.hash & VARIABLE_TABLE_SIZE_MASK;
-    Node value = LIST_get(&n->children, 1);
+    size_t hash = n->token->string.hash & VARIABLE_TABLE_SIZE_MASK;
+    Node value = LIST_get_UNSAFE(&n->children, 0);
     compile(alloc, vm, ctx, &value);
     BC(OP_VAR, hash);
     break;
   }
-  case N_FN: { // (@fn <name> [<args>] <s-expr's>)
-    size_t len = n->children.len;
-    Str name = LIST_get(&n->children, 0).token->string;
+  case N_FN: { // (fn <name> [<args>] <s-expr's>)
+    Str name = n->token->string;
     size_t hash = name.hash & MAX_BUILTIN_SIZE_MASK;
-    LIST_Node params = LIST_get(&n->children, 1).children;
-    size_t param_len = params.len;
+    LIST_Node params = LIST_get_UNSAFE(&n->children, 0).children;
 
     CtxFunction function_ctx = {
         .name = name,
         .bytecode_index = BC_LEN,
-        .argument_count = param_len,
+        .argument_count = params.len,
+        // placeholder so recursive self calls arent optimised away due to
+        // function size checks
+        .size = 0xAFFEDEAD,
     };
     ctx->hash_to_function[hash] = function_ctx;
 
     // PERF: optimisation for removing empty functions
-    if (len == 2) {
+    if (n->children.len == 1) {
       DEBUG_PUTS("Removing body of empty `%.*s` function",
                  (int)function_ctx.name.len, function_ctx.name.p);
       return;
@@ -191,8 +191,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     // registers  = rn1 rn2 rn3
     // parameters = [ a  b  c]
     // arguments  = [ 1  2  3]
-    for (size_t i = 0; i < param_len; i++) {
-      Node param = LIST_get(&params, i);
+    for (size_t i = 0; i < params.len; i++) {
+      Node param = LIST_get_UNSAFE(&params, i);
       // PERF: changing args to start from r1 to starting from r0,
       // thus saving a single OP_LOAD for each function invocation
       BC(OP_LOAD, i + 1);
@@ -201,11 +201,11 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     // compiling the body, returning a value is free since its just in
     // r0
-    if (len > 2) {
-      for (size_t i = 2; i < len; i++) {
+    if (n->children.len > 1) {
+      for (size_t i = 1; i < n->children.len; i++) {
         // PERF: if last Node is N_CALL think about reusing call
         // frames (TCO)
-        Node body_expr = LIST_get(&n->children, i);
+        Node body_expr = LIST_get_UNSAFE(&n->children, i);
         compile(alloc, vm, ctx, &body_expr);
       }
     }
@@ -325,6 +325,7 @@ break;
     } else {
       BC(OP_BUILTIN, idx);
     }
+
     break;
   }
   case N_OBJECT: {

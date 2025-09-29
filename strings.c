@@ -57,7 +57,7 @@ inline uint64_t Str_hash(const Str *str) {
   // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV_hash_parameters
   uint64_t hash = FNV_OFFSET_BASIS;
   for (size_t i = 0; i < str->len; i++) {
-    hash ^= str->p[i];
+    hash ^= (uint64_t)str->p[i];
     hash *= FNV_PRIME;
   }
 

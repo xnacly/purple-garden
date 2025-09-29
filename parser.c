@@ -32,13 +32,12 @@ static inline void advance(Parser *p) {
 
 // TODO: add custom error message here
 static inline Token *consume(Parser *p, TokenType tt) {
-  ASSERT(p->cur != NULL, "NULLPOINTER");
   if (p->cur->type != tt) {
     printf("Unexpected Token %.*s, wanted %.*s\n",
            (int)TOKEN_TYPE_MAP[p->cur->type].len,
            TOKEN_TYPE_MAP[p->cur->type].p, (int)TOKEN_TYPE_MAP[tt].len,
            TOKEN_TYPE_MAP[tt].p);
-    ASSERT(0, "");
+    ASSERT(0, "Unexpected Token");
   }
   Token *last = p->cur;
   advance(p);
@@ -91,13 +90,8 @@ Node Parser_obj(Parser *p) {
 }
 
 Node Parser_array(Parser *p) {
+  Node array = NODE_NEW(N_ARRAY, p->cur);
   consume(p, T_BRAKET_LEFT);
-
-  Node array = (Node){
-      .type = N_ARRAY,
-      .token = p->cur,
-      .children = LIST_new(Node),
-  };
 
   while (p->cur->type != T_EOF && p->cur->type != T_BRAKET_RIGHT) {
     Node n = TRACE(Parser_next);
@@ -121,12 +115,29 @@ Node Parser_stmt(Parser *p) {
   Node stmt;
 
   switch (p->cur->type) {
-  case T_VAR: {
-    Node var = NODE_NEW(N_VAR, p->cur);
-    advance(p);
+  case T_VAR: { // (var <ident> <rhs>)
+    consume(p, T_VAR);
     Token *ident = consume(p, T_IDENT);
-    Node value = Parser_next(p);
-    LIST_append(&var.children, p->alloc, value);
+    stmt = NODE_NEW(N_VAR, ident);
+    Node rhs = TRACE(Parser_next);
+    LIST_append(&stmt.children, p->alloc, rhs);
+    break;
+  }
+  case T_MATCH: {
+    TODO("Unimplemented");
+  }
+  case T_FN: { // (fn <name> [<args>] <s-expr's>)
+    consume(p, T_FN);
+    Token *ident = consume(p, T_IDENT);
+    stmt = NODE_NEW(N_FN, ident);
+
+    Node params = TRACE(Parser_array);
+    LIST_append(&stmt.children, p->alloc, params);
+
+    while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
+      Node body_part = TRACE(Parser_next);
+      LIST_append(&stmt.children, p->alloc, body_part);
+    }
     break;
   }
   case T_IDENT:
@@ -180,7 +191,12 @@ Node Parser_next(Parser *p) {
     return n;
   default:
     // TODO: error handling:
-    ASSERT(0, "EDGE CASE")
+    ASSERT(0,
+           "Unexpected Token %.*s, wanted any of: IDENT, DOUBLE, "
+           "INTEGER, STRING, TRUE, FALSE, DELIMITOR_LEFT, "
+           "BRAKELEFT, CURLY_LEFT",
+           (int)TOKEN_TYPE_MAP[p->cur->type].len,
+           TOKEN_TYPE_MAP[p->cur->type].p)
   };
 }
 
@@ -196,6 +212,9 @@ void Node_debug(const Node *n, size_t depth) {
     Str_debug(&NODE_TYPE_MAP[n->type]);
   }
   switch (n->type) {
+  case N_VAR:
+    Token_debug(n->token);
+    break;
   case N_IDENT:
     Token_debug(n->token);
     printf("{idx=%lu}", n->token->string.hash & VARIABLE_TABLE_SIZE_MASK);

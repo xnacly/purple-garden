@@ -4,10 +4,11 @@ purple_garden is a lean lisp, designed and implemented with a focus on
 performance
 
 ```racket
-(@fn greeting [greetee] 
-    (@println "hello world to:" greetee))
-; prints `hello world to: user`
-(greeting "user")
+(fn greeting [greetee] (println "hello world to:" greetee))
+(greeting "teo") ; hello world to: user
+
+(fn tuplify [v] [(type v) (len v)])
+(println (tuplify "hello world")) ; [str, 11]
 ```
 
 ## Local Setup
@@ -32,7 +33,7 @@ make
 # 
 # ; @println is a predefined function responsible for writing to stdout
 # ; builtins are specifically called via @<builtin>
-# (@println "Hello World")
+# (println "Hello World")
 # vmnew: 8.00KB of 25.00KB used (32.000000%)
 # [T_DELIMITOR_LEFT]
 # [T_BUILTIN][println]{.hash=8602815819212105030}
@@ -133,47 +134,45 @@ $ ./purple_garden +h
 
 ```sh
 $ make test
-# [+][PASS][Case 1/40] in=`(@test_return 3.1415)`
-# [+][PASS][Case 2/40] in=`(@test_return 0.1415)`
-# [+][PASS][Case 3/40] in=`(@test_return "string")`
-# [+][PASS][Case 4/40] in=`(@test_return 'quoted)`
-# [+][PASS][Case 5/40] in=`(@test_return false)`
-# [+][PASS][Case 6/40] in=`(@test_return true)(@test_return false)(@test_return false)`
-# [+][PASS][Case 7/40] in=`(@test_return "hello")`
-# [+][PASS][Case 8/40] in=`(+2 2)`
-# [+][PASS][Case 9/40] in=`(-5 3)`
-# [+][PASS][Case 10/40] in=`(*3 4)`
-# [+][PASS][Case 11/40] in=`(/ 6 2)`
-# [+][PASS][Case 12/40] in=`(+1(-2 1))`
-# [+][PASS][Case 13/40] in=`(+2.0 2)`
-# [+][PASS][Case 14/40] in=`(+2 2.0)`
-# [+][PASS][Case 15/40] in=`(-5.0 3)`
-# [+][PASS][Case 16/40] in=`(-5 3.0)`
-# [+][PASS][Case 17/40] in=`(*3.0 4)`
-# [+][PASS][Case 18/40] in=`(*3 4.0)`
-# [+][PASS][Case 19/40] in=`(/ 6.0 2)`
-# [+][PASS][Case 20/40] in=`(/ 6 2.0)`
-# [+][PASS][Case 21/40] in=`(@len "hello")`
-# [+][PASS][Case 22/40] in=`(@len "hello")(@len "hello")`
-# [+][PASS][Case 23/40] in=`(@len "")`
-# [+][PASS][Case 24/40] in=`(@len "a")`
-# [+][PASS][Case 25/40] in=`(= 1 1)`
-# [+][PASS][Case 26/40] in=`(= "abc" "abc")`
-# [+][PASS][Case 27/40] in=`(= 3.1415 3.1415)`
-# [+][PASS][Case 28/40] in=`(= true true)`
-# [+][PASS][Case 29/40] in=`(= true false)`
-# [+][PASS][Case 30/40] in=`(= false false)`
-# [+][PASS][Case 31/40] in=`(@let name "user")(@test_return name)`
-# [+][PASS][Case 32/40] in=`(@let age 25)(@test_return age)`
-# [+][PASS][Case 33/40] in=`(@fn ret[arg] arg)(ret 25)`
-# [+][PASS][Case 34/40] in=`(@fn add25[arg](+arg 25))(add25 25)`
-# [+][PASS][Case 35/40] in=`(@assert true)`
-# [+][PASS][Case 36/40] in=`(@None)`
-# [+][PASS][Case 37/40] in=`(@Some true)`
-# [+][PASS][Case 38/40] in=`(@Some false)`
-# [+][PASS][Case 39/40] in=`(@match true)`
-# [+][PASS][Case 40/40] in=`(@match false)`
-# [=] 40/40 passed, 0 failed
+# [+][PASS][Case 1/38] in=`(test_return 3.1415)`
+# [+][PASS][Case 2/38] in=`(test_return 0.1415)`
+# [+][PASS][Case 3/38] in=`(test_return "string")`
+# [+][PASS][Case 4/38] in=`(test_return 'quoted)`
+# [+][PASS][Case 5/38] in=`(test_return false)`
+# [+][PASS][Case 6/38] in=`(test_return true)(test_return false)(test_return false)`
+# [+][PASS][Case 7/38] in=`(test_return "hello")`
+# [+][PASS][Case 8/38] in=`(+2 2)`
+# [+][PASS][Case 9/38] in=`(-5 3)`
+# [+][PASS][Case 10/38] in=`(*3 4)`
+# [+][PASS][Case 11/38] in=`(/ 6 2)`
+# [+][PASS][Case 12/38] in=`(+1(-2 1))`
+# [+][PASS][Case 13/38] in=`(+2.0 2)`
+# [+][PASS][Case 14/38] in=`(+2 2.0)`
+# [+][PASS][Case 15/38] in=`(-5.0 3)`
+# [+][PASS][Case 16/38] in=`(-5 3.0)`
+# [+][PASS][Case 17/38] in=`(*3.0 4)`
+# [+][PASS][Case 18/38] in=`(*3 4.0)`
+# [+][PASS][Case 19/38] in=`(/ 6.0 2)`
+# [+][PASS][Case 20/38] in=`(/ 6 2.0)`
+# [+][PASS][Case 21/38] in=`(len "hello")`
+# [+][PASS][Case 22/38] in=`(len "hello")(len "hello")`
+# [+][PASS][Case 23/38] in=`(len "")`
+# [+][PASS][Case 24/38] in=`(len "a")`
+# [+][PASS][Case 25/38] in=`(= 1 1)`
+# [+][PASS][Case 26/38] in=`(= "abc" "abc")`
+# [+][PASS][Case 27/38] in=`(= 3.1415 3.1415)`
+# [+][PASS][Case 28/38] in=`(= true true)`
+# [+][PASS][Case 29/38] in=`(= true false)`
+# [+][PASS][Case 30/38] in=`(= false false)`
+# [+][PASS][Case 31/38] in=`(var name "user")(test_return name)`
+# [+][PASS][Case 32/38] in=`(var age 25)(test_return age)`
+# [+][PASS][Case 33/38] in=`(fn ret[arg] arg)(ret 25)`
+# [+][PASS][Case 34/38] in=`(fn add25[arg](+arg 25))(add25 25)`
+# [+][PASS][Case 35/38] in=`(assert true)`
+# [+][PASS][Case 36/38] in=`(None)`
+# [+][PASS][Case 37/38] in=`(Some true)`
+# [+][PASS][Case 38/38] in=`(Some false)`
+# [=] 38/38 passed, 0 failed
 ```
 
 
@@ -271,7 +270,7 @@ The disassembler attempts to display as much information as possible:
 - elements of the global pool, their pool index and their hashes
 - readable bytecode names: `LOAD` and `BUILTIN` instead of `0` and `6`
 - global pool values for certain bytecode operators: ```global=Str(`Hello World`)```
-- names for builtin calls: `builtin=@println`
+- names for builtin calls: `builtin=println`
 - labels for function definitions `<function>:` and branching `if:`, `then:`, `match:`, `default:`
 - names for arguments, functions and variabels
 
@@ -287,8 +286,8 @@ $ wc -l examples/bench.garden
 > This benchmark example is for optimizing tail calls, builtin dispatch and match performance:
 
 ```racket
-(@fn comparer [a b] (@match ((= a b) (@assert (= a b)))))
-(@fn inc [a] (comparer a a))
+(fn comparer [a b] (= a b))
+(fn inc [a] (comparer a a))
 (inc 2.5)
 (inc 2.5)
 (inc 2.5)
@@ -338,7 +337,7 @@ $ make profile
   - [x] booleans
   - [x] lists
   - [x] optionals (support in backend - compiler, vm)
-  - [ ] objects
+  - [x] objects
 - [ ] language constructs
   - [x] variables
   - [x] match

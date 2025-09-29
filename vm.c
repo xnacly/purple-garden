@@ -45,6 +45,8 @@ Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
     Vm_register_builtin(&vm, builtin_len, STRING("len"));
     Vm_register_builtin(&vm, builtin_type, STRING("type"));
     Vm_register_builtin(&vm, builtin_Some, STRING("Some"));
+    Vm_register_builtin(&vm, builtin_assert, STRING("assert"));
+    Vm_register_builtin(&vm, builtin_None, STRING("None"));
   }
 
   return vm;
@@ -70,10 +72,6 @@ void freelist_preallocate(FrameFreeList *fl) {
     fl->head = frame;
   }
 }
-
-#if DEBUG
-static uint64_t frame_count = 1;
-#endif
 
 void freelist_push(FrameFreeList *fl, Frame *frame) {
   frame->prev = fl->head;
