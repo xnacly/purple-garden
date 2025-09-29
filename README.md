@@ -301,20 +301,20 @@ notated between `[` and `]`.
 # built in time measurements
 $ make bench PG=examples/bench.garden
 # [    0.0000ms] main::Args_parse: Parsed arguments
-# [    0.0070ms] io::IO_read_file_to_string: mmaped input of size=2500087B
-# [    0.0020ms] mem::init: Allocated memory block of size=25600B
-# [   53.0570ms] cc::cc: Flattened AST to byte code/global pool length=2000052/4 (8000208B/64B)
-# [   18.7470ms] vm::Vm_run: executed byte code
-# [    2.3230ms] mem::Allocator::destroy: Deallocated memory space
-# [    0.0000ms] vm::Vm_destroy: teared vm down
-# [    0.0000ms] munmap: unmapped inpu
+# [    0.0100ms] io::IO_read_file_to_string: mmaped input of size=2500066B
+# [    0.0030ms] mem::init: Allocated memory block of size=24832B
+# [   83.3970ms] cc::cc: Flattened AST to byte code/global pool length=2000048/4 (8000192B/64B)
+# [    9.3620ms] vm::Vm_run: executed byte code
+# [   12.0180ms] mem::Allocator::destroy: Deallocated memory space
+# [    0.0010ms] vm::Vm_destroy: teared vm down
+# [    0.0000ms] munmap: unmapped input
 
 # or hyperfine
 $ make release
-$ hyperfine "./purple_garden examples/bench.garden"
+$ hyperfine "./build/purple_garden examples/bench.garden"
 # Benchmark 1: ./build/purple_garden examples/bench.garden
-#   Time (mean ± σ):      70.8 ms ±   2.2 ms    [User: 38.8 ms, System: 31.4 ms]
-#   Range (min … max):    68.4 ms …  81.5 ms    41 runs
+#   Time (mean ± σ):     102.3 ms ±   4.6 ms    [User: 29.9 ms, System: 71.8 ms]
+#   Range (min … max):    94.8 ms … 113.8 ms    27 runs
 ```
 
 ### Profiling
