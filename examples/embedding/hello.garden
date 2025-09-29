@@ -1,9 +1,9 @@
 ; vim: filetype=scheme
 
 ; println is a predefined alias for @std/fmt/println
-(@println 
+(println 
     ; dbg is the builtin registered in main.c
-    (@dbg 
+    (dbg 
       "hello" "world" 
       3.1415 
       true false 
