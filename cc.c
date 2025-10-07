@@ -173,6 +173,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     // PERF: optimisation for removing empty functions
     if (n->children.len == 1) {
+      // set 0 so the call is also removed
+      ctx->hash_to_function[hash].size = 0;
       DEBUG_PUTS("Removing body of empty `%.*s` function",
                  (int)function_ctx.name.len, function_ctx.name.p);
       return;

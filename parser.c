@@ -238,13 +238,16 @@ void Node_debug(const Node *n, size_t depth) {
     Str_debug(&NODE_TYPE_MAP[n->type]);
   }
   switch (n->type) {
-  case N_VAR:
-    Token_debug(n->token);
-    break;
   case N_IDENT:
     Token_debug(n->token);
     printf("{idx=%lu}", n->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
     break;
+  case N_FN:
+    printf("[");
+    Str_debug(&n->token->string);
+    printf("]");
+    break;
+  case N_VAR:
   case N_ATOM:
   case N_BIN:
     Token_debug(n->token);
