@@ -1,5 +1,5 @@
 ; vim: filetype=racket
-(@let str "hi")
-(@let number 12)
-(@let bool true)
-(@println str number bool)
+(var str "hi")
+(var number 12)
+(var bool true)
+(println str number bool)

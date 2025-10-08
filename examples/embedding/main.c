@@ -1,6 +1,8 @@
 // Obviously we need to access types from the pg runtime
 #include "../../pg.h"
 
+static const Str *HELLO_STR = &STRING("hello from the embedding context");
+
 // Each builtin gets a mutable reference to the the vm state, from this the
 // builtin can access data like the current registers, argument count, other
 // builtins, the bytecode, the callframe, the allocator, etc. This is defined in
@@ -18,15 +20,17 @@ void builtin_dbg(Vm *vm) {
   }
 
   // RETURN puts its inner value into the return register of the virtual machine
-  RETURN((Value){.type = V_STR,
-                 .string = &STRING("hello from the embedding context")});
+  RETURN((Value){.type = V_STR, .string = HELLO_STR});
 }
 
 int main(void) {
   // pg can be configured by Vm_Config, there are options available like
   // disabling the garbage collector, limiting the memory usage, etc.
   Vm_Config vm_config = {
-      .max_memory = MIN_MEM * 100,
+      .max_memory = MIN_MEM * 2,
+      .disable_std_namespace = true,
+      .disable_gc = true,
+      .remove_default_builtins = false,
   };
 
   // creates the purple garden context and the virtual machine
@@ -34,7 +38,7 @@ int main(void) {
 
   // register a builtin function in the pg context with the name 'dbg' and
   // taking the pointer to 'builtin_dbg'; The vm will invoke this pointer upon
-  // encountering a builtin called '@dbg' in the source code
+  // encountering a builtin called 'dbg' in the source code
   PG_REGISTER_BUILTIN(&pg, "dbg", builtin_dbg);
 
   // pg will map 'hello.garden' into memory and begin the execution pipeline,

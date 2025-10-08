@@ -9,68 +9,31 @@
 
 #define SINGLE_TOK(t) ((Token){.type = t})
 
-Str TOKEN_TYPE_MAP[] = {[T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
-                        [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
-                        [T_BRAKET_LEFT] = STRING("T_BRAKET_LEFT"),
-                        [T_BRAKET_RIGHT] = STRING("T_BRAKET_RIGHT"),
-                        [T_CURLY_LEFT] = STRING("T_CURLY_LEFT"),
-                        [T_CURLY_RIGHT] = STRING("T_CURLY_RIGHT"),
-                        [T_STRING] = STRING("T_STRING"),
-                        [T_TRUE] = STRING("T_TRUE"),
-                        [T_FALSE] = STRING("T_FALSE"),
-                        [T_DOUBLE] = STRING("T_DOUBLE"),
-                        [T_INTEGER] = STRING("T_INTEGER"),
-                        [T_BUILTIN] = STRING("T_BUILTIN"),
-                        [T_IDENT] = STRING("T_IDENT"),
-                        [T_PLUS] = STRING("T_PLUS"),
-                        [T_MINUS] = STRING("T_MINUS"),
-                        [T_ASTERISKS] = STRING("T_ASTERISKS"),
-                        [T_SLASH] = STRING("T_SLASH"),
-                        [T_EQUAL] = STRING("T_EQUAL"),
-                        [T_EOF] = STRING("T_EOF")};
+Str TOKEN_TYPE_MAP[] = {
+    [T_DELIMITOR_LEFT] = STRING("T_DELIMITOR_LEFT"),
+    [T_PLUS] = STRING("T_PLUS"),
+    [T_MINUS] = STRING("T_MINUS"),
+    [T_ASTERISKS] = STRING("T_ASTERISKS"),
+    [T_SLASH] = STRING("T_SLASH"),
+    [T_EQUAL] = STRING("T_EQUAL"),
+    [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
+    [T_BRAKET_LEFT] = STRING("T_BRAKET_LEFT"),
+    [T_BRAKET_RIGHT] = STRING("T_BRAKET_RIGHT"),
+    [T_CURLY_LEFT] = STRING("T_CURLY_LEFT"),
+    [T_CURLY_RIGHT] = STRING("T_CURLY_RIGHT"),
+    [T_STRING] = STRING("T_STRING"),
+    [T_TRUE] = STRING("T_TRUE"),
+    [T_FALSE] = STRING("T_FALSE"),
+    [T_DOUBLE] = STRING("T_DOUBLE"),
+    [T_INTEGER] = STRING("T_INTEGER"),
+    [T_VAR] = STRING("T_VAR"),
+    [T_FN] = STRING("T_FN"),
+    [T_MATCH] = STRING("T_MATCH"),
+    [T_IDENT] = STRING("T_IDENT"),
+    [T_EOF] = STRING("T_EOF"),
+};
 
-#if DEBUG
-void Token_debug(Token *token) {
-  ASSERT(token != NULL, "NULL token!");
-  ASSERT(token->type <= T_EOF, "Out of bounds type, SHOULD NEVER HAPPEN");
-  printf("[");
-  Str_debug(&TOKEN_TYPE_MAP[token->type]);
-  putc(']', stdout);
-  switch (token->type) {
-  case T_DOUBLE:
-  case T_INTEGER:
-  case T_STRING:
-  case T_BUILTIN:
-  case T_IDENT:
-    putc('[', stdout);
-    Str_debug(&token->string);
-    printf("]{.hash=%lu}", token->string.hash);
-    break;
-  case T_TRUE:
-  case T_FALSE:
-  default:
-    break;
-  }
-}
-#endif
-
-Lexer Lexer_new(Str input) {
-  return (Lexer){
-      .input = input,
-      .pos = 0,
-      .true_hash = Str_hash(&STRING("true")),
-      .false_hash = Str_hash(&STRING("false")),
-  };
-}
-
-#define cur(L) (L->input.p[L->pos])
-
-__attribute__((always_inline)) inline static bool is_alphanum(uint8_t cc) {
-  uint8_t lower = cc | 0x20;
-  bool is_alpha = (lower >= 'a' && lower <= 'z');
-  bool is_digit = (cc >= '0' && cc <= '9');
-  return is_alpha || is_digit || cc == '_' || cc == '-';
-}
+static Token *compiletime_hashes[MAX_BUILTIN_SIZE] = {0};
 
 // we can "intern" these, since all of them are the same, regardless of position
 Token *INTERN_DELIMITOR_LEFT = &SINGLE_TOK(T_DELIMITOR_LEFT);
@@ -86,7 +49,41 @@ Token *INTERN_SLASH = &SINGLE_TOK(T_SLASH);
 Token *INTERN_FALSE = &SINGLE_TOK(T_FALSE);
 Token *INTERN_TRUE = &SINGLE_TOK(T_TRUE);
 Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
+Token *INTERN_VAR = &SINGLE_TOK(T_VAR);
+Token *INTERN_FN = &SINGLE_TOK(T_FN);
+Token *INTERN_MATCH = &SINGLE_TOK(T_MATCH);
 Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
+
+Lexer Lexer_new(Str input) {
+  compiletime_hashes[Str_hash(&STRING("var")) & MAX_BUILTIN_SIZE_MASK] =
+      INTERN_VAR;
+  compiletime_hashes[Str_hash(&STRING("match")) & MAX_BUILTIN_SIZE_MASK] =
+      INTERN_MATCH;
+  compiletime_hashes[Str_hash(&STRING("fn")) & MAX_BUILTIN_SIZE_MASK] =
+      INTERN_FN;
+  compiletime_hashes[Str_hash(&STRING("true")) & MAX_BUILTIN_SIZE_MASK] =
+      INTERN_TRUE;
+  compiletime_hashes[Str_hash(&STRING("false")) & MAX_BUILTIN_SIZE_MASK] =
+      INTERN_FALSE;
+
+  return (Lexer){
+      .input = input,
+      .pos = 0,
+  };
+}
+
+#define cur(L) (L->input.p[L->pos])
+
+// this whole block makes is_alphanum zero branch and as fast as possible
+static const bool is_alphanum_table[256] = {['0' ... '9'] = true,
+                                            ['A' ... 'Z'] = true,
+                                            ['a' ... 'z'] = true,
+                                            ['_'] = true,
+                                            ['-'] = true};
+
+__attribute__((always_inline)) inline static bool is_alphanum(uint8_t cc) {
+  return is_alphanum_table[cc];
+}
 
 // TODO: lexer needs a hash based string and ident interning model, the current
 // falls apart after around 1 mio identifiers
@@ -110,7 +107,6 @@ Token *Lexer_next(Lexer *l, Allocator *a) {
       [';'] = &&comment,
       ['('] = &&delimitor_left,
       [')'] = &&delimitor_right,
-      ['@'] = &&builtin,
       ['.'] = &&number,
       ['0' ... '9'] = &&number,
       ['a' ... 'z'] = &&ident,
@@ -159,31 +155,6 @@ curly_right:
   l->pos++;
   return INTERN_CURLY_RIGHT;
 
-builtin: {
-  l->pos++;
-  // not an ident after @, this is shit
-  if (!is_alphanum(cur(l))) {
-    return INTERN_EOF;
-  }
-  size_t start = l->pos;
-  uint64_t hash = FNV_OFFSET_BASIS;
-  for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
-    hash ^= cc;
-    hash *= FNV_PRIME;
-  }
-
-  size_t len = l->pos - start;
-  Str s = (Str){
-      .p = l->input.p + start,
-      .len = len,
-      .hash = hash,
-  };
-  Token *b = CALL(a, request, sizeof(Token));
-  b->string = s;
-  b->type = T_BUILTIN;
-  return b;
-}
-
 plus:
   l->pos++;
   return INTERN_PLUS;
@@ -225,6 +196,7 @@ number: {
 
   l->pos = i;
   Token *n = CALL(a, request, sizeof(Token));
+  *n = (Token){0};
   n->string = (Str){
       .p = l->input.p + start,
       .len = i - start,
@@ -247,23 +219,19 @@ ident: {
     hash *= FNV_PRIME;
   }
 
-  size_t len = l->pos - start;
+  Token *tt = compiletime_hashes[hash & MAX_BUILTIN_SIZE_MASK];
 
-  if (hash == l->true_hash) {
-    return INTERN_TRUE;
-  } else if (hash == l->false_hash) {
-    return INTERN_FALSE;
-  } else {
-    Token *t = CALL(a, request, sizeof(Token));
-    t->type = T_IDENT;
-    t->string = (Str){
+  if (tt == NULL) {
+    tt = CALL(a, request, sizeof(Token));
+    tt->type = T_IDENT;
+    tt->string = (Str){
         .p = l->input.p + start,
-        .len = len,
+        .len = l->pos - start,
         .hash = hash,
     };
-
-    return t;
   }
+
+  return tt;
 }
 
 // same as string but only with leading '
@@ -278,8 +246,8 @@ quoted: {
   }
 
   size_t len = l->pos - start;
-  Token *t;
-  t = CALL(a, request, sizeof(Token));
+  Token *t = CALL(a, request, sizeof(Token));
+  *t = (Token){0};
   t->type = T_STRING;
   t->string = (Str){
       .p = l->input.p + start,
@@ -306,6 +274,7 @@ string: {
     return INTERN_EOF;
   } else {
     Token *t = CALL(a, request, sizeof(Token));
+    *t = (Token){0};
     t->type = T_STRING;
     t->string = (Str){
         .p = l->input.p + start,
@@ -337,3 +306,30 @@ end:
 }
 
 #undef SINGLE_TOK
+
+#if DEBUG
+void Token_debug(Token *token) {
+  if (token == NULL) {
+    printf("<UNKOWN_TOKEN>");
+    return;
+  }
+  printf("[");
+  Str_debug(&TOKEN_TYPE_MAP[token->type]);
+  putc(']', stdout);
+  switch (token->type) {
+  case T_DOUBLE:
+  case T_INTEGER:
+  case T_STRING:
+  case T_BUILTIN:
+  case T_IDENT:
+    putc('[', stdout);
+    Str_debug(&token->string);
+    printf("]{.hash=%lu}", token->string.hash);
+    break;
+  case T_TRUE:
+  case T_FALSE:
+  default:
+    break;
+  }
+}
+#endif

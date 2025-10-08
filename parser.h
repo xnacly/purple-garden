@@ -3,12 +3,30 @@
 #include "lexer.h"
 #include "mem.h"
 
-typedef struct {
-  Allocator *alloc;
-  Lexer *lexer;
-  size_t pos;
-  Token *cur;
-} Parser;
+#if DEBUG
+static size_t call_depth = 0;
+#define TRACE(FUNC)                                                            \
+  ({                                                                           \
+    printf("%*s->" #FUNC "#%.*s\n", (int)call_depth, "",                       \
+           (int)TOKEN_TYPE_MAP[p->cur->type].len,                              \
+           TOKEN_TYPE_MAP[p->cur->type].p);                                    \
+    call_depth++;                                                              \
+    Node __n = (FUNC)(p);                                                      \
+    call_depth--;                                                              \
+    __n;                                                                       \
+  })
+#else
+#define TRACE(FUNC) FUNC(p)
+#endif
+
+#define NODE_NEW(TYPE, TOKEN)                                                  \
+  ({                                                                           \
+    Node __n = {0};                                                            \
+    __n.type = TYPE;                                                           \
+    __n.token = TOKEN;                                                         \
+    __n.children = LIST_new(Node);                                             \
+    __n;                                                                       \
+  })
 
 typedef enum {
   // error case
@@ -23,14 +41,19 @@ typedef enum {
   N_OBJECT,
   // main data structure
   N_LIST,
-  // builtins, like @println, @len, @let, @function, etc
-  N_BUILTIN,
+  // creating variables
+  N_VAR,
+  // defining functions
+  N_FN,
+  // conditional logic
+  N_MATCH,
   // operator, like +-*/%=
   N_BIN,
   // function call
   N_CALL,
-  // root node
-  N_ROOT,
+  // path to a namespace, object or array index, like std/fmt/println or
+  // std/os/env/USER
+  N_PATH,
 } NodeType;
 
 extern Str NODE_TYPE_MAP[];
@@ -48,8 +71,23 @@ typedef struct Node {
   LIST_Node children;
 } Node;
 
+typedef struct Parser Parser;
+typedef struct Parser {
+  Allocator *alloc;
+  Lexer *lexer;
+  size_t pos;
+  Token *cur;
+} Parser;
+
 Parser Parser_new(Allocator *alloc, Lexer *l);
 Node Parser_next(Parser *p);
+
+// necessary for recursive descent parser
+Node Parser_array(Parser *p);
+Node Parser_atom(Parser *p);
+Node Parser_next(Parser *p);
+Node Parser_obj(Parser *p);
+Node Parser_stmt(Parser *p);
 
 #if DEBUG
 void Node_debug(const Node *n, size_t depth);
