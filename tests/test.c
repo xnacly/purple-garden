@@ -65,16 +65,17 @@ int main() {
       // atoms:
 
       // doubles
-      CASE((test_return 3.1415), VAL(.type = V_DOUBLE, .floating = 3.1415)),
-      CASE((test_return 0.1415), VAL(.type = V_DOUBLE, .floating = 0.1415)),
+      CASE(test_return(3.1415), VAL(.type = V_DOUBLE, .floating = 3.1415)),
+      CASE(test_return(0.1415), VAL(.type = V_DOUBLE, .floating = 0.1415)),
 
-      CASE((test_return "string"),
+      CASE(test_return("string"),
            VAL(.type = V_STR, .string = &STRING("string"))),
+
       {
-          .input = ((Str){.len = sizeof("(test_return 'quoted)"
+          .input = ((Str){.len = sizeof("test_return('quoted)"
                                         "\0") -
                                  1,
-                          .p = (const uint8_t *)"(test_return 'quoted)"
+                          .p = (const uint8_t *)"test_return('quoted)"
                                                 "\0"}),
           .expected_r0 =
               (Value){.type = V_STR,
@@ -84,11 +85,11 @@ int main() {
       // TODO: this is for future me to implement
       // CASE("escaped string\"", BC(OP_LOAD, 0), VAL(.type = V_STRING, .string
       // = STRING("escaped string\""))),
-      CASE((test_return false), VAL(.type = V_FALSE)),
+      CASE(test_return(false), VAL(.type = V_FALSE)),
       // checking if boolean interning works
-      CASE((test_return true)(test_return false)(test_return false),
+      CASE(test_return(true) test_return(true) test_return(false),
            VAL(.type = V_FALSE)),
-      CASE((test_return "hello"),
+      CASE(test_return("hello"),
            VAL(.type = V_STR, .string = &STRING("hello"))),
 
       // too large integer and double values
@@ -100,52 +101,50 @@ int main() {
       //     VAL(.type = V_UNDEFINED)),
 
       // math:
-      CASE((+2 2), VAL(.type = V_INT, .integer = 4)),
-      CASE((-5 3), VAL(.type = V_INT, .integer = 2)),
-      CASE((*3 4), VAL(.type = V_INT, .integer = 12)),
-      CASE((/ 6 2), VAL(.type = V_INT, .integer = 3)),
-      CASE((+1(-2 1)), VAL(.type = V_INT, .integer = 2)),
+      CASE(2 + 2, VAL(.type = V_INT, .integer = 4)),
+      CASE(5 - 3, VAL(.type = V_INT, .integer = 2)),
+      CASE(3 * 4, VAL(.type = V_INT, .integer = 12)),
+      CASE(6 / 2, VAL(.type = V_INT, .integer = 3)),
+      CASE(1 + 2 - 1, VAL(.type = V_INT, .integer = 2)),
 
       // double and int math:
-      CASE((+2.0 2), VAL(.type = V_DOUBLE, .floating = 4.0)),
-      CASE((+2 2.0), VAL(.type = V_DOUBLE, .floating = 4.0)),
-      CASE((-5.0 3), VAL(.type = V_DOUBLE, .floating = 2)),
-      CASE((-5 3.0), VAL(.type = V_DOUBLE, .floating = 2)),
-      CASE((*3.0 4), VAL(.type = V_DOUBLE, .floating = 12)),
-      CASE((*3 4.0), VAL(.type = V_DOUBLE, .floating = 12)),
-      CASE((/ 6.0 2), VAL(.type = V_DOUBLE, .floating = 3)),
-      CASE((/ 6 2.0), VAL(.type = V_DOUBLE, .floating = 3)),
+      CASE(2.0 + 2, VAL(.type = V_DOUBLE, .floating = 4.0)),
+      CASE(2 + 2.0, VAL(.type = V_DOUBLE, .floating = 4.0)),
+      CASE(5.0 - 3, VAL(.type = V_DOUBLE, .floating = 2)),
+      CASE(5 - 3.0, VAL(.type = V_DOUBLE, .floating = 2)),
+      CASE(3.0 * 4, VAL(.type = V_DOUBLE, .floating = 12)),
+      CASE(3 * 4.0, VAL(.type = V_DOUBLE, .floating = 12)),
+      CASE(6.0 / 2, VAL(.type = V_DOUBLE, .floating = 3)),
+      CASE(6 / 2.0, VAL(.type = V_DOUBLE, .floating = 3)),
 
-      CASE((len "hello"), VAL(.type = V_INT, .integer = 5)),
+      CASE(len("hello"), VAL(.type = V_INT, .integer = 5)),
       // checking if string interning works
-      CASE((len "hello")(len "hello"), VAL(.type = V_INT, .integer = 5)),
-      CASE((len ""), VAL(.type = V_INT, .integer = 0)),
-      CASE((len "a"), VAL(.type = V_INT, .integer = 1)),
+      CASE(len("hello") len("hello"), VAL(.type = V_INT, .integer = 5)),
+      CASE(len(""), VAL(.type = V_INT, .integer = 0)),
+      CASE(len("a"), VAL(.type = V_INT, .integer = 1)),
 
-      CASE((= 1 1), VAL(.type = V_TRUE)),
-      CASE((= "abc"
-              "abc"),
-           VAL(.type = V_TRUE)),
-      CASE((= 3.1415 3.1415), VAL(.type = V_TRUE)),
-      CASE((= true true), VAL(.type = V_TRUE)),
-      CASE((= true false), VAL(.type = V_FALSE)),
-      CASE((= false false), VAL(.type = V_TRUE)),
+      CASE(1 = 1, VAL(.type = V_TRUE)),
+      CASE("abc" = "abc", VAL(.type = V_TRUE)),
+      CASE(3.1415 = 3.1415, VAL(.type = V_TRUE)),
+      CASE(true = true, VAL(.type = V_TRUE)),
+      CASE(true = false, VAL(.type = V_FALSE)),
+      CASE(false = false, VAL(.type = V_TRUE)),
 
       // variables
-      CASE((var name "user")(test_return name),
+      CASE(var name ::"user" test_return(name),
            VAL(.type = V_STR, .string = &STRING("user"))),
-      CASE((var age 25)(test_return age), VAL(.type = V_INT, .integer = 25)),
+      CASE(var age ::25 test_return(age), VAL(.type = V_INT, .integer = 25)),
 
       // functions
-      CASE((fn ret[arg] arg)(ret 25), VAL(.type = V_INT, .integer = 25)),
-      CASE((fn add25[arg](+arg 25))(add25 25),
+      CASE(fn ret ::arg{arg} ret(25), VAL(.type = V_INT, .integer = 25)),
+      CASE(fn add25 ::arg{arg + 25} add25(25),
            VAL(.type = V_INT, .integer = 50)),
 
       // builtins
-      CASE((assert true), VAL(.type = V_TRUE)),
-      CASE((None), VAL(.type = V_NONE)),
-      CASE((Some true), VAL(.type = V_TRUE, .is_some = true)),
-      CASE((Some false), VAL(.type = V_FALSE, .is_some = true)),
+      CASE(assert(true), VAL(.type = V_TRUE)),
+      CASE(None(), VAL(.type = V_NONE)),
+      CASE(Some(true), VAL(.type = V_TRUE, .is_some = true)),
+      CASE(Some(false), VAL(.type = V_FALSE, .is_some = true)),
 
       // match (TODO:)
       //

@@ -85,7 +85,7 @@ typedef struct Value Value;
 typedef struct Map Map;
 
 Map Map_new(size_t cap, Allocator *a);
-void Map_insert(Map *m, Str *s, Value v, Allocator *a);
+void Map_insert(Map *m, const Str *s, Value v, Allocator *a);
 void Map_insert_hash(Map *m, uint32_t hash, Value v);
-Value Map_get(const Map *m, Str *s);
+Value Map_get(const Map *m, const Str *s);
 Value Map_get_hash(const Map *m, uint32_t hash);

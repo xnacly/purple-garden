@@ -16,6 +16,8 @@ Str TOKEN_TYPE_MAP[] = {
     [T_ASTERISKS] = STRING("T_ASTERISKS"),
     [T_SLASH] = STRING("T_SLASH"),
     [T_EQUAL] = STRING("T_EQUAL"),
+    [T_EXCLAIM] = STRING("T_EXCLAIM"),
+    [T_DOUBLEDOUBLEDOT] = STRING("T_DOUBLEDOUBLEDOT"),
     [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
     [T_BRAKET_LEFT] = STRING("T_BRAKET_LEFT"),
     [T_BRAKET_RIGHT] = STRING("T_BRAKET_RIGHT"),
@@ -46,9 +48,11 @@ Token *INTERN_MINUS = &SINGLE_TOK(T_MINUS);
 Token *INTERN_PLUS = &SINGLE_TOK(T_PLUS);
 Token *INTERN_ASTERISKS = &SINGLE_TOK(T_ASTERISKS);
 Token *INTERN_SLASH = &SINGLE_TOK(T_SLASH);
+Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
+Token *INTERN_EXCLAIM = &SINGLE_TOK(T_EXCLAIM);
+Token *INTERN_DOUBLEDOUBLEDOT = &SINGLE_TOK(T_DOUBLEDOUBLEDOT);
 Token *INTERN_FALSE = &SINGLE_TOK(T_FALSE);
 Token *INTERN_TRUE = &SINGLE_TOK(T_TRUE);
-Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
 Token *INTERN_VAR = &SINGLE_TOK(T_VAR);
 Token *INTERN_FN = &SINGLE_TOK(T_FN);
 Token *INTERN_MATCH = &SINGLE_TOK(T_MATCH);
@@ -104,7 +108,7 @@ Token *Lexer_next(Lexer *l, Allocator *a) {
       [' '] = &&whitespace,
       ['\t'] = &&whitespace,
       ['\n'] = &&whitespace,
-      [';'] = &&comment,
+      ['#'] = &&comment,
       ['('] = &&delimitor_left,
       [')'] = &&delimitor_right,
       ['.'] = &&number,
@@ -119,6 +123,8 @@ Token *Lexer_next(Lexer *l, Allocator *a) {
       ['/'] = &&slash,
       ['*'] = &&asterisks,
       ['='] = &&equal,
+      ['!'] = &&exclaim,
+      [':'] = &&doubledoubledot,
       ['['] = &&braket_left,
       [']'] = &&braket_right,
       ['{'] = &&curly_left,
@@ -128,52 +134,32 @@ Token *Lexer_next(Lexer *l, Allocator *a) {
 #pragma GCC diagnostic pop
 
 #define JUMP_TARGET goto *jump_table[(int32_t)l->input.p[l->pos]]
+#define SYMBOL(label, INTERN)                                                  \
+  label: {                                                                     \
+    l->pos++;                                                                  \
+    return (INTERN);                                                           \
+  }
 
   JUMP_TARGET;
 
-delimitor_left:
-  l->pos++;
-  return INTERN_DELIMITOR_LEFT;
+  SYMBOL(delimitor_left, INTERN_DELIMITOR_LEFT);
+  SYMBOL(delimitor_right, INTERN_DELIMITOR_RIGHT);
+  SYMBOL(braket_left, INTERN_BRAKET_LEFT);
+  SYMBOL(braket_right, INTERN_BRAKET_RIGHT);
+  SYMBOL(curly_left, INTERN_CURLY_LEFT);
+  SYMBOL(curly_right, INTERN_CURLY_RIGHT);
+  SYMBOL(plus, INTERN_PLUS);
+  SYMBOL(minus, INTERN_MINUS);
+  SYMBOL(slash, INTERN_SLASH);
+  SYMBOL(equal, INTERN_EQUAL);
+  SYMBOL(exclaim, INTERN_EQUAL);
+  SYMBOL(asterisks, INTERN_ASTERISKS);
 
-delimitor_right:
+doubledoubledot:
   l->pos++;
-  return INTERN_DELIMITOR_RIGHT;
-
-braket_left:
+  ASSERT(cur(l) == ':', "Only double double dots are allowed, not singular");
   l->pos++;
-  return INTERN_BRAKET_LEFT;
-
-braket_right:
-  l->pos++;
-  return INTERN_BRAKET_RIGHT;
-
-curly_left:
-  l->pos++;
-  return INTERN_CURLY_LEFT;
-
-curly_right:
-  l->pos++;
-  return INTERN_CURLY_RIGHT;
-
-plus:
-  l->pos++;
-  return INTERN_PLUS;
-
-minus:
-  l->pos++;
-  return INTERN_MINUS;
-
-slash:
-  l->pos++;
-  return INTERN_SLASH;
-
-equal:
-  l->pos++;
-  return INTERN_EQUAL;
-
-asterisks:
-  l->pos++;
-  return INTERN_ASTERISKS;
+  return INTERN_DOUBLEDOUBLEDOT;
 
 number: {
   size_t start = l->pos;
@@ -307,7 +293,6 @@ end:
 
 #undef SINGLE_TOK
 
-#if DEBUG
 void Token_debug(Token *token) {
   if (token == NULL) {
     printf("<UNKOWN_TOKEN>");
@@ -332,4 +317,3 @@ void Token_debug(Token *token) {
     break;
   }
 }
-#endif

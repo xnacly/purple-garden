@@ -1,14 +1,20 @@
 # purple_garden
 
-purple_garden is a lean lisp, designed and implemented with a focus on
-performance
+purple_garden is a lean scripting language, designed and implemented with a
+focus on performance via strategies like aggressive compile time optimisations,
+just in time compilation for runtime hotspots, fine grained control over memory
+and gc, while allowing to disable the gc and stdlib fully.
 
-```racket
-(fn greeting [greetee] (println "hello world to:" greetee))
-(greeting "teo") ; hello world to: user
+```python
+fn greeting :: greetee {
+    println("hello world to:" greetee)
+} 
+greeting("teo") # hello world to: user
 
-(fn tuplify [v] [(type v) (len v)])
-(println (tuplify "hello world")) ; [str, 11]
+fn tuplify :: v {
+    [type(v) len(v)]
+} 
+println(tuplify("hello world")) # [str, 11]
 ```
 
 ## Local Setup
@@ -29,17 +35,23 @@ nix develop
 # by default purple_garden fills $PG to be ./examples/hello-world.garden
 make
 
-# ; vim: filetype=racket
+# ./build/purple_garden_debug ./examples/hello-world.garden
+# #vim: filetype=python
 # 
-# ; @println is a predefined function responsible for writing to stdout
-# ; builtins are specifically called via @<builtin>
-# (println "Hello World")
-# vmnew: 8.00KB of 25.00KB used (32.000000%)
-# [T_DELIMITOR_LEFT]
-# [T_BUILTIN][println]{.hash=8602815819212105030}
-# [T_STRING][Hello World]{.hash=4420528118743043111}
-# [T_DELIMITOR_RIGHT]
-# N_BUILTIN[T_BUILTIN][println]{.hash=8602815819212105030}(
+# #fmt/println is a predefined function responsible for writing to
+# #stdout
+# println("Hello World")
+# vmnew: 8.03KB of 24.25KB used (33.118557%)
+# ->Parser_comparison#T_IDENT
+#  ->Parser_expr#T_IDENT
+#   ->Parser_term#T_IDENT
+#    ->Parser_atom#T_IDENT
+#     ->Parser_next#T_STRING
+#      ->Parser_comparison#T_STRING
+#       ->Parser_expr#T_STRING
+#        ->Parser_term#T_STRING
+#         ->Parser_atom#T_STRING
+# N_CALL[println](
 #  N_ATOM[T_STRING][Hello World]{.hash=4420528118743043111}
 # )
 # allocating r1
@@ -50,18 +62,18 @@ make
 #         Option/None; {idx=2}
 #         Str(`Hello World`); {idx=3,hash=39}
 # 
-# __entry:
+# __start:
 #         LOADG 3; Str(`Hello World`)
 #         STORE 1
 #         ARGS 128 ; count=1,offset=0
 #         BUILTIN 326
-# cc  : 11.27KB of 25.00KB used (45.093750%)
+# cc  : 10.77KB of 24.25KB used (44.426546%)
 # [VM][000000|00001] LOADG     =000003{ Option/None Option/None }
 # [VM][000002|00003] STORE     =000001{ Str(`Hello World`) Option/None }
 # [VM][000004|00005] ARGS      =000128{ Str(`Hello World`) Str(`Hello World`) }
 # [VM][000006|00007] BUILTIN   =000326{ Str(`Hello World`) Str(`Hello World`) }
 # Hello World
-# vm  : 4.23KB of 50.00KB used (8.468750%)
+# vm  : 4.02KB of 50.00KB used (8.046875%)
 # | Opcode     | Compiled %               | Executed %               |
 # | ---------- | ------------------------ | ------------------------ |
 # | STORE      | 1               (25.00%) | 1               (25.00%) |
@@ -134,44 +146,44 @@ $ ./purple_garden +h
 
 ```sh
 $ make test
-# [+][PASS][Case 1/38] in=`(test_return 3.1415)`
-# [+][PASS][Case 2/38] in=`(test_return 0.1415)`
-# [+][PASS][Case 3/38] in=`(test_return "string")`
-# [+][PASS][Case 4/38] in=`(test_return 'quoted)`
-# [+][PASS][Case 5/38] in=`(test_return false)`
-# [+][PASS][Case 6/38] in=`(test_return true)(test_return false)(test_return false)`
-# [+][PASS][Case 7/38] in=`(test_return "hello")`
-# [+][PASS][Case 8/38] in=`(+2 2)`
-# [+][PASS][Case 9/38] in=`(-5 3)`
-# [+][PASS][Case 10/38] in=`(*3 4)`
-# [+][PASS][Case 11/38] in=`(/ 6 2)`
-# [+][PASS][Case 12/38] in=`(+1(-2 1))`
-# [+][PASS][Case 13/38] in=`(+2.0 2)`
-# [+][PASS][Case 14/38] in=`(+2 2.0)`
-# [+][PASS][Case 15/38] in=`(-5.0 3)`
-# [+][PASS][Case 16/38] in=`(-5 3.0)`
-# [+][PASS][Case 17/38] in=`(*3.0 4)`
-# [+][PASS][Case 18/38] in=`(*3 4.0)`
-# [+][PASS][Case 19/38] in=`(/ 6.0 2)`
-# [+][PASS][Case 20/38] in=`(/ 6 2.0)`
-# [+][PASS][Case 21/38] in=`(len "hello")`
-# [+][PASS][Case 22/38] in=`(len "hello")(len "hello")`
-# [+][PASS][Case 23/38] in=`(len "")`
-# [+][PASS][Case 24/38] in=`(len "a")`
-# [+][PASS][Case 25/38] in=`(= 1 1)`
-# [+][PASS][Case 26/38] in=`(= "abc" "abc")`
-# [+][PASS][Case 27/38] in=`(= 3.1415 3.1415)`
-# [+][PASS][Case 28/38] in=`(= true true)`
-# [+][PASS][Case 29/38] in=`(= true false)`
-# [+][PASS][Case 30/38] in=`(= false false)`
-# [+][PASS][Case 31/38] in=`(var name "user")(test_return name)`
-# [+][PASS][Case 32/38] in=`(var age 25)(test_return age)`
-# [+][PASS][Case 33/38] in=`(fn ret[arg] arg)(ret 25)`
-# [+][PASS][Case 34/38] in=`(fn add25[arg](+arg 25))(add25 25)`
-# [+][PASS][Case 35/38] in=`(assert true)`
-# [+][PASS][Case 36/38] in=`(None)`
-# [+][PASS][Case 37/38] in=`(Some true)`
-# [+][PASS][Case 38/38] in=`(Some false)`
+# [+][PASS][Case 1/38] in=`test_return(3.1415)`
+# [+][PASS][Case 2/38] in=`test_return(0.1415)`
+# [+][PASS][Case 3/38] in=`test_return("string")`
+# [+][PASS][Case 4/38] in=`test_return('quoted)`
+# [+][PASS][Case 5/38] in=`test_return(false)`
+# [+][PASS][Case 6/38] in=`test_return(true) test_return(true) test_return(false)`
+# [+][PASS][Case 7/38] in=`test_return("hello")`
+# [+][PASS][Case 8/38] in=`2 + 2`
+# [+][PASS][Case 9/38] in=`5 - 3`
+# [+][PASS][Case 10/38] in=`3 * 4`
+# [+][PASS][Case 11/38] in=`6 / 2`
+# [+][PASS][Case 12/38] in=`1 + 2 - 1`
+# [+][PASS][Case 13/38] in=`2.0 + 2`
+# [+][PASS][Case 14/38] in=`2 + 2.0`
+# [+][PASS][Case 15/38] in=`5.0 - 3`
+# [+][PASS][Case 16/38] in=`5 - 3.0`
+# [+][PASS][Case 17/38] in=`3.0 * 4`
+# [+][PASS][Case 18/38] in=`3 * 4.0`
+# [+][PASS][Case 19/38] in=`6.0 / 2`
+# [+][PASS][Case 20/38] in=`6 / 2.0`
+# [+][PASS][Case 21/38] in=`len("hello")`
+# [+][PASS][Case 22/38] in=`len("hello") len("hello")`
+# [+][PASS][Case 23/38] in=`len("")`
+# [+][PASS][Case 24/38] in=`len("a")`
+# [+][PASS][Case 25/38] in=`1 = 1`
+# [+][PASS][Case 26/38] in=`"abc" = "abc"`
+# [+][PASS][Case 27/38] in=`3.1415 = 3.1415`
+# [+][PASS][Case 28/38] in=`true = true`
+# [+][PASS][Case 29/38] in=`true = false`
+# [+][PASS][Case 30/38] in=`false = false`
+# [+][PASS][Case 31/38] in=`var name = "user" test_return(name)`
+# [+][PASS][Case 32/38] in=`var age = 25 test_return(age)`
+# [+][PASS][Case 33/38] in=`fn ret(arg){arg} ret(25)`
+# [+][PASS][Case 34/38] in=`fn add25(arg){arg + 25} add25(25)`
+# [+][PASS][Case 35/38] in=`assert(true)`
+# [+][PASS][Case 36/38] in=`None()`
+# [+][PASS][Case 37/38] in=`Some(true)`
+# [+][PASS][Case 38/38] in=`Some(false)`
 # [=] 38/38 passed, 0 failed
 ```
 
@@ -179,9 +191,9 @@ $ make test
 Tests are located in `tests/test.c` and a test is declared via the `CASE` macro:
 
 ```c
-    CASE(3.1415, BC(OP_LOAD, 2), VAL(.type = V_NUM, .number = 3.1415)),
-    CASE(.1415, BC(OP_LOAD, 2), VAL(.type = V_NUM, .number = 0.1415)),
-    CASE("string", BC(OP_LOAD, 2), VAL(.type = V_STRING, .string = STRING("string"))),
+      CASE(test_return(3.1415), VAL(.type = V_DOUBLE, .floating = 3.1415)),
+      CASE(test_return(0.1415), VAL(.type = V_DOUBLE, .floating = 0.1415)),
+      CASE(test_return("string"), VAL(.type = V_STR, .string = &STRING("string"))),
 ```
 
 ### Disassembling bytecode
@@ -225,10 +237,10 @@ __globals:
         Option/None; {idx=2}
         Double(2.5); {idx=3}
 
-__entry:
-; comparer::{args=2,size=32}
+__start:
+; comparer::{args=2,size=26}
 __0x000000[02F2]:
-        JMP 32
+        JMP 26
         LOAD 1
         VAR 140
         LOAD 2
@@ -237,18 +249,15 @@ __0x000000[02F2]:
         STORE 1
         LOADV 165
         EQ 1
-        JMPF 30
-        LOADV 140
         STORE 1
-        LOADV 165
-        EQ 1
-        ASSERT
+        ARGS 128 ; count=1,offset=0
+        BUILTIN 603
         LEAVE
 
 
 ; inc::{args=1,size=20}
-__0x000020[0087]:
-        JMP 52
+__0x00001A[0087]:
+        JMP 46
         LOAD 1
         VAR 140
         LOADV 140
@@ -262,7 +271,7 @@ __0x000020[0087]:
         LOADG 3; Double(2.5)
         STORE 1
         ARGS 128 ; count=1,offset=0
-        CALL 32; <inc> $1
+        CALL 26; <inc> $1
 ```
 
 The disassembler attempts to display as much information as possible:
@@ -286,11 +295,11 @@ $ wc -l examples/bench.garden
 > This benchmark example is for optimizing tail calls, builtin dispatch and match performance:
 
 ```racket
-(fn comparer [a b] (= a b))
-(fn inc [a] (comparer a a))
-(inc 2.5)
-(inc 2.5)
-(inc 2.5)
+fn comparer :: a b { assert(a = b) }
+fn inc :: a { comparer(a a) }
+inc(2.5)
+inc(2.5)
+inc(2.5)
 ; [...]
 ```
 
@@ -331,7 +340,7 @@ $ make profile
 > Documentation for these is a work in progress, since the language is still
 > subject to a lot of changes
 
-- [ ] data types
+- [x] data types
   - [x] numbers
   - [x] strings
   - [x] booleans
@@ -340,8 +349,7 @@ $ make profile
   - [x] objects
 - [ ] language constructs
   - [x] variables
-  - [x] match
-  - [ ] loops
+  - [ ] match
   - [x] functions
   - [ ] pattern matching
 - [x] builtins
@@ -387,7 +395,7 @@ $ make profile
     - [x] `vm`: merge `LOAD` and `PUSH` consecutively into `PUSHG`
 - [ ] `vm`: lock I/O for the whole program execution for faster performance via `+lock-io`
 - [ ] `cc`: cache bytecode and global pool to omit frontend, disable via `+no-cache`
-- [ ] `gc`: mark and sweep garbage collection via `+gc-marksweep`
-- [ ] `gc`: generational garbage collection via `+gc-gen`
-- [ ] `gc`: reference counting via `+gc-rc`
+- [ ] `gc`: mark and sweep garbage collection via `+gc:marksweep`
+- [ ] `gc`: generational garbage collection via `+gc:gen`
+- [ ] `gc`: reference counting via `+gc:rc`
 - [x] `gc`: allow for bump/block allocator with `+block-allocator`

@@ -1,33 +1,32 @@
-; vim: filetype=racket
-(fn
-  ; name
-  add3        
-  ; arguments
-  [arg1 arg2 arg3]
-  ; body, last element is returned
-  (+ 
-    (+ arg1 arg2) arg3)  
-)
-(println
-  (add3 3.1415 3.1415 3.1415))
+# vim: filetype=python
+fn add3 :: arg1 arg2 arg3 {
+    arg1+arg2+arg3
+}
+println(add3(3.1415 3.1415 3.1415))
 
-(fn greeting [greetee] (println "hello world to:" greetee))
-(greeting "user")
+fn greeting :: greetee {
+    println("hello world to:" greetee)
+} 
+greeting("teo") # hello world to: user
 
-;; tail calls 
-(fn inc [x] (+ x 1))
-(fn call1 [x] (inc x))
-(fn call2 [x] (call1 x))
-(fn call3 [x] (call2 x))
-(fn call4 [x] (call3 x))
-(fn call5 [x] (call4 x))
-(println (call5 0))
 
-(fn tuplify [v] [(type v) (len v)])
-(println (tuplify "hello world"))
+# tail calls 
+fn inc :: x {x + 1}
+fn call1 :: x {inc(x)}
+fn call2 :: x {call1(x)}
+fn call3 :: x {call2(x)}
+fn call4 :: x {call3(x)}
+fn call5 :: x {call4(x)}
+println(call5(0))
 
-; WARN: this loops endlessly until it goes OOM, this is just a test for producing gc pressure
-;; (fn f1 [a]
-;;     (println "f1-depth" a)
-;;     (f1 (+ a 1)))
-;; (f1 0)
+fn tuplify :: v {
+    [type(v) len(v)]
+} 
+println(tuplify("hello world")) # [str, 11]
+
+# WARN: this loops endlessly until it goes OOM, this is just a test for producing gc pressure
+# fn f1 :: a {
+#     println("f1-depth" a)
+#     f1(a+1)
+# }
+# f1(0)

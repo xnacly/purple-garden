@@ -17,6 +17,10 @@ typedef enum {
   T_SLASH = 5,
   // =
   T_EQUAL = 6,
+  // !
+  T_EXCLAIM,
+  // ::
+  T_DOUBLEDOUBLEDOT,
   // )
   T_DELIMITOR_RIGHT,
   // [
@@ -54,11 +58,6 @@ typedef struct __Token {
   Str string;
 } Token;
 
-#if DEBUG
-// Token_debug will print a debug representation of token to stdout
-void Token_debug(Token *token);
-#endif
-
 typedef struct {
   Str input;
   size_t pos;
@@ -66,3 +65,5 @@ typedef struct {
 
 Lexer Lexer_new(Str input);
 Token *Lexer_next(Lexer *l, Allocator *a);
+// Token_debug will print a debug representation of token to stdout
+void Token_debug(Token *token);

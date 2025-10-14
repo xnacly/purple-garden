@@ -103,6 +103,7 @@ __attribute__((unused)) static const Value *INTERNED_NONE =
 bool Value_cmp(const Value *a, const Value *b);
 void Value_debug(const Value *v);
 double Value_as_double(const Value *v);
+int64_t Value_as_int(const Value *v);
 
 #define DBG(EXPR)                                                              \
   ({                                                                           \

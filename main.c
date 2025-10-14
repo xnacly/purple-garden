@@ -189,7 +189,7 @@ int main(int argc, char **argv) {
                (size_t)vm.global_len * sizeof(Value));
 
   if (UNLIKELY(a.disassemble)) {
-    disassemble(&vm, &ctx);
+    disassemble(&vm, &ctx, 0, 0, false);
     puts("");
   }
 

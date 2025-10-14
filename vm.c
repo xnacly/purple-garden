@@ -142,6 +142,17 @@ int Vm_run(Vm *vm) {
           v.array = lv;
         }
         break;
+      case VM_NEW_OBJ: {
+        v.type = V_OBJ;
+        Map *m = CALL(vm->alloc, request, sizeof(Map));
+        if (vm->size_hint != 0) {
+          *m = Map_new(vm->size_hint, vm->alloc);
+        } else {
+          *m = (Map){0};
+        }
+        v.obj = m;
+        break;
+      }
       default:
         ASSERT(0, "OP_NEW unimplemented");
         break;

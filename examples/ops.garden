@@ -1,22 +1,7 @@
 ; vim: filetype=racket
 ; arithmetics
-(assert 
-  (= (+ 1 2) 3))
-(assert 
-  (= (+ "hello" "World") "helloWorld")) ; this also works for strings
-(assert 
-  (= (- 2 1) 1))
-(assert 
-  (= (* 3 3) 3))
-
-
-; all evaluation happens left to right, meaning:
-; (/ 1 2 3 4 5) 
-; => 1/2/3/4/5 
-; => 0.5/3/4/5
-; => ~0.17/4/5
-; => ~0.042/5
-; => ~0.008
-
-; comparisons
-(assert (= 3.1415 3.1415))
+assert(3 = 1+2)
+assert("helloWorld" = "hello"+"World")
+assert(1 = 2-1)
+assert(9 = 3*3)
+assert(3.1415 = 3.1415)

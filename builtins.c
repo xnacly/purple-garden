@@ -6,11 +6,11 @@
 
 static void print_value(const Value *v) {
   if (v->is_some) {
-    printf("Option/Some(");
+    printf("Option::Some(");
   }
   switch (v->type) {
   case V_NONE:
-    printf("Option/None");
+    printf("Option::None");
     break;
   case V_STR:
     Str_debug(v->string);
@@ -149,7 +149,8 @@ void builtin_Some(Vm *vm) {
 void builtin_None(Vm *vm) { RETURN(*INTERNED_NONE); }
 
 void builtin_assert(Vm *vm) {
-  ASSERT(vm->arg_count == 1, "assert can't compare nothing")
+  ASSERT(vm->arg_count == 1, "assert needs exactly a single argument, got %d",
+         vm->arg_count);
   Value v = ARG(0);
   ASSERT(v.type = V_TRUE, "Assertion failed");
 }

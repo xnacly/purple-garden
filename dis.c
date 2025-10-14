@@ -5,8 +5,13 @@
 
 // TODO: rework all of this
 
-void disassemble(const Vm *vm, const Ctx *ctx) {
-  if (vm->global_len > 0) {
+void disassemble(const Vm *vm, const Ctx *ctx, size_t offset, size_t length,
+                 bool skip_globals) {
+  if (length == 0) {
+    length = vm->bytecode_len;
+  }
+
+  if (!skip_globals && vm->global_len > 0) {
     printf("__globals:\n\t");
     for (size_t i = 0; i < vm->global_len; i++) {
       Value v = vm->globals[i];
@@ -21,9 +26,11 @@ void disassemble(const Vm *vm, const Ctx *ctx) {
 
   bool ctx_available = ctx != NULL;
 
-  if (vm->bytecode_len > 0) {
-    printf("\n__entry:");
-    for (size_t i = 0; i < vm->bytecode_len; i += 2) {
+  if (length > 0) {
+    if (offset == 0) {
+      printf("\n__start:");
+    }
+    for (size_t i = offset; i < length; i += 2) {
       if (ctx_available) {
         for (size_t j = 0; j < MAX_BUILTIN_SIZE; j++) {
           CtxFunction func = ctx->hash_to_function[j];

@@ -118,4 +118,14 @@ inline double Value_as_double(const Value *v) {
   }
 }
 
+inline int64_t Value_as_int(const Value *v) {
+  if (v->type == V_DOUBLE) {
+    return (int64_t)v->floating;
+  } else if (v->type == V_INT) {
+    return v->integer;
+  } else {
+    ASSERT(0, "Value is neither double nor int, cant convert to int")
+  }
+}
+
 #undef PREC

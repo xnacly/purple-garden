@@ -1,6 +1,5 @@
-; vim: filetype=racket
+#vim: filetype=python
 
-; println is a predefined function responsible for writing to stdout 
-(assert (= [187]/0 187))
-(var x [0 0 161 0 0 ])
-(assert (= x/2 161))
+#println is a predefined function responsible for writing to
+#stdout
+println("Hello World")

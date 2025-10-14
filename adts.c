@@ -1,4 +1,5 @@
 #include "adts.h"
+#include "strings.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -117,4 +118,20 @@ inline Value Map_get_hash(const Map *m, uint32_t hash) {
   }
 
   return *INTERNED_NONE; // not found after full table scan
+}
+
+void Map_insert(Map *m, const Str *s, Value v, Allocator *a) {
+  uint32_t hash = s->hash;
+  if (hash != 0) {
+    Str_hash(s);
+  }
+  Map_insert_hash(m, hash, v);
+}
+
+Value Map_get(const Map *m, const Str *s) {
+  uint32_t hash = s->hash;
+  if (hash != 0) {
+    Str_hash(s);
+  }
+  return Map_get_hash(m, hash);
 }

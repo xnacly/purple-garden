@@ -12,7 +12,7 @@
 #if DEBUG
 #define DEBUG_PUTS(fmt, ...)                                                   \
   do {                                                                         \
-    printf("[CC] " fmt "\n", ##__VA_ARGS__);                                   \
+    printf("[cc] " fmt "\n", ##__VA_ARGS__);                                   \
   } while (0)
 #else
 #define DEBUG_PUTS(fmt, ...)
@@ -131,7 +131,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       Node child = LIST_get(&n->children, 0);
       // PERF: arithmetic optimisations like n+0=n; n*0=0; n*1=n, etc
       compile(alloc, vm, ctx, &child);
-    } else if (n->children.len == 2) {
+    } else {
       Node lhs = LIST_get(&n->children, 0);
       // two arguments is easy to compile, just load and add two Values
       compile(alloc, vm, ctx, &lhs);
@@ -141,11 +141,6 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       compile(alloc, vm, ctx, &rhs);
       BC(n->token->type, r);
       Ctx_free_register(ctx, r);
-    } else {
-#if DEBUG
-      Node_debug(n, 0);
-#endif
-      TODO("compile#N_LIST for Node.children_length > 3 is not implemented");
     }
     break;
   }
@@ -160,6 +155,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     Str name = n->token->string;
     size_t hash = name.hash & MAX_BUILTIN_SIZE_MASK;
     LIST_Node params = LIST_get_UNSAFE(&n->children, 0).children;
+
+    ASSERT(ctx->hash_to_function[hash].name.len == 0,
+           "Cant redefine function `%.*s`", (int)name.len, name.p);
 
     CtxFunction function_ctx = {
         .name = name,
@@ -215,6 +213,13 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     BC(OP_LEAVE, 0);
     ByteCodeBuilder_insert_arg(ctx->bcb, jump_op_index, BC_LEN);
     ctx->hash_to_function[hash].size = BC_LEN - function_ctx.bytecode_index;
+
+    DEBUG_PUTS("Compiled fn `%.*s` {.bytecode_index=%zu, .argument_count=%zu, "
+               ".size=%lu}",
+               (int)function_ctx.name.len, function_ctx.name.p,
+               function_ctx.bytecode_index, function_ctx.argument_count,
+               BC_LEN - function_ctx.bytecode_index);
+
     break;
   }
     /*
@@ -298,16 +303,15 @@ break;
 
       // PERF: optimisation to remove calls to empty functions, since their
       // definition is also removed
-      if (!func->size) {
-        DEBUG_PUTS("Removing call to empty `%.*s` function (size=%zu)",
-                   (int)func->name.len, func->name.p, func->size);
-        return;
-      }
+      // if (!func->size) {
+      //   DEBUG_PUTS("Removing call to empty `%.*s` function (size=%zu)",
+      //              (int)func->name.len, func->name.p, func->size);
+      //   return;
+      // }
     }
 
-    size_t children_length = len < 1 ? 1 : len;
     // we compile all arguments to bytecode one by one by one
-    size_t registers[children_length];
+    size_t registers[len < 1 ? 1 : len];
     for (size_t i = 0; i < len; i++) {
       Node child = LIST_get(&n->children, i);
       compile(alloc, vm, ctx, &child);
@@ -331,8 +335,34 @@ break;
     break;
   }
   case N_OBJECT: {
-    // TODO: its time, see N_LIST|N_ARRAY
-    ASSERT(0, "N_OBJECT: Unimplemented");
+    size_t size = n->children.len;
+    // fast path for empty obj
+    if (size != 0) {
+      // size hint is placed in r0 to instruct the OP_NEW to use the allocation
+      // size for any value, such as an array or object.
+      BC(OP_SIZE, size);
+    }
+
+    BC(OP_NEW, VM_NEW_OBJ);
+
+    // fast path for empty obj
+    if (size != 0) {
+      // after OP_NEW the created value is in r0, we must now temporarly move
+      // it to any other register, so its not clobbered by acm register usage
+      size_t obj_register = Ctx_allocate_register(ctx);
+      BC(OP_STORE, obj_register);
+      TODO("There is no pg instruction for inserting into an object yet")
+
+      for (size_t i = 0; i < size; i++) {
+        Node member = LIST_get(&n->children, i);
+        compile(alloc, vm, ctx, &member);
+      }
+
+      // move the array back into r0, since it needs to be the return value of
+      // this N_ARRAY and N_LIST node
+      BC(OP_LOAD, obj_register);
+      Ctx_free_register(ctx, obj_register);
+    }
     break;
   }
   case N_LIST: // Lists are just sugar for arrays, same same
