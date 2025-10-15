@@ -14,8 +14,6 @@ typedef enum {
   N_ARRAY,
   // anything between { and }
   N_OBJECT,
-  // main data structure
-  N_LIST,
   // creating variables
   N_VAR,
   // defining functions

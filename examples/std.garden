@@ -27,27 +27,52 @@ std::opt::expect(opt_some "would panic with this message") # -> []
 std::opt::some(opt_some) # -> true 
 std::opt::none(opt_none) # -> true 
 
+# array provides array utilities
+var arr :: [1 2 3 4 5]
+std::arr::join(arr ", ") # 1, 2, 3, 4, 5
+std::arr::sum(arr) # 15
+std::arr::map(arr fn _ :: x {
+    x*2
+}) # [2 4 6 8 10]
+std::arr::filter(arr fn _ :: x {
+    x % 2 = 0
+}) # [2 4]
+
 # object contains helper functions for working with objects
 var obj :: { 
-      'key1 None()
-      'key2 None() 
+      key1 None()
+      key2 None() 
     }
-std::fmt::println(obj::key1) # -> Option::None
 std::object::keys(obj) # -> ["key1", "key2"]
 std::object::values(obj) # -> [Option::None, Option::None]
 std::object::entries(obj) # -> [["key1", Option::None], ["key2", Option::None]]
 
-# encoding allows for serializing and deserializing purple garden values into different formats
-std::encoding::json({ 'key "value" }) # { "key": "value" }
+# str helps with efficient str interaction
+var hello_hash :: std::str::hash("Hello")
+std::str::contains("Hello" "elo") # true
+std::str::contains_char("Hello" "e") # true
+std::str::idx("Hello" "elo") # 1
+std::str::slice("Hello" 0 2) # hel
+std::str::slice("Hello" 1 2) # el
+std::str::lines("hello\nworld") # [hello world]
+std::str::repeat("hello" 5) # hellohellohellohellohello
+std::str::replace("hello" "lo" "per") # helper
+std::str::split("name,group,age" ",") # [name group age]
+std::str::lower("IAMLOWER") # iamlower
+std::str::upper("iamupper") # IAMUPPER
+std::str::trim("H\n\t    ello\n\t    ") # "Hello"
 
-# '<ident> produces a literal identifier,
-# similar to a string, but omitting the need for "",
-# since they do fit a different usecase in a semantic sense
+# encoding and decoding allows for serializing and deserializing purple garden
+# values from and into different formats, like json, csv, html, etc.
+std::encoding::json({ key "value" }) # { "key": "value" }
+std::encoding::json([1 2 3 "some string" None()]) # [ 1, 2, 3, "some string", null ]
+std::decoding::json("{ key \"value\" }") # { key "value" }
+
 std::encoding::csv(
-  [{ 'name "user1" 'age 25 } 
-   { 'name "user2" 'age 14 }
-   { 'name "user3" 'age 18 'role "admin" }
-   { 'name "user4" }])
+  [{ name "user1" age 25 } 
+   { name "user2" age 14 }
+   { name "user3" age 18 role "admin" }
+   { name "user4" }])
   # produces:
   #
   # name,age,role
@@ -56,11 +81,33 @@ std::encoding::csv(
   # user3,18,admin
   # user4,,
 
+std::decoding::ini("\
+    ; last modified 1 April 2001 by John Doe\
+    [owner]\
+    name = John Doe\
+    organization = Acme Widgets Inc.\
+    ") 
+    # {
+    #     owner {
+    #         name "John Doe"
+    #         organization "Acme Widgets Inc."
+    #     }
+    # }
+
+std::encoding::ini({
+    owner {
+        name "John Doe"
+        organization "Acme Widgets Inc."
+    }})
+    # [owner]
+    # name = John Doe
+    # organization = Acme Widgets Inc.
+
 std::encoding::html(
     {
-        'div {
-          'p {
-            'b "This is a bold paragraph in a div"
+        div {
+          p {
+            b "This is a bold paragraph in a div"
           }
         }
     })

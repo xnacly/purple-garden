@@ -83,8 +83,7 @@ Lexer Lexer_new(Str input) {
 static const bool is_alphanum_table[256] = {['0' ... '9'] = true,
                                             ['A' ... 'Z'] = true,
                                             ['a' ... 'z'] = true,
-                                            ['_'] = true,
-                                            ['-'] = true};
+                                            ['_'] = true};
 
 // TODO: lexer needs a hash based string and ident interning model, the current
 // falls apart after around 1 mio identifiers
@@ -166,6 +165,7 @@ number: {
   size_t i = start;
   bool is_double = false;
   uint64_t hash = FNV_OFFSET_BASIS;
+
   for (; i < l->input.len; i++) {
     char cc = l->input.p[i];
     hash ^= cc;
@@ -203,6 +203,8 @@ number: {
 ident: {
   size_t start = l->pos;
   uint64_t hash = FNV_OFFSET_BASIS;
+
+#pragma GCC unroll 32
   for (char cc = CUR(l); cc > 0 && IS_ALPHANUM(cc); l->pos++, cc = CUR(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;

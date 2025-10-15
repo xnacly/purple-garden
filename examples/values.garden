@@ -31,10 +31,12 @@ println(
 
 
 # objects
+
+# quoted via 'user-name to allow symbols in identifiers
 var obj = { 'user-name "dummy" }
 println(obj) # { user-name: "dummy" }
-obj::user-name = "xnacly"
+obj::'user-name = "xnacly"
 println(
   obj # { user-name: "xnacly" }
-  obj::user-name # "xnacly"
+  obj::'user-name # "xnacly"
 )

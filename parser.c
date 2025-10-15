@@ -35,10 +35,9 @@ static size_t call_depth = 0;
 Str NODE_TYPE_MAP[] = {
     [N_ATOM] = STRING("N_ATOM"),   [N_IDENT] = STRING("N_IDENT"),
     [N_ARRAY] = STRING("N_ARRAY"), [N_OBJECT] = STRING("N_OBJECT"),
-    [N_LIST] = STRING("N_LIST"),   [N_VAR] = STRING("N_VAR"),
-    [N_FN] = STRING("N_FN"),       [N_MATCH] = STRING("N_MATCH"),
-    [N_BIN] = STRING("N_BIN"),     [N_CALL] = STRING("N_CALL"),
-    [N_PATH] = STRING("N_PATH"),
+    [N_VAR] = STRING("N_VAR"),     [N_FN] = STRING("N_FN"),
+    [N_MATCH] = STRING("N_MATCH"), [N_BIN] = STRING("N_BIN"),
+    [N_CALL] = STRING("N_CALL"),   [N_PATH] = STRING("N_PATH"),
 };
 
 void Node_debug(const Node *n, size_t depth) {
@@ -103,7 +102,7 @@ Parser Parser_new(Allocator *alloc, Lexer *l) {
   };
 }
 
-static inline void advance(Parser *p) {
+static inline __attribute__((always_inline, hot)) void advance(Parser *p) {
 #if DEBUG
   Token_debug(p->cur);
   puts("");
@@ -112,7 +111,8 @@ static inline void advance(Parser *p) {
   p->cur = Lexer_next(p->lexer, p->alloc);
 }
 
-static inline Token *consume(Parser *p, TokenType type) {
+static inline __attribute__((always_inline, hot)) Token *
+consume(Parser *p, TokenType type) {
   Token *t = p->cur;
   if (UNLIKELY(t->type != type)) {
     printf("Unexpected Token %.*s, wanted %.*s\n",
@@ -130,6 +130,7 @@ static Node *Parser_comparison(Parser *p);
 static Node *Parser_atom(Parser *p);
 static Node *Parser_obj(Parser *p);
 static Node *Parser_array(Parser *p);
+static Node *Parser_postfix_access(Parser *p, Node *base);
 
 inline static Node *Parser_expr(Parser *p) {
   Node *lhs = TRACE(Parser_term);
@@ -157,6 +158,52 @@ inline static Node *Parser_term(Parser *p) {
     lhs = bin;
   }
   return lhs;
+}
+
+inline static Node *Parser_postfix_access(Parser *p, Node *base) {
+  while (p->cur->type == T_DOUBLEDOUBLEDOT) {
+    consume(p, T_DOUBLEDOUBLEDOT);
+
+    Node *selector;
+    switch (p->cur->type) {
+    case T_IDENT: {
+      Token *tok = consume(p, T_IDENT);
+
+      if (p->cur->type == T_DELIMITOR_LEFT) {
+        consume(p, T_DELIMITOR_LEFT);
+        Node *call = NODE_NEW(N_CALL, tok);
+
+        while (p->cur->type != T_DELIMITOR_RIGHT && p->cur->type != T_EOF) {
+          Node *arg = TRACE(Parser_next);
+          LIST_append(&call->children, p->alloc, arg);
+        }
+        consume(p, T_DELIMITOR_RIGHT);
+        selector = call;
+      } else {
+        selector = NODE_NEW(N_IDENT, tok);
+      }
+      break;
+    }
+    case T_INTEGER:
+    case T_DOUBLE:
+    case T_STRING: {
+      Token *tok = p->cur;
+      advance(p);
+      selector = NODE_NEW(N_ATOM, tok);
+      break;
+    }
+    default:
+      ASSERT(0, "Unexpected token after ::");
+    }
+
+    Node *path = NODE_NEW(N_PATH, selector->token);
+    LIST_append(&path->children, p->alloc, base);
+    LIST_append(&path->children, p->alloc, selector);
+
+    base = path;
+  }
+
+  return base;
 }
 
 inline static Node *Parser_comparison(Parser *p) {
@@ -189,27 +236,6 @@ inline static Node *Parser_atom(Parser *p) {
   case T_IDENT: { // variable name or <name>(<args>)
     Token *ident = p->cur;
     advance(p);
-    // TODO: i gotta work on this one
-    // if (EQUALS(T_SLASH)) {
-    //   Node path = NODE_NEW(N_PATH, ident);
-    //   consume(p, T_SLASH);
-    //   while (p->cur->type != T_EOF) {
-    //     if (p->cur->type == T_IDENT) {
-    //       Node path_ident = (Node){.type = N_IDENT, .token = p->cur};
-    //       LIST_append(&path.children, p->alloc, path_ident);
-    //       advance(p);
-    //     } else {
-    //       // TODO: error handling
-    //       ASSERT(0, "Wanted IDENT in path")
-    //     }
-
-    //     if (p->cur->type != T_SLASH) {
-    //       break;
-    //     }
-    //   }
-
-    //   return path;
-    // }
 
     if (EQUALS(T_DELIMITOR_LEFT)) {
       consume(p, T_DELIMITOR_LEFT);
@@ -223,7 +249,6 @@ inline static Node *Parser_atom(Parser *p) {
       consume(p, T_DELIMITOR_RIGHT);
       return call;
     } else {
-
       Node *n = CALL(p->alloc, request, sizeof(Node));
       n->type = N_IDENT;
       n->token = ident;
@@ -238,7 +263,8 @@ inline static Node *Parser_atom(Parser *p) {
   }
   case T_EOF:
   default:
-    __builtin_unreachable();
+    ASSERT(0, "Unexpected element where an atom was expected")
+    break;
   }
 }
 
@@ -277,11 +303,14 @@ inline static Node *Parser_array(Parser *p) {
 }
 
 Node *Parser_next(Parser *p) {
+  Node *n;
   switch (p->cur->type) {
   case T_BRAKET_LEFT:
-    return TRACE(Parser_array);
+    n = TRACE(Parser_array);
+    break;
   case T_CURLY_LEFT:
-    return TRACE(Parser_obj);
+    n = TRACE(Parser_obj);
+    break;
   case T_VAR: { // var <ident> <rhs>
     consume(p, T_VAR);
     Token *ident = consume(p, T_IDENT);
@@ -289,7 +318,8 @@ Node *Parser_next(Parser *p) {
     Node *var = NODE_NEW(N_VAR, ident);
     Node *rhs = TRACE(Parser_next);
     LIST_append(&var->children, p->alloc, rhs);
-    return var;
+    n = var;
+    break;
   }
   case T_MATCH: {
     TODO("Unimplemented");
@@ -302,8 +332,8 @@ Node *Parser_next(Parser *p) {
     Node *params = NODE_NEW(N_ARRAY, p->cur);
     consume(p, T_DOUBLEDOUBLEDOT);
     while (p->cur->type != T_EOF && p->cur->type != T_CURLY_LEFT) {
-      Node *n = TRACE(Parser_next);
-      LIST_append(&params->children, p->alloc, n);
+      Node *param = TRACE(Parser_next);
+      LIST_append(&params->children, p->alloc, param);
     }
     LIST_append(&fn->children, p->alloc, params);
 
@@ -313,20 +343,17 @@ Node *Parser_next(Parser *p) {
       LIST_append(&fn->children, p->alloc, body_part);
     }
     consume(p, T_CURLY_RIGHT);
-    return fn;
+    n = fn;
+    break;
   }
   case T_EOF: {
-    return NULL;
+    n = NULL;
+    break;
   }
-  default: {
-    return TRACE(Parser_comparison);
-    // TODO: error handling:
-    // ASSERT(0,
-    //        "Unexpected Token %.*s, wanted any of: IDENT, DOUBLE, "
-    //        "INTEGER, STRING, TRUE, FALSE, DELIMITOR_LEFT, "
-    //        "BRAKELEFT, CURLY_LEFT",
-    //        (int)TOKEN_TYPE_MAP[p->cur->type].len,
-    //        TOKEN_TYPE_MAP[p->cur->type].p)
-  }
+  default:
+    n = TRACE(Parser_comparison);
+    break;
   };
+
+  return Parser_postfix_access(p, n);
 }

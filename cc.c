@@ -128,16 +128,16 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
   case N_BIN: {
     // single argument is just a return of that value
     if (n->children.len == 1) {
-      Node *child = LIST_get(&n->children, 0);
+      Node *child = LIST_get_UNSAFE(&n->children, 0);
       // PERF: arithmetic optimisations like n+0=n; n*0=0; n*1=n, etc
       compile(alloc, vm, ctx, child);
     } else {
-      Node *lhs = LIST_get(&n->children, 0);
+      Node *lhs = LIST_get_UNSAFE(&n->children, 0);
       // two arguments is easy to compile, just load and add two Values
       compile(alloc, vm, ctx, lhs);
       size_t r = Ctx_allocate_register(ctx);
       BC(OP_STORE, r);
-      Node *rhs = LIST_get(&n->children, 1);
+      Node *rhs = LIST_get_UNSAFE(&n->children, 1);
       compile(alloc, vm, ctx, rhs);
       BC(n->token->type, r);
       Ctx_free_register(ctx, r);
@@ -149,6 +149,13 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     Node *value = LIST_get_UNSAFE(&n->children, 0);
     compile(alloc, vm, ctx, value);
     BC(OP_VAR, hash);
+    break;
+  }
+  case N_PATH: {
+    size_t len = n->children.len;
+    for (size_t i = 0; i < len; i++) {
+      LIST_get_UNSAFE(&n->children, i);
+    }
     break;
   }
   case N_FN: { // (fn <name> [<args>] <s-expr's>)
@@ -222,71 +229,6 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     break;
   }
-    /*
-// TODO: outdated, needs to be ported !!!!!!!!
-
-if (b != 0) {
-switch (b) {
-case COMPILE_BUILTIN_MATCH: { // (@match
-                           //  (<condition> <s-expr's>) ; case 1
-                           //  (<condition> <s-expr's>) ; case 2
-                           //  Node ; default case
-                           //  )
-
-size_t len = n->children.len;
-ASSERT(len >= 1, "Need at least one case for a match expr")
-
-// used for jumping to the end of the match statement once a case is
-// done
-int backfill_slots[len];
-bool encountered_default_cause = false;
-
-// iterating over cases
-for (size_t i = 0; i < len; i++) {
- Node cur_case = LIST_get(&n->children, i);
-
- if (cur_case.children.len > 1) {
-   Node cur_condition = LIST_get(&cur_case.children, 0);
-   Node cur_body = LIST_get(&cur_case.children, 1);
-   compile(alloc, vm, ctx, &cur_condition);
-   size_t last_case_start = BC_LEN;
-   // jump to next case conditional if conditional above is false
-   BC(OP_JMPF, 0xAFFEDEAD);
-
-   compile(alloc, vm, ctx, &cur_body);
-
-   // only jmp to end of match statement if not already at the end,
-   // since we are inside of the body of a case
-   if (i != len - 1) {
-     backfill_slots[i] = BC_LEN;
-     BC(OP_JMP, 0xAFFEDEAD);
-   }
-   ByteCodeBuilder_insert_arg(ctx->bcb, last_case_start, BC_LEN);
- } else {
-   ASSERT(!encountered_default_cause,
-          "Only a single default case allowed")
-   // default case has a singular children, being executed if all other
-   // cases do not match
-   compile(alloc, vm, ctx, &cur_case);
-   encountered_default_cause = true;
- }
-}
-
-// backfill jumps to the end of the switch statement
-for (size_t i = 0; i < len - 1; i++) {
- int jump_argument_location = backfill_slots[i];
- if (jump_argument_location) {
-   ByteCodeBuilder_insert_arg(ctx->bcb, jump_argument_location,
-                              BC_LEN);
- }
-}
-
-break;
-}
-}
-} else { // calling a builtin function thats not a compile time construct
-}
-  }*/
   case N_CALL: { // function call site (<name|builtin> <args>)
     Str *name = &n->token->string;
     size_t len = n->children.len;
@@ -313,7 +255,7 @@ break;
     // we compile all arguments to bytecode one by one by one
     size_t registers[len < 1 ? 1 : len];
     for (size_t i = 0; i < len; i++) {
-      Node *child = LIST_get(&n->children, i);
+      Node *child = LIST_get_UNSAFE(&n->children, i);
       compile(alloc, vm, ctx, child);
       size_t r = Ctx_allocate_register(ctx);
       registers[i] = r;
@@ -354,7 +296,7 @@ break;
       TODO("There is no pg instruction for inserting into an object yet")
 
       for (size_t i = 0; i < size; i++) {
-        Node *member = LIST_get(&n->children, i);
+        Node *member = LIST_get_UNSAFE(&n->children, i);
         compile(alloc, vm, ctx, member);
       }
 
@@ -365,7 +307,6 @@ break;
     }
     break;
   }
-  case N_LIST: // Lists are just sugar for arrays, same same
   case N_ARRAY: {
     size_t size = n->children.len;
     // fast path for empty array
@@ -385,7 +326,7 @@ break;
       BC(OP_STORE, list_register);
 
       for (size_t i = 0; i < size; i++) {
-        Node *member = LIST_get(&n->children, i);
+        Node *member = LIST_get_UNSAFE(&n->children, i);
         compile(alloc, vm, ctx, member);
         BC(OP_APPEND, list_register);
       }
@@ -426,7 +367,7 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
     }
 
 #if DEBUG
-    Node_debug(&n, 0);
+    Node_debug(n, 0);
     puts("");
 #endif
     compile(alloc, vm, &ctx, n);

@@ -8,9 +8,9 @@ ByteCodeBuilder ByteCodeBuilder_new(Allocator *a) {
   ByteCodeBuilder bcb = {.alloc = a, .buffer = LIST_new(uint32_t)};
 
   // we preallocate here so middle large scripts dont require many newblock
-  // operations, S of n blocks is: LIST_DEFAULT_SIZE * (2^i - 1); for 6 thats
-  // around 504 fields or 252 instruction and argument pairs
-#define PREALLOCATE_BLOCKS_IN_BUFFER 6
+  // operations, S of n blocks is: LIST_DEFAULT_SIZE * (2^i - 1); for 8 thats
+  // around 2040 fields or 1020 instruction and argument pairs
+#define PREALLOCATE_BLOCKS_IN_BUFFER 8
   bcb.buffer.blocks = CALL(a, request, LIST_BLOCK_COUNT * sizeof(uint32_t *));
   for (size_t i = 0; i < PREALLOCATE_BLOCKS_IN_BUFFER; i++) {
     bcb.buffer.blocks[i] =
@@ -40,9 +40,11 @@ uint32_t *ByteCodeBuilder_to_buffer(const ByteCodeBuilder *bcb) {
   uint32_t *flat = CALL(bcb->alloc, request, size);
   size_t offset = 0;
 
+  // same as LIST_BLOCK_COUNT, but the pragma somehow doesnt want my constant
+#pragma GCC unroll 24
   for (size_t block = 0; block < LIST_BLOCK_COUNT && offset < l.len; block++) {
     if (l.blocks[block] == NULL)
-      continue;
+      break;
 
     size_t block_size = LIST_DEFAULT_SIZE << block;
     size_t remaining = l.len - offset;
