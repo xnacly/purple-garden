@@ -13,7 +13,7 @@
 #define LIST_TYPE(TYPE)                                                        \
   typedef struct {                                                             \
     TYPE **blocks;                                                             \
-    uint64_t len;                                                              \
+    size_t len;                                                                \
     size_t type_size;                                                          \
   } LIST_##TYPE
 
@@ -26,9 +26,9 @@
 
 struct ListIdx {
   // which block to use for the indexing
-  uint64_t block;
+  size_t block;
   // the idx into said block
-  uint64_t block_idx;
+  size_t block_idx;
 };
 
 struct ListIdx idx_to_block_idx(size_t idx);

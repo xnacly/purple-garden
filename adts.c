@@ -10,8 +10,8 @@ idx_to_block_idx(size_t idx) {
     return (struct ListIdx){.block_idx = idx, .block = 0};
   }
 
-  uint64_t adjusted = idx + LIST_DEFAULT_SIZE;
-  uint64_t msb_pos = 63 - __builtin_clzll(adjusted);
+  size_t adjusted = idx + LIST_DEFAULT_SIZE;
+  size_t msb_pos = 63 - __builtin_clzll(adjusted);
 
   // This optimizes the block index lookup to be constant time
   //
