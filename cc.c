@@ -128,17 +128,17 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
   case N_BIN: {
     // single argument is just a return of that value
     if (n->children.len == 1) {
-      Node child = LIST_get(&n->children, 0);
+      Node *child = LIST_get(&n->children, 0);
       // PERF: arithmetic optimisations like n+0=n; n*0=0; n*1=n, etc
-      compile(alloc, vm, ctx, &child);
+      compile(alloc, vm, ctx, child);
     } else {
-      Node lhs = LIST_get(&n->children, 0);
+      Node *lhs = LIST_get(&n->children, 0);
       // two arguments is easy to compile, just load and add two Values
-      compile(alloc, vm, ctx, &lhs);
+      compile(alloc, vm, ctx, lhs);
       size_t r = Ctx_allocate_register(ctx);
       BC(OP_STORE, r);
-      Node rhs = LIST_get(&n->children, 1);
-      compile(alloc, vm, ctx, &rhs);
+      Node *rhs = LIST_get(&n->children, 1);
+      compile(alloc, vm, ctx, rhs);
       BC(n->token->type, r);
       Ctx_free_register(ctx, r);
     }
@@ -146,15 +146,15 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
   }
   case N_VAR: {
     size_t hash = n->token->string.hash & VARIABLE_TABLE_SIZE_MASK;
-    Node value = LIST_get_UNSAFE(&n->children, 0);
-    compile(alloc, vm, ctx, &value);
+    Node *value = LIST_get_UNSAFE(&n->children, 0);
+    compile(alloc, vm, ctx, value);
     BC(OP_VAR, hash);
     break;
   }
   case N_FN: { // (fn <name> [<args>] <s-expr's>)
     Str name = n->token->string;
     size_t hash = name.hash & MAX_BUILTIN_SIZE_MASK;
-    LIST_Node params = LIST_get_UNSAFE(&n->children, 0).children;
+    LIST_Nptr params = LIST_get_UNSAFE(&n->children, 0)->children;
 
     ASSERT(ctx->hash_to_function[hash].name.len == 0,
            "Cant redefine function `%.*s`", (int)name.len, name.p);
@@ -192,11 +192,11 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     // parameters = [ a  b  c]
     // arguments  = [ 1  2  3]
     for (size_t i = 0; i < params.len; i++) {
-      Node param = LIST_get_UNSAFE(&params, i);
+      Node *param = LIST_get_UNSAFE(&params, i);
       // PERF: changing args to start from r1 to starting from r0,
       // thus saving a single OP_LOAD for each function invocation
       BC(OP_LOAD, i + 1);
-      BC(OP_VAR, param.token->string.hash & VARIABLE_TABLE_SIZE_MASK);
+      BC(OP_VAR, param->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
     }
 
     // compiling the body, returning a value is free since its just in
@@ -205,8 +205,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       for (size_t i = 1; i < n->children.len; i++) {
         // PERF: if last Node is N_CALL think about reusing call
         // frames (TCO)
-        Node body_expr = LIST_get_UNSAFE(&n->children, i);
-        compile(alloc, vm, ctx, &body_expr);
+        Node *body_expr = LIST_get_UNSAFE(&n->children, i);
+        compile(alloc, vm, ctx, body_expr);
       }
     }
 
@@ -313,8 +313,8 @@ break;
     // we compile all arguments to bytecode one by one by one
     size_t registers[len < 1 ? 1 : len];
     for (size_t i = 0; i < len; i++) {
-      Node child = LIST_get(&n->children, i);
-      compile(alloc, vm, ctx, &child);
+      Node *child = LIST_get(&n->children, i);
+      compile(alloc, vm, ctx, child);
       size_t r = Ctx_allocate_register(ctx);
       registers[i] = r;
       BC(OP_STORE, r);
@@ -354,8 +354,8 @@ break;
       TODO("There is no pg instruction for inserting into an object yet")
 
       for (size_t i = 0; i < size; i++) {
-        Node member = LIST_get(&n->children, i);
-        compile(alloc, vm, ctx, &member);
+        Node *member = LIST_get(&n->children, i);
+        compile(alloc, vm, ctx, member);
       }
 
       // move the array back into r0, since it needs to be the return value of
@@ -385,8 +385,8 @@ break;
       BC(OP_STORE, list_register);
 
       for (size_t i = 0; i < size; i++) {
-        Node member = LIST_get(&n->children, i);
-        compile(alloc, vm, ctx, &member);
+        Node *member = LIST_get(&n->children, i);
+        compile(alloc, vm, ctx, member);
         BC(OP_APPEND, list_register);
       }
 
@@ -420,8 +420,8 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
   };
 
   while (true) {
-    Node n = Parser_next(p);
-    if (n.type == N_UNKNOWN) {
+    Node *n = Parser_next(p);
+    if (!n) {
       break;
     }
 
@@ -429,7 +429,7 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
     Node_debug(&n, 0);
     puts("");
 #endif
-    compile(alloc, vm, &ctx, &n);
+    compile(alloc, vm, &ctx, n);
   }
 
   ASSERT(ctx.register_allocated_count == 1,

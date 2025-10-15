@@ -76,7 +76,8 @@ Lexer Lexer_new(Str input) {
   };
 }
 
-#define cur(L) (L->input.p[L->pos])
+#define CUR(L) (L->input.p[L->pos])
+#define IS_ALPHANUM(CC) (is_alphanum_table[(uint8_t)(CC)])
 
 // this whole block makes is_alphanum zero branch and as fast as possible
 static const bool is_alphanum_table[256] = {['0' ... '9'] = true,
@@ -84,10 +85,6 @@ static const bool is_alphanum_table[256] = {['0' ... '9'] = true,
                                             ['a' ... 'z'] = true,
                                             ['_'] = true,
                                             ['-'] = true};
-
-__attribute__((always_inline)) inline static bool is_alphanum(uint8_t cc) {
-  return is_alphanum_table[cc];
-}
 
 // TODO: lexer needs a hash based string and ident interning model, the current
 // falls apart after around 1 mio identifiers
@@ -157,7 +154,10 @@ Token *Lexer_next(Lexer *l, Allocator *a) {
 
 doubledoubledot:
   l->pos++;
-  ASSERT(cur(l) == ':', "Only double double dots are allowed, not singular");
+  if (UNLIKELY(CUR(l) != ':')) {
+    fprintf(stderr, "lex: Only double double dots are allowed, not singular");
+    return INTERN_EOF;
+  }
   l->pos++;
   return INTERN_DOUBLEDOUBLEDOT;
 
@@ -173,7 +173,10 @@ number: {
     if (cc >= '0' && cc <= '9')
       continue;
     if (cc == '.') {
-      ASSERT(!is_double, "Two dots in double");
+      if (UNLIKELY(is_double)) {
+        fprintf(stderr, "lex: Invalid floating point format");
+        return INTERN_EOF;
+      }
       is_double = true;
       continue;
     }
@@ -200,7 +203,7 @@ number: {
 ident: {
   size_t start = l->pos;
   uint64_t hash = FNV_OFFSET_BASIS;
-  for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
+  for (char cc = CUR(l); cc > 0 && IS_ALPHANUM(cc); l->pos++, cc = CUR(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
   }
@@ -226,7 +229,7 @@ quoted: {
   l->pos++;
   size_t start = l->pos;
   uint64_t hash = FNV_OFFSET_BASIS;
-  for (char cc = cur(l); cc > 0 && is_alphanum(cc); l->pos++, cc = cur(l)) {
+  for (char cc = CUR(l); cc > 0 && IS_ALPHANUM(cc); l->pos++, cc = CUR(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
   }
@@ -248,12 +251,12 @@ string: {
   l->pos++;
   size_t start = l->pos;
   uint64_t hash = FNV_OFFSET_BASIS;
-  for (char cc = cur(l); cc > 0 && cc != '"'; l->pos++, cc = cur(l)) {
+  for (char cc = CUR(l); cc > 0 && cc != '"'; l->pos++, cc = CUR(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
   }
 
-  if (UNLIKELY(cur(l) != '"')) {
+  if (UNLIKELY(CUR(l) != '"')) {
     Str slice = Str_slice(&l->input, l->pos, l->input.len);
     fprintf(stderr, "lex: Unterminated string near: '%.*s'", (int)slice.len,
             slice.p);
@@ -274,7 +277,7 @@ string: {
 }
 
 comment:
-  for (char cc = cur(l); cc > 0 && cc != '\n'; l->pos++, cc = cur(l)) {
+  for (char cc = CUR(l); cc > 0 && cc != '\n'; l->pos++, cc = CUR(l)) {
   }
   JUMP_TARGET;
 
@@ -283,8 +286,9 @@ whitespace:
   JUMP_TARGET;
 
 unknown: {
-  uint8_t c = cur(l);
-  ASSERT(0, "Unexpected byte '%c' (0x%X) in input", c, c)
+  uint8_t c = CUR(l);
+  fprintf(stderr, "lex: Unexpected byte '%c' (0x%X) in input", c, c);
+  return INTERN_EOF;
 }
 
 end:

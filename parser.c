@@ -5,24 +5,7 @@
 #include "strings.h"
 
 #define TRACE_PARSER 0
-#define ADVANCE()                                                              \
-  p->pos++;                                                                    \
-  p->cur = Lexer_next(p->lexer, p->alloc);
-
 #define EQUALS(TYPE) p->cur->type == (TYPE)
-#define CONSUME(TYPE)                                                          \
-  ({                                                                           \
-    Token *__tok = p->cur;                                                     \
-    if (__tok->type != (TYPE)) {                                               \
-      printf("Unexpected Token %.*s, wanted %.*s\n",                           \
-             (int)TOKEN_TYPE_MAP[__tok->type].len,                             \
-             TOKEN_TYPE_MAP[__tok->type].p, (int)TOKEN_TYPE_MAP[(TYPE)].len,   \
-             TOKEN_TYPE_MAP[(TYPE)].p);                                        \
-      ASSERT(0, "Unexpected Token");                                           \
-    }                                                                          \
-    ADVANCE();                                                                 \
-    __tok;                                                                     \
-  })
 
 #if TRACE_PARSER
 static size_t call_depth = 0;
@@ -42,10 +25,10 @@ static size_t call_depth = 0;
 
 #define NODE_NEW(TYPE, TOKEN)                                                  \
   ({                                                                           \
-    Node __n = {0};                                                            \
-    __n.type = TYPE;                                                           \
-    __n.token = TOKEN;                                                         \
-    __n.children = LIST_new(Node);                                             \
+    Node *__n = CALL(p->alloc, request, sizeof(Node));                         \
+    __n->type = TYPE;                                                          \
+    __n->token = TOKEN;                                                        \
+    __n->children = LIST_new(Nptr);                                            \
     __n;                                                                       \
   })
 
@@ -96,8 +79,8 @@ void Node_debug(const Node *n, size_t depth) {
     putc('\n', stdout);
   }
   for (size_t i = 0; i < n->children.len; i++) {
-    Node ni = LIST_get(&n->children, i);
-    Node_debug(&ni, depth + 1);
+    Node *ni = LIST_get(&n->children, i);
+    Node_debug(ni, depth + 1);
     if (i + 1 < n->children.len) {
       putc(',', stdout);
     }
@@ -129,71 +112,92 @@ static inline void advance(Parser *p) {
   p->cur = Lexer_next(p->lexer, p->alloc);
 }
 
-Node Parser_expr(Parser *p) {
-  Node lhs = TRACE(Parser_term);
+static inline Token *consume(Parser *p, TokenType type) {
+  Token *t = p->cur;
+  if (UNLIKELY(t->type != type)) {
+    printf("Unexpected Token %.*s, wanted %.*s\n",
+           (int)TOKEN_TYPE_MAP[t->type].len, TOKEN_TYPE_MAP[t->type].p,
+           (int)TOKEN_TYPE_MAP[(type)].len, TOKEN_TYPE_MAP[(type)].p);
+    ASSERT(0, "Unexpected Token");
+  }
+  advance(p);
+  return t;
+}
+
+static Node *Parser_expr(Parser *p);
+static Node *Parser_term(Parser *p);
+static Node *Parser_comparison(Parser *p);
+static Node *Parser_atom(Parser *p);
+static Node *Parser_obj(Parser *p);
+static Node *Parser_array(Parser *p);
+
+inline static Node *Parser_expr(Parser *p) {
+  Node *lhs = TRACE(Parser_term);
   while (p->cur->type == T_PLUS || p->cur->type == T_MINUS) {
     Token *op = p->cur;
-    ADVANCE();
-    Node rhs = TRACE(Parser_term);
-    Node bin = NODE_NEW(N_BIN, op);
-    LIST_append(&bin.children, p->alloc, lhs);
-    LIST_append(&bin.children, p->alloc, rhs);
+    advance(p);
+    Node *rhs = TRACE(Parser_term);
+    Node *bin = NODE_NEW(N_BIN, op);
+    LIST_append(&bin->children, p->alloc, lhs);
+    LIST_append(&bin->children, p->alloc, rhs);
     lhs = bin;
   }
   return lhs;
 }
 
-Node Parser_term(Parser *p) {
-  Node lhs = TRACE(Parser_atom);
+inline static Node *Parser_term(Parser *p) {
+  Node *lhs = TRACE(Parser_atom);
   while (p->cur->type == T_ASTERISKS || p->cur->type == T_SLASH) {
     Token *op = p->cur;
-    ADVANCE();
-    Node rhs = TRACE(Parser_atom);
-    Node bin = NODE_NEW(N_BIN, op);
-    LIST_append(&bin.children, p->alloc, lhs);
-    LIST_append(&bin.children, p->alloc, rhs);
+    advance(p);
+    Node *rhs = TRACE(Parser_atom);
+    Node *bin = NODE_NEW(N_BIN, op);
+    LIST_append(&bin->children, p->alloc, lhs);
+    LIST_append(&bin->children, p->alloc, rhs);
     lhs = bin;
   }
   return lhs;
 }
 
-Node Parser_comparison(Parser *p) {
-  Node lhs = TRACE(Parser_expr);
+inline static Node *Parser_comparison(Parser *p) {
+  Node *lhs = TRACE(Parser_expr);
   while (p->cur->type == T_EQUAL) {
     Token *op = p->cur;
-    ADVANCE();
-    Node rhs = TRACE(Parser_expr);
-    Node bin = NODE_NEW(N_BIN, op);
-    LIST_append(&bin.children, p->alloc, lhs);
-    LIST_append(&bin.children, p->alloc, rhs);
+    advance(p);
+    Node *rhs = TRACE(Parser_expr);
+    Node *bin = NODE_NEW(N_BIN, op);
+    LIST_append(&bin->children, p->alloc, lhs);
+    LIST_append(&bin->children, p->alloc, rhs);
     lhs = bin;
   }
   return lhs;
 }
 
-Node Parser_atom(Parser *p) {
+inline static Node *Parser_atom(Parser *p) {
   switch (p->cur->type) {
   case T_INTEGER:
   case T_DOUBLE:
   case T_STRING:
   case T_TRUE:
   case T_FALSE: {
-    Node n = (Node){.type = N_ATOM, .token = p->cur};
-    ADVANCE();
+    Node *n = CALL(p->alloc, request, sizeof(Node));
+    n->type = N_ATOM;
+    n->token = p->cur;
+    advance(p);
     return n;
   }
   case T_IDENT: { // variable name or <name>(<args>)
     Token *ident = p->cur;
-    ADVANCE();
+    advance(p);
     // TODO: i gotta work on this one
     // if (EQUALS(T_SLASH)) {
     //   Node path = NODE_NEW(N_PATH, ident);
-    //   CONSUME(T_SLASH);
+    //   consume(p, T_SLASH);
     //   while (p->cur->type != T_EOF) {
     //     if (p->cur->type == T_IDENT) {
     //       Node path_ident = (Node){.type = N_IDENT, .token = p->cur};
     //       LIST_append(&path.children, p->alloc, path_ident);
-    //       ADVANCE();
+    //       advance(p);
     //     } else {
     //       // TODO: error handling
     //       ASSERT(0, "Wanted IDENT in path")
@@ -208,24 +212,28 @@ Node Parser_atom(Parser *p) {
     // }
 
     if (EQUALS(T_DELIMITOR_LEFT)) {
-      CONSUME(T_DELIMITOR_LEFT);
+      consume(p, T_DELIMITOR_LEFT);
       // PERF: perform builtin function / user function lookup here once and
       // cache, instead of doing it a whole lot in the compiler
-      Node call = NODE_NEW(N_CALL, ident);
+      Node *call = NODE_NEW(N_CALL, ident);
       while (p->cur->type != T_EOF && p->cur->type != T_DELIMITOR_RIGHT) {
-        Node n = TRACE(Parser_next);
-        LIST_append(&call.children, p->alloc, n);
+        Node *n = TRACE(Parser_next);
+        LIST_append(&call->children, p->alloc, n);
       }
-      CONSUME(T_DELIMITOR_RIGHT);
+      consume(p, T_DELIMITOR_RIGHT);
       return call;
     } else {
-      return (Node){.type = N_IDENT, .token = ident};
+
+      Node *n = CALL(p->alloc, request, sizeof(Node));
+      n->type = N_IDENT;
+      n->token = ident;
+      return n;
     }
   }
   case T_DELIMITOR_LEFT: {
-    CONSUME(T_DELIMITOR_LEFT);
-    Node expr = TRACE(Parser_expr);
-    CONSUME(T_DELIMITOR_RIGHT);
+    consume(p, T_DELIMITOR_LEFT);
+    Node *expr = TRACE(Parser_expr);
+    consume(p, T_DELIMITOR_RIGHT);
     return expr;
   }
   case T_EOF:
@@ -235,82 +243,80 @@ Node Parser_atom(Parser *p) {
 }
 
 // { <key> <value> } both values can be anything we want them to be
-Node Parser_obj(Parser *p) {
-  Node obj = NODE_NEW(N_OBJECT, p->cur);
-  CONSUME(T_CURLY_LEFT);
+inline static Node *Parser_obj(Parser *p) {
+  Node *obj = NODE_NEW(N_OBJECT, p->cur);
+  consume(p, T_CURLY_LEFT);
 
   while (p->cur->type != T_EOF && p->cur->type != T_CURLY_RIGHT) {
     // Key can be anything, i dont care, runtime error, because sometimes we do
     // want dynamic keys, like (+ "user_" name), which would resolve to
     // something like "user_xyz" at runtime, thus setting the corresponding key.
-    Node key = TRACE(Parser_next);
-    LIST_append(&obj.children, p->alloc, key);
+    Node *key = TRACE(Parser_next);
+    LIST_append(&obj->children, p->alloc, key);
     // Value can also be anything, we are just building a dynamic hashmap like
     // container
-    Node val = TRACE(Parser_next);
-    LIST_append(&obj.children, p->alloc, val);
+    Node *val = TRACE(Parser_next);
+    LIST_append(&obj->children, p->alloc, val);
   }
 
-  CONSUME(T_CURLY_RIGHT);
+  consume(p, T_CURLY_RIGHT);
   return obj;
 }
 
-Node Parser_array(Parser *p) {
-  Node array = NODE_NEW(N_ARRAY, p->cur);
-  CONSUME(T_BRAKET_LEFT);
+inline static Node *Parser_array(Parser *p) {
+  Node *array = NODE_NEW(N_ARRAY, p->cur);
+  consume(p, T_BRAKET_LEFT);
 
   while (p->cur->type != T_EOF && p->cur->type != T_BRAKET_RIGHT) {
-    Node n = TRACE(Parser_next);
-    LIST_append(&array.children, p->alloc, n);
+    Node *n = TRACE(Parser_next);
+    LIST_append(&array->children, p->alloc, n);
   }
 
-  CONSUME(T_BRAKET_RIGHT);
+  consume(p, T_BRAKET_RIGHT);
   return array;
 }
 
-Node Parser_next(Parser *p) {
+Node *Parser_next(Parser *p) {
   switch (p->cur->type) {
   case T_BRAKET_LEFT:
     return TRACE(Parser_array);
   case T_CURLY_LEFT:
     return TRACE(Parser_obj);
   case T_VAR: { // var <ident> <rhs>
-    CONSUME(T_VAR);
-    Token *ident = CONSUME(T_IDENT);
-    CONSUME(T_DOUBLEDOUBLEDOT);
-    Node var = NODE_NEW(N_VAR, ident);
-    Node rhs = TRACE(Parser_next);
-    LIST_append(&var.children, p->alloc, rhs);
+    consume(p, T_VAR);
+    Token *ident = consume(p, T_IDENT);
+    consume(p, T_DOUBLEDOUBLEDOT);
+    Node *var = NODE_NEW(N_VAR, ident);
+    Node *rhs = TRACE(Parser_next);
+    LIST_append(&var->children, p->alloc, rhs);
     return var;
   }
   case T_MATCH: {
     TODO("Unimplemented");
   }
   case T_FN: { // fn <name>(<args>){ <body> }
-    CONSUME(T_FN);
-    Token *ident = CONSUME(T_IDENT);
-    Node fn = NODE_NEW(N_FN, ident);
+    consume(p, T_FN);
+    Token *ident = consume(p, T_IDENT);
+    Node *fn = NODE_NEW(N_FN, ident);
 
-    Node params = NODE_NEW(N_ARRAY, p->cur);
-    CONSUME(T_DOUBLEDOUBLEDOT);
+    Node *params = NODE_NEW(N_ARRAY, p->cur);
+    consume(p, T_DOUBLEDOUBLEDOT);
     while (p->cur->type != T_EOF && p->cur->type != T_CURLY_LEFT) {
-      Node n = TRACE(Parser_next);
-      LIST_append(&params.children, p->alloc, n);
+      Node *n = TRACE(Parser_next);
+      LIST_append(&params->children, p->alloc, n);
     }
-    LIST_append(&fn.children, p->alloc, params);
+    LIST_append(&fn->children, p->alloc, params);
 
-    CONSUME(T_CURLY_LEFT);
+    consume(p, T_CURLY_LEFT);
     while (p->cur->type != T_EOF && p->cur->type != T_CURLY_RIGHT) {
-      Node body_part = TRACE(Parser_next);
-      LIST_append(&fn.children, p->alloc, body_part);
+      Node *body_part = TRACE(Parser_next);
+      LIST_append(&fn->children, p->alloc, body_part);
     }
-    CONSUME(T_CURLY_RIGHT);
+    consume(p, T_CURLY_RIGHT);
     return fn;
   }
   case T_EOF: {
-    Node n = {0};
-    n.type = N_UNKNOWN;
-    return n;
+    return NULL;
   }
   default: {
     return TRACE(Parser_comparison);

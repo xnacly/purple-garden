@@ -1,5 +1,5 @@
-#vim: filetype=python
+# vim: filetype=python
 
-#println is a predefined function responsible for writing to
-#stdout
+# println is a predefined function responsible for writing to
+# stdout
 println("Hello World")

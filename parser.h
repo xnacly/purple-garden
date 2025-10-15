@@ -33,8 +33,9 @@ typedef enum {
 extern Str NODE_TYPE_MAP[];
 
 typedef struct Node Node;
+typedef Node *Nptr;
 
-LIST_TYPE(Node);
+LIST_TYPE(Nptr);
 
 // stores all possible values of a node
 typedef struct Node {
@@ -42,10 +43,9 @@ typedef struct Node {
   // N_ATOM values and the N_FUNCTION name are stored in the Token struct - this
   // reduces copies
   Token *token;
-  LIST_Node children;
+  LIST_Nptr children;
 } Node;
 
-typedef struct Parser Parser;
 typedef struct Parser {
   Allocator *alloc;
   Lexer *lexer;
@@ -54,13 +54,5 @@ typedef struct Parser {
 } Parser;
 
 Parser Parser_new(Allocator *alloc, Lexer *l);
-Node Parser_next(Parser *p);
-
-// necessary for recursive descent parser
-Node Parser_array(Parser *p);
-Node Parser_atom(Parser *p);
-Node Parser_next(Parser *p);
-Node Parser_obj(Parser *p);
-Node Parser_expr(Parser *p);
-Node Parser_term(Parser *p);
+Node *Parser_next(Parser *p);
 void Node_debug(const Node *n, size_t depth);
