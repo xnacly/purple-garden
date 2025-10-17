@@ -13,7 +13,7 @@
 #define LIST_TYPE(TYPE)                                                        \
   typedef struct {                                                             \
     TYPE **blocks;                                                             \
-    uint64_t len;                                                              \
+    size_t len;                                                                \
     size_t type_size;                                                          \
   } LIST_##TYPE
 
@@ -47,7 +47,7 @@ struct ListIdx idx_to_block_idx(size_t idx);
                                                                                \
     /* allocate the specific block if needed */                                \
     if ((LIST)->blocks[bi.block] == NULL) {                                    \
-      size_t block_size = LIST_DEFAULT_SIZE << bi.block;                       \
+      uint64_t block_size = LIST_DEFAULT_SIZE << bi.block;                     \
       (LIST)->blocks[bi.block] =                                               \
           CALL(ALLOC, request, block_size * (LIST)->type_size);                \
       ASSERT((LIST)->blocks[bi.block] != NULL,                                 \
@@ -85,7 +85,7 @@ typedef struct Value Value;
 typedef struct Map Map;
 
 Map Map_new(size_t cap, Allocator *a);
-void Map_insert(Map *m, Str *s, Value v, Allocator *a);
+void Map_insert(Map *m, const Str *s, Value v, Allocator *a);
 void Map_insert_hash(Map *m, uint32_t hash, Value v);
-Value Map_get(const Map *m, Str *s);
+Value Map_get(const Map *m, const Str *s);
 Value Map_get_hash(const Map *m, uint32_t hash);

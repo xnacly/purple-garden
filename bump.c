@@ -7,9 +7,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define BUMP_MIN_START 512
+#define BUMP_MIN_START 4096
 // geometric series result for max amount of bytes fitting into uint64_t used to
-// count the totally allocated bytes; amounts to something like (2^64)-512B
+// count the totally allocated bytes; amounts to something like (2^64)-
 #define BUMP_MAX_BLOCKS 55
 #define BUMP_GROWTH 2
 
@@ -37,6 +37,7 @@ typedef struct {
 
   // List of blocks the bump allocator uses to hand out memory
   void *blocks[BUMP_MAX_BLOCKS];
+  uint64_t block_sizes[BUMP_MAX_BLOCKS];
 } BumpCtx;
 
 void *bump_request(void *ctx, size_t size) {
@@ -53,10 +54,12 @@ void *bump_request(void *ctx, size_t size) {
     ASSERT(b_ctx->pos + 1 < BUMP_MAX_BLOCKS, "Out of block size");
     uint64_t new_size = b_ctx->size * BUMP_GROWTH;
 
-    void *new_block = malloc(new_size);
-    ASSERT(new_block != NULL, "Failed to get a new bump block");
+    void *new_block = mmap(NULL, new_size, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT(new_block != MAP_FAILED, "Failed to mmap new block");
 
     b_ctx->blocks[++b_ctx->pos] = new_block;
+    b_ctx->block_sizes[b_ctx->pos] = new_size;
     b_ctx->size = new_size;
     b_ctx->len = 0;
     aligned_pos = 0;
@@ -64,8 +67,6 @@ void *bump_request(void *ctx, size_t size) {
   }
 
   void *ptr = (char *)b_ctx->blocks[b_ctx->pos] + aligned_pos;
-  // TODO: recheck this once I'm fully awake; we need to track both alignment
-  // and size; to make total_used accurate.
   b_ctx->total_used += (aligned_pos - b_ctx->len) + size;
   b_ctx->len = aligned_pos + size;
   return ptr;
@@ -75,8 +76,10 @@ void bump_destroy(void *ctx) {
   ASSERT(ctx != NULL, "bump_destroy on already destroyed allocator");
   BumpCtx *b_ctx = (BumpCtx *)ctx;
   for (size_t i = 0; i <= b_ctx->pos; i++) {
-    free(b_ctx->blocks[i]);
-    b_ctx->blocks[i] = NULL;
+    if (b_ctx->blocks[i]) {
+      munmap(b_ctx->blocks[i], b_ctx->block_sizes[i]);
+      b_ctx->blocks[i] = NULL;
+    }
   }
   free(ctx);
 }
@@ -93,9 +96,11 @@ Allocator *bump_init(uint64_t min_size, uint64_t max_size) {
   *ctx = (BumpCtx){0};
   ctx->size = min_size < BUMP_MIN_START ? BUMP_MIN_START : min_size;
   ctx->max = max_size;
-  ctx->blocks[0] = malloc(ctx->size);
-  ctx->total_allocated += ctx->size;
-  ASSERT(ctx->blocks[0] != NULL, "Failed to allocate initial bump block");
+  void *first_block = mmap(NULL, ctx->size, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT(first_block != MAP_FAILED, "Failed to mmap initial block");
+  ctx->blocks[0] = first_block;
+  ctx->total_allocated = ctx->size;
 
   Allocator *a = malloc(sizeof(Allocator));
   ASSERT(a != NULL, "failed to alloc bump allocator");

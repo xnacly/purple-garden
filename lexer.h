@@ -5,6 +5,8 @@
 #include "string.h"
 
 typedef enum {
+  // end marker, specifically 0 to enable if(Token::type)
+  T_EOF,
   // (
   T_DELIMITOR_LEFT = 1,
   // assigned OP numbers because we directly map these in the compiler, see
@@ -15,6 +17,10 @@ typedef enum {
   T_SLASH = 5,
   // =
   T_EQUAL = 6,
+  // !
+  T_EXCLAIM,
+  // ::
+  T_DOUBLEDOUBLEDOT,
   // )
   T_DELIMITOR_RIGHT,
   // [
@@ -33,12 +39,15 @@ typedef enum {
   T_DOUBLE,
   // whole numbers
   T_INTEGER,
-  // builtins in the format @<builtin>
+  // builtins in the format @<builtin>, but only
   T_BUILTIN,
+  // compile time builtins
+  T_VAR,
+  T_FN,
+  T_MATCH,
+  T_STD,
   // any identifier
   T_IDENT,
-  // end marker
-  T_EOF,
 } TokenType;
 
 // TOKEN_TYPE_MAP allows for mapping TokenType to its string representation
@@ -50,19 +59,12 @@ typedef struct __Token {
   Str string;
 } Token;
 
-#if DEBUG
-// Token_debug will print a debug representation of token to stdout
-void Token_debug(Token *token);
-#endif
-
 typedef struct {
   Str input;
   size_t pos;
-
-  // precomputed hashes for faster boolean lookups
-  size_t true_hash;
-  size_t false_hash;
 } Lexer;
 
 Lexer Lexer_new(Str input);
 Token *Lexer_next(Lexer *l, Allocator *a);
+// Token_debug will print a debug representation of token to stdout
+void Token_debug(Token *token);

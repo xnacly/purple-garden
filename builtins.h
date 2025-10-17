@@ -12,3 +12,5 @@ void builtin_println(Vm *vm);
 void builtin_len(Vm *vm);
 void builtin_type(Vm *vm);
 void builtin_Some(Vm *vm);
+void builtin_None(Vm *vm);
+void builtin_assert(Vm *vm);

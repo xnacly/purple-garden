@@ -32,7 +32,7 @@ typedef enum {
 
 // PERF: maybe `n` is too many, but prefetching a recursion depth can have
 // some positive effects on the runtime performance
-#define PREALLOCATE_FREELIST_SIZE 0
+#define PREALLOCATE_FREELIST_SIZE 1
 
 // A frame represents a Scope, a new scope is created upon entering a function -
 // since functions are pure, there is no way to interact with the previous frame
@@ -46,6 +46,10 @@ typedef struct Frame {
   // stores Values by their hash, serving as a variable table
   Value *variable_table;
 } Frame;
+
+typedef struct __Vm Vm;
+// Represents the type signature for a builtin function
+typedef void (*builtin_function)(Vm *vm);
 
 typedef struct __Vm {
   uint32_t global_len;
@@ -73,17 +77,13 @@ typedef struct __Vm {
   // used for container sizes and stuff
   uint32_t size_hint;
 
-  // i have to type erase here :(
-  void **builtins;
+  builtin_function *builtins;
 
   Allocator *alloc;
 #if DEBUG
   uint64_t instruction_counter[256];
 #endif
 } Vm;
-
-// Represents the type signature for a builtin function
-typedef void (*builtin_function)(Vm *vm);
 
 #define GLOBAL_FALSE 0
 #define GLOBAL_TRUE 1
@@ -160,11 +160,6 @@ typedef enum {
   //
   // Jumps to bc in bytecode index, does no bounds checking
   OP_JMP,
-
-  // OP_ASSERT
-  //
-  // stops execution with error message if r0 evals to false
-  OP_ASSERT,
 
   // LOADG rANY
   //

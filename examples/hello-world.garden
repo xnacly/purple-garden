@@ -1,5 +1,5 @@
-; vim: filetype=racket
+# vim: filetype=python
 
-; @println is a predefined function responsible for writing to stdout 
-; builtins are specifically called via @<builtin>
-(@println "Hello World")
+# println is a predefined function responsible for writing to
+# stdout
+println("Hello World")

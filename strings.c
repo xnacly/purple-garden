@@ -50,17 +50,14 @@ bool Str_eq(const Str *a, const Str *b) {
   return 0 == memcmp(a->p, b->p, a->len);
 }
 
-void Str_debug(const Str *str) {
-  ASSERT(str != NULL, "HS");
-  printf("%.*s", (int)str->len, str->p);
-}
+void Str_debug(const Str *str) { printf("%.*s", (int)str->len, str->p); }
 
 inline uint64_t Str_hash(const Str *str) {
   // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash
   // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV_hash_parameters
   uint64_t hash = FNV_OFFSET_BASIS;
   for (size_t i = 0; i < str->len; i++) {
-    hash ^= str->p[i];
+    hash ^= (uint64_t)str->p[i];
     hash *= FNV_PRIME;
   }
 

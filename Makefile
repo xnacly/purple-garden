@@ -15,7 +15,7 @@ ifeq ($(UNAME_S),Darwin)
 	FLAGS += -DPLATFORM_DARWIN
 endif
 
-RELEASE_FLAGS := -O3 -flto -fno-semantic-interposition \
+RELEASE_FLAGS := -O3 -flto -flto=auto -fno-semantic-interposition \
                  -fno-asynchronous-unwind-tables -march=native
 # -g3 if you want to run valgrind on the release binary
 

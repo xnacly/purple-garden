@@ -1,14 +1,17 @@
 #include "adts.h"
+#include "strings.h"
 
 #include <stdint.h>
 #include <string.h>
 
-struct ListIdx idx_to_block_idx(size_t idx) {
-  struct ListIdx r = {0};
+inline __attribute__((always_inline, hot)) struct ListIdx
+idx_to_block_idx(size_t idx) {
   if (idx < LIST_DEFAULT_SIZE) {
-    r.block_idx = idx;
-    return r;
+    return (struct ListIdx){.block_idx = idx, .block = 0};
   }
+
+  size_t adjusted = idx + LIST_DEFAULT_SIZE;
+  size_t msb_pos = 63 - __builtin_clzll(adjusted);
 
   // This optimizes the block index lookup to be constant time
   //
@@ -41,17 +44,16 @@ struct ListIdx idx_to_block_idx(size_t idx) {
   //     -> block 1 24+8=32-> MSB pos 5 -> block 2
 
   // shifting the geometric series so 2^i aligns with idx
-  size_t adjusted = idx + LIST_DEFAULT_SIZE;
-  size_t msb_pos = 63 - __builtin_clzll(adjusted);
 
   //   log2(LIST_DEFAULT_SIZE) = 3 for LIST_DEFAULT_SIZE = 8
 #define LOG2_OF_LIST_DEFAULT_SIZE 3
   // first block is LIST_DEFAULT_SIZE wide, this normalizes
-  r.block = msb_pos - LOG2_OF_LIST_DEFAULT_SIZE;
+  size_t block = msb_pos - LOG2_OF_LIST_DEFAULT_SIZE;
+  size_t start_index_of_block =
+      (LIST_DEFAULT_SIZE << block) - LIST_DEFAULT_SIZE;
+  size_t block_idx = idx - start_index_of_block;
 
-  size_t start_index_of_block = LIST_DEFAULT_SIZE * ((1UL << r.block) - 1);
-  r.block_idx = idx - start_index_of_block;
-  return r;
+  return (struct ListIdx){.block_idx = block_idx, .block = block};
 }
 
 #include "common.h"
@@ -117,4 +119,20 @@ inline Value Map_get_hash(const Map *m, uint32_t hash) {
   }
 
   return *INTERNED_NONE; // not found after full table scan
+}
+
+void Map_insert(Map *m, const Str *s, Value v, Allocator *a) {
+  uint32_t hash = s->hash;
+  if (hash != 0) {
+    Str_hash(s);
+  }
+  Map_insert_hash(m, hash, v);
+}
+
+Value Map_get(const Map *m, const Str *s) {
+  uint32_t hash = s->hash;
+  if (hash != 0) {
+    Str_hash(s);
+  }
+  return Map_get_hash(m, hash);
 }

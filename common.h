@@ -11,7 +11,7 @@
 #define DEBUG 0
 #endif
 
-#define INIT_BYTECODE_SIZE 256
+#define INIT_BYTECODE_SIZE 64
 #define GLOBAL_SIZE 512
 #define GLOBAL_SIZE_MASK (GLOBAL_SIZE - 1)
 #define MAX_BUILTIN_SIZE 1024
@@ -28,29 +28,6 @@
 #define VARIABLE_TABLE_SIZE 256
 #define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
 
-#define DBG(EXPR)                                                              \
-  ({                                                                           \
-    _Pragma("GCC diagnostic push")                                             \
-        _Pragma("GCC diagnostic ignored \"-Wformat\"") __auto_type _val =      \
-            (EXPR);                                                            \
-    fprintf(stderr, "[%s:%d] %s = ", __FILE__, __LINE__, #EXPR);               \
-    _Generic(_val,                                                             \
-        int: fprintf(stderr, "%d\n", _val),                                    \
-        long: fprintf(stderr, "%ld\n", _val),                                  \
-        long long: fprintf(stderr, "%lld\n", _val),                            \
-        unsigned: fprintf(stderr, "%u\n", _val),                               \
-        unsigned long: fprintf(stderr, "%lu\n", _val),                         \
-        unsigned long long: fprintf(stderr, "%llu\n", _val),                   \
-        float: fprintf(stderr, "%f\n", _val),                                  \
-        double: fprintf(stderr, "%f\n", _val),                                 \
-        const char *: fprintf(stderr, "\"%s\"\n", _val),                       \
-        char *: fprintf(stderr, "\"%s\"\n", _val),                             \
-        struct ListIdx: fprintf(stderr,                                        \
-                                "ListIdx {.block=%u, .block_idx=%u}\n", _val), \
-        default: fprintf(stderr, "<unprintable>\n"));                          \
-    _Pragma("GCC diagnostic pop") _val;                                        \
-  })
-
 #define UNLIKELY(condition) __builtin_expect(condition, 0)
 // TODO: not compiled out in release builds; rework this into a panic system and
 // compile asserts out for release
@@ -63,8 +40,8 @@
     exit(EXIT_FAILURE);                                                        \
   }
 
-#define TODO(fmt, ...)                                                         \
-  fprintf(stderr, "TODO: " fmt " failed in " __FILE__ ":%d\n", ##__VA_ARGS__,  \
+#define TODO(MSG)                                                              \
+  fprintf(stderr, "TODO: %s in %s %s:%d\n", MSG, __func__, __FILE__,           \
           __LINE__);                                                           \
   exit(EXIT_FAILURE);
 
@@ -126,3 +103,25 @@ __attribute__((unused)) static const Value *INTERNED_NONE =
 bool Value_cmp(const Value *a, const Value *b);
 void Value_debug(const Value *v);
 double Value_as_double(const Value *v);
+int64_t Value_as_int(const Value *v);
+
+#define DBG(EXPR)                                                              \
+  ({                                                                           \
+    _Pragma("GCC diagnostic push")                                             \
+        _Pragma("GCC diagnostic ignored \"-Wformat\"") __auto_type _val =      \
+            (EXPR);                                                            \
+    fprintf(stderr, "[%s:%d] %s = ", __FILE__, __LINE__, #EXPR);               \
+    _Generic((_val),                                                           \
+        int: fprintf(stderr, "%d\n", _val),                                    \
+        long: fprintf(stderr, "%ld\n", _val),                                  \
+        long long: fprintf(stderr, "%lld\n", _val),                            \
+        unsigned: fprintf(stderr, "%u\n", _val),                               \
+        unsigned long: fprintf(stderr, "%lu\n", _val),                         \
+        unsigned long long: fprintf(stderr, "%llu\n", _val),                   \
+        float: fprintf(stderr, "%f\n", _val),                                  \
+        double: fprintf(stderr, "%f\n", _val),                                 \
+        const char *: fprintf(stderr, "\"%s\"\n", _val),                       \
+        char *: fprintf(stderr, "\"%s\"\n", _val),                             \
+        default: fprintf(stderr, "<unprintable>\n"));                          \
+    _Pragma("GCC diagnostic pop") _val;                                        \
+  })

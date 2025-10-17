@@ -15,22 +15,23 @@ Str OP_MAP[256] = {
     [OP_LOADV] = STRING("LOADV"),     [OP_ARGS] = STRING("ARGS"),
     [OP_BUILTIN] = STRING("BUILTIN"), [OP_LEAVE] = STRING("LEAVE"),
     [OP_CALL] = STRING("CALL"),       [OP_JMP] = STRING("JMP"),
-    [OP_ASSERT] = STRING("ASSERT"),   [OP_LOADG] = STRING("LOADG"),
-    [OP_JMPF] = STRING("JMPF"),       [OP_APPEND] = STRING("APPEND"),
-    [OP_NEW] = STRING("NEW"),         [OP_SIZE] = STRING("SIZE"),
+    [OP_LOADG] = STRING("LOADG"),     [OP_JMPF] = STRING("JMPF"),
+    [OP_APPEND] = STRING("APPEND"),   [OP_NEW] = STRING("NEW"),
+    [OP_SIZE] = STRING("SIZE"),
 };
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE] = {0};
 
 inline void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
-  vm->builtins[Str_hash(&name) & MAX_BUILTIN_SIZE_MASK] = bf;
+  uint64_t hashed = Str_hash(&name) & MAX_BUILTIN_SIZE_MASK;
+  vm->builtins[hashed] = bf;
 }
 
 Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
   Vm vm = {0};
   vm.alloc = alloc;
 
-  vm.builtins = (void **)BUILTIN_MAP;
+  vm.builtins = BUILTIN_MAP;
 
   vm.globals = CALL(static_alloc, request, (sizeof(Value) * GLOBAL_SIZE));
   vm.globals[GLOBAL_FALSE] = *INTERNED_FALSE;
@@ -44,6 +45,8 @@ Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
     Vm_register_builtin(&vm, builtin_len, STRING("len"));
     Vm_register_builtin(&vm, builtin_type, STRING("type"));
     Vm_register_builtin(&vm, builtin_Some, STRING("Some"));
+    Vm_register_builtin(&vm, builtin_assert, STRING("assert"));
+    Vm_register_builtin(&vm, builtin_None, STRING("None"));
   }
 
   return vm;
@@ -64,14 +67,11 @@ void freelist_preallocate(FrameFreeList *fl) {
     *frame = (Frame){0};
     frame->variable_table =
         CALL(fl->alloc, request, sizeof(Value) * VARIABLE_TABLE_SIZE);
+    memset(frame->variable_table, 0, sizeof(Value) * VARIABLE_TABLE_SIZE);
     frame->prev = fl->head;
     fl->head = frame;
   }
 }
-
-#if DEBUG
-static uint64_t frame_count = 1;
-#endif
 
 void freelist_push(FrameFreeList *fl, Frame *frame) {
   frame->prev = fl->head;
@@ -84,6 +84,7 @@ Frame *freelist_pop(FrameFreeList *fl) {
     Frame *f = CALL(fl->alloc, request, sizeof(Frame));
     f->variable_table =
         CALL(fl->alloc, request, sizeof(Value) * VARIABLE_TABLE_SIZE);
+    memset(f->variable_table, 0, sizeof(Value) * VARIABLE_TABLE_SIZE);
     return f;
   }
   Frame *f = fl->head;
@@ -130,8 +131,6 @@ int Vm_run(Vm *vm) {
       case VM_NEW_ARRAY:
         v.type = V_ARRAY;
         if (vm->size_hint != 0) {
-          // TODO: replace with List_new_with_size once implemented; use
-          // Vm.size_hint
           LIST_Value *lv = CALL(vm->alloc, request, sizeof(LIST_Value));
           *lv = LIST_new(Value);
           v.array = lv;
@@ -143,6 +142,17 @@ int Vm_run(Vm *vm) {
           v.array = lv;
         }
         break;
+      case VM_NEW_OBJ: {
+        v.type = V_OBJ;
+        Map *m = CALL(vm->alloc, request, sizeof(Map));
+        if (vm->size_hint != 0) {
+          *m = Map_new(vm->size_hint, vm->alloc);
+        } else {
+          *m = (Map){0};
+        }
+        v.obj = m;
+        break;
+      }
       default:
         ASSERT(0, "OP_NEW unimplemented");
         break;
@@ -165,9 +175,11 @@ int Vm_run(Vm *vm) {
       // compile time, but we still have to check if the variable is available
       // in the current scope...
       Value v = vm->frame->variable_table[arg];
-      if (v.type == V_NONE) {
-        VM_ERR("Undefined variable with hash %i", arg);
-      }
+      // TODO: this doesnt work, we need a different way of checking access,
+      // this disallows putting (@None) in the variable table if (v.type ==
+      // V_NONE) {
+      //   VM_ERR("Undefined variable with hash %i", arg);
+      // }
       vm->registers[0] = v;
       break;
     }
@@ -278,7 +290,7 @@ int Vm_run(Vm *vm) {
     case OP_BUILTIN: {
       // at this point all builtins are just "syscalls" into an array of
       // function pointers
-      ((builtin_function)(size_t)arg)(vm);
+      ((builtin_function)vm->builtins[arg])(vm);
       vm->arg_count = 1;
       vm->arg_offset = 0;
       break;
@@ -312,12 +324,6 @@ int Vm_run(Vm *vm) {
     case OP_JMP: {
       vm->pc = arg;
       continue;
-    }
-    case OP_ASSERT: {
-      if (vm->registers[0].type != V_TRUE) {
-        VM_ERR("Assertion failed, value is not true")
-      }
-      break;
     }
     default:
       VM_ERR("Unimplemented instruction `%.*s`", (int)OP_MAP[op].len,

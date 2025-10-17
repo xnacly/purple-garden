@@ -9,17 +9,11 @@
 #define DISASSEMBLE_INCLUDE_POSITIONS 0
 #endif
 
-#define BC(CODE, ARG) ByteCodeBuilder_add(ctx->bcb, CODE, ARG)
-#define BC_LEN ctx->bcb->buffer.len
+#define BC(CODE, ARG)                                                          \
+  LIST_append((&ctx->bcb->buffer), (ctx->bcb->alloc), CODE);                   \
+  LIST_append((&ctx->bcb->buffer), (ctx->bcb->alloc), ARG);
 
-typedef enum {
-  COMPILE_BUILTIN_UNKNOWN = 0,
-  COMPILE_BUILTIN_LET,
-  COMPILE_BUILTIN_FUNCTION,
-  COMPILE_BUILTIN_ASSERT,
-  COMPILE_BUILTIN_NONE,
-  COMPILE_BUILTIN_MATCH,
-} COMPILE_BUILTIN;
+#define BC_LEN ctx->bcb->buffer.len
 
 typedef struct CtxFunction {
   Str name;
@@ -59,7 +53,8 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p);
 
 // disassemble prints a readable bytecode representation with labels, globals
 // and comments as a heap allocated string
-void disassemble(const Vm *vm, const Ctx *ctx);
+void disassemble(const Vm *vm, const Ctx *ctx, size_t offset, size_t length,
+                 bool skip_globals);
 
 // stats displays some statistics around the bytecode
 void bytecode_stats(const Vm *vm);

@@ -3,13 +3,6 @@
 #include "lexer.h"
 #include "mem.h"
 
-typedef struct {
-  Allocator *alloc;
-  Lexer *lexer;
-  size_t pos;
-  Token *cur;
-} Parser;
-
 typedef enum {
   // error case
   N_UNKNOWN = -1,
@@ -21,23 +14,26 @@ typedef enum {
   N_ARRAY,
   // anything between { and }
   N_OBJECT,
-  // main data structure
-  N_LIST,
-  // builtins, like @println, @len, @let, @function, etc
-  N_BUILTIN,
+  // creating variables
+  N_VAR,
+  // defining functions
+  N_FN,
+  // conditional logic
+  N_MATCH,
   // operator, like +-*/%=
   N_BIN,
   // function call
   N_CALL,
-  // root node
-  N_ROOT,
+  // path to a namespace, like std/fmt/println or std/os/env/USER
+  N_PATH,
 } NodeType;
 
 extern Str NODE_TYPE_MAP[];
 
 typedef struct Node Node;
+typedef Node *Nptr;
 
-LIST_TYPE(Node);
+LIST_TYPE(Nptr);
 
 // stores all possible values of a node
 typedef struct Node {
@@ -45,12 +41,16 @@ typedef struct Node {
   // N_ATOM values and the N_FUNCTION name are stored in the Token struct - this
   // reduces copies
   Token *token;
-  LIST_Node children;
+  LIST_Nptr children;
 } Node;
 
-Parser Parser_new(Allocator *alloc, Lexer *l);
-Node Parser_next(Parser *p);
+typedef struct Parser {
+  Allocator *alloc;
+  Lexer *lexer;
+  size_t pos;
+  Token *cur;
+} Parser;
 
-#if DEBUG
+Parser Parser_new(Allocator *alloc, Lexer *l);
+Node *Parser_next(Parser *p);
 void Node_debug(const Node *n, size_t depth);
-#endif
