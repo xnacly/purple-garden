@@ -6,8 +6,7 @@
 
 #include <stdint.h>
 
-#include "builtins.h"
-#include "common.h"
+#include "std/std.h"
 #include "vm.h"
 
 #define PG_API __attribute__((visibility("default")))

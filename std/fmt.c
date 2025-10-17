@@ -48,7 +48,7 @@ static void print_value(const Value *v) {
 }
 
 // print works the same as println but without the newline
-void builtin_fmt_print(Vm *vm) {
+static void builtin_fmt_print(Vm *vm) {
   for (uint16_t i = 0; i < vm->arg_count; i++) {
     print_value(&ARG(i));
     putc(' ', stdout);
@@ -58,7 +58,7 @@ void builtin_fmt_print(Vm *vm) {
 
 // println outputs its argument to stdout, joined with ' ' and postfixed with a
 // newline
-void builtin_fmt_println(Vm *vm) {
+static void builtin_fmt_println(Vm *vm) {
   builtin_fmt_print(vm);
   putc('\n', stdout);
   RETURN(*INTERNED_NONE);

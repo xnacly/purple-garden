@@ -6,6 +6,7 @@
 #include "lexer.h"
 #include "mem.h"
 #include "parser.h"
+#include "std/std.h"
 #include "strings.h"
 #include "vm.h"
 
@@ -152,10 +153,54 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     break;
   }
   case N_PATH: {
-    size_t len = n->children.len;
-    for (size_t i = 0; i < len; i++) {
-      LIST_get_UNSAFE(&n->children, i);
+
+    // stdlib path lookup and compilation
+    if (n->token->type == T_STD) {
+      size_t len = n->children.len;
+
+      StdNode *sn = ctx->std;
+
+      // walk path segments to find package, for instance for
+      // std::runtime::gc::stats() we walk: PKG: runtime PKG: gc FN: stats
+      for (size_t i = 0; i < len; i++) {
+        Str s = LIST_get_UNSAFE(&n->children, i)->token->string;
+        for (size_t j = 0; j < sn->len; j++) {
+          if (sn->children[j].name.hash == s.hash) {
+            sn = &sn->children[j];
+            DEBUG_PUTS("path segment `%.*s`", (int)s.len, s.p);
+            break;
+          }
+        }
+      }
+
+      ASSERT(sn->fn != NULL, "No matching builtin function found");
+
+      Node *last = LIST_get_UNSAFE(&n->children, len - 1);
+      ASSERT(last != NULL, "Wasnt able to get the call part of the path");
+      ASSERT(last->type == N_CALL, "Last segment of std access isn't N_CALL");
+      size_t argument_len = last->children.len;
+
+      size_t registers[argument_len < 1 ? 1 : len];
+      for (size_t i = 0; i < argument_len; i++) {
+        Node *child = LIST_get_UNSAFE(&last->children, i);
+        compile(alloc, vm, ctx, child);
+        size_t r = Ctx_allocate_register(ctx);
+        registers[i] = r;
+        BC(OP_STORE, r);
+      }
+
+      for (int i = argument_len - 1; i >= 0; i--) {
+        Ctx_free_register(ctx, registers[i]);
+      }
+
+      BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(argument_len,
+                                              ctx->register_allocated_count));
+      BC(OP_BUILTIN, vm->builtin_count);
+      Vm_register_builtin(vm, sn->fn);
+    } else {
+      ASSERT(0, "Only N_PATH for std currently supported")
     }
+
     break;
   }
   case N_FN: { // (fn <name> [<args>] <s-expr's>)
@@ -176,15 +221,6 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     };
     ctx->hash_to_function[hash] = function_ctx;
 
-    // PERF: optimisation for removing empty functions
-    if (n->children.len == 1) {
-      // set 0 so the call is also removed
-      ctx->hash_to_function[hash].size = 0;
-      DEBUG_PUTS("Removing body of empty `%.*s` function",
-                 (int)function_ctx.name.len, function_ctx.name.p);
-      return;
-    }
-
     // this is the worst hack i have ever written, this is used to
     // jump over the bytecode of a function (header with args setup
     // and body), so we keep the bytecode compilation single pass and
@@ -200,8 +236,6 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     // arguments  = [ 1  2  3]
     for (size_t i = 0; i < params.len; i++) {
       Node *param = LIST_get_UNSAFE(&params, i);
-      // PERF: changing args to start from r1 to starting from r0,
-      // thus saving a single OP_LOAD for each function invocation
       BC(OP_LOAD, i + 1);
       BC(OP_VAR, param->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
     }
@@ -229,28 +263,16 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     break;
   }
-  case N_CALL: { // function call site (<name|builtin> <args>)
+  case N_CALL: { // user defined function call site (<name> <args>)
     Str *name = &n->token->string;
     size_t len = n->children.len;
-    size_t idx = name->hash & MAX_BUILTIN_SIZE_MASK;
 
-    builtin_function bf = vm->builtins[idx];
-    CtxFunction *func = NULL;
-    if (bf == NULL) {
-      func = &ctx->hash_to_function[idx];
-      ASSERT(func->name.len != 0, "Undefined function `%.*s`", (int)name->len,
-             name->p)
-      ASSERT(len == func->argument_count, "`%.*s` wants %zu arguments, got %zu",
-             (int)func->name.len, func->name.p, func->argument_count, len);
-
-      // PERF: optimisation to remove calls to empty functions, since their
-      // definition is also removed
-      // if (!func->size) {
-      //   DEBUG_PUTS("Removing call to empty `%.*s` function (size=%zu)",
-      //              (int)func->name.len, func->name.p, func->size);
-      //   return;
-      // }
-    }
+    CtxFunction *func = func =
+        &ctx->hash_to_function[name->hash & MAX_BUILTIN_SIZE_MASK];
+    ASSERT(func->name.len != 0, "Undefined function `%.*s`", (int)name->len,
+           name->p)
+    ASSERT(len == func->argument_count, "`%.*s` wants %zu arguments, got %zu",
+           (int)func->name.len, func->name.p, func->argument_count, len);
 
     // we compile all arguments to bytecode one by one by one
     size_t registers[len < 1 ? 1 : len];
@@ -268,11 +290,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     BC(OP_ARGS,
        ENCODE_ARG_COUNT_AND_OFFSET(len, ctx->register_allocated_count));
-    if (bf == NULL) {
-      BC(OP_CALL, func->bytecode_index);
-    } else {
-      BC(OP_BUILTIN, idx);
-    }
+    BC(OP_CALL, func->bytecode_index);
 
     break;
   }
@@ -358,6 +376,7 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
       .global_hash_buckets = {0},
       .hash_to_function = {},
       .bcb = &bcb,
+      .std = std_tree(vm->config),
   };
 
   while (true) {

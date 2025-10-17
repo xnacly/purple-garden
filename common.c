@@ -6,10 +6,10 @@
 #define PREC 1e-9
 
 Str VALUE_TYPE_MAP[] = {
-    [V_NONE] = STRING("Option/None"), [V_STR] = STRING("Str"),
-    [V_INT] = STRING("Int"),          [V_DOUBLE] = STRING("Double"),
-    [V_TRUE] = STRING("True"),        [V_FALSE] = STRING("False"),
-    [V_ARRAY] = STRING("Array"),      [V_OBJ] = STRING("Object"),
+    [V_NONE] = STRING("Option::None"), [V_STR] = STRING("str"),
+    [V_INT] = STRING("int"),           [V_DOUBLE] = STRING("double"),
+    [V_TRUE] = STRING("true"),         [V_FALSE] = STRING("false"),
+    [V_ARRAY] = STRING("arr"),         [V_OBJ] = STRING("obj"),
 };
 
 // Value_cmp compares two values in a shallow way, is used for OP_EQ and in

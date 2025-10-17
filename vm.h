@@ -8,10 +8,8 @@ typedef struct {
   // defines the maximum amount of memory purple garden is allowed to allocate,
   // if this is hit, the vm exits with a non zero code
   uint64_t max_memory;
-  // removes all default builtins like @len, @type, etc
-  bool remove_default_builtins;
-  // disables the @std/ namespace
-  bool disable_std_namespace;
+  // disables the standard library
+  bool disable_std;
   // disables garbage collection and allocates 'max_memory' with a bump
   // allocator
   bool disable_gc;
@@ -52,6 +50,8 @@ typedef struct __Vm Vm;
 typedef void (*builtin_function)(Vm *vm);
 
 typedef struct __Vm {
+  Vm_Config config;
+
   uint32_t global_len;
   // globals represents the global pool created by the bytecode compiler
   Value *globals;
@@ -78,6 +78,7 @@ typedef struct __Vm {
   uint32_t size_hint;
 
   builtin_function *builtins;
+  size_t builtin_count;
 
   Allocator *alloc;
 #if DEBUG
@@ -198,6 +199,6 @@ extern Str OP_MAP[];
 // to allocate space for both the global pool and the byte code space, alloc is
 // used in the virtual machine itself
 Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc);
-void Vm_register_builtin(Vm *vm, builtin_function bf, Str name);
+void Vm_register_builtin(Vm *vm, builtin_function bf);
 int Vm_run(Vm *vm);
 void Vm_destroy(Vm *vm);

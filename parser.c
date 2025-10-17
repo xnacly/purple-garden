@@ -109,8 +109,8 @@ Parser Parser_new(Allocator *alloc, Lexer *l) {
 
 static inline __attribute__((always_inline, hot)) void advance(Parser *p) {
 #if DEBUG
-  Token_debug(p->cur);
-  puts("");
+  // Token_debug(p->cur);
+  // puts("");
 #endif
   p->pos++;
   p->cur = Lexer_next(p->lexer, p->alloc);

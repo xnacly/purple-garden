@@ -7,7 +7,7 @@ static const Str *BOOL = &STRING("bool");
 static const Str *OBJ = &STRING("obj");
 static const Str *ARR = &STRING("array");
 
-void builtin_runtime_type(Vm *vm) {
+static void builtin_runtime_type(Vm *vm) {
   ASSERT(vm->arg_count == 1, "type only works for a singular argument")
   uint16_t offset = vm->arg_offset;
   const Str *s;
@@ -49,9 +49,26 @@ void builtin_runtime_type(Vm *vm) {
   });
 }
 
-void builtin_runtime_assert(Vm *vm) {
+static void builtin_runtime_assert(Vm *vm) {
   ASSERT(vm->arg_count == 1, "assert needs exactly a single argument, got %d",
          vm->arg_count);
   Value v = ARG(0);
   ASSERT(v.type = V_TRUE, "Assertion failed");
+}
+
+static void builtin_runtime_gc_stats(Vm *vm) {
+  // TODO: this fucking sucks, there has to be a better way, i urgenly need a
+  // c->pg type macro
+  Stats c = CALL(vm->alloc, stats);
+  LIST_Value *lv = CALL(vm->alloc, request, sizeof(LIST_Value));
+  *lv = LIST_new(Value);
+  Value current = (Value){.type = V_INT, .integer = c.current};
+  Value allocated = (Value){.type = V_INT, .integer = c.allocated};
+  LIST_append(lv, vm->alloc, allocated);
+  LIST_append(lv, vm->alloc, current);
+
+  RETURN((Value){
+      .type = V_ARRAY,
+      .array = lv,
+  });
 }

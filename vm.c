@@ -1,7 +1,6 @@
 #include <stdint.h>
 
 #include "adts.h"
-#include "builtins.h"
 #include "common.h"
 #include "mem.h"
 #include "strings.h"
@@ -22,14 +21,14 @@ Str OP_MAP[256] = {
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE] = {0};
 
-inline void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
-  uint64_t hashed = Str_hash(&name) & MAX_BUILTIN_SIZE_MASK;
-  vm->builtins[hashed] = bf;
+inline void Vm_register_builtin(Vm *vm, builtin_function bf) {
+  vm->builtins[vm->builtin_count++] = bf;
 }
 
 Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
   Vm vm = {0};
   vm.alloc = alloc;
+  vm.config = conf;
 
   vm.builtins = BUILTIN_MAP;
 
@@ -38,16 +37,6 @@ Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
   vm.globals[GLOBAL_TRUE] = *INTERNED_TRUE;
   vm.globals[GLOBAL_NONE] = *INTERNED_NONE;
   vm.global_len = 3;
-
-  if (!conf.remove_default_builtins) {
-    Vm_register_builtin(&vm, builtin_print, STRING("print"));
-    Vm_register_builtin(&vm, builtin_println, STRING("println"));
-    Vm_register_builtin(&vm, builtin_len, STRING("len"));
-    Vm_register_builtin(&vm, builtin_type, STRING("type"));
-    Vm_register_builtin(&vm, builtin_Some, STRING("Some"));
-    Vm_register_builtin(&vm, builtin_assert, STRING("assert"));
-    Vm_register_builtin(&vm, builtin_None, STRING("None"));
-  }
 
   return vm;
 }
