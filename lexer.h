@@ -45,6 +45,7 @@ typedef enum {
   T_VAR,
   T_FN,
   T_MATCH,
+  T_STD,
   // any identifier
   T_IDENT,
 } TokenType;

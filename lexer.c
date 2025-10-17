@@ -32,6 +32,7 @@ Str TOKEN_TYPE_MAP[] = {
     [T_FN] = STRING("T_FN"),
     [T_MATCH] = STRING("T_MATCH"),
     [T_IDENT] = STRING("T_IDENT"),
+    [T_STD] = STRING("T_STD"),
     [T_EOF] = STRING("T_EOF"),
 };
 
@@ -56,6 +57,7 @@ Token *INTERN_TRUE = &SINGLE_TOK(T_TRUE);
 Token *INTERN_VAR = &SINGLE_TOK(T_VAR);
 Token *INTERN_FN = &SINGLE_TOK(T_FN);
 Token *INTERN_MATCH = &SINGLE_TOK(T_MATCH);
+Token *INTERN_STD = &SINGLE_TOK(T_STD);
 Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 
 Lexer Lexer_new(Str input) {
@@ -63,6 +65,8 @@ Lexer Lexer_new(Str input) {
       INTERN_VAR;
   compiletime_hashes[Str_hash(&STRING("match")) & MAX_BUILTIN_SIZE_MASK] =
       INTERN_MATCH;
+  compiletime_hashes[Str_hash(&STRING("std")) & MAX_BUILTIN_SIZE_MASK] =
+      INTERN_STD;
   compiletime_hashes[Str_hash(&STRING("fn")) & MAX_BUILTIN_SIZE_MASK] =
       INTERN_FN;
   compiletime_hashes[Str_hash(&STRING("true")) & MAX_BUILTIN_SIZE_MASK] =

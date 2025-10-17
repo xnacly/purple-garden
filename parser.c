@@ -60,6 +60,11 @@ void Node_debug(const Node *n, size_t depth) {
     Str_debug(&n->token->string);
     printf("]");
     break;
+  case N_PATH:
+    if (n->token != NULL) {
+      Token_debug(n->token);
+    }
+    break;
   case N_VAR:
   case N_ATOM:
   case N_BIN:
@@ -232,6 +237,16 @@ inline static Node *Parser_atom(Parser *p) {
     n->token = p->cur;
     advance(p);
     return n;
+  }
+  case T_STD: { // std lib access via std::<path>
+    Node *std_path = NODE_NEW(N_PATH, p->cur);
+    advance(p);
+    while (p->cur->type == T_DOUBLEDOUBLEDOT) {
+      consume(p, T_DOUBLEDOUBLEDOT);
+      Node *n = TRACE(Parser_atom);
+      LIST_append(&std_path->children, p->alloc, n);
+    }
+    return std_path;
   }
   case T_IDENT: { // variable name or <name>(<args>)
     Token *ident = p->cur;
