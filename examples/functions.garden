@@ -2,10 +2,10 @@
 fn add3 :: arg1 arg2 arg3  {
     arg1+arg2+arg3
 }
-println(add3(3.1415 3.1415 3.1415))
+std::println(add3(3.1415 3.1415 3.1415))
 
 fn greeting :: greetee {
-    println("hello world to:" greetee)
+    std::println("hello world to:" greetee)
 } 
 greeting("teo") # hello world to: user
 
@@ -17,12 +17,12 @@ fn call2 :: x {call1(x)}
 fn call3 :: x {call2(x)}
 fn call4 :: x {call3(x)}
 fn call5 :: x {call4(x)}
-println(call5(0))
+std::println(call5(0))
 
 fn tuplify :: v {
     [type(v) len(v)]
 } 
-println(tuplify("hello world")) # [str, 11]
+std::println(tuplify("hello world")) # [str, 11]
 
 # WARN: this loops endlessly until it goes OOM, this is just a test for producing gc pressure
 # fn f1 :: a {

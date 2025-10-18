@@ -16,14 +16,10 @@ Str OP_MAP[256] = {
     [OP_CALL] = STRING("CALL"),       [OP_JMP] = STRING("JMP"),
     [OP_LOADG] = STRING("LOADG"),     [OP_JMPF] = STRING("JMPF"),
     [OP_APPEND] = STRING("APPEND"),   [OP_NEW] = STRING("NEW"),
-    [OP_SIZE] = STRING("SIZE"),
+    [OP_SIZE] = STRING("SIZE"),       [OP_IDX] = STRING("IDX"),
 };
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE] = {0};
-
-inline void Vm_register_builtin(Vm *vm, builtin_function bf) {
-  vm->builtins[vm->builtin_count++] = bf;
-}
 
 Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
   Vm vm = {0};
@@ -270,6 +266,31 @@ int Vm_run(Vm *vm) {
       vm->registers[0] = Value_cmp(&vm->registers[0], &vm->registers[arg])
                              ? vm->globals[1]
                              : vm->globals[0];
+      break;
+    }
+    case OP_IDX: {
+      Value target = vm->registers[arg];
+      Value idx = vm->registers[0];
+      switch (target.type) {
+      case V_ARRAY:
+        if (idx.type != V_INT || idx.type != V_INT) {
+          goto err;
+        }
+        vm->registers[0] = LIST_get_UNSAFE(target.array, Value_as_int(&idx));
+        break;
+      case V_OBJ:
+        if (idx.type != V_STR) {
+          goto err;
+        }
+        vm->registers[0] = Map_get(target.obj, idx.string);
+        break;
+      err:
+      default:
+        Str t = VALUE_TYPE_MAP[target.type];
+        Str i = VALUE_TYPE_MAP[idx.type];
+        VM_ERR("Cant index into `%.*s` with `%.*s`", (int)t.len, t.p,
+               (int)i.len, i.p);
+      }
       break;
     }
     case OP_ARGS:

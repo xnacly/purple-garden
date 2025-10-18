@@ -2,6 +2,7 @@
 #include "common.h"
 #include "mem.h"
 #include "strings.h"
+#include <ctype.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -81,13 +82,19 @@ Lexer Lexer_new(Str input) {
 }
 
 #define CUR(L) (L->input.p[L->pos])
-#define IS_ALPHANUM(CC) (is_alphanum_table[(uint8_t)(CC)])
+#define IS_ALPHANUM(CC) (alphanum_table[(uint8_t)(CC)])
 
 // this whole block makes is_alphanum zero branch and as fast as possible
-static const bool is_alphanum_table[256] = {['0' ... '9'] = true,
-                                            ['A' ... 'Z'] = true,
-                                            ['a' ... 'z'] = true,
-                                            ['_'] = true};
+static const bool alphanum_table[256] = {['0' ... '9'] = true,
+                                         ['A' ... 'Z'] = true,
+                                         ['a' ... 'z'] = true,
+                                         ['_'] = true};
+static const bool space_table[256] = {
+    [' '] = true,
+    ['\t'] = true,
+    ['\n'] = true,
+    ['\r'] = true,
+};
 
 // TODO: lexer needs a hash based string and ident interning model, the current
 // falls apart after around 1 mio identifiers
@@ -170,6 +177,7 @@ number: {
   bool is_double = false;
   uint64_t hash = FNV_OFFSET_BASIS;
 
+#pragma GCC unroll 32
   for (; i < l->input.len; i++) {
     char cc = l->input.p[i];
     hash ^= cc;
@@ -229,13 +237,15 @@ ident: {
   return tt;
 }
 
-// same as string but only with leading '
+// same as string but only with leading ' and allowing everything except spaces
 quoted: {
   // skip '
   l->pos++;
   size_t start = l->pos;
   uint64_t hash = FNV_OFFSET_BASIS;
-  for (char cc = CUR(l); cc > 0 && IS_ALPHANUM(cc); l->pos++, cc = CUR(l)) {
+
+#pragma GCC unroll 32
+  for (uint8_t cc = CUR(l); cc > 0 && !space_table[cc]; l->pos++, cc = CUR(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
   }
@@ -257,6 +267,8 @@ string: {
   l->pos++;
   size_t start = l->pos;
   uint64_t hash = FNV_OFFSET_BASIS;
+
+#pragma GCC unroll 32
   for (char cc = CUR(l); cc > 0 && cc != '"'; l->pos++, cc = CUR(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;

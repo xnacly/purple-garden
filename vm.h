@@ -187,6 +187,11 @@ typedef enum {
   //
   // Specifices a size
   OP_SIZE,
+
+  // Idx rANY
+  //
+  // Use the value in r0 to index into rANY
+  OP_IDX,
 } VM_OP;
 
 #define VM_ERR(fmt, ...)                                                       \
@@ -199,6 +204,5 @@ extern Str OP_MAP[];
 // to allocate space for both the global pool and the byte code space, alloc is
 // used in the virtual machine itself
 Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc);
-void Vm_register_builtin(Vm *vm, builtin_function bf);
 int Vm_run(Vm *vm);
 void Vm_destroy(Vm *vm);

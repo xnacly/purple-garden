@@ -53,7 +53,7 @@ static void builtin_runtime_assert(Vm *vm) {
   ASSERT(vm->arg_count == 1, "assert needs exactly a single argument, got %d",
          vm->arg_count);
   Value v = ARG(0);
-  ASSERT(v.type = V_TRUE, "Assertion failed");
+  ASSERT(v.type == V_TRUE, "Assertion");
 }
 
 static void builtin_runtime_gc_stats(Vm *vm) {

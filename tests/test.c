@@ -135,7 +135,7 @@ int main() {
            VAL(.type = V_INT, .integer = 50)),
 
       // builtins
-      CASE(std::runtime::assert(true), VAL(.type = V_TRUE)),
+      CASE(std::assert(true), VAL(.type = V_TRUE)),
       CASE(std::None(), VAL(.type = V_NONE)),
       CASE(std::Some(true), VAL(.type = V_TRUE, .is_some = true)),
       CASE(std::Some(false), VAL(.type = V_FALSE, .is_some = true)),

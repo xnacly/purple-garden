@@ -1,6 +1,5 @@
 # vim: filetype=python
 
-# println is a predefined function responsible for writing to
-# stdout
-var stats :: std::runtime::gc::stats()
-std::fmt::println("[allocated,used]" stats)
+# std::println is a predefined function responsible for writing to
+# stdout, like std::fmt::print or std::fmt::printf
+std::println("Hello World")

@@ -1,7 +1,7 @@
-; vim: filetype=racket
-; arithmetics
-assert(3 = 1+2)
-assert("helloWorld" = "hello"+"World")
-assert(1 = 2-1)
-assert(9 = 3*3)
-assert(3.1415 = 3.1415)
+# vim: filetype=python
+# arithmetics
+std::assert(3 = 1+2)
+std::assert("helloWorld" = "hello"+"World")
+std::assert(1 = 2-1)
+std::assert(9 = 3*3)
+std::assert(3.1415 = 3.1515)

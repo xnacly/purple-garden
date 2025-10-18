@@ -160,29 +160,30 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
       StdNode *sn = ctx->std;
 
-      // walk path segments to find package, for instance for
+      // walk path fragments to find package, for instance for
       // std::runtime::gc::stats() we walk: PKG: runtime PKG: gc FN: stats
       for (size_t i = 0; i < len; i++) {
         Str s = LIST_get_UNSAFE(&n->children, i)->token->string;
         for (size_t j = 0; j < sn->len; j++) {
           if (sn->children[j].name.hash == s.hash) {
             sn = &sn->children[j];
-            DEBUG_PUTS("path segment `%.*s`", (int)s.len, s.p);
             break;
           }
         }
       }
 
       ASSERT(sn->fn != NULL, "No matching builtin function found");
+      DEBUG_PUTS("Found std leaf function `%.*s`(0x%p)", (int)sn->name.len,
+                 sn->name.p, sn->fn);
 
-      Node *last = LIST_get_UNSAFE(&n->children, len - 1);
-      ASSERT(last != NULL, "Wasnt able to get the call part of the path");
-      ASSERT(last->type == N_CALL, "Last segment of std access isn't N_CALL");
-      size_t argument_len = last->children.len;
+      Node *call = LIST_get_UNSAFE(&n->children, len - 1);
+      ASSERT(call != NULL, "Wasnt able to get the call part of the path");
+      ASSERT(call->type == N_CALL, "Last segment of std access isn't N_CALL");
+      size_t argument_len = call->children.len;
 
-      size_t registers[argument_len < 1 ? 1 : len];
+      size_t registers[argument_len < 1 ? 1 : argument_len];
       for (size_t i = 0; i < argument_len; i++) {
-        Node *child = LIST_get_UNSAFE(&last->children, i);
+        Node *child = LIST_get_UNSAFE(&call->children, i);
         compile(alloc, vm, ctx, child);
         size_t r = Ctx_allocate_register(ctx);
         registers[i] = r;
@@ -196,9 +197,17 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(argument_len,
                                               ctx->register_allocated_count));
       BC(OP_BUILTIN, vm->builtin_count);
-      Vm_register_builtin(vm, sn->fn);
+      vm->builtins[vm->builtin_count++] = sn->fn;
     } else {
-      ASSERT(0, "Only N_PATH for std currently supported")
+      compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 0));
+      size_t rtarget = Ctx_allocate_register(ctx);
+      BC(OP_STORE, rtarget);
+      for (size_t i = 1; i < n->children.len; i++) {
+        compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, i));
+        BC(OP_IDX, rtarget);
+      }
+
+      Ctx_free_register(ctx, rtarget);
     }
 
     break;
