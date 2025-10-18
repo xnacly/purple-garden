@@ -23,8 +23,9 @@ static void builtin_len(Vm *vm) {
       .integer = len,
   });
 }
+
 // clang-format off
-static StdNode tree = PACKAGE("std",
+static const StdNode tree = PACKAGE("std",
           PACKAGE("fmt", 
               FUNCTION("print", &builtin_fmt_print), 
               FUNCTION("println", &builtin_fmt_println),
@@ -42,7 +43,7 @@ static StdNode tree = PACKAGE("std",
           FUNCTION("len", &builtin_len),
         );
 
-static StdNode reduced = PACKAGE("std", 
+static const StdNode reduced = PACKAGE("std", 
           FUNCTION("Some", &builtin_opt_some),
           FUNCTION("None", &builtin_opt_none),
           FUNCTION("len", &builtin_len),

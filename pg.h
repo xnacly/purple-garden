@@ -19,13 +19,6 @@ typedef struct Pg {
 
 typedef void (*builtin_function)(Vm *vm);
 
-#define PG_REGISTER_BUILTIN(PG, NAME, FN)                                      \
-  Vm_register_builtin(&(PG)->__vm, (FN), STRING(NAME))
-
-// TODO: create a PG_Value_from and PG_Value_to macro family that allocates
-// strings, lists, objects and stuff, while taking ints, booleans and doubles as
-// literals.
-
 PG_API Pg pg_init(Vm_Config *conf);
 PG_API uint8_t pg_exec_file(Pg *pg, const char *filename);
 PG_API uint8_t pg_exec_Str(Pg *pg, Str input);
