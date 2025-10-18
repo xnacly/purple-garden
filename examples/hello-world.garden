@@ -1,5 +1,5 @@
 # vim: filetype=python
 
-# println is a predefined function responsible for writing to
-# stdout
-println("Hello World")
+# std::println is a predefined function responsible for writing to
+# stdout, like std::fmt::print or std::fmt::printf
+std::println("Hello World")

@@ -6,8 +6,7 @@
 
 #include <stdint.h>
 
-#include "builtins.h"
-#include "common.h"
+#include "std/std.h"
 #include "vm.h"
 
 #define PG_API __attribute__((visibility("default")))
@@ -19,13 +18,6 @@ typedef struct Pg {
 } Pg;
 
 typedef void (*builtin_function)(Vm *vm);
-
-#define PG_REGISTER_BUILTIN(PG, NAME, FN)                                      \
-  Vm_register_builtin(&(PG)->__vm, (FN), STRING(NAME))
-
-// TODO: create a PG_Value_from and PG_Value_to macro family that allocates
-// strings, lists, objects and stuff, while taking ints, booleans and doubles as
-// literals.
 
 PG_API Pg pg_init(Vm_Config *conf);
 PG_API uint8_t pg_exec_file(Pg *pg, const char *filename);

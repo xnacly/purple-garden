@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define ARG(I) (vm->registers[vm->arg_offset + 1 + (I)])
+#define RETURN(...) (vm->registers[0] = (Value)__VA_ARGS__)
+
 #ifndef DEBUG
 #define DEBUG 0
 #endif

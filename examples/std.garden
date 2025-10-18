@@ -16,16 +16,16 @@ std::fmt::sprintf("hello world: {}[{}]" user len(user)) # return as string
 # runtime allows for programatic virtual machine interactions
 std::runtime::gc::clean() # clean triggers a garbage collection cycle normaly only being triggered by the allocator inside of the vm
 std::runtime::gc::stop() # stop stops the gc from running again in the current execution
-std::runtime::stats::mem() # returns memory statistics: {current: int, allocated: int}
+std::runtime::gc::stats() # returns memory statistics: {current: int, allocated: int}
 
 # optionals
-var opt_none :: None()
-var opt_some :: Some([])
+var opt_none :: std::None()
+var opt_some :: std::Some([])
 std::opt::or(opt_none "anything else") # -> "anything else"
 std::opt::unwrap(opt_some) # -> []
 std::opt::expect(opt_some "would panic with this message") # -> []
-std::opt::some(opt_some) # -> true 
-std::opt::none(opt_none) # -> true 
+std::opt::is_some(opt_some) # -> true 
+std::opt::is_none(opt_none) # -> true 
 
 # array provides array utilities
 var arr :: [1 2 3 4 5]

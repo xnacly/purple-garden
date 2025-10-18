@@ -1,25 +1,25 @@
 # vim: filetype=python
 
 # atoms
-println(
+std::println(
   3.1415 
   true 
   false 
   "string"
 )
 
-println(
+std::println(
   'quoted-identifier-at-this-point
 )
 
 # optionals
-println(
-   Some("value")  # Option::Some("value")
-   None()         # Option::None
+std::println(
+    std::Some("value")  # Option::Some("value")
+    std::None()         # Option::None
 )
 
 # lists
-println(
+std::println(
   # same type lists
   [1 2 3 4 5 6]
   # different type lists
@@ -28,15 +28,17 @@ println(
   [161]::0
 )
 
-
+var arr :: [161 [["hello"] "world"] 787]
+var target :: arr::1
+std::println(target::0::0 target::1)
 
 # objects
 
 # quoted via 'user-name to allow symbols in identifiers
-var obj = { 'user-name "dummy" }
-println(obj) # { user-name: "dummy" }
-obj::'user-name = "xnacly"
-println(
-  obj # { user-name: "xnacly" }
-  obj::'user-name # "xnacly"
-)
+# var obj = { 'user-name "dummy" }
+# println(obj) # { user-name: "dummy" }
+# obj::'user-name = "xnacly"
+# println(
+#   obj # { user-name: "xnacly" }
+#   obj::'user-name # "xnacly"
+# )
