@@ -1,5 +1,10 @@
 # vim: filetype=python
+fn f1 :: a {
+    std::println("f1-depth" a)
+    match {
+        a=15 {  }
+        :: { f1(a+1) }
+    }
+}
 
-# std::println is a predefined function responsible for writing to
-# stdout, like std::fmt::print or std::fmt::printf
-std::println("Hello World")
+f1(0)

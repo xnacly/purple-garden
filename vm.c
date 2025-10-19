@@ -7,16 +7,17 @@
 #include "vm.h"
 
 Str OP_MAP[256] = {
-    [OP_STORE] = STRING("STORE"),     [OP_LOAD] = STRING("LOAD"),
-    [OP_ADD] = STRING("ADD"),         [OP_SUB] = STRING("SUB"),
-    [OP_MUL] = STRING("MUL"),         [OP_DIV] = STRING("DIV"),
-    [OP_EQ] = STRING("EQ"),           [OP_VAR] = STRING("VAR"),
-    [OP_LOADV] = STRING("LOADV"),     [OP_ARGS] = STRING("ARGS"),
-    [OP_BUILTIN] = STRING("BUILTIN"), [OP_LEAVE] = STRING("LEAVE"),
-    [OP_CALL] = STRING("CALL"),       [OP_JMP] = STRING("JMP"),
-    [OP_LOADG] = STRING("LOADG"),     [OP_JMPF] = STRING("JMPF"),
-    [OP_APPEND] = STRING("APPEND"),   [OP_NEW] = STRING("NEW"),
-    [OP_SIZE] = STRING("SIZE"),       [OP_IDX] = STRING("IDX"),
+    [OP_STORE] = STRING("STORE"),   [OP_LOAD] = STRING("LOAD"),
+    [OP_ADD] = STRING("ADD"),       [OP_SUB] = STRING("SUB"),
+    [OP_MUL] = STRING("MUL"),       [OP_DIV] = STRING("DIV"),
+    [OP_EQ] = STRING("EQ"),         [OP_LT] = STRING("LT"),
+    [OP_GT] = STRING("GT"),         [OP_VAR] = STRING("VAR"),
+    [OP_LOADV] = STRING("LOADV"),   [OP_ARGS] = STRING("ARGS"),
+    [OP_SYS] = STRING("BUILTIN"),   [OP_LEAVE] = STRING("LEAVE"),
+    [OP_CALL] = STRING("CALL"),     [OP_JMP] = STRING("JMP"),
+    [OP_LOADG] = STRING("LOADG"),   [OP_JMPF] = STRING("JMPF"),
+    [OP_APPEND] = STRING("APPEND"), [OP_NEW] = STRING("NEW"),
+    [OP_SIZE] = STRING("SIZE"),     [OP_IDX] = STRING("IDX"),
 };
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE] = {0};
@@ -175,90 +176,121 @@ int Vm_run(Vm *vm) {
       vm->frame->variable_table[arg] = vm->registers[0];
       break;
     case OP_ADD: {
-      Value *left = &vm->registers[0];
-      Value *right = &vm->registers[arg];
-      if (left->type == V_STR && right->type == V_STR) {
+      Value *lhs = &vm->registers[0];
+      Value *rhs = &vm->registers[arg];
+
+      if (lhs->type == V_STR && rhs->type == V_STR) {
         Str *s = CALL(vm->alloc, request, sizeof(Str));
-        *s = Str_concat(right->string, left->string, vm->alloc);
-        vm->registers[0] = (Value){
-            .type = V_STR,
-            .string = s,
-        };
-      } else if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0].floating =
-            Value_as_double(right) + Value_as_double(left);
-        vm->registers[0].type = V_DOUBLE;
-      } else {
-        if (!(left->type == V_INT && right->type == V_INT)) {
-          VM_ERR("VM[+] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[left->type].len,
-                 VALUE_TYPE_MAP[left->type].p,
-                 (int)VALUE_TYPE_MAP[right->type].len,
-                 VALUE_TYPE_MAP[right->type].p)
-        }
-        vm->registers[0].integer = right->integer + left->integer;
-        vm->registers[0].type = V_INT;
+        *s = Str_concat(rhs->string, lhs->string, vm->alloc);
+        vm->registers[0] = (Value){.type = V_STR, .string = s};
+        break;
       }
+
+      int lhs_is_double = lhs->type == V_DOUBLE;
+      int rhs_is_double = rhs->type == V_DOUBLE;
+
+      if (lhs_is_double | rhs_is_double) {
+        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = b + a;
+        vm->registers[0].type = V_DOUBLE;
+        break;
+      }
+
+      if (!(lhs->type == V_INT && rhs->type == V_INT)) {
+        Str l = VALUE_TYPE_MAP[lhs->type];
+        Str r = VALUE_TYPE_MAP[rhs->type];
+        VM_ERR("Can not perform `%.*s` + `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      vm->registers[0].integer = rhs->integer + lhs->integer;
+      vm->registers[0].type = V_INT;
       break;
     }
+
     case OP_SUB: {
-      Value *left = &vm->registers[0];
-      Value *right = &vm->registers[arg];
-      if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0].floating =
-            Value_as_double(right) - Value_as_double(left);
+      Value *lhs = &vm->registers[0];
+      Value *rhs = &vm->registers[arg];
+
+      int lhs_is_double = lhs->type == V_DOUBLE;
+      int rhs_is_double = rhs->type == V_DOUBLE;
+
+      if (lhs_is_double | rhs_is_double) {
+        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = b - a;
         vm->registers[0].type = V_DOUBLE;
-      } else {
-        if (!(left->type == V_INT && right->type == V_INT)) {
-          VM_ERR("VM[-] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[left->type].len,
-                 VALUE_TYPE_MAP[left->type].p,
-                 (int)VALUE_TYPE_MAP[right->type].len,
-                 VALUE_TYPE_MAP[right->type].p)
-        }
-        vm->registers[0].type = V_INT;
-        vm->registers[0].integer = right->integer - left->integer;
+        break;
       }
+
+      if (!(lhs->type == V_INT && rhs->type == V_INT)) {
+        Str l = VALUE_TYPE_MAP[lhs->type];
+        Str r = VALUE_TYPE_MAP[rhs->type];
+        VM_ERR("Can not perform `%.*s` - `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      vm->registers[0].integer = rhs->integer - lhs->integer;
+      vm->registers[0].type = V_INT;
       break;
     }
+
     case OP_MUL: {
-      Value *left = &vm->registers[0];
-      Value *right = &vm->registers[arg];
-      if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0].floating =
-            Value_as_double(right) * Value_as_double(left);
+      Value *lhs = &vm->registers[0];
+      Value *rhs = &vm->registers[arg];
+
+      int lhs_is_double = lhs->type == V_DOUBLE;
+      int rhs_is_double = rhs->type == V_DOUBLE;
+
+      if (lhs_is_double | rhs_is_double) {
+        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = b * a;
         vm->registers[0].type = V_DOUBLE;
-      } else {
-        if (!(left->type == V_INT && right->type == V_INT)) {
-          VM_ERR("VM[*] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[left->type].len,
-                 VALUE_TYPE_MAP[left->type].p,
-                 (int)VALUE_TYPE_MAP[right->type].len,
-                 VALUE_TYPE_MAP[right->type].p)
-        }
-        vm->registers[0].type = V_INT;
-        vm->registers[0].integer = right->integer * left->integer;
+        break;
       }
+
+      if (!(lhs->type == V_INT && rhs->type == V_INT)) {
+        Str l = VALUE_TYPE_MAP[lhs->type];
+        Str r = VALUE_TYPE_MAP[rhs->type];
+        VM_ERR("Can not perform `%.*s` * `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      vm->registers[0].integer = rhs->integer * lhs->integer;
+      vm->registers[0].type = V_INT;
       break;
     }
+
     case OP_DIV: {
-      Value *left = &vm->registers[0];
-      Value *right = &vm->registers[arg];
-      if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0].floating =
-            Value_as_double(right) / Value_as_double(left);
+      Value *lhs = &vm->registers[0];
+      Value *rhs = &vm->registers[arg];
+
+      int lhs_is_double = lhs->type == V_DOUBLE;
+      int rhs_is_double = rhs->type == V_DOUBLE;
+
+      if (lhs_is_double | rhs_is_double) {
+        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = b / a;
         vm->registers[0].type = V_DOUBLE;
-      } else {
-        if (!(left->type == V_INT && right->type == V_INT)) {
-          VM_ERR("VM[/] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[left->type].len,
-                 VALUE_TYPE_MAP[left->type].p,
-                 (int)VALUE_TYPE_MAP[right->type].len,
-                 VALUE_TYPE_MAP[right->type].p)
-        }
-        vm->registers[0].type = V_INT;
-        vm->registers[0].integer = right->integer / left->integer;
+        break;
       }
+
+      if (!(lhs->type == V_INT && rhs->type == V_INT)) {
+        Str l = VALUE_TYPE_MAP[lhs->type];
+        Str r = VALUE_TYPE_MAP[rhs->type];
+        VM_ERR("Can not perform `%.*s` / `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      if (lhs->integer == 0) {
+        VM_ERR("Division by zero");
+      }
+
+      vm->registers[0].integer = rhs->integer / lhs->integer;
+      vm->registers[0].type = V_INT;
       break;
     }
     case OP_EQ: {
@@ -266,6 +298,40 @@ int Vm_run(Vm *vm) {
       vm->registers[0] = Value_cmp(&vm->registers[0], &vm->registers[arg])
                              ? vm->globals[1]
                              : vm->globals[0];
+      break;
+    }
+    case OP_LT: {
+      Value lhs = vm->registers[arg];
+      Value rhs = vm->registers[0];
+      if (!((1 << lhs.type) & V_NUM_MASK) || !((1 << rhs.type) & V_NUM_MASK)) {
+        Str l = VALUE_TYPE_MAP[lhs.type];
+        Str r = VALUE_TYPE_MAP[rhs.type];
+        VM_ERR("Can not perform `%.*s` < `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      double a = lhs.type == V_INT ? (double)lhs.integer : lhs.floating;
+      double b = rhs.type == V_INT ? (double)rhs.integer : rhs.floating;
+      vm->registers[0] = (Value){
+          .type = (a < b) ? V_TRUE : V_FALSE,
+      };
+      break;
+    }
+    case OP_GT: {
+      Value lhs = vm->registers[arg];
+      Value rhs = vm->registers[0];
+      if (!((1 << lhs.type) & V_NUM_MASK) || !((1 << rhs.type) & V_NUM_MASK)) {
+        Str l = VALUE_TYPE_MAP[lhs.type];
+        Str r = VALUE_TYPE_MAP[rhs.type];
+        VM_ERR("Can not perform `%.*s` > `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      double a = lhs.type == V_INT ? (double)lhs.integer : lhs.floating;
+      double b = rhs.type == V_INT ? (double)rhs.integer : rhs.floating;
+      vm->registers[0] = (Value){
+          .type = (a > b) ? V_TRUE : V_FALSE,
+      };
       break;
     }
     case OP_IDX: {
@@ -297,7 +363,7 @@ int Vm_run(Vm *vm) {
       vm->arg_count = DECODE_ARG_COUNT(arg);
       vm->arg_offset = DECODE_ARG_OFFSET(arg);
       break;
-    case OP_BUILTIN: {
+    case OP_SYS: {
       // at this point all builtins are just "syscalls" into an array of
       // function pointers
       ((builtin_function)vm->builtins[arg])(vm);

@@ -23,18 +23,28 @@ static void print_value(const Value *v) {
   case V_FALSE:
     printf("false");
     break;
-  case V_OBJ:
-    // TODO: V_OBJ
-    printf("{}");
+  case V_OBJ: {
+    printf("{");
+    size_t len = v->obj->entries.len;
+    for (size_t i = 0; i < len; i++) {
+      MapEntry e = LIST_get_UNSAFE(&v->obj->entries, i);
+      printf("%u::", e.hash);
+      print_value(&e.value);
+      if (i + 1 < len) {
+        printf(" ");
+      }
+    }
+    printf("}");
     break;
+  }
   case V_ARRAY:
     printf("[");
-    uint64_t len = v->array->len;
+    size_t len = v->array->len;
     for (size_t i = 0; i < len; i++) {
       Value e = LIST_get(v->array, i);
       print_value(&e);
       if (i + 1 < len) {
-        printf(", ");
+        printf(" ");
       }
     }
     printf("]");

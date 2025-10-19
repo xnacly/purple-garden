@@ -15,7 +15,7 @@
 #endif
 
 #define INIT_BYTECODE_SIZE 64
-#define GLOBAL_SIZE 512
+#define GLOBAL_SIZE 1024
 #define GLOBAL_SIZE_MASK (GLOBAL_SIZE - 1)
 #define MAX_BUILTIN_SIZE 1024
 #define MAX_BUILTIN_SIZE_MASK (MAX_BUILTIN_SIZE - 1)
@@ -83,6 +83,8 @@ typedef struct Value {
   };
 } Value;
 
+#define V_NUM_MASK ((1 << V_INT) | (1 << V_DOUBLE))
+
 typedef struct {
   uint32_t hash;
   Value value;
@@ -107,6 +109,7 @@ bool Value_cmp(const Value *a, const Value *b);
 void Value_debug(const Value *v);
 double Value_as_double(const Value *v);
 int64_t Value_as_int(const Value *v);
+bool Value_is_opt(const Value *v);
 
 #define DBG(EXPR)                                                              \
   ({                                                                           \

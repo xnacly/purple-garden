@@ -1,4 +1,5 @@
 #include "std.h"
+#include "conv.c"
 #include "fmt.c"
 #include "opt.c"
 #include "runtime.c"
@@ -25,10 +26,22 @@ static void builtin_len(Vm *vm) {
 }
 
 // clang-format off
-static const StdNode tree = PACKAGE("std",
+static StdNode tree = PACKAGE("std",
           PACKAGE("fmt", 
               FUNCTION("print", &builtin_fmt_print), 
               FUNCTION("println", &builtin_fmt_println),
+          ), 
+          PACKAGE("opt", 
+              FUNCTION("unwrap", &builtin_opt_unwrap), 
+              FUNCTION("expect", &builtin_opt_expect),
+              FUNCTION("or", &builtin_opt_or), 
+              FUNCTION("is_some", &builtin_opt_is_some), 
+              FUNCTION("is_none", &builtin_opt_is_none), 
+          ), 
+          PACKAGE("conv", 
+              FUNCTION("int", &builtin_conv_int),
+              FUNCTION("num", &builtin_conv_num),
+              FUNCTION("str", &builtin_conv_str),
           ), 
           PACKAGE("runtime", 
               FUNCTION("type", &builtin_runtime_type),
@@ -43,7 +56,7 @@ static const StdNode tree = PACKAGE("std",
           FUNCTION("len", &builtin_len),
         );
 
-static const StdNode reduced = PACKAGE("std", 
+static StdNode reduced = PACKAGE("std", 
           FUNCTION("Some", &builtin_opt_some),
           FUNCTION("None", &builtin_opt_none),
           FUNCTION("len", &builtin_len),

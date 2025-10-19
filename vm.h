@@ -123,6 +123,16 @@ typedef enum {
   // compares value at r0 and rANY via Value_cmp
   OP_EQ = 6,
 
+  // OP_LT rANY
+  //
+  // numeric value at r0 < rANY
+  OP_LT = 7,
+
+  // OP_GT rANY
+  //
+  // numeric value at r0 > rANY
+  OP_GT = 8,
+
   // OP_VAR rANY
   //
   // stores the Value in the register rANY in the variable table via the
@@ -139,10 +149,10 @@ typedef enum {
   // instructs the vm on how many values to pop of the argument stacks
   OP_ARGS,
 
-  // OP_BUILTIN bANY
+  // OP_SYS bANY
   //
-  // call the builtin its argument refers to, with the argument stored in r0
-  OP_BUILTIN,
+  // syscall into the vm->builtin with idx bANY
+  OP_SYS,
 
   // OP_RET rANY
   //

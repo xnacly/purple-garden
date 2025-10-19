@@ -33,11 +33,12 @@ static size_t call_depth = 0;
   })
 
 Str NODE_TYPE_MAP[] = {
-    [N_ATOM] = STRING("N_ATOM"),   [N_IDENT] = STRING("N_IDENT"),
-    [N_ARRAY] = STRING("N_ARRAY"), [N_OBJECT] = STRING("N_OBJECT"),
-    [N_VAR] = STRING("N_VAR"),     [N_FN] = STRING("N_FN"),
-    [N_MATCH] = STRING("N_MATCH"), [N_BIN] = STRING("N_BIN"),
-    [N_CALL] = STRING("N_CALL"),   [N_PATH] = STRING("N_PATH"),
+    [N_ATOM] = STRING("N_ATOM"),       [N_IDENT] = STRING("N_IDENT"),
+    [N_ARRAY] = STRING("N_ARRAY"),     [N_OBJECT] = STRING("N_OBJECT"),
+    [N_VAR] = STRING("N_VAR"),         [N_FN] = STRING("N_FN"),
+    [N_MATCH] = STRING("N_MATCH"),     [N_CASE] = STRING("N_CASE"),
+    [N_DEFAULT] = STRING("N_DEFAULT"), [N_BIN] = STRING("N_BIN"),
+    [N_CALL] = STRING("N_CALL"),       [N_PATH] = STRING("N_PATH"),
 };
 
 void Node_debug(const Node *n, size_t depth) {
@@ -213,7 +214,8 @@ inline static Node *Parser_postfix_access(Parser *p, Node *base) {
 
 inline static Node *Parser_comparison(Parser *p) {
   Node *lhs = TRACE(Parser_expr);
-  while (p->cur->type == T_EQUAL) {
+  while (p->cur->type == T_EQUAL || p->cur->type == T_LESS_THAN ||
+         p->cur->type == T_GREATER_THAN) {
     Token *op = p->cur;
     advance(p);
     Node *rhs = TRACE(Parser_expr);
@@ -337,7 +339,55 @@ Node *Parser_next(Parser *p) {
     break;
   }
   case T_MATCH: {
-    TODO("T_MATCH: Unimplemented");
+    // match {
+    //   <condition> { <case body> }
+    //   <condition> { <case body> }
+    //   <condition> { <case body> }
+    //  :: <default case body>
+    // }
+    //
+    // N_MATCH(
+    //     N_ARRAY(
+    //          <condition>
+    //          <body>
+    //     )
+    //     N_ARRAY(
+    //          <condition>
+    //          <body>
+    //     )
+    //     // default case:
+    //     N_ARRAY(
+    //          <body>
+    //     )
+    // )
+    Node *match = NODE_NEW(N_MATCH, p->cur);
+    advance(p);
+    consume(p, T_CURLY_LEFT);
+    while (p->cur->type != T_CURLY_RIGHT) {
+      Node *case_container = NODE_NEW(N_CASE, p->cur);
+
+      if (p->cur->type != T_DOUBLEDOUBLEDOT) {
+        Node *condition = TRACE(Parser_next);
+        LIST_append(&case_container->children, p->alloc, condition);
+      } else {
+        // default case prefixed with ::
+        consume(p, T_DOUBLEDOUBLEDOT);
+        // modifed so the compiler nows this is the default cause
+        case_container->type = N_DEFAULT;
+      }
+
+      consume(p, T_CURLY_LEFT);
+      while (p->cur->type != T_CURLY_RIGHT) {
+        Node *body = TRACE(Parser_next);
+        LIST_append(&case_container->children, p->alloc, body);
+      }
+      consume(p, T_CURLY_RIGHT);
+
+      LIST_append(&match->children, p->alloc, case_container);
+    }
+    consume(p, T_CURLY_RIGHT);
+    n = match;
+    break;
   }
   case T_FN: { // fn <name>(<args>){ <body> }
     consume(p, T_FN);

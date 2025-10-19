@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdlib.h>
 
 #include "adts.h"
@@ -134,7 +135,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       compile(alloc, vm, ctx, child);
     } else {
       Node *lhs = LIST_get_UNSAFE(&n->children, 0);
-      // two arguments is easy to compile, just load and add two Values
+      // two arguments is easy to compile, just load and perform the bin op on
+      // two Values
       compile(alloc, vm, ctx, lhs);
       size_t r = Ctx_allocate_register(ctx);
       BC(OP_STORE, r);
@@ -153,7 +155,6 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     break;
   }
   case N_PATH: {
-
     // stdlib path lookup and compilation
     if (n->token->type == T_STD) {
       size_t len = n->children.len;
@@ -173,7 +174,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       }
 
       ASSERT(sn->fn != NULL, "No matching builtin function found");
-      DEBUG_PUTS("Found std leaf function `%.*s`(0x%p)", (int)sn->name.len,
+      DEBUG_PUTS("Found std leaf function `%.*s`: %p", (int)sn->name.len,
                  sn->name.p, sn->fn);
 
       Node *call = LIST_get_UNSAFE(&n->children, len - 1);
@@ -196,7 +197,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
       BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(argument_len,
                                               ctx->register_allocated_count));
-      BC(OP_BUILTIN, vm->builtin_count);
+      BC(OP_SYS, vm->builtin_count);
       vm->builtins[vm->builtin_count++] = sn->fn;
     } else {
       compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 0));
@@ -212,7 +213,10 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     break;
   }
-  case N_FN: { // (fn <name> [<args>] <s-expr's>)
+  case N_MATCH: {
+    break;
+  };
+  case N_FN: {
     Str name = n->token->string;
     size_t hash = name.hash & MAX_BUILTIN_SIZE_MASK;
     LIST_Nptr params = LIST_get_UNSAFE(&n->children, 0)->children;
@@ -224,9 +228,6 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
         .name = name,
         .bytecode_index = BC_LEN,
         .argument_count = params.len,
-        // placeholder so recursive self calls arent optimised away due to
-        // function size checks
-        .size = 0xAFFEDEAD,
     };
     ctx->hash_to_function[hash] = function_ctx;
 

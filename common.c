@@ -128,4 +128,8 @@ inline int64_t Value_as_int(const Value *v) {
   }
 }
 
+inline bool Value_is_opt(const Value *v) {
+  return v->type == V_NONE || v->is_some;
+}
+
 #undef PREC

@@ -2,7 +2,6 @@
 #include "common.h"
 #include "mem.h"
 #include "strings.h"
-#include <ctype.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -17,6 +16,8 @@ Str TOKEN_TYPE_MAP[] = {
     [T_ASTERISKS] = STRING("T_ASTERISKS"),
     [T_SLASH] = STRING("T_SLASH"),
     [T_EQUAL] = STRING("T_EQUAL"),
+    [T_LESS_THAN] = STRING("T_LESS_THAN"),
+    [T_GREATER_THAN] = STRING("T_GREATER_THAN"),
     [T_EXCLAIM] = STRING("T_EXCLAIM"),
     [T_DOUBLEDOUBLEDOT] = STRING("T_DOUBLEDOUBLEDOT"),
     [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
@@ -51,6 +52,8 @@ Token *INTERN_PLUS = &SINGLE_TOK(T_PLUS);
 Token *INTERN_ASTERISKS = &SINGLE_TOK(T_ASTERISKS);
 Token *INTERN_SLASH = &SINGLE_TOK(T_SLASH);
 Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
+Token *INTERN_LESS_THAN = &SINGLE_TOK(T_LESS_THAN);
+Token *INTERN_GREATER_THAN = &SINGLE_TOK(T_GREATER_THAN);
 Token *INTERN_EXCLAIM = &SINGLE_TOK(T_EXCLAIM);
 Token *INTERN_DOUBLEDOUBLEDOT = &SINGLE_TOK(T_DOUBLEDOUBLEDOT);
 Token *INTERN_FALSE = &SINGLE_TOK(T_FALSE);
@@ -130,6 +133,8 @@ Token *Lexer_next(Lexer *l, Allocator *a) {
       ['/'] = &&slash,
       ['*'] = &&asterisks,
       ['='] = &&equal,
+      ['<'] = &&less_than,
+      ['>'] = &&greater_than,
       ['!'] = &&exclaim,
       [':'] = &&doubledoubledot,
       ['['] = &&braket_left,
@@ -159,6 +164,8 @@ Token *Lexer_next(Lexer *l, Allocator *a) {
   SYMBOL(minus, INTERN_MINUS);
   SYMBOL(slash, INTERN_SLASH);
   SYMBOL(equal, INTERN_EQUAL);
+  SYMBOL(less_than, INTERN_LESS_THAN);
+  SYMBOL(greater_than, INTERN_GREATER_THAN);
   SYMBOL(exclaim, INTERN_EQUAL);
   SYMBOL(asterisks, INTERN_ASTERISKS);
 
