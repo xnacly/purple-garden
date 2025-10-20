@@ -2,6 +2,7 @@
 #include "conv.c"
 #include "fmt.c"
 #include "fs.c"
+#include "math.c"
 #include "opt.c"
 #include "runtime.c"
 
@@ -35,6 +36,9 @@ static StdNode tree = PACKAGE("std",
           PACKAGE("fs", 
               FUNCTION("read_file", &builtin_fs_read_file), 
               FUNCTION("write_file", &builtin_fs_write_file),
+          ), 
+          PACKAGE("math", 
+              FUNCTION("mod", &builtin_math_mod), 
           ), 
           PACKAGE("opt", 
               FUNCTION("unwrap", &builtin_opt_unwrap), 
