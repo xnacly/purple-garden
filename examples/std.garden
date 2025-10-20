@@ -7,6 +7,12 @@ std::cli::args()# the list of arguments of the script invocation
 std::cli::flags()# holds all options passed to the runtime as a key value store `pg script.garden -- -t=5 --month=april->{ t=5 month="april" }
 std::cli::rest()# holds all non option arguments as an array
 
+# filesystem interaction
+var path :: "hola.txt"
+var content :: "I HAVE WRITTEN!"
+std::fs::write_file(path content)
+std::assert(std::opt::unwrap(std::fs::read_file(path)) = content)
+
 # fmt allows for pretty printing values and to do structured formatting into
 # strings
 var user :: "teo"
