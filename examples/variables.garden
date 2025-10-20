@@ -1,5 +1,5 @@
 # vim: filetype=python
-var str :: "hi"
-var number :: 12
-var bool :: true
+var str = "hi"
+var number = 12
+var bool = true
 std::println(str number bool)

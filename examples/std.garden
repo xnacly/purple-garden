@@ -8,14 +8,14 @@ std::cli::flags()# holds all options passed to the runtime as a key value store 
 std::cli::rest()# holds all non option arguments as an array
 
 # filesystem interaction
-var path :: "hola.txt"
-var content :: "I HAVE WRITTEN!"
+var path = "hola.txt"
+var content = "I HAVE WRITTEN!"
 std::fs::write_file(path content)
 std::assert(std::opt::unwrap(std::fs::read_file(path)) = content)
 
 # fmt allows for pretty printing values and to do structured formatting into
 # strings
-var user :: "teo"
+var user = "teo"
 std::fmt::printf("hello world: {}[{}]" user len(user)) # print to stdout
 std::fmt::sprintf("hello world: {}[{}]" user len(user)) # return as string
 
@@ -25,16 +25,16 @@ std::runtime::gc::stop() # stop stops the gc from running again in the current e
 std::runtime::gc::stats() # returns memory statistics: {current: int, allocated: int}
 
 # optionals
-var opt_none :: std::None()
-var opt_some :: std::Some([])
+var opt_none = std::None()
+var opt_some = std::Some([])
 std::opt::or(opt_none "anything else") # -> "anything else"
 std::opt::unwrap(opt_some) # -> []
 std::opt::expect(opt_some "would panic with this message") # -> []
 std::opt::is_some(opt_some) # -> true 
 std::opt::is_none(opt_none) # -> true 
 
-# array provides array utilities
-var arr :: [1 2 3 4 5]
+# array utilities
+var arr = [1 2 3 4 5]
 std::arr::join(arr ", ") # 1, 2, 3, 4, 5
 std::arr::sum(arr) # 15
 std::arr::map(arr fn _ :: x {
@@ -54,7 +54,7 @@ std::object::values(obj) # -> [Option::None, Option::None]
 std::object::entries(obj) # -> [["key1", Option::None], ["key2", Option::None]]
 
 # str helps with efficient str interaction
-var hello_hash :: std::str::hash("Hello")
+var hello_hash = std::str::hash("Hello")
 std::str::contains("Hello" "elo") # true
 std::str::contains_char("Hello" "e") # true
 std::str::idx("Hello" "elo") # 1

@@ -331,7 +331,7 @@ Node *Parser_next(Parser *p) {
   case T_VAR: { // var <ident> <rhs>
     consume(p, T_VAR);
     Token *ident = consume(p, T_IDENT);
-    consume(p, T_DOUBLEDOUBLEDOT);
+    consume(p, T_EQUAL);
     Node *var = NODE_NEW(N_VAR, ident);
     Node *rhs = TRACE(Parser_next);
     LIST_append(&var->children, p->alloc, rhs);

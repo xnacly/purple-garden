@@ -1,8 +1,8 @@
 # vim: filetype=python
-var n :: 1
+var n = 1
 
 std::println(match {
-  n=12 :: "is 12"
-  n=10 :: "is 10"
+  n=12 { "is 12" }
+  n=10 { "is 10" }
   :: "something else"
 })

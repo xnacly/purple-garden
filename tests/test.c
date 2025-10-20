@@ -14,10 +14,7 @@ typedef struct {
   (Value) { .is_some = false, __VA_ARGS__ }
 
 #define CASE(in, r0)                                                           \
-  {                                                                            \
-      .input = STRING(#in),                                                    \
-      .expected_r0 = r0,                                                       \
-  }
+  { .input = STRING(#in), .expected_r0 = r0, }
 
 // stolen from common.(c|h) and adapted
 bool Value_cmp_deep(const Value *a, const Value *b) {
@@ -125,9 +122,9 @@ int main() {
       CASE(false = false, VAL(.type = V_TRUE)),
 
       // variables
-      CASE(var name ::"user" name,
+      CASE(var name = "user" name,
            VAL(.type = V_STR, .string = &STRING("user"))),
-      CASE(var age ::25 age, VAL(.type = V_INT, .integer = 25)),
+      CASE(var age = 25 age, VAL(.type = V_INT, .integer = 25)),
 
       // functions
       CASE(fn ret ::arg{arg} ret(25), VAL(.type = V_INT, .integer = 25)),

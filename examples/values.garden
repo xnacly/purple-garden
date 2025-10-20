@@ -28,8 +28,8 @@ std::println(
   [161]::0
 )
 
-var arr :: [161 [["hello"] "world"] 787]
-var target :: arr::1
+var arr = [161 [["hello"] "world"] 787]
+var target = arr::1
 std::println(target::0::0 target::1)
 
 # objects

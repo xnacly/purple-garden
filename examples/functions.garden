@@ -30,13 +30,9 @@ fn bin :: n k {
         k = n { std::Some(1) }
         k = 0 { std::Some(1) }
         :: {
-            var a :: bin(n-1 k-1)
-            var b :: bin(n-1 k)
-
-            var a_val :: std::opt::or(a 0)
-            var b_val :: std::opt::or(b 0)
-
-            std::Some(a_val + b_val)
+            var a = std::opt::or(bin(n-1 k-1) 0)
+            var b = std::opt::or(bin(n-1 k))
+            std::Some(a + b)
         }
     }
 }
