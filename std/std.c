@@ -62,8 +62,6 @@ static StdNode tree = PACKAGE("std",
         );
 
 static StdNode reduced = PACKAGE("std", 
-          FUNCTION("Some", &builtin_opt_some),
-          FUNCTION("None", &builtin_opt_none),
           FUNCTION("len", &builtin_len),
         );
 // clang-format on
