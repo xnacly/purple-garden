@@ -85,15 +85,15 @@ typedef struct Value {
 
 #define V_NUM_MASK ((1 << V_INT) | (1 << V_DOUBLE))
 
-typedef struct {
+typedef struct MapEntry {
   uint32_t hash;
   Value value;
 } MapEntry;
-LIST_TYPE(MapEntry);
 
 typedef struct Map {
-  LIST_MapEntry entries;
-  uint64_t cap;
+  size_t cap;
+  size_t len;
+  MapEntry *buckets;
 } Map;
 
 // global values that compiler, optimiser and vm use, often mapped to global

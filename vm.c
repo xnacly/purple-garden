@@ -50,33 +50,30 @@ typedef struct {
 void freelist_preallocate(FrameFreeList *fl) {
   for (int i = 0; i < PREALLOCATE_FREELIST_SIZE; i++) {
     Frame *frame = CALL(fl->alloc, request, sizeof(Frame));
-    *frame = (Frame){0};
-    frame->variable_table =
-        CALL(fl->alloc, request, sizeof(Value) * VARIABLE_TABLE_SIZE);
-    memset(frame->variable_table, 0, sizeof(Value) * VARIABLE_TABLE_SIZE);
+    frame->variable_table = Map_new(8, fl->alloc);
     frame->prev = fl->head;
     fl->head = frame;
   }
 }
 
-void freelist_push(FrameFreeList *fl, Frame *frame) {
-  frame->prev = fl->head;
-  frame->return_to_bytecode = 0;
-  fl->head = frame;
-}
-
 Frame *freelist_pop(FrameFreeList *fl) {
   if (!fl->head) {
     Frame *f = CALL(fl->alloc, request, sizeof(Frame));
-    f->variable_table =
-        CALL(fl->alloc, request, sizeof(Value) * VARIABLE_TABLE_SIZE);
-    memset(f->variable_table, 0, sizeof(Value) * VARIABLE_TABLE_SIZE);
+    f->variable_table = Map_new(8, fl->alloc);
     return f;
   }
+
   Frame *f = fl->head;
   fl->head = f->prev;
   f->prev = NULL;
   return f;
+}
+
+void freelist_push(FrameFreeList *fl, Frame *f) {
+  Map_clear(&f->variable_table);
+  f->prev = fl->head;
+  f->return_to_bytecode = 0;
+  fl->head = f;
 }
 
 int Vm_run(Vm *vm) {
@@ -157,23 +154,24 @@ int Vm_run(Vm *vm) {
       vm->registers[0] = vm->registers[arg];
       break;
     case OP_LOADV: {
-      // bounds checking and checking for variable validity is performed at
-      // compile time, but we still have to check if the variable is available
-      // in the current scope...
-      Value v = vm->frame->variable_table[arg];
       // TODO: this doesnt work, we need a different way of checking access,
       // this disallows putting (@None) in the variable table if (v.type ==
       // V_NONE) {
       //   VM_ERR("Undefined variable with hash %i", arg);
       // }
-      vm->registers[0] = v;
+      //
+      // bounds checking and checking for variable validity is performed at
+      // compile time, but we still have to check if the variable is available
+      // in the current scope...
+      vm->registers[0] = Map_get_hash(&vm->frame->variable_table, arg);
       break;
     }
     case OP_STORE:
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      vm->frame->variable_table[arg] = vm->registers[0];
+      Map_insert_hash(&vm->frame->variable_table, arg, vm->registers[0],
+                      vm->alloc);
       break;
     case OP_ADD: {
       Value *lhs = &vm->registers[0];

@@ -25,15 +25,15 @@ static void print_value(const Value *v) {
     break;
   case V_OBJ: {
     printf("{");
-    size_t len = v->obj->entries.len;
-    for (size_t i = 0; i < len; i++) {
-      MapEntry e = LIST_get_UNSAFE(&v->obj->entries, i);
-      printf("%u::", e.hash);
-      print_value(&e.value);
-      if (i + 1 < len) {
-        printf(" ");
-      }
-    }
+    // size_t len = v->obj->len;
+    // for (size_t i = 0; i < len; i++) {
+    //   MapEntry e = v->obj->entries[i];
+    //   printf("%u::", e.hash);
+    //   print_value(&e.value);
+    //   if (i + 1 < len) {
+    //     printf(" ");
+    //   }
+    // }
     printf("}");
     break;
   }

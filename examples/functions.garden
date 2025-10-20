@@ -26,21 +26,32 @@ std::println(tuplify("hello world")) # [str, 11]
 
 fn f1 :: a {
     match {
-        a<150 { 
-            std::println("f1-depth" a)
+        a<100000 {
             f1(a+1)
         }
-        { std::println("final depth" a) }
+        {  }
     }
 }
 f1(0)
+
+# compute n! with acumulator a
+fn factorial :: n a {
+    match {
+        n = 0 { a }
+        { factorial(n-1 n*a) }
+    }
+}
+
+var n = 15
+std::println(factorial(n 1))
+
 
 fn bin :: n k {
     match {
         k < 0 { std::None() }
         k = n { std::Some(1) }
         k = 0 { std::Some(1) }
-        :: {
+        {
             var a = std::opt::or(bin(n-1 k-1) 0)
             var b = std::opt::or(bin(n-1 k))
             std::Some(a + b)

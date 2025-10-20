@@ -41,8 +41,7 @@ typedef struct Frame {
   // returning out of scope, we need to jump back to the callsite of the
   // function
   size_t return_to_bytecode;
-  // stores Values by their hash, serving as a variable table
-  Value *variable_table;
+  Map variable_table;
 } Frame;
 
 typedef struct __Vm Vm;
