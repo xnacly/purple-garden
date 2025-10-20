@@ -1,10 +1,2 @@
 # vim: filetype=python
-fn f1 :: a {
-    std::println("f1-depth" a)
-    match {
-        a=15 {  }
-        :: { f1(a+1) }
-    }
-}
-
-f1(0)
+std::fmt::println("Hello World")

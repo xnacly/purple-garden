@@ -24,6 +24,17 @@ fn tuplify :: v {
 } 
 std::println(tuplify("hello world")) # [str, 11]
 
+fn f1 :: a {
+    match {
+        a<150 { 
+            std::println("f1-depth" a)
+            f1(a+1)
+        }
+        { std::println("final depth" a) }
+    }
+}
+f1(0)
+
 fn bin :: n k {
     match {
         k < 0 { std::None() }

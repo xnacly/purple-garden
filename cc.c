@@ -214,6 +214,46 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     break;
   }
   case N_MATCH: {
+    size_t skip_backfill_slots[n->children.len];
+
+    for (size_t i = 0; i < n->children.len; i++) {
+      Node *match_case = LIST_get_UNSAFE(&n->children, i);
+      if (match_case->type == N_CASE) {
+        // compile condition
+        compile(alloc, vm, ctx, LIST_get_UNSAFE(&match_case->children, 0));
+        size_t next_case = BC_LEN;
+        BC(OP_JMPF, 0xAFFEDEAD);
+
+        // compile the expressions making up the body
+        for (size_t j = 1; j < match_case->children.len; j++) {
+          compile(alloc, vm, ctx, LIST_get_UNSAFE(&match_case->children, j));
+        }
+
+        skip_backfill_slots[i] = BC_LEN;
+        // skip to the end of the match block
+        BC(OP_JMP, 0xAFFEDEAD);
+
+        // only jump to the next case if there is one, which there only can be
+        // if we are not at the last case
+        if (i + 1 < n->children.len) {
+          ByteCodeBuilder_insert_arg(ctx->bcb, next_case, BC_LEN);
+        }
+      } else {
+        skip_backfill_slots[i] = 0;
+        for (size_t j = 0; j < match_case->children.len; j++) {
+          compile(alloc, vm, ctx, LIST_get_UNSAFE(&match_case->children, j));
+        }
+      }
+    }
+
+    size_t size = BC_LEN;
+    for (size_t i = 0; i < n->children.len; i++) {
+      size_t slot = skip_backfill_slots[i];
+      if (slot) {
+        ByteCodeBuilder_insert_arg(ctx->bcb, slot, size);
+      }
+    }
+
     break;
   };
   case N_FN: {
@@ -308,8 +348,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     size_t size = n->children.len;
     // fast path for empty obj
     if (size != 0) {
-      // size hint is placed in r0 to instruct the OP_NEW to use the allocation
-      // size for any value, such as an array or object.
+      // size hint is placed in r0 to instruct the OP_NEW to use the
+      // allocation size for any value, such as an array or object.
       BC(OP_SIZE, size);
     }
 
@@ -317,8 +357,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     // fast path for empty obj
     if (size != 0) {
-      // after OP_NEW the created value is in r0, we must now temporarly move
-      // it to any other register, so its not clobbered by acm register usage
+      // after OP_NEW the created value is in r0, we must now temporarly
+      // move it to any other register, so its not clobbered by acm
+      // register usage
       size_t obj_register = Ctx_allocate_register(ctx);
       BC(OP_STORE, obj_register);
       TODO("There is no pg instruction for inserting into an object yet")
@@ -328,8 +369,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
         compile(alloc, vm, ctx, member);
       }
 
-      // move the array back into r0, since it needs to be the return value of
-      // this N_ARRAY and N_LIST node
+      // move the array back into r0, since it needs to be the return
+      // value of this N_ARRAY and N_LIST node
       BC(OP_LOAD, obj_register);
       Ctx_free_register(ctx, obj_register);
     }
@@ -339,8 +380,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     size_t size = n->children.len;
     // fast path for empty array
     if (size != 0) {
-      // size hint is placed in r0 to instruct the OP_NEW to use the allocation
-      // size for any value, such as an array or object.
+      // size hint is placed in r0 to instruct the OP_NEW to use the
+      // allocation size for any value, such as an array or object.
       BC(OP_SIZE, size);
     }
 
@@ -348,8 +389,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     // fast path for empty array
     if (size != 0) {
-      // after OP_NEW the created value is in r0, we must now temporarly move
-      // it to any other register, so its not clobbered by acm register usage
+      // after OP_NEW the created value is in r0, we must now temporarly
+      // move it to any other register, so its not clobbered by acm
+      // register usage
       size_t list_register = Ctx_allocate_register(ctx);
       BC(OP_STORE, list_register);
 
@@ -359,8 +401,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
         BC(OP_APPEND, list_register);
       }
 
-      // move the array back into r0, since it needs to be the return value of
-      // this N_ARRAY and N_LIST node
+      // move the array back into r0, since it needs to be the return
+      // value of this N_ARRAY and N_LIST node
       BC(OP_LOAD, list_register);
       Ctx_free_register(ctx, list_register);
     }

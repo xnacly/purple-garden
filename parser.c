@@ -343,7 +343,7 @@ Node *Parser_next(Parser *p) {
     //   <condition> { <case body> }
     //   <condition> { <case body> }
     //   <condition> { <case body> }
-    //  :: <default case body>
+    //   { <default case body> }
     // }
     //
     // N_MATCH(
@@ -366,12 +366,10 @@ Node *Parser_next(Parser *p) {
     while (p->cur->type != T_CURLY_RIGHT) {
       Node *case_container = NODE_NEW(N_CASE, p->cur);
 
-      if (p->cur->type != T_DOUBLEDOUBLEDOT) {
+      if (p->cur->type != T_CURLY_LEFT) {
         Node *condition = TRACE(Parser_next);
         LIST_append(&case_container->children, p->alloc, condition);
       } else {
-        // default case prefixed with ::
-        consume(p, T_DOUBLEDOUBLEDOT);
         // modifed so the compiler nows this is the default cause
         case_container->type = N_DEFAULT;
       }
