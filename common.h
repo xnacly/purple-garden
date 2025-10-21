@@ -27,9 +27,6 @@
 #endif
 
 #define REGISTERS 31
-#define CALL_ARGUMENT_STACK 256
-#define VARIABLE_TABLE_SIZE 256
-#define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
 
 #define UNLIKELY(condition) __builtin_expect(condition, 0)
 // TODO: not compiled out in release builds; rework this into a panic system and

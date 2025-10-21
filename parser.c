@@ -54,7 +54,6 @@ void Node_debug(const Node *n, size_t depth) {
   switch (n->type) {
   case N_IDENT:
     Token_debug(n->token);
-    printf("{idx=%lu}", n->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
     break;
   case N_FN:
     printf("[");

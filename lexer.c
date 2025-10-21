@@ -147,7 +147,7 @@ Token *Lexer_next(Lexer *l, Allocator *a) {
 
 #define JUMP_TARGET goto *jump_table[(int32_t)l->input.p[l->pos]]
 #define SYMBOL(label, INTERN)                                                  \
-  label: {                                                                     \
+  label : {                                                                    \
     l->pos++;                                                                  \
     return (INTERN);                                                           \
   }

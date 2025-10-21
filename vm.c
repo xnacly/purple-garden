@@ -13,7 +13,7 @@ Str OP_MAP[256] = {
     [OP_EQ] = STRING("EQ"),         [OP_LT] = STRING("LT"),
     [OP_GT] = STRING("GT"),         [OP_VAR] = STRING("VAR"),
     [OP_LOADV] = STRING("LOADV"),   [OP_ARGS] = STRING("ARGS"),
-    [OP_SYS] = STRING("BUILTIN"),   [OP_LEAVE] = STRING("LEAVE"),
+    [OP_SYS] = STRING("SYS"),       [OP_RET] = STRING("RET"),
     [OP_CALL] = STRING("CALL"),     [OP_JMP] = STRING("JMP"),
     [OP_LOADG] = STRING("LOADG"),   [OP_JMPF] = STRING("JMPF"),
     [OP_APPEND] = STRING("APPEND"), [OP_NEW] = STRING("NEW"),
@@ -91,8 +91,8 @@ int Vm_run(Vm *vm) {
 #if DEBUG
     vm->instruction_counter[op]++;
     Str *str = &OP_MAP[op];
-    printf("[VM][%06zu|%05zu] %.*s%*.s=%06u", vm->pc, vm->pc + 1, (int)str->len,
-           str->p, 10 - (int)str->len, " ", arg);
+    printf("[VM][%05zu|%05zu] %.*s%*.s=%010u", vm->pc, vm->pc + 1,
+           (int)str->len, str->p, 10 - (int)str->len, " ", arg);
 #if PRINT_REGISTERS
     printf("{ ");
     for (size_t i = 0; i < PRINT_REGISTERS; i++) {
@@ -154,24 +154,19 @@ int Vm_run(Vm *vm) {
       vm->registers[0] = vm->registers[arg];
       break;
     case OP_LOADV: {
-      // TODO: this doesnt work, we need a different way of checking access,
-      // this disallows putting (@None) in the variable table if (v.type ==
-      // V_NONE) {
-      //   VM_ERR("Undefined variable with hash %i", arg);
-      // }
-      //
       // bounds checking and checking for variable validity is performed at
       // compile time, but we still have to check if the variable is available
       // in the current scope...
-      vm->registers[0] = Map_get_hash(&vm->frame->variable_table, arg);
+      Value v = Map_get_hash(&vm->frame->variable_table, arg);
+      vm->registers[0] = v;
       break;
     }
     case OP_STORE:
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      Map_insert_hash(&vm->frame->variable_table, arg, vm->registers[0],
-                      vm->alloc);
+      Value v = vm->registers[0];
+      Map_insert_hash(&vm->frame->variable_table, arg, v, vm->alloc);
       break;
     case OP_ADD: {
       Value *lhs = &vm->registers[0];
@@ -292,15 +287,58 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_EQ: {
-      // pointer comparison fast path
-      vm->registers[0] = Value_cmp(&vm->registers[0], &vm->registers[arg])
-                             ? vm->globals[1]
-                             : vm->globals[0];
+      Value *lhs = &vm->registers[0];
+      Value *rhs = &vm->registers[arg];
+      bool eq = false;
+
+      if (lhs == rhs) {
+        goto set_true;
+      }
+
+      if ((lhs->type == V_INT || lhs->type == V_DOUBLE) &&
+          (rhs->type == V_INT || rhs->type == V_DOUBLE)) {
+        double a =
+            (lhs->type == V_DOUBLE) ? lhs->floating : (double)lhs->integer;
+        double b =
+            (rhs->type == V_DOUBLE) ? rhs->floating : (double)rhs->integer;
+        double diff = a - b;
+#define PREC 1e-9
+        if ((diff > -PREC) & (diff < PREC))
+          goto set_true;
+        goto set_false;
+      }
+
+      if (lhs->type == V_STR && rhs->type == V_STR) {
+        if (Str_eq(lhs->string, rhs->string)) {
+          goto set_true;
+        }
+        goto set_false;
+      }
+
+      if ((lhs->type == V_TRUE || lhs->type == V_FALSE ||
+           lhs->type == V_NONE) &&
+          (rhs->type == V_TRUE || rhs->type == V_FALSE ||
+           rhs->type == V_NONE)) {
+        if (lhs->type == rhs->type) {
+          goto set_true;
+        }
+        goto set_false;
+      }
+
+      goto set_false;
+
+    set_true:
+      vm->registers[0] = vm->globals[1];
+      break;
+
+    set_false:
+      vm->registers[0] = vm->globals[0];
       break;
     }
     case OP_LT: {
       Value lhs = vm->registers[arg];
       Value rhs = vm->registers[0];
+
       if (!((1 << lhs.type) & V_NUM_MASK) || !((1 << rhs.type) & V_NUM_MASK)) {
         Str l = VALUE_TYPE_MAP[lhs.type];
         Str r = VALUE_TYPE_MAP[rhs.type];
@@ -379,7 +417,7 @@ int Vm_run(Vm *vm) {
       vm->arg_offset = 0;
       break;
     }
-    case OP_LEAVE: {
+    case OP_RET: {
       Frame *old = vm->frame;
       if (vm->frame->prev) {
         vm->pc = vm->frame->return_to_bytecode;

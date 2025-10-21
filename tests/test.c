@@ -106,6 +106,14 @@ int main() {
       CASE(3 * 4.0, VAL(.type = V_DOUBLE, .floating = 12)),
       CASE(6.0 / 2, VAL(.type = V_DOUBLE, .floating = 3)),
       CASE(6 / 2.0, VAL(.type = V_DOUBLE, .floating = 3)),
+      CASE(2.0 + 2 + 2, VAL(.type = V_DOUBLE, .floating = 6.0)),
+      CASE(2 + 2.0 + 2, VAL(.type = V_DOUBLE, .floating = 6.0)),
+      CASE(5.0 - 3 + 2, VAL(.type = V_DOUBLE, .floating = 4)),
+      CASE(5 - 3.0 + 2, VAL(.type = V_DOUBLE, .floating = 4)),
+      CASE(3.0 * 4 + 2, VAL(.type = V_DOUBLE, .floating = 14)),
+      CASE(3 * 4.0 + 2, VAL(.type = V_DOUBLE, .floating = 14)),
+      CASE(6.0 / 2 + 2, VAL(.type = V_DOUBLE, .floating = 5)),
+      CASE(6 / 2.0 + 2, VAL(.type = V_DOUBLE, .floating = 5)),
 
       CASE(std::len("hello"), VAL(.type = V_INT, .integer = 5)),
       // checking if string interning works
@@ -117,9 +125,13 @@ int main() {
       CASE(1 = 1, VAL(.type = V_TRUE)),
       CASE("abc" = "abc", VAL(.type = V_TRUE)),
       CASE(3.1415 = 3.1415, VAL(.type = V_TRUE)),
+      CASE(3.1415 = 3.1416, VAL(.type = V_FALSE)),
+      CASE(3.0 = 3, VAL(.type = V_TRUE)),
       CASE(true = true, VAL(.type = V_TRUE)),
       CASE(true = false, VAL(.type = V_FALSE)),
       CASE(false = false, VAL(.type = V_TRUE)),
+      CASE(1 < 2.0, VAL(.type = V_TRUE)),
+      CASE(2 > 1, VAL(.type = V_TRUE)),
 
       // variables
       CASE(var name = "user" name,
@@ -130,18 +142,14 @@ int main() {
       CASE(fn ret ::arg{arg} ret(25), VAL(.type = V_INT, .integer = 25)),
       CASE(fn add25 ::arg{arg + 25} add25(25),
            VAL(.type = V_INT, .integer = 50)),
+      CASE(fn threearguments ::x y z{x + y + z} threearguments(25 25 25),
+           VAL(.type = V_INT, .integer = 75)),
 
       // builtins
-      CASE(std::assert(true), VAL(.type = V_TRUE)),
+      CASE(std::assert(true = true), VAL(.type = V_TRUE)),
       CASE(std::None(), VAL(.type = V_NONE)),
       CASE(std::Some(true), VAL(.type = V_TRUE, .is_some = true)),
       CASE(std::Some(false), VAL(.type = V_FALSE, .is_some = true)),
-
-      // match (TODO:)
-      //
-      // default case
-      // CASE((match true), VAL(.type = V_TRUE)),
-      // CASE((match false), VAL(.type = V_FALSE)),
   };
 
   size_t passed = 0;

@@ -4,11 +4,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef DEBUG
-#if DEBUG
-#define VERBOSE_ALLOCATOR 1
-#endif
-#endif
+// #ifdef DEBUG
+// #if DEBUG
+// #define VERBOSE_ALLOCATOR 1
+// #endif
+// #endif
 
 // 50KB
 #define GC_MIN_HEAP 50 * 1024

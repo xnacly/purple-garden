@@ -156,7 +156,7 @@ typedef enum {
   // OP_RET rANY
   //
   // Ends a scope
-  OP_LEAVE,
+  OP_RET,
 
   // OP_CALL ADDR
   //

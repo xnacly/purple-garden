@@ -123,8 +123,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     break;
   }
   case N_IDENT: {
-    uint64_t hash = n->token->string.hash & VARIABLE_TABLE_SIZE_MASK;
-    BC(OP_LOADV, hash);
+    BC(OP_LOADV, (uint32_t)n->token->string.hash);
     break;
   }
   case N_BIN: {
@@ -134,24 +133,19 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       // PERF: arithmetic optimisations like n+0=n; n*0=0; n*1=n, etc
       compile(alloc, vm, ctx, child);
     } else {
-      Node *lhs = LIST_get_UNSAFE(&n->children, 0);
-      // two arguments is easy to compile, just load and perform the bin op on
-      // two Values
-      compile(alloc, vm, ctx, lhs);
+      compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 0));
       size_t r = Ctx_allocate_register(ctx);
       BC(OP_STORE, r);
-      Node *rhs = LIST_get_UNSAFE(&n->children, 1);
-      compile(alloc, vm, ctx, rhs);
+      compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 1));
       BC(n->token->type, r);
       Ctx_free_register(ctx, r);
     }
     break;
   }
   case N_VAR: {
-    size_t hash = n->token->string.hash & VARIABLE_TABLE_SIZE_MASK;
     Node *value = LIST_get_UNSAFE(&n->children, 0);
     compile(alloc, vm, ctx, value);
-    BC(OP_VAR, hash);
+    BC(OP_VAR, (uint32_t)n->token->string.hash);
     break;
   }
   case N_PATH: {
@@ -287,7 +281,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     for (size_t i = 0; i < params.len; i++) {
       Node *param = LIST_get_UNSAFE(&params, i);
       BC(OP_LOAD, i + 1);
-      BC(OP_VAR, param->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
+      BC(OP_VAR, param->token->string.hash);
     }
 
     // compiling the body, returning a value is free since its just in
@@ -301,7 +295,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       }
     }
 
-    BC(OP_LEAVE, 0);
+    BC(OP_RET, 0);
     ByteCodeBuilder_insert_arg(ctx->bcb, jump_op_index, BC_LEN);
     ctx->hash_to_function[hash].size = BC_LEN - function_ctx.bytecode_index;
 

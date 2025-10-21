@@ -34,6 +34,7 @@ fn f1 :: a {
 }
 f1(0)
 
+
 # compute n! with acumulator a
 fn factorial :: n a {
     match {
@@ -42,42 +43,38 @@ fn factorial :: n a {
     }
 }
 
-var n = 15
+var n = 18
 std::println(factorial(n 1))
 
+fn bin_step :: n k i r {
+    match {
+        i = k { std::Some(r) }
+        {
+            bin_step(n k i+1 r * (n-i)/(i+1))
+        }
+    }
+}
 
 fn bin :: n k {
     match {
         k < 0 { std::None() }
-        k = n { std::Some(1) }
         k = 0 { std::Some(1) }
+        k = n { std::Some(1) }
         {
-            var a = std::opt::or(bin(n-1 k-1) 0)
-            var b = std::opt::or(bin(n-1 k))
-            std::Some(a + b)
+            # Apply symmetry: k = min(k, n-k)
+            var kk = match {
+                n - k < k { n - k }
+                { k }
+            }
+            bin_step(n kk 0 1)
         }
     }
 }
 
-bin(49 6) # 13983816
-
-fn fizzbuzz :: n max {
-    match {
-        n > max {}
-        { 
-            std::println(
-                match {
-                    std::math::mod(n 15) = 0 { "FizzBuzz" }
-                    std::math::mod(n 3)  = 0 { "Fizz" }
-                    std::math::mod(n 5)  = 0 { "Buzz" }
-                    { n }
-                }
-            )
-            fizzbuzz(n + 1)
-        }
-    }
-}
-
-var start = 1
-var max = 1024
-fizzbuzz(start max)
+std::assert(bin(1 1) = 1)
+std::assert(bin(1 0) = 1)
+std::assert(bin(6 3) = 20)
+std::assert(bin(6 5) = 6)
+std::assert(bin(10 5) = 252)
+std::assert(bin(20 15) = 15504)
+std::assert(bin(49 6) = 13983816)
