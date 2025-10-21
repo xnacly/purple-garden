@@ -13,9 +13,12 @@ static void builtin_opt_or(Vm *vm) {
   ASSERT(vm->arg_count == 2, "Or: Two arguments needed");
   Value lhs = ARG(0);
   Value rhs = ARG(1);
-  ASSERT(Value_is_opt(&lhs), "Or: lhs wasnt a ");
+  ASSERT(Value_is_opt(&lhs), "Or: lhs wasnt an Optional");
   if (!lhs.is_some) {
     RETURN(rhs);
+  } else {
+    lhs.is_some = false;
+    RETURN(lhs);
   }
 }
 
