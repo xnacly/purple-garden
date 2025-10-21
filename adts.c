@@ -56,6 +56,9 @@ idx_to_block_idx(size_t idx) {
 
 #include "common.h"
 
+// TODO: fix collision handling, idk how rn or what the tradeoffs are, but fix
+// it.
+
 inline Map Map_new(size_t cap, Allocator *a) {
   Map m;
   m.cap = cap;
@@ -85,44 +88,18 @@ inline void Map_clear(Map *m) {
 }
 
 inline void Map_insert_hash(Map *m, uint32_t hash, Value v, Allocator *a) {
-    if ((double)m->len / (double)m->cap >= 0.7) {
-        Map_resize(m, a);
-    }
-    size_t idx = hash % m->cap;
-    size_t start = idx;
-    MapEntry *e = &m->buckets[idx];
-
-    while (e->hash != 0 && e->hash != hash) {
-        idx = (idx + 1) % m->cap;
-        if (idx == start) {
-            return;
-        }
-        e = &m->buckets[idx];
-    }
-
-    if (e->hash == 0) {
-        m->len++;
-    }
-    e->hash = hash;
-    e->value = v;
+  if ((double)m->len / (double)m->cap >= 0.7) {
+    Map_resize(m, a);
+  }
+  size_t idx = hash % m->cap;
+  MapEntry *e = &m->buckets[idx];
+  e->hash = hash;
+  e->value = v;
 }
 
 inline Value Map_get_hash(const Map *m, uint32_t hash) {
   uint32_t idx = hash % m->cap;
   MapEntry *e = &m->buckets[idx];
-  size_t start = idx;
-  do {
-    if (e->hash == 0)
-      return *INTERNED_NONE;
-    if (e->hash == hash)
-      return e->value;
-    idx = (idx + 1) % m->cap;
-    e = &m->buckets[idx];
-  } while (idx != start);
-  return *INTERNED_NONE;
-  if (!e || e->hash == 0)
-    return *INTERNED_NONE;
-
   return e->value;
 }
 
