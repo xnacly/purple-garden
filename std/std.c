@@ -7,6 +7,7 @@
 #include "runtime.c"
 
 static void builtin_len(Vm *vm) {
+  BUILTIN_CONTRACT(1);
   ASSERT(vm->arg_count == 1, "len only works for a singular argument")
   const Value *a = &ARG(0);
   size_t len = 0;

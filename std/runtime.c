@@ -8,7 +8,7 @@ static const Str *OBJ = &STRING("obj");
 static const Str *ARR = &STRING("array");
 
 static void builtin_runtime_type(Vm *vm) {
-  ASSERT(vm->arg_count == 1, "type only works for a singular argument")
+  BUILTIN_CONTRACT(1);
   uint16_t offset = vm->arg_offset;
   const Str *s;
   const Value *a = &ARG(0);
@@ -50,8 +50,7 @@ static void builtin_runtime_type(Vm *vm) {
 }
 
 static void builtin_runtime_assert(Vm *vm) {
-  ASSERT(vm->arg_count == 1, "assert needs exactly a single argument, got %d",
-         vm->arg_count);
+  BUILTIN_CONTRACT(1);
   ASSERT(ARG(0).type == V_TRUE, "Assertion");
 }
 

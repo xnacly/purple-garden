@@ -4,6 +4,16 @@
 #include "common.h"
 #include <stdint.h>
 
+#define BUILTIN_CONTRACT_ARGUMENT_TYPE(IDX, TYPE)                              \
+  ASSERT(ARG((IDX)).type == (TYPE),                                            \
+         "%s: argument " #IDX " needs to be " #TYPE, __FUNCTION__);
+
+#define BUILTIN_CONTRACT(ARG_COUNT, ...)                                       \
+  ASSERT(vm->arg_count == (ARG_COUNT),                                         \
+         "%s: expected " #ARG_COUNT " argument(s), got %d", __FUNCTION__,      \
+         vm->arg_count);                                                       \
+  __VA_ARGS__
+
 typedef struct {
   // defines the maximum amount of memory purple garden is allowed to allocate,
   // if this is hit, the vm exits with a non zero code

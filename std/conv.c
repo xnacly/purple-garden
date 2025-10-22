@@ -4,9 +4,8 @@
 // Str_to_int64_t expects the lexer to verify all inputs. Also supports prefix
 // via +-.
 static void builtin_conv_int(Vm *vm) {
+  BUILTIN_CONTRACT(1, BUILTIN_CONTRACT_ARGUMENT_TYPE(0, V_STR));
   Value in = ARG(0);
-  if (in.type != V_STR)
-    goto err;
   const Str *s = in.string;
   if (!s->len)
     goto err;
