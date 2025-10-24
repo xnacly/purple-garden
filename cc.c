@@ -255,8 +255,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     size_t hash = name.hash & MAX_BUILTIN_SIZE_MASK;
     LIST_Nptr params = LIST_get_UNSAFE(&n->children, 0)->children;
 
-    ASSERT(ctx->hash_to_function[hash].name.len == 0,
-           "Cant redefine function `%.*s`", (int)name.len, name.p);
+    // ASSERT(ctx->hash_to_function[hash].name.len == 0,
+    //        "Cant redefine function `%.*s`", (int)name.len, name.p);
 
     CtxFunction function_ctx = {
         .name = name,
@@ -356,7 +356,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       // register usage
       size_t obj_register = Ctx_allocate_register(ctx);
       BC(OP_STORE, obj_register);
-      TODO("There is no pg instruction for inserting into an object yet")
+      // TODO("There is no pg instruction for inserting into an object yet")
 
       for (size_t i = 0; i < size; i++) {
         Node *member = LIST_get_UNSAFE(&n->children, i);

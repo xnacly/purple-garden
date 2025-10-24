@@ -42,6 +42,10 @@ typedef struct {
 
 void *bump_request(void *ctx, size_t size) {
   BumpCtx *b_ctx = ctx;
+  if (b_ctx->pos >= BUMP_MAX_BLOCKS) {
+    printf("b_ctx->pos out of range: %lu\n", b_ctx->pos);
+    return NULL;
+  }
   size_t align = sizeof(void *);
   uint64_t aligned_pos = (b_ctx->len + align - 1) & ~(align - 1);
 
