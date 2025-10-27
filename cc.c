@@ -191,6 +191,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
       BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(argument_len,
                                               ctx->register_allocated_count));
+      ASSERT(vm->builtin_count + 1 < MAX_BUILTIN_SIZE, "Too many builtins");
       BC(OP_SYS, vm->builtin_count);
       vm->builtins[vm->builtin_count++] = sn->fn;
     } else {

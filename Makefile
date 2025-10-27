@@ -16,7 +16,7 @@ ifeq ($(UNAME_S),Darwin)
 endif
 
 RELEASE_FLAGS := -O3 -flto -flto=auto -fno-semantic-interposition \
-                 -fno-asynchronous-unwind-tables -march=native -g3
+                 -fno-asynchronous-unwind-tables -march=native
 # -g3 if you want to run valgrind on the release binary
 
 COMMIT := $(shell git rev-parse --short HEAD)
