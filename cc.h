@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "parser.h"
+#include "std/std.h"
 #include "vm.h"
 #include <stdint.h>
 
@@ -44,6 +45,7 @@ typedef struct Ctx {
   size_t register_allocated_count;
   CtxFunction hash_to_function[MAX_BUILTIN_SIZE];
   ByteCodeBuilder *bcb;
+  StdNode *std;
 } Ctx;
 
 // cc requests a Node from parser::Parser_next compiles said Node and its

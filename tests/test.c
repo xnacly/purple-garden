@@ -14,10 +14,7 @@ typedef struct {
   (Value) { .is_some = false, __VA_ARGS__ }
 
 #define CASE(in, r0)                                                           \
-  {                                                                            \
-      .input = STRING(#in),                                                    \
-      .expected_r0 = r0,                                                       \
-  }
+  { .input = STRING(#in), .expected_r0 = r0, }
 
 // stolen from common.(c|h) and adapted
 bool Value_cmp_deep(const Value *a, const Value *b) {
@@ -56,26 +53,21 @@ bool Value_cmp_deep(const Value *a, const Value *b) {
   }
 }
 
-// @_ is used to simply return its argument since pg doesnt allow top level
-// atoms
-void builtin_test_return(Vm *vm) { RETURN(ARG(0)); }
-
 int main() {
   Case cases[] = {
       // atoms:
 
       // doubles
-      CASE(test_return(3.1415), VAL(.type = V_DOUBLE, .floating = 3.1415)),
-      CASE(test_return(0.1415), VAL(.type = V_DOUBLE, .floating = 0.1415)),
+      CASE(3.1415, VAL(.type = V_DOUBLE, .floating = 3.1415)),
+      CASE(0.1415, VAL(.type = V_DOUBLE, .floating = 0.1415)),
 
-      CASE(test_return("string"),
-           VAL(.type = V_STR, .string = &STRING("string"))),
+      CASE("string", VAL(.type = V_STR, .string = &STRING("string"))),
 
       {
-          .input = ((Str){.len = sizeof("test_return('quoted)"
+          .input = ((Str){.len = sizeof("'quoted"
                                         "\0") -
                                  1,
-                          .p = (const uint8_t *)"test_return('quoted)"
+                          .p = (const uint8_t *)"'quoted"
                                                 "\0"}),
           .expected_r0 =
               (Value){.type = V_STR,
@@ -85,12 +77,10 @@ int main() {
       // TODO: this is for future me to implement
       // CASE("escaped string\"", BC(OP_LOAD, 0), VAL(.type = V_STRING, .string
       // = STRING("escaped string\""))),
-      CASE(test_return(false), VAL(.type = V_FALSE)),
+      CASE(false, VAL(.type = V_FALSE)),
       // checking if boolean interning works
-      CASE(test_return(true) test_return(true) test_return(false),
-           VAL(.type = V_FALSE)),
-      CASE(test_return("hello"),
-           VAL(.type = V_STR, .string = &STRING("hello"))),
+      CASE(true true false, VAL(.type = V_FALSE)),
+      CASE("hello", VAL(.type = V_STR, .string = &STRING("hello"))),
 
       // too large integer and double values
       // https://github.com/xNaCly/purple-garden/issues/1
@@ -116,41 +106,50 @@ int main() {
       CASE(3 * 4.0, VAL(.type = V_DOUBLE, .floating = 12)),
       CASE(6.0 / 2, VAL(.type = V_DOUBLE, .floating = 3)),
       CASE(6 / 2.0, VAL(.type = V_DOUBLE, .floating = 3)),
+      CASE(2.0 + 2 + 2, VAL(.type = V_DOUBLE, .floating = 6.0)),
+      CASE(2 + 2.0 + 2, VAL(.type = V_DOUBLE, .floating = 6.0)),
+      CASE(5.0 - 3 + 2, VAL(.type = V_DOUBLE, .floating = 4)),
+      CASE(5 - 3.0 + 2, VAL(.type = V_DOUBLE, .floating = 4)),
+      CASE(3.0 * 4 + 2, VAL(.type = V_DOUBLE, .floating = 14)),
+      CASE(3 * 4.0 + 2, VAL(.type = V_DOUBLE, .floating = 14)),
+      CASE(6.0 / 2 + 2, VAL(.type = V_DOUBLE, .floating = 5)),
+      CASE(6 / 2.0 + 2, VAL(.type = V_DOUBLE, .floating = 5)),
 
-      CASE(len("hello"), VAL(.type = V_INT, .integer = 5)),
+      CASE(std::len("hello"), VAL(.type = V_INT, .integer = 5)),
       // checking if string interning works
-      CASE(len("hello") len("hello"), VAL(.type = V_INT, .integer = 5)),
-      CASE(len(""), VAL(.type = V_INT, .integer = 0)),
-      CASE(len("a"), VAL(.type = V_INT, .integer = 1)),
+      CASE(std::len("hello") std::len("hello"),
+           VAL(.type = V_INT, .integer = 5)),
+      CASE(std::len(""), VAL(.type = V_INT, .integer = 0)),
+      CASE(std::len("a"), VAL(.type = V_INT, .integer = 1)),
 
       CASE(1 = 1, VAL(.type = V_TRUE)),
       CASE("abc" = "abc", VAL(.type = V_TRUE)),
       CASE(3.1415 = 3.1415, VAL(.type = V_TRUE)),
+      CASE(3.1415 = 3.1416, VAL(.type = V_FALSE)),
+      CASE(3.0 = 3, VAL(.type = V_TRUE)),
       CASE(true = true, VAL(.type = V_TRUE)),
       CASE(true = false, VAL(.type = V_FALSE)),
       CASE(false = false, VAL(.type = V_TRUE)),
+      CASE(1 < 2.0, VAL(.type = V_TRUE)),
+      CASE(2 > 1, VAL(.type = V_TRUE)),
 
       // variables
-      CASE(var name ::"user" test_return(name),
+      CASE(var name = "user" name,
            VAL(.type = V_STR, .string = &STRING("user"))),
-      CASE(var age ::25 test_return(age), VAL(.type = V_INT, .integer = 25)),
+      CASE(var age = 25 age, VAL(.type = V_INT, .integer = 25)),
 
       // functions
       CASE(fn ret ::arg{arg} ret(25), VAL(.type = V_INT, .integer = 25)),
       CASE(fn add25 ::arg{arg + 25} add25(25),
            VAL(.type = V_INT, .integer = 50)),
+      CASE(fn threearguments ::x y z{x + y + z} threearguments(25 25 25),
+           VAL(.type = V_INT, .integer = 75)),
 
       // builtins
-      CASE(assert(true), VAL(.type = V_TRUE)),
-      CASE(None(), VAL(.type = V_NONE)),
-      CASE(Some(true), VAL(.type = V_TRUE, .is_some = true)),
-      CASE(Some(false), VAL(.type = V_FALSE, .is_some = true)),
-
-      // match (TODO:)
-      //
-      // default case
-      // CASE((match true), VAL(.type = V_TRUE)),
-      // CASE((match false), VAL(.type = V_FALSE)),
+      CASE(std::assert(true = true), VAL(.type = V_TRUE)),
+      CASE(std::None(), VAL(.type = V_NONE)),
+      CASE(std::Some(true), VAL(.type = V_TRUE, .is_some = true)),
+      CASE(std::Some(false), VAL(.type = V_FALSE, .is_some = true)),
   };
 
   size_t passed = 0;
@@ -160,7 +159,6 @@ int main() {
     Case c = cases[i];
     Vm_Config conf = (Vm_Config){.disable_gc = true};
     Pg pg = pg_init(&conf);
-    PG_REGISTER_BUILTIN(&pg, "test_return", builtin_test_return);
     uint8_t code = pg_exec_Str(&pg, c.input);
 
     Vm *vm = &pg.__vm;

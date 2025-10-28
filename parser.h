@@ -20,6 +20,10 @@ typedef enum {
   N_FN,
   // conditional logic
   N_MATCH,
+  // <condition> { <body> }
+  N_CASE,
+  // :: { <body> }
+  N_DEFAULT,
   // operator, like +-*/%=
   N_BIN,
   // function call

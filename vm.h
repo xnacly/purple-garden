@@ -4,14 +4,22 @@
 #include "common.h"
 #include <stdint.h>
 
+#define BUILTIN_CONTRACT_ARGUMENT_TYPE(IDX, TYPE)                              \
+  ASSERT(ARG((IDX)).type == (TYPE),                                            \
+         "%s: argument " #IDX " needs to be " #TYPE, __FUNCTION__);
+
+#define BUILTIN_CONTRACT(ARG_COUNT, ...)                                       \
+  ASSERT(vm->arg_count == (ARG_COUNT),                                         \
+         "%s: expected " #ARG_COUNT " argument(s), got %d", __FUNCTION__,      \
+         vm->arg_count);                                                       \
+  __VA_ARGS__
+
 typedef struct {
   // defines the maximum amount of memory purple garden is allowed to allocate,
   // if this is hit, the vm exits with a non zero code
   uint64_t max_memory;
-  // removes all default builtins like @len, @type, etc
-  bool remove_default_builtins;
-  // disables the @std/ namespace
-  bool disable_std_namespace;
+  // disables the standard library
+  bool disable_std;
   // disables garbage collection and allocates 'max_memory' with a bump
   // allocator
   bool disable_gc;
@@ -43,8 +51,7 @@ typedef struct Frame {
   // returning out of scope, we need to jump back to the callsite of the
   // function
   size_t return_to_bytecode;
-  // stores Values by their hash, serving as a variable table
-  Value *variable_table;
+  Map variable_table;
 } Frame;
 
 typedef struct __Vm Vm;
@@ -52,6 +59,8 @@ typedef struct __Vm Vm;
 typedef void (*builtin_function)(Vm *vm);
 
 typedef struct __Vm {
+  Vm_Config config;
+
   uint32_t global_len;
   // globals represents the global pool created by the bytecode compiler
   Value *globals;
@@ -78,6 +87,7 @@ typedef struct __Vm {
   uint32_t size_hint;
 
   builtin_function *builtins;
+  size_t builtin_count;
 
   Allocator *alloc;
 #if DEBUG
@@ -122,6 +132,16 @@ typedef enum {
   // compares value at r0 and rANY via Value_cmp
   OP_EQ = 6,
 
+  // OP_LT rANY
+  //
+  // numeric value at r0 < rANY
+  OP_LT = 7,
+
+  // OP_GT rANY
+  //
+  // numeric value at r0 > rANY
+  OP_GT = 8,
+
   // OP_VAR rANY
   //
   // stores the Value in the register rANY in the variable table via the
@@ -138,15 +158,15 @@ typedef enum {
   // instructs the vm on how many values to pop of the argument stacks
   OP_ARGS,
 
-  // OP_BUILTIN bANY
+  // OP_SYS bANY
   //
-  // call the builtin its argument refers to, with the argument stored in r0
-  OP_BUILTIN,
+  // syscall into the vm->builtin with idx bANY
+  OP_SYS,
 
   // OP_RET rANY
   //
   // Ends a scope
-  OP_LEAVE,
+  OP_RET,
 
   // OP_CALL ADDR
   //
@@ -186,6 +206,11 @@ typedef enum {
   //
   // Specifices a size
   OP_SIZE,
+
+  // Idx rANY
+  //
+  // Use the value in r0 to index into rANY
+  OP_IDX,
 } VM_OP;
 
 #define VM_ERR(fmt, ...)                                                       \
@@ -198,6 +223,5 @@ extern Str OP_MAP[];
 // to allocate space for both the global pool and the byte code space, alloc is
 // used in the virtual machine itself
 Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc);
-void Vm_register_builtin(Vm *vm, builtin_function bf, Str name);
 int Vm_run(Vm *vm);
 void Vm_destroy(Vm *vm);

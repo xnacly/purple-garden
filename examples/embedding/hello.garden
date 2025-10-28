@@ -1,7 +1,7 @@
 # vim: filetype=python
 
 # println is a predefined alias for @std/fmt/println
-println(
+std::println(
     # dbg is the builtin registered in main.c
     dbg("hello" "world" 3.1415 true false [1 2])
 )

@@ -7,12 +7,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define ARG(I) (vm->registers[vm->arg_offset + 1 + (I)])
+#define RETURN(...) (vm->registers[0] = (Value)__VA_ARGS__)
+
 #ifndef DEBUG
 #define DEBUG 0
 #endif
 
 #define INIT_BYTECODE_SIZE 64
-#define GLOBAL_SIZE 512
+#define GLOBAL_SIZE 1024
 #define GLOBAL_SIZE_MASK (GLOBAL_SIZE - 1)
 #define MAX_BUILTIN_SIZE 1024
 #define MAX_BUILTIN_SIZE_MASK (MAX_BUILTIN_SIZE - 1)
@@ -24,9 +27,6 @@
 #endif
 
 #define REGISTERS 31
-#define CALL_ARGUMENT_STACK 256
-#define VARIABLE_TABLE_SIZE 256
-#define VARIABLE_TABLE_SIZE_MASK (VARIABLE_TABLE_SIZE - 1)
 
 #define UNLIKELY(condition) __builtin_expect(condition, 0)
 // TODO: not compiled out in release builds; rework this into a panic system and
@@ -80,15 +80,17 @@ typedef struct Value {
   };
 } Value;
 
-typedef struct {
+#define V_NUM_MASK ((1 << V_INT) | (1 << V_DOUBLE))
+
+typedef struct MapEntry {
   uint32_t hash;
   Value value;
 } MapEntry;
-LIST_TYPE(MapEntry);
 
 typedef struct Map {
-  LIST_MapEntry entries;
-  uint64_t cap;
+  size_t cap;
+  size_t len;
+  MapEntry *buckets;
 } Map;
 
 // global values that compiler, optimiser and vm use, often mapped to global
@@ -104,6 +106,7 @@ bool Value_cmp(const Value *a, const Value *b);
 void Value_debug(const Value *v);
 double Value_as_double(const Value *v);
 int64_t Value_as_int(const Value *v);
+bool Value_is_opt(const Value *v);
 
 #define DBG(EXPR)                                                              \
   ({                                                                           \

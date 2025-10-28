@@ -18,7 +18,7 @@ void disassemble(const Vm *vm, const Ctx *ctx, size_t offset, size_t length,
       Value_debug(&v);
       printf("; {idx=%zu", i);
       if (v.type == V_STR) {
-        printf(",hash=%lu", v.string->hash & GLOBAL_SIZE_MASK);
+        printf(",hash=%lu", v.string->hash);
       }
       printf("}\n\t");
     }
@@ -58,7 +58,7 @@ void disassemble(const Vm *vm, const Ctx *ctx, size_t offset, size_t length,
         printf(" %zu ; count=%zu,offset=%zu", arg, DECODE_ARG_COUNT(arg),
                DECODE_ARG_OFFSET(arg));
         break;
-      case OP_LEAVE:
+      case OP_RET:
         puts("");
         break;
 #if DISASSEMBLE_INCLUDE_POSITIONS

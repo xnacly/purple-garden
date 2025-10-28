@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdlib.h>
 
 #include "adts.h"
@@ -6,6 +7,7 @@
 #include "lexer.h"
 #include "mem.h"
 #include "parser.h"
+#include "std/std.h"
 #include "strings.h"
 #include "vm.h"
 
@@ -121,8 +123,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     break;
   }
   case N_IDENT: {
-    uint64_t hash = n->token->string.hash & VARIABLE_TABLE_SIZE_MASK;
-    BC(OP_LOADV, hash);
+    BC(OP_LOADV, (uint32_t)n->token->string.hash);
     break;
   }
   case N_BIN: {
@@ -132,58 +133,138 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       // PERF: arithmetic optimisations like n+0=n; n*0=0; n*1=n, etc
       compile(alloc, vm, ctx, child);
     } else {
-      Node *lhs = LIST_get_UNSAFE(&n->children, 0);
-      // two arguments is easy to compile, just load and add two Values
-      compile(alloc, vm, ctx, lhs);
+      compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 0));
       size_t r = Ctx_allocate_register(ctx);
       BC(OP_STORE, r);
-      Node *rhs = LIST_get_UNSAFE(&n->children, 1);
-      compile(alloc, vm, ctx, rhs);
+      compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 1));
       BC(n->token->type, r);
       Ctx_free_register(ctx, r);
     }
     break;
   }
   case N_VAR: {
-    size_t hash = n->token->string.hash & VARIABLE_TABLE_SIZE_MASK;
     Node *value = LIST_get_UNSAFE(&n->children, 0);
     compile(alloc, vm, ctx, value);
-    BC(OP_VAR, hash);
+    BC(OP_VAR, (uint32_t)n->token->string.hash);
     break;
   }
   case N_PATH: {
-    size_t len = n->children.len;
-    for (size_t i = 0; i < len; i++) {
-      LIST_get_UNSAFE(&n->children, i);
+    // stdlib path lookup and compilation
+    if (n->token->type == T_STD) {
+      size_t len = n->children.len;
+
+      StdNode *sn = ctx->std;
+
+      // walk path fragments to find package, for instance for
+      // std::runtime::gc::stats() we walk: PKG: runtime PKG: gc FN: stats
+      for (size_t i = 0; i < len; i++) {
+        Str s = LIST_get_UNSAFE(&n->children, i)->token->string;
+        for (size_t j = 0; j < sn->len; j++) {
+          if (sn->children[j].name.hash == s.hash) {
+            sn = &sn->children[j];
+            break;
+          }
+        }
+      }
+
+      ASSERT(sn->fn != NULL, "No matching builtin function found");
+      DEBUG_PUTS("Found std leaf function `%.*s`: %p", (int)sn->name.len,
+                 sn->name.p, sn->fn);
+
+      Node *call = LIST_get_UNSAFE(&n->children, len - 1);
+      ASSERT(call != NULL, "Wasnt able to get the call part of the path");
+      ASSERT(call->type == N_CALL, "Last segment of std access isn't N_CALL");
+      size_t argument_len = call->children.len;
+
+      size_t registers[argument_len < 1 ? 1 : argument_len];
+      for (size_t i = 0; i < argument_len; i++) {
+        Node *child = LIST_get_UNSAFE(&call->children, i);
+        compile(alloc, vm, ctx, child);
+        size_t r = Ctx_allocate_register(ctx);
+        registers[i] = r;
+        BC(OP_STORE, r);
+      }
+
+      for (int i = argument_len - 1; i >= 0; i--) {
+        Ctx_free_register(ctx, registers[i]);
+      }
+
+      BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(argument_len,
+                                              ctx->register_allocated_count));
+      ASSERT(vm->builtin_count + 1 < MAX_BUILTIN_SIZE, "Too many builtins");
+      BC(OP_SYS, vm->builtin_count);
+      vm->builtins[vm->builtin_count++] = sn->fn;
+    } else {
+      compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 0));
+      size_t rtarget = Ctx_allocate_register(ctx);
+      BC(OP_STORE, rtarget);
+      for (size_t i = 1; i < n->children.len; i++) {
+        compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, i));
+        BC(OP_IDX, rtarget);
+      }
+
+      Ctx_free_register(ctx, rtarget);
     }
+
     break;
   }
-  case N_FN: { // (fn <name> [<args>] <s-expr's>)
+  case N_MATCH: {
+    size_t skip_backfill_slots[n->children.len];
+
+    for (size_t i = 0; i < n->children.len; i++) {
+      Node *match_case = LIST_get_UNSAFE(&n->children, i);
+      if (match_case->type == N_CASE) {
+        // compile condition
+        compile(alloc, vm, ctx, LIST_get_UNSAFE(&match_case->children, 0));
+        size_t next_case = BC_LEN;
+        BC(OP_JMPF, 0xAFFEDEAD);
+
+        // compile the expressions making up the body
+        for (size_t j = 1; j < match_case->children.len; j++) {
+          compile(alloc, vm, ctx, LIST_get_UNSAFE(&match_case->children, j));
+        }
+
+        skip_backfill_slots[i] = BC_LEN;
+        // skip to the end of the match block
+        BC(OP_JMP, 0xAFFEDEAD);
+
+        // only jump to the next case if there is one, which there only can be
+        // if we are not at the last case
+        if (i + 1 < n->children.len) {
+          ByteCodeBuilder_insert_arg(ctx->bcb, next_case, BC_LEN);
+        }
+      } else {
+        skip_backfill_slots[i] = 0;
+        for (size_t j = 0; j < match_case->children.len; j++) {
+          compile(alloc, vm, ctx, LIST_get_UNSAFE(&match_case->children, j));
+        }
+      }
+    }
+
+    size_t size = BC_LEN;
+    for (size_t i = 0; i < n->children.len; i++) {
+      size_t slot = skip_backfill_slots[i];
+      if (slot) {
+        ByteCodeBuilder_insert_arg(ctx->bcb, slot, size);
+      }
+    }
+
+    break;
+  };
+  case N_FN: {
     Str name = n->token->string;
     size_t hash = name.hash & MAX_BUILTIN_SIZE_MASK;
     LIST_Nptr params = LIST_get_UNSAFE(&n->children, 0)->children;
 
-    ASSERT(ctx->hash_to_function[hash].name.len == 0,
-           "Cant redefine function `%.*s`", (int)name.len, name.p);
+    // ASSERT(ctx->hash_to_function[hash].name.len == 0,
+    //        "Cant redefine function `%.*s`", (int)name.len, name.p);
 
     CtxFunction function_ctx = {
         .name = name,
         .bytecode_index = BC_LEN,
         .argument_count = params.len,
-        // placeholder so recursive self calls arent optimised away due to
-        // function size checks
-        .size = 0xAFFEDEAD,
     };
     ctx->hash_to_function[hash] = function_ctx;
-
-    // PERF: optimisation for removing empty functions
-    if (n->children.len == 1) {
-      // set 0 so the call is also removed
-      ctx->hash_to_function[hash].size = 0;
-      DEBUG_PUTS("Removing body of empty `%.*s` function",
-                 (int)function_ctx.name.len, function_ctx.name.p);
-      return;
-    }
 
     // this is the worst hack i have ever written, this is used to
     // jump over the bytecode of a function (header with args setup
@@ -200,10 +281,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     // arguments  = [ 1  2  3]
     for (size_t i = 0; i < params.len; i++) {
       Node *param = LIST_get_UNSAFE(&params, i);
-      // PERF: changing args to start from r1 to starting from r0,
-      // thus saving a single OP_LOAD for each function invocation
       BC(OP_LOAD, i + 1);
-      BC(OP_VAR, param->token->string.hash & VARIABLE_TABLE_SIZE_MASK);
+      BC(OP_VAR, param->token->string.hash);
     }
 
     // compiling the body, returning a value is free since its just in
@@ -217,7 +296,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       }
     }
 
-    BC(OP_LEAVE, 0);
+    BC(OP_RET, 0);
     ByteCodeBuilder_insert_arg(ctx->bcb, jump_op_index, BC_LEN);
     ctx->hash_to_function[hash].size = BC_LEN - function_ctx.bytecode_index;
 
@@ -229,28 +308,16 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     break;
   }
-  case N_CALL: { // function call site (<name|builtin> <args>)
+  case N_CALL: { // user defined function call site (<name> <args>)
     Str *name = &n->token->string;
     size_t len = n->children.len;
-    size_t idx = name->hash & MAX_BUILTIN_SIZE_MASK;
 
-    builtin_function bf = vm->builtins[idx];
-    CtxFunction *func = NULL;
-    if (bf == NULL) {
-      func = &ctx->hash_to_function[idx];
-      ASSERT(func->name.len != 0, "Undefined function `%.*s`", (int)name->len,
-             name->p)
-      ASSERT(len == func->argument_count, "`%.*s` wants %zu arguments, got %zu",
-             (int)func->name.len, func->name.p, func->argument_count, len);
-
-      // PERF: optimisation to remove calls to empty functions, since their
-      // definition is also removed
-      // if (!func->size) {
-      //   DEBUG_PUTS("Removing call to empty `%.*s` function (size=%zu)",
-      //              (int)func->name.len, func->name.p, func->size);
-      //   return;
-      // }
-    }
+    CtxFunction *func = func =
+        &ctx->hash_to_function[name->hash & MAX_BUILTIN_SIZE_MASK];
+    ASSERT(func->name.len != 0, "Undefined function `%.*s`", (int)name->len,
+           name->p)
+    ASSERT(len == func->argument_count, "`%.*s` wants %zu arguments, got %zu",
+           (int)func->name.len, func->name.p, func->argument_count, len);
 
     // we compile all arguments to bytecode one by one by one
     size_t registers[len < 1 ? 1 : len];
@@ -268,11 +335,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     BC(OP_ARGS,
        ENCODE_ARG_COUNT_AND_OFFSET(len, ctx->register_allocated_count));
-    if (bf == NULL) {
-      BC(OP_CALL, func->bytecode_index);
-    } else {
-      BC(OP_BUILTIN, idx);
-    }
+    BC(OP_CALL, func->bytecode_index);
 
     break;
   }
@@ -280,8 +343,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     size_t size = n->children.len;
     // fast path for empty obj
     if (size != 0) {
-      // size hint is placed in r0 to instruct the OP_NEW to use the allocation
-      // size for any value, such as an array or object.
+      // size hint is placed in r0 to instruct the OP_NEW to use the
+      // allocation size for any value, such as an array or object.
       BC(OP_SIZE, size);
     }
 
@@ -289,19 +352,20 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     // fast path for empty obj
     if (size != 0) {
-      // after OP_NEW the created value is in r0, we must now temporarly move
-      // it to any other register, so its not clobbered by acm register usage
+      // after OP_NEW the created value is in r0, we must now temporarly
+      // move it to any other register, so its not clobbered by acm
+      // register usage
       size_t obj_register = Ctx_allocate_register(ctx);
       BC(OP_STORE, obj_register);
-      TODO("There is no pg instruction for inserting into an object yet")
+      // TODO("There is no pg instruction for inserting into an object yet")
 
       for (size_t i = 0; i < size; i++) {
         Node *member = LIST_get_UNSAFE(&n->children, i);
         compile(alloc, vm, ctx, member);
       }
 
-      // move the array back into r0, since it needs to be the return value of
-      // this N_ARRAY and N_LIST node
+      // move the array back into r0, since it needs to be the return
+      // value of this N_ARRAY and N_LIST node
       BC(OP_LOAD, obj_register);
       Ctx_free_register(ctx, obj_register);
     }
@@ -311,8 +375,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     size_t size = n->children.len;
     // fast path for empty array
     if (size != 0) {
-      // size hint is placed in r0 to instruct the OP_NEW to use the allocation
-      // size for any value, such as an array or object.
+      // size hint is placed in r0 to instruct the OP_NEW to use the
+      // allocation size for any value, such as an array or object.
       BC(OP_SIZE, size);
     }
 
@@ -320,8 +384,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     // fast path for empty array
     if (size != 0) {
-      // after OP_NEW the created value is in r0, we must now temporarly move
-      // it to any other register, so its not clobbered by acm register usage
+      // after OP_NEW the created value is in r0, we must now temporarly
+      // move it to any other register, so its not clobbered by acm
+      // register usage
       size_t list_register = Ctx_allocate_register(ctx);
       BC(OP_STORE, list_register);
 
@@ -331,8 +396,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
         BC(OP_APPEND, list_register);
       }
 
-      // move the array back into r0, since it needs to be the return value of
-      // this N_ARRAY and N_LIST node
+      // move the array back into r0, since it needs to be the return
+      // value of this N_ARRAY and N_LIST node
       BC(OP_LOAD, list_register);
       Ctx_free_register(ctx, list_register);
     }
@@ -358,6 +423,7 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
       .global_hash_buckets = {0},
       .hash_to_function = {},
       .bcb = &bcb,
+      .std = std_tree(vm->config),
   };
 
   while (true) {

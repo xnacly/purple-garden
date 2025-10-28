@@ -6,10 +6,10 @@
 #define PREC 1e-9
 
 Str VALUE_TYPE_MAP[] = {
-    [V_NONE] = STRING("Option/None"), [V_STR] = STRING("Str"),
-    [V_INT] = STRING("Int"),          [V_DOUBLE] = STRING("Double"),
-    [V_TRUE] = STRING("True"),        [V_FALSE] = STRING("False"),
-    [V_ARRAY] = STRING("Array"),      [V_OBJ] = STRING("Object"),
+    [V_NONE] = STRING("Option::None"), [V_STR] = STRING("str"),
+    [V_INT] = STRING("int"),           [V_DOUBLE] = STRING("double"),
+    [V_TRUE] = STRING("true"),         [V_FALSE] = STRING("false"),
+    [V_ARRAY] = STRING("arr"),         [V_OBJ] = STRING("obj"),
 };
 
 // Value_cmp compares two values in a shallow way, is used for OP_EQ and in
@@ -66,9 +66,6 @@ void Value_debug(const Value *v) {
       printf("Option::Some(");
     }
     Str_debug(t);
-    if (v->is_some) {
-      printf(")");
-    }
   }
   switch (v->type) {
   case V_NONE:
@@ -76,9 +73,7 @@ void Value_debug(const Value *v) {
   case V_FALSE:
     break;
   case V_STR:
-    printf("(`");
     Str_debug(v->string);
-    printf("`)");
     break;
   case V_DOUBLE:
     printf("(%g)", v->floating);
@@ -88,10 +83,10 @@ void Value_debug(const Value *v) {
     break;
   case V_OBJ:
     // TODO: V_OBJ
-    printf("{}");
+    printf("({})");
     break;
   case V_ARRAY: {
-    printf("(");
+    printf("([");
     uint64_t len = v->array->len;
     for (size_t i = 0; i < len; i++) {
       Value v_at_i = LIST_get(v->array, i);
@@ -100,11 +95,15 @@ void Value_debug(const Value *v) {
         putc(' ', stdout);
       }
     }
-    printf(")");
+    printf("])");
     break;
   };
   default:
     printf("<unkown>");
+  }
+
+  if (v->is_some) {
+    printf(")");
   }
 }
 
@@ -126,6 +125,10 @@ inline int64_t Value_as_int(const Value *v) {
   } else {
     ASSERT(0, "Value is neither double nor int, cant convert to int")
   }
+}
+
+inline bool Value_is_opt(const Value *v) {
+  return v->type == V_NONE || v->is_some;
 }
 
 #undef PREC

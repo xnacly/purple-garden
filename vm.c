@@ -1,35 +1,31 @@
 #include <stdint.h>
 
 #include "adts.h"
-#include "builtins.h"
 #include "common.h"
 #include "mem.h"
 #include "strings.h"
 #include "vm.h"
 
 Str OP_MAP[256] = {
-    [OP_STORE] = STRING("STORE"),     [OP_LOAD] = STRING("LOAD"),
-    [OP_ADD] = STRING("ADD"),         [OP_SUB] = STRING("SUB"),
-    [OP_MUL] = STRING("MUL"),         [OP_DIV] = STRING("DIV"),
-    [OP_EQ] = STRING("EQ"),           [OP_VAR] = STRING("VAR"),
-    [OP_LOADV] = STRING("LOADV"),     [OP_ARGS] = STRING("ARGS"),
-    [OP_BUILTIN] = STRING("BUILTIN"), [OP_LEAVE] = STRING("LEAVE"),
-    [OP_CALL] = STRING("CALL"),       [OP_JMP] = STRING("JMP"),
-    [OP_LOADG] = STRING("LOADG"),     [OP_JMPF] = STRING("JMPF"),
-    [OP_APPEND] = STRING("APPEND"),   [OP_NEW] = STRING("NEW"),
-    [OP_SIZE] = STRING("SIZE"),
+    [OP_STORE] = STRING("STORE"),   [OP_LOAD] = STRING("LOAD"),
+    [OP_ADD] = STRING("ADD"),       [OP_SUB] = STRING("SUB"),
+    [OP_MUL] = STRING("MUL"),       [OP_DIV] = STRING("DIV"),
+    [OP_EQ] = STRING("EQ"),         [OP_LT] = STRING("LT"),
+    [OP_GT] = STRING("GT"),         [OP_VAR] = STRING("VAR"),
+    [OP_LOADV] = STRING("LOADV"),   [OP_ARGS] = STRING("ARGS"),
+    [OP_SYS] = STRING("SYS"),       [OP_RET] = STRING("RET"),
+    [OP_CALL] = STRING("CALL"),     [OP_JMP] = STRING("JMP"),
+    [OP_LOADG] = STRING("LOADG"),   [OP_JMPF] = STRING("JMPF"),
+    [OP_APPEND] = STRING("APPEND"), [OP_NEW] = STRING("NEW"),
+    [OP_SIZE] = STRING("SIZE"),     [OP_IDX] = STRING("IDX"),
 };
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE] = {0};
 
-inline void Vm_register_builtin(Vm *vm, builtin_function bf, Str name) {
-  uint64_t hashed = Str_hash(&name) & MAX_BUILTIN_SIZE_MASK;
-  vm->builtins[hashed] = bf;
-}
-
 Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
   Vm vm = {0};
   vm.alloc = alloc;
+  vm.config = conf;
 
   vm.builtins = BUILTIN_MAP;
 
@@ -38,16 +34,6 @@ Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
   vm.globals[GLOBAL_TRUE] = *INTERNED_TRUE;
   vm.globals[GLOBAL_NONE] = *INTERNED_NONE;
   vm.global_len = 3;
-
-  if (!conf.remove_default_builtins) {
-    Vm_register_builtin(&vm, builtin_print, STRING("print"));
-    Vm_register_builtin(&vm, builtin_println, STRING("println"));
-    Vm_register_builtin(&vm, builtin_len, STRING("len"));
-    Vm_register_builtin(&vm, builtin_type, STRING("type"));
-    Vm_register_builtin(&vm, builtin_Some, STRING("Some"));
-    Vm_register_builtin(&vm, builtin_assert, STRING("assert"));
-    Vm_register_builtin(&vm, builtin_None, STRING("None"));
-  }
 
   return vm;
 }
@@ -64,33 +50,30 @@ typedef struct {
 void freelist_preallocate(FrameFreeList *fl) {
   for (int i = 0; i < PREALLOCATE_FREELIST_SIZE; i++) {
     Frame *frame = CALL(fl->alloc, request, sizeof(Frame));
-    *frame = (Frame){0};
-    frame->variable_table =
-        CALL(fl->alloc, request, sizeof(Value) * VARIABLE_TABLE_SIZE);
-    memset(frame->variable_table, 0, sizeof(Value) * VARIABLE_TABLE_SIZE);
+    frame->variable_table = Map_new(8, fl->alloc);
     frame->prev = fl->head;
     fl->head = frame;
   }
 }
 
-void freelist_push(FrameFreeList *fl, Frame *frame) {
-  frame->prev = fl->head;
-  frame->return_to_bytecode = 0;
-  fl->head = frame;
-}
-
 Frame *freelist_pop(FrameFreeList *fl) {
   if (!fl->head) {
     Frame *f = CALL(fl->alloc, request, sizeof(Frame));
-    f->variable_table =
-        CALL(fl->alloc, request, sizeof(Value) * VARIABLE_TABLE_SIZE);
-    memset(f->variable_table, 0, sizeof(Value) * VARIABLE_TABLE_SIZE);
+    f->variable_table = Map_new(8, fl->alloc);
     return f;
   }
+
   Frame *f = fl->head;
   fl->head = f->prev;
   f->prev = NULL;
   return f;
+}
+
+void freelist_push(FrameFreeList *fl, Frame *f) {
+  Map_clear(&f->variable_table);
+  f->prev = fl->head;
+  f->return_to_bytecode = 0;
+  fl->head = f;
 }
 
 int Vm_run(Vm *vm) {
@@ -108,8 +91,8 @@ int Vm_run(Vm *vm) {
 #if DEBUG
     vm->instruction_counter[op]++;
     Str *str = &OP_MAP[op];
-    printf("[VM][%06zu|%05zu] %.*s%*.s=%06u", vm->pc, vm->pc + 1, (int)str->len,
-           str->p, 10 - (int)str->len, " ", arg);
+    printf("[VM][%05zu|%05zu] %.*s%*.s=%010u", vm->pc, vm->pc + 1,
+           (int)str->len, str->p, 10 - (int)str->len, " ", arg);
 #if PRINT_REGISTERS
     printf("{ ");
     for (size_t i = 0; i < PRINT_REGISTERS; i++) {
@@ -174,12 +157,7 @@ int Vm_run(Vm *vm) {
       // bounds checking and checking for variable validity is performed at
       // compile time, but we still have to check if the variable is available
       // in the current scope...
-      Value v = vm->frame->variable_table[arg];
-      // TODO: this doesnt work, we need a different way of checking access,
-      // this disallows putting (@None) in the variable table if (v.type ==
-      // V_NONE) {
-      //   VM_ERR("Undefined variable with hash %i", arg);
-      // }
+      Value v = Map_get_hash(&vm->frame->variable_table, arg);
       vm->registers[0] = v;
       break;
     }
@@ -187,107 +165,241 @@ int Vm_run(Vm *vm) {
       vm->registers[arg] = vm->registers[0];
       break;
     case OP_VAR:
-      vm->frame->variable_table[arg] = vm->registers[0];
+      Value v = vm->registers[0];
+      Map_insert_hash(&vm->frame->variable_table, arg, v, vm->alloc);
       break;
     case OP_ADD: {
-      Value *left = &vm->registers[0];
-      Value *right = &vm->registers[arg];
-      if (left->type == V_STR && right->type == V_STR) {
+      Value *lhs = &vm->registers[0];
+      Value *rhs = &vm->registers[arg];
+
+      if (lhs->type == V_STR && rhs->type == V_STR) {
         Str *s = CALL(vm->alloc, request, sizeof(Str));
-        *s = Str_concat(right->string, left->string, vm->alloc);
-        vm->registers[0] = (Value){
-            .type = V_STR,
-            .string = s,
-        };
-      } else if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0].floating =
-            Value_as_double(right) + Value_as_double(left);
-        vm->registers[0].type = V_DOUBLE;
-      } else {
-        if (!(left->type == V_INT && right->type == V_INT)) {
-          VM_ERR("VM[+] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[left->type].len,
-                 VALUE_TYPE_MAP[left->type].p,
-                 (int)VALUE_TYPE_MAP[right->type].len,
-                 VALUE_TYPE_MAP[right->type].p)
-        }
-        vm->registers[0].integer = right->integer + left->integer;
-        vm->registers[0].type = V_INT;
+        *s = Str_concat(rhs->string, lhs->string, vm->alloc);
+        vm->registers[0] = (Value){.type = V_STR, .string = s};
+        break;
       }
+
+      int lhs_is_double = lhs->type == V_DOUBLE;
+      int rhs_is_double = rhs->type == V_DOUBLE;
+
+      if (lhs_is_double | rhs_is_double) {
+        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = b + a;
+        vm->registers[0].type = V_DOUBLE;
+        break;
+      }
+
+      if (!(lhs->type == V_INT && rhs->type == V_INT)) {
+        Str l = VALUE_TYPE_MAP[lhs->type];
+        Str r = VALUE_TYPE_MAP[rhs->type];
+        VM_ERR("Can not perform `%.*s` + `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      vm->registers[0].integer = rhs->integer + lhs->integer;
+      vm->registers[0].type = V_INT;
       break;
     }
+
     case OP_SUB: {
-      Value *left = &vm->registers[0];
-      Value *right = &vm->registers[arg];
-      if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0].floating =
-            Value_as_double(right) - Value_as_double(left);
+      Value *lhs = &vm->registers[0];
+      Value *rhs = &vm->registers[arg];
+
+      int lhs_is_double = lhs->type == V_DOUBLE;
+      int rhs_is_double = rhs->type == V_DOUBLE;
+
+      if (lhs_is_double | rhs_is_double) {
+        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = b - a;
         vm->registers[0].type = V_DOUBLE;
-      } else {
-        if (!(left->type == V_INT && right->type == V_INT)) {
-          VM_ERR("VM[-] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[left->type].len,
-                 VALUE_TYPE_MAP[left->type].p,
-                 (int)VALUE_TYPE_MAP[right->type].len,
-                 VALUE_TYPE_MAP[right->type].p)
-        }
-        vm->registers[0].type = V_INT;
-        vm->registers[0].integer = right->integer - left->integer;
+        break;
       }
+
+      if (!(lhs->type == V_INT && rhs->type == V_INT)) {
+        Str l = VALUE_TYPE_MAP[lhs->type];
+        Str r = VALUE_TYPE_MAP[rhs->type];
+        VM_ERR("Can not perform `%.*s` - `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      vm->registers[0].integer = rhs->integer - lhs->integer;
+      vm->registers[0].type = V_INT;
       break;
     }
+
     case OP_MUL: {
-      Value *left = &vm->registers[0];
-      Value *right = &vm->registers[arg];
-      if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0].floating =
-            Value_as_double(right) * Value_as_double(left);
+      Value *lhs = &vm->registers[0];
+      Value *rhs = &vm->registers[arg];
+
+      int lhs_is_double = lhs->type == V_DOUBLE;
+      int rhs_is_double = rhs->type == V_DOUBLE;
+
+      if (lhs_is_double | rhs_is_double) {
+        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = b * a;
         vm->registers[0].type = V_DOUBLE;
-      } else {
-        if (!(left->type == V_INT && right->type == V_INT)) {
-          VM_ERR("VM[*] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[left->type].len,
-                 VALUE_TYPE_MAP[left->type].p,
-                 (int)VALUE_TYPE_MAP[right->type].len,
-                 VALUE_TYPE_MAP[right->type].p)
-        }
-        vm->registers[0].type = V_INT;
-        vm->registers[0].integer = right->integer * left->integer;
+        break;
       }
+
+      if (!(lhs->type == V_INT && rhs->type == V_INT)) {
+        Str l = VALUE_TYPE_MAP[lhs->type];
+        Str r = VALUE_TYPE_MAP[rhs->type];
+        VM_ERR("Can not perform `%.*s` * `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      vm->registers[0].integer = rhs->integer * lhs->integer;
+      vm->registers[0].type = V_INT;
       break;
     }
+
     case OP_DIV: {
-      Value *left = &vm->registers[0];
-      Value *right = &vm->registers[arg];
-      if (left->type == V_DOUBLE || right->type == V_DOUBLE) {
-        vm->registers[0].floating =
-            Value_as_double(right) / Value_as_double(left);
+      Value *lhs = &vm->registers[0];
+      Value *rhs = &vm->registers[arg];
+
+      int lhs_is_double = lhs->type == V_DOUBLE;
+      int rhs_is_double = rhs->type == V_DOUBLE;
+
+      if (lhs_is_double | rhs_is_double) {
+        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = b / a;
         vm->registers[0].type = V_DOUBLE;
-      } else {
-        if (!(left->type == V_INT && right->type == V_INT)) {
-          VM_ERR("VM[/] Incompatible types %.*s and %.*s",
-                 (int)VALUE_TYPE_MAP[left->type].len,
-                 VALUE_TYPE_MAP[left->type].p,
-                 (int)VALUE_TYPE_MAP[right->type].len,
-                 VALUE_TYPE_MAP[right->type].p)
-        }
-        vm->registers[0].type = V_INT;
-        vm->registers[0].integer = right->integer / left->integer;
+        break;
       }
+
+      if (!(lhs->type == V_INT && rhs->type == V_INT)) {
+        Str l = VALUE_TYPE_MAP[lhs->type];
+        Str r = VALUE_TYPE_MAP[rhs->type];
+        VM_ERR("Can not perform `%.*s` / `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      if (lhs->integer == 0) {
+        VM_ERR("Division by zero");
+      }
+
+      vm->registers[0].integer = rhs->integer / lhs->integer;
+      vm->registers[0].type = V_INT;
       break;
     }
     case OP_EQ: {
-      // pointer comparison fast path
-      vm->registers[0] = Value_cmp(&vm->registers[0], &vm->registers[arg])
-                             ? vm->globals[1]
-                             : vm->globals[0];
+      Value *lhs = &vm->registers[0];
+      Value *rhs = &vm->registers[arg];
+      bool eq = false;
+
+      if (lhs == rhs) {
+        goto set_true;
+      }
+
+      if ((lhs->type == V_INT || lhs->type == V_DOUBLE) &&
+          (rhs->type == V_INT || rhs->type == V_DOUBLE)) {
+        double a =
+            (lhs->type == V_DOUBLE) ? lhs->floating : (double)lhs->integer;
+        double b =
+            (rhs->type == V_DOUBLE) ? rhs->floating : (double)rhs->integer;
+        double diff = a - b;
+#define PREC 1e-9
+        if ((diff > -PREC) & (diff < PREC))
+          goto set_true;
+        goto set_false;
+      }
+
+      if (lhs->type == V_STR && rhs->type == V_STR) {
+        if (Str_eq(lhs->string, rhs->string)) {
+          goto set_true;
+        }
+        goto set_false;
+      }
+
+      if ((lhs->type == V_TRUE || lhs->type == V_FALSE ||
+           lhs->type == V_NONE) &&
+          (rhs->type == V_TRUE || rhs->type == V_FALSE ||
+           rhs->type == V_NONE)) {
+        if (lhs->type == rhs->type) {
+          goto set_true;
+        }
+        goto set_false;
+      }
+
+      goto set_false;
+
+    set_true:
+      vm->registers[0] = vm->globals[1];
+      break;
+
+    set_false:
+      vm->registers[0] = vm->globals[0];
+      break;
+    }
+    case OP_LT: {
+      Value lhs = vm->registers[arg];
+      Value rhs = vm->registers[0];
+
+      if (!((1 << lhs.type) & V_NUM_MASK) || !((1 << rhs.type) & V_NUM_MASK)) {
+        Str l = VALUE_TYPE_MAP[lhs.type];
+        Str r = VALUE_TYPE_MAP[rhs.type];
+        VM_ERR("Can not perform `%.*s` < `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      double a = lhs.type == V_INT ? (double)lhs.integer : lhs.floating;
+      double b = rhs.type == V_INT ? (double)rhs.integer : rhs.floating;
+      vm->registers[0] = (Value){
+          .type = (a < b) ? V_TRUE : V_FALSE,
+      };
+      break;
+    }
+    case OP_GT: {
+      Value lhs = vm->registers[arg];
+      Value rhs = vm->registers[0];
+      if (!((1 << lhs.type) & V_NUM_MASK) || !((1 << rhs.type) & V_NUM_MASK)) {
+        Str l = VALUE_TYPE_MAP[lhs.type];
+        Str r = VALUE_TYPE_MAP[rhs.type];
+        VM_ERR("Can not perform `%.*s` > `%.*s`", (int)l.len, l.p, (int)r.len,
+               r.p);
+      }
+
+      double a = lhs.type == V_INT ? (double)lhs.integer : lhs.floating;
+      double b = rhs.type == V_INT ? (double)rhs.integer : rhs.floating;
+      vm->registers[0] = (Value){
+          .type = (a > b) ? V_TRUE : V_FALSE,
+      };
+      break;
+    }
+    case OP_IDX: {
+      Value target = vm->registers[arg];
+      Value idx = vm->registers[0];
+      switch (target.type) {
+      case V_ARRAY:
+        if (idx.type != V_INT || idx.type != V_INT) {
+          goto err;
+        }
+        vm->registers[0] = LIST_get_UNSAFE(target.array, Value_as_int(&idx));
+        break;
+      case V_OBJ:
+        if (idx.type != V_STR) {
+          goto err;
+        }
+        vm->registers[0] = Map_get(target.obj, idx.string);
+        break;
+      err:
+      default:
+        Str t = VALUE_TYPE_MAP[target.type];
+        Str i = VALUE_TYPE_MAP[idx.type];
+        VM_ERR("Cant index into `%.*s` with `%.*s`", (int)t.len, t.p,
+               (int)i.len, i.p);
+      }
       break;
     }
     case OP_ARGS:
       vm->arg_count = DECODE_ARG_COUNT(arg);
       vm->arg_offset = DECODE_ARG_OFFSET(arg);
       break;
-    case OP_BUILTIN: {
+    case OP_SYS: {
       // at this point all builtins are just "syscalls" into an array of
       // function pointers
       ((builtin_function)vm->builtins[arg])(vm);
@@ -305,7 +417,7 @@ int Vm_run(Vm *vm) {
       vm->arg_offset = 0;
       break;
     }
-    case OP_LEAVE: {
+    case OP_RET: {
       Frame *old = vm->frame;
       if (vm->frame->prev) {
         vm->pc = vm->frame->return_to_bytecode;

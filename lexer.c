@@ -16,6 +16,8 @@ Str TOKEN_TYPE_MAP[] = {
     [T_ASTERISKS] = STRING("T_ASTERISKS"),
     [T_SLASH] = STRING("T_SLASH"),
     [T_EQUAL] = STRING("T_EQUAL"),
+    [T_LESS_THAN] = STRING("T_LESS_THAN"),
+    [T_GREATER_THAN] = STRING("T_GREATER_THAN"),
     [T_EXCLAIM] = STRING("T_EXCLAIM"),
     [T_DOUBLEDOUBLEDOT] = STRING("T_DOUBLEDOUBLEDOT"),
     [T_DELIMITOR_RIGHT] = STRING("T_DELIMITOR_RIGHT"),
@@ -37,6 +39,7 @@ Str TOKEN_TYPE_MAP[] = {
 };
 
 static Token *compiletime_hashes[MAX_BUILTIN_SIZE] = {0};
+static Str compiletime_names[MAX_BUILTIN_SIZE] = {0};
 
 // we can "intern" these, since all of them are the same, regardless of position
 Token *INTERN_DELIMITOR_LEFT = &SINGLE_TOK(T_DELIMITOR_LEFT);
@@ -50,6 +53,8 @@ Token *INTERN_PLUS = &SINGLE_TOK(T_PLUS);
 Token *INTERN_ASTERISKS = &SINGLE_TOK(T_ASTERISKS);
 Token *INTERN_SLASH = &SINGLE_TOK(T_SLASH);
 Token *INTERN_EQUAL = &SINGLE_TOK(T_EQUAL);
+Token *INTERN_LESS_THAN = &SINGLE_TOK(T_LESS_THAN);
+Token *INTERN_GREATER_THAN = &SINGLE_TOK(T_GREATER_THAN);
 Token *INTERN_EXCLAIM = &SINGLE_TOK(T_EXCLAIM);
 Token *INTERN_DOUBLEDOUBLEDOT = &SINGLE_TOK(T_DOUBLEDOUBLEDOT);
 Token *INTERN_FALSE = &SINGLE_TOK(T_FALSE);
@@ -60,19 +65,21 @@ Token *INTERN_MATCH = &SINGLE_TOK(T_MATCH);
 Token *INTERN_STD = &SINGLE_TOK(T_STD);
 Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 
+#define NEW_BUILTIN(TEXT, INTERNED)                                            \
+  {                                                                            \
+    Str __s = STRING((TEXT));                                                  \
+    uint32_t __hash = Str_hash(&__s) & MAX_BUILTIN_SIZE_MASK;                  \
+    compiletime_hashes[__hash] = (INTERNED);                                   \
+    compiletime_names[__hash] = __s;                                           \
+  }
+
 Lexer Lexer_new(Str input) {
-  compiletime_hashes[Str_hash(&STRING("var")) & MAX_BUILTIN_SIZE_MASK] =
-      INTERN_VAR;
-  compiletime_hashes[Str_hash(&STRING("match")) & MAX_BUILTIN_SIZE_MASK] =
-      INTERN_MATCH;
-  compiletime_hashes[Str_hash(&STRING("std")) & MAX_BUILTIN_SIZE_MASK] =
-      INTERN_STD;
-  compiletime_hashes[Str_hash(&STRING("fn")) & MAX_BUILTIN_SIZE_MASK] =
-      INTERN_FN;
-  compiletime_hashes[Str_hash(&STRING("true")) & MAX_BUILTIN_SIZE_MASK] =
-      INTERN_TRUE;
-  compiletime_hashes[Str_hash(&STRING("false")) & MAX_BUILTIN_SIZE_MASK] =
-      INTERN_FALSE;
+  NEW_BUILTIN("var", INTERN_VAR)
+  NEW_BUILTIN("match", INTERN_MATCH)
+  NEW_BUILTIN("std", INTERN_STD);
+  NEW_BUILTIN("fn", INTERN_FN);
+  NEW_BUILTIN("true", INTERN_TRUE);
+  NEW_BUILTIN("false", INTERN_FALSE);
 
   return (Lexer){
       .input = input,
@@ -81,16 +88,27 @@ Lexer Lexer_new(Str input) {
 }
 
 #define CUR(L) (L->input.p[L->pos])
-#define IS_ALPHANUM(CC) (is_alphanum_table[(uint8_t)(CC)])
+#define IS_ALPHANUM(CC) (alphanum_table[(uint8_t)(CC)])
 
 // this whole block makes is_alphanum zero branch and as fast as possible
-static const bool is_alphanum_table[256] = {['0' ... '9'] = true,
-                                            ['A' ... 'Z'] = true,
-                                            ['a' ... 'z'] = true,
-                                            ['_'] = true};
+static const bool alphanum_table[256] = {['0' ... '9'] = true,
+                                         ['A' ... 'Z'] = true,
+                                         ['a' ... 'z'] = true,
+                                         ['_'] = true};
+static const bool space_table[256] = {
+    [' '] = true,
+    ['\t'] = true,
+    ['\n'] = true,
+    ['\r'] = true,
+};
 
-// TODO: lexer needs a hash based string and ident interning model, the current
-// falls apart after around 1 mio identifiers
+#define JUMP_TO_CASE goto *jump_table[(int32_t)l->input.p[l->pos]]
+#define CASE(label, INTERN)                                                    \
+  label : {                                                                    \
+    l->pos++;                                                                  \
+    return (INTERN);                                                           \
+  }
+
 Token *Lexer_next(Lexer *l, Allocator *a) {
   // empty input
   if (l->input.len == 0) {
@@ -98,10 +116,10 @@ Token *Lexer_next(Lexer *l, Allocator *a) {
   }
 
 #pragma GCC diagnostic push
-  // We know what we're doing, so this is fine:
-  //
-  // we assign unknown to all and overwrite these to make sure an invalid
-  // index is not a unassigned memory access.
+// We know what we're doing, so this is fine:
+//
+// we assign unknown to all and overwrite these to make sure an invalid
+// index is not a unassigned memory access.
 #pragma GCC diagnostic ignored "-Woverride-init"
   static void *jump_table[256] = {
       [0 ... 255] = &&unknown,
@@ -123,6 +141,8 @@ Token *Lexer_next(Lexer *l, Allocator *a) {
       ['/'] = &&slash,
       ['*'] = &&asterisks,
       ['='] = &&equal,
+      ['<'] = &&less_than,
+      ['>'] = &&greater_than,
       ['!'] = &&exclaim,
       [':'] = &&doubledoubledot,
       ['['] = &&braket_left,
@@ -133,27 +153,22 @@ Token *Lexer_next(Lexer *l, Allocator *a) {
   };
 #pragma GCC diagnostic pop
 
-#define JUMP_TARGET goto *jump_table[(int32_t)l->input.p[l->pos]]
-#define SYMBOL(label, INTERN)                                                  \
-  label: {                                                                     \
-    l->pos++;                                                                  \
-    return (INTERN);                                                           \
-  }
+  JUMP_TO_CASE;
 
-  JUMP_TARGET;
-
-  SYMBOL(delimitor_left, INTERN_DELIMITOR_LEFT);
-  SYMBOL(delimitor_right, INTERN_DELIMITOR_RIGHT);
-  SYMBOL(braket_left, INTERN_BRAKET_LEFT);
-  SYMBOL(braket_right, INTERN_BRAKET_RIGHT);
-  SYMBOL(curly_left, INTERN_CURLY_LEFT);
-  SYMBOL(curly_right, INTERN_CURLY_RIGHT);
-  SYMBOL(plus, INTERN_PLUS);
-  SYMBOL(minus, INTERN_MINUS);
-  SYMBOL(slash, INTERN_SLASH);
-  SYMBOL(equal, INTERN_EQUAL);
-  SYMBOL(exclaim, INTERN_EQUAL);
-  SYMBOL(asterisks, INTERN_ASTERISKS);
+  CASE(delimitor_left, INTERN_DELIMITOR_LEFT);
+  CASE(delimitor_right, INTERN_DELIMITOR_RIGHT);
+  CASE(braket_left, INTERN_BRAKET_LEFT);
+  CASE(braket_right, INTERN_BRAKET_RIGHT);
+  CASE(curly_left, INTERN_CURLY_LEFT);
+  CASE(curly_right, INTERN_CURLY_RIGHT);
+  CASE(plus, INTERN_PLUS);
+  CASE(minus, INTERN_MINUS);
+  CASE(slash, INTERN_SLASH);
+  CASE(equal, INTERN_EQUAL);
+  CASE(less_than, INTERN_LESS_THAN);
+  CASE(greater_than, INTERN_GREATER_THAN);
+  CASE(exclaim, INTERN_EXCLAIM);
+  CASE(asterisks, INTERN_ASTERISKS);
 
 doubledoubledot:
   l->pos++;
@@ -170,6 +185,7 @@ number: {
   bool is_double = false;
   uint64_t hash = FNV_OFFSET_BASIS;
 
+#pragma GCC ivdep
   for (; i < l->input.len; i++) {
     char cc = l->input.p[i];
     hash ^= cc;
@@ -208,34 +224,41 @@ ident: {
   size_t start = l->pos;
   uint64_t hash = FNV_OFFSET_BASIS;
 
-#pragma GCC unroll 32
+#pragma GCC ivdep
   for (char cc = CUR(l); cc > 0 && IS_ALPHANUM(cc); l->pos++, cc = CUR(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
   }
 
-  Token *tt = compiletime_hashes[hash & MAX_BUILTIN_SIZE_MASK];
-
-  if (tt == NULL) {
-    tt = CALL(a, request, sizeof(Token));
-    tt->type = T_IDENT;
-    tt->string = (Str){
-        .p = l->input.p + start,
-        .len = l->pos - start,
-        .hash = hash,
-    };
+  uint64_t normalized_hash = hash & MAX_BUILTIN_SIZE_MASK;
+  Token *tt = compiletime_hashes[normalized_hash];
+  if (tt) {
+    Str *s = &compiletime_names[normalized_hash];
+    if (memcmp(s->p, l->input.p + start, s->len) == 0) {
+      return tt;
+    }
   }
+
+  tt = CALL(a, request, sizeof(Token));
+  tt->type = T_IDENT;
+  tt->string = (Str){
+      .p = l->input.p + start,
+      .len = l->pos - start,
+      .hash = hash,
+  };
 
   return tt;
 }
 
-// same as string but only with leading '
+// same as string but only with leading ' and allowing everything except spaces
 quoted: {
   // skip '
   l->pos++;
   size_t start = l->pos;
   uint64_t hash = FNV_OFFSET_BASIS;
-  for (char cc = CUR(l); cc > 0 && IS_ALPHANUM(cc); l->pos++, cc = CUR(l)) {
+
+#pragma GCC ivdep
+  for (uint8_t cc = CUR(l); cc > 0 && !space_table[cc]; l->pos++, cc = CUR(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
   }
@@ -257,6 +280,8 @@ string: {
   l->pos++;
   size_t start = l->pos;
   uint64_t hash = FNV_OFFSET_BASIS;
+
+#pragma GCC ivdep
   for (char cc = CUR(l); cc > 0 && cc != '"'; l->pos++, cc = CUR(l)) {
     hash ^= cc;
     hash *= FNV_PRIME;
@@ -283,13 +308,14 @@ string: {
 }
 
 comment:
+#pragma GCC ivdep
   for (char cc = CUR(l); cc > 0 && cc != '\n'; l->pos++, cc = CUR(l)) {
   }
-  JUMP_TARGET;
+  JUMP_TO_CASE;
 
 whitespace:
   l->pos++;
-  JUMP_TARGET;
+  JUMP_TO_CASE;
 
 unknown: {
   uint8_t c = CUR(l);

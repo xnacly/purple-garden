@@ -17,6 +17,10 @@ typedef enum {
   T_SLASH = 5,
   // =
   T_EQUAL = 6,
+  // <
+  T_LESS_THAN = 7,
+  // >
+  T_GREATER_THAN = 8,
   // !
   T_EXCLAIM,
   // ::

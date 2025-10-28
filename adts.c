@@ -1,8 +1,6 @@
 #include "adts.h"
-#include "strings.h"
 
 #include <stdint.h>
-#include <string.h>
 
 inline __attribute__((always_inline, hot)) struct ListIdx
 idx_to_block_idx(size_t idx) {
@@ -58,81 +56,65 @@ idx_to_block_idx(size_t idx) {
 
 #include "common.h"
 
-Map Map_new(size_t cap, Allocator *a) {
-  Map m = {.cap = cap};
+// TODO: fix collision handling, idk how rn or what the tradeoffs are, but fix
+// it.
 
-  m.entries.blocks = CALL(a, request, LIST_BLOCK_COUNT * sizeof(MapEntry *));
-  ASSERT(m.entries.blocks != NULL, "Map_new: block array allocation failed");
-
-  m.entries.type_size = sizeof(MapEntry);
-  m.entries.len = 0;
-
-  size_t remaining = cap;
-
-  for (size_t b = 0; b < LIST_BLOCK_COUNT && remaining > 0; b++) {
-    size_t block_size = LIST_DEFAULT_SIZE << b;
-    size_t to_alloc = remaining < block_size ? remaining : block_size;
-
-    m.entries.blocks[b] = CALL(a, request, to_alloc * sizeof(MapEntry));
-    ASSERT(m.entries.blocks[b] != NULL, "Map_new: block allocation failed");
-
-    for (size_t i = 0; i < to_alloc; i++) {
-      m.entries.blocks[b][i] = (MapEntry){0};
-    }
-
-    remaining -= to_alloc;
-    m.entries.len += to_alloc;
-  }
-
+inline Map Map_new(size_t cap, Allocator *a) {
+  Map m;
+  m.cap = cap;
+  m.len = 0;
+  m.buckets = CALL(a, request, cap * sizeof(MapEntry));
   return m;
 }
 
-inline void Map_insert_hash(Map *m, uint32_t hash, Value v) {
-  size_t idx = hash % m->cap;
+static inline void Map_resize(Map *m, Allocator *a) {
+  Map new = Map_new(m->cap * 2, a);
 
-  for (size_t probe = 0; probe < m->cap; probe++) {
-    size_t current = (idx + probe) % m->cap;
-    MapEntry e = LIST_get_UNSAFE(&m->entries, current);
-
-    // Empty slot or same hash → insert/update
-    if (e.hash == 0 || e.hash == hash) {
-      e.hash = hash;
-      e.value = v;
-      return;
+  for (size_t i = 0; i < m->cap; i++) {
+    MapEntry e = m->buckets[i];
+    if (e.hash != 0) {
+      Map_insert_hash(&new, e.hash, e.value, a);
     }
   }
 
-  ASSERT(false, "Map_insert_hash: table is full!");
+  *m = new;
+}
+
+inline void Map_clear(Map *m) {
+  for (size_t i = 0; i < m->cap; i++) {
+    m->buckets[i].hash = 0;
+  }
+  m->len = 0;
+}
+
+inline void Map_insert_hash(Map *m, uint32_t hash, Value v, Allocator *a) {
+  if ((double)m->len / (double)m->cap >= 0.7) {
+    Map_resize(m, a);
+  }
+  size_t idx = hash % m->cap;
+  MapEntry *e = &m->buckets[idx];
+  e->hash = hash;
+  e->value = v;
 }
 
 inline Value Map_get_hash(const Map *m, uint32_t hash) {
-  size_t idx = hash % m->cap;
-
-  for (size_t probe = 0; probe < m->cap; probe++) {
-    size_t current = (idx + probe) % m->cap;
-    MapEntry e = LIST_get_UNSAFE(&m->entries, current);
-
-    if (e.hash == 0)
-      return *INTERNED_NONE; // empty slot → not found
-    if (e.hash == hash)
-      return e.value; // found
-  }
-
-  return *INTERNED_NONE; // not found after full table scan
-}
-
-void Map_insert(Map *m, const Str *s, Value v, Allocator *a) {
-  uint32_t hash = s->hash;
-  if (hash != 0) {
-    Str_hash(s);
-  }
-  Map_insert_hash(m, hash, v);
+  uint32_t idx = hash % m->cap;
+  MapEntry *e = &m->buckets[idx];
+  return e->value;
 }
 
 Value Map_get(const Map *m, const Str *s) {
   uint32_t hash = s->hash;
-  if (hash != 0) {
+  if (hash == 0) {
     Str_hash(s);
   }
   return Map_get_hash(m, hash);
+}
+
+void Map_insert(Map *m, const Str *s, Value v, Allocator *a) {
+  uint32_t hash = s->hash;
+  if (hash == 0) {
+    Str_hash(s);
+  }
+  Map_insert_hash(m, hash, v, a);
 }
