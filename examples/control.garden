@@ -13,3 +13,7 @@ std::println(match {
     b=false {0}
     { 161 }
 })
+
+for x :: [1 2 3] {
+    std::println(x)
+}

@@ -4,6 +4,9 @@
 #include "lexer.h"
 #include "strings.h"
 
+// TODO: support for <element> :: <container> {}
+// TODO: support set <container>::<element> = <value> (in place mutation)
+
 #define TRACE_PARSER 0
 #define EQUALS(TYPE) p->cur->type == (TYPE)
 
