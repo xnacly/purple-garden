@@ -62,9 +62,12 @@ typedef enum {
   V_OBJ,
 } ValueType;
 
-LIST_TYPE(Value);
-
-// TODO: should this be smaller?
+// dynamically growing array
+typedef struct List {
+  size_t cap;
+  size_t len;
+  Value *arr;
+} List;
 
 // Value represents a value known to the runtime
 typedef struct Value {
@@ -73,7 +76,7 @@ typedef struct Value {
   unsigned int type : 3;
   union {
     const Str *string;
-    LIST_Value *array;
+    List *array;
     Map *obj;
     double floating;
     int64_t integer;

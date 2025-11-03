@@ -1,4 +1,3 @@
-#include <math.h>
 #include <stdlib.h>
 
 #include "adts.h"
@@ -177,6 +176,13 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       size_t argument_len = call->children.len;
 
       size_t registers[argument_len < 1 ? 1 : argument_len];
+
+      // -1 is the sentinel for a variable amount of arguments
+      if (sn->argument_count > 0) {
+        ASSERT((size_t)sn->argument_count == argument_len,
+               "Argument count doesn't match");
+      }
+
       for (size_t i = 0; i < argument_len; i++) {
         Node *child = LIST_get_UNSAFE(&call->children, i);
         compile(alloc, vm, ctx, child);

@@ -20,7 +20,7 @@ Str OP_MAP[256] = {
     [OP_SIZE] = STRING("SIZE"),     [OP_IDX] = STRING("IDX"),
 };
 
-static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE] = {0};
+static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
 
 Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
   Vm vm = {0};
@@ -113,26 +113,18 @@ int Vm_run(Vm *vm) {
       switch ((VM_New)arg) {
       case VM_NEW_ARRAY:
         v.type = V_ARRAY;
-        if (vm->size_hint != 0) {
-          LIST_Value *lv = CALL(vm->alloc, request, sizeof(LIST_Value));
-          *lv = LIST_new(Value);
-          v.array = lv;
+        List *l = CALL(vm->alloc, request, sizeof(List));
+        if (vm->size_hint == 0) {
+          *l = (List){0};
         } else {
-          LIST_Value *lv = CALL(vm->alloc, request, sizeof(LIST_Value));
-          *lv = (LIST_Value){
-              .len = 0,
-          };
-          v.array = lv;
+          *l = List_new(vm->size_hint, vm->alloc);
         }
+        v.array = l;
         break;
       case VM_NEW_OBJ: {
         v.type = V_OBJ;
         Map *m = CALL(vm->alloc, request, sizeof(Map));
-        if (vm->size_hint != 0) {
-          *m = Map_new(vm->size_hint, vm->alloc);
-        } else {
-          *m = (Map){0};
-        }
+        *m = Map_new(vm->size_hint, vm->alloc);
         v.obj = m;
         break;
       }
@@ -145,7 +137,7 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_APPEND:
-      LIST_append(vm->registers[arg].array, vm->alloc, vm->registers[0]);
+      List_append(vm->registers[arg].array, vm->registers[0], vm->alloc);
       break;
     case OP_LOADG:
       vm->registers[0] = vm->globals[arg];
@@ -378,7 +370,7 @@ int Vm_run(Vm *vm) {
         if (idx.type != V_INT || idx.type != V_INT) {
           goto err;
         }
-        vm->registers[0] = LIST_get_UNSAFE(target.array, Value_as_int(&idx));
+        vm->registers[0] = List_get(target.array, Value_as_int(&idx));
         break;
       case V_OBJ:
         if (idx.type != V_STR) {

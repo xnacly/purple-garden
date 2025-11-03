@@ -118,3 +118,38 @@ void Map_insert(Map *m, const Str *s, Value v, Allocator *a) {
   }
   Map_insert_hash(m, hash, v, a);
 }
+
+List List_new(size_t cap, Allocator *a) {
+#define MIN_SIZE 8
+
+  cap = cap < MIN_SIZE ? MIN_SIZE : cap;
+
+  return (List){
+      .cap = cap,
+      .len = 0,
+      .arr = CALL(a, request, cap * sizeof(Value)),
+  };
+}
+
+void List_clear(List *l) {
+  // List_get uses idx, so there is no need to clear the list at this point
+  l->len = 0;
+}
+
+Value List_get(const List *l, size_t idx) {
+  ASSERT(l->len > idx, "Idx out of bounds for length");
+  return l->arr[idx];
+}
+
+void List_append(List *l, Value v, Allocator *a) {
+#define GROWTH 2
+  if (l->len + 1 > l->cap) {
+    size_t new_cap = l->cap * GROWTH;
+    Value *old = l->arr;
+    l->arr = CALL(a, request, sizeof(Value) * new_cap);
+    l->cap = new_cap;
+    memcpy(l->arr, old, l->len * sizeof(Value));
+  }
+
+  l->arr[l->len++] = v;
+}

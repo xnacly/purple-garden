@@ -89,7 +89,7 @@ void Value_debug(const Value *v) {
     printf("([");
     uint64_t len = v->array->len;
     for (size_t i = 0; i < len; i++) {
-      Value v_at_i = LIST_get(v->array, i);
+      Value v_at_i = v->array->arr[i];
       Value_debug(&v_at_i);
       if (i < len - 1) {
         putc(' ', stdout);

@@ -1,2 +1,2 @@
 # vim: filetype=python
-std::fmt::println("Hello World")
+std::println("Hello World")

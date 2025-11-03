@@ -7,7 +7,6 @@
 #include "runtime.c"
 
 static void builtin_len(Vm *vm) {
-  BUILTIN_CONTRACT(1);
   ASSERT(vm->arg_count == 1, "len only works for a singular argument")
   const Value *a = &ARG(0);
   size_t len = 0;
@@ -31,43 +30,43 @@ static void builtin_len(Vm *vm) {
 // clang-format off
 static StdNode tree = PACKAGE("std",
           PACKAGE("fmt", 
-              FUNCTION("print", &builtin_fmt_print), 
-              FUNCTION("println", &builtin_fmt_println),
+              FUNCTION("print", &builtin_fmt_print, -1), 
+              FUNCTION("println", &builtin_fmt_println, -1),
           ), 
           PACKAGE("fs", 
-              FUNCTION("read_file", &builtin_fs_read_file), 
-              FUNCTION("write_file", &builtin_fs_write_file),
+              FUNCTION("read_file", &builtin_fs_read_file, 1), 
+              FUNCTION("write_file", &builtin_fs_write_file, 2),
           ), 
           PACKAGE("math", 
-              FUNCTION("mod", &builtin_math_mod), 
+              FUNCTION("mod", &builtin_math_mod, 2), 
           ), 
           PACKAGE("opt", 
-              FUNCTION("unwrap", &builtin_opt_unwrap), 
-              FUNCTION("expect", &builtin_opt_expect),
-              FUNCTION("or", &builtin_opt_or), 
-              FUNCTION("is_some", &builtin_opt_is_some), 
-              FUNCTION("is_none", &builtin_opt_is_none), 
+              FUNCTION("unwrap", &builtin_opt_unwrap, 1), 
+              FUNCTION("expect", &builtin_opt_expect, 2),
+              FUNCTION("or", &builtin_opt_or, 2), 
+              FUNCTION("is_some", &builtin_opt_is_some, 1), 
+              FUNCTION("is_none", &builtin_opt_is_none, 1), 
           ), 
           PACKAGE("conv", 
-              FUNCTION("int", &builtin_conv_int),
-              FUNCTION("num", &builtin_conv_num),
-              FUNCTION("str", &builtin_conv_str),
+              FUNCTION("int", &builtin_conv_int, 1),
+              FUNCTION("num", &builtin_conv_num, 1),
+              FUNCTION("str", &builtin_conv_str, 1),
           ), 
           PACKAGE("runtime", 
-              FUNCTION("type", &builtin_runtime_type),
+              FUNCTION("type", &builtin_runtime_type, 1),
               PACKAGE("gc", 
-                  FUNCTION("stats", &builtin_runtime_gc_stats)
+                  FUNCTION("stats", &builtin_runtime_gc_stats, 0)
               ),
           ), 
-          FUNCTION("assert", &builtin_runtime_assert),
-          FUNCTION("println", &builtin_fmt_println),
-          FUNCTION("Some", &builtin_opt_some),
-          FUNCTION("None", &builtin_opt_none),
-          FUNCTION("len", &builtin_len),
+          FUNCTION("assert", &builtin_runtime_assert, 1),
+          FUNCTION("println", &builtin_fmt_println, -1),
+          FUNCTION("Some", &builtin_opt_some, 1),
+          FUNCTION("None", &builtin_opt_none, 0),
+          FUNCTION("len", &builtin_len, 1),
         );
 
 static StdNode reduced = PACKAGE("std", 
-          FUNCTION("len", &builtin_len),
+          FUNCTION("len", &builtin_len, 1),
         );
 // clang-format on
 

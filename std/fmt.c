@@ -41,7 +41,7 @@ static void print_value(const Value *v) {
     printf("[");
     size_t len = v->array->len;
     for (size_t i = 0; i < len; i++) {
-      Value e = LIST_get(v->array, i);
+      Value e = v->array->arr[i];
       print_value(&e);
       if (i + 1 < len) {
         printf(" ");

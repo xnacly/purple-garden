@@ -7,7 +7,6 @@
 #define MAX_PATH 256
 
 static void builtin_fs_read_file(Vm *vm) {
-  BUILTIN_CONTRACT(1, BUILTIN_CONTRACT_ARGUMENT_TYPE(0, V_STR));
   Value path_value = ARG(0);
   if (path_value.string->len == 0)
     goto invalid;
@@ -55,9 +54,6 @@ invalid:
 }
 
 static void builtin_fs_write_file(Vm *vm) {
-  BUILTIN_CONTRACT(2, BUILTIN_CONTRACT_ARGUMENT_TYPE(0, V_STR)
-                          BUILTIN_CONTRACT_ARGUMENT_TYPE(1, V_STR));
-
   Value path_value = ARG(0);
   Value content_value = ARG(1);
 
