@@ -35,6 +35,7 @@ Str TOKEN_TYPE_MAP[] = {
     [T_MATCH] = STRING("T_MATCH"),
     [T_IDENT] = STRING("T_IDENT"),
     [T_STD] = STRING("T_STD"),
+    [T_FOR] = STRING("T_FOR"),
     [T_EOF] = STRING("T_EOF"),
 };
 
@@ -63,6 +64,7 @@ Token *INTERN_VAR = &SINGLE_TOK(T_VAR);
 Token *INTERN_FN = &SINGLE_TOK(T_FN);
 Token *INTERN_MATCH = &SINGLE_TOK(T_MATCH);
 Token *INTERN_STD = &SINGLE_TOK(T_STD);
+Token *INTERN_FOR = &SINGLE_TOK(T_FOR);
 Token *INTERN_EOF = &SINGLE_TOK(T_EOF);
 
 #define NEW_BUILTIN(TEXT, INTERNED)                                            \
@@ -77,6 +79,7 @@ Lexer Lexer_new(Str input) {
   NEW_BUILTIN("var", INTERN_VAR)
   NEW_BUILTIN("match", INTERN_MATCH)
   NEW_BUILTIN("std", INTERN_STD);
+  NEW_BUILTIN("for", INTERN_FOR);
   NEW_BUILTIN("fn", INTERN_FN);
   NEW_BUILTIN("true", INTERN_TRUE);
   NEW_BUILTIN("false", INTERN_FALSE);

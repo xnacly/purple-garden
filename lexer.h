@@ -50,6 +50,7 @@ typedef enum {
   T_FN,
   T_MATCH,
   T_STD,
+  T_FOR,
   // any identifier
   T_IDENT,
 } TokenType;

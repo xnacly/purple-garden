@@ -35,6 +35,8 @@ std::opt::is_none(opt_none) # -> true
 
 # array utilities
 var arr = [1 2 3 4 5]
+std::arr::new(25) # 25 elements reserved, but none set
+std::arr::range(1 5) # 1 2 3 4 5
 std::arr::join(arr ", ") # 1, 2, 3, 4, 5
 std::arr::sum(arr) # 15
 std::arr::map(arr fn _ :: x {

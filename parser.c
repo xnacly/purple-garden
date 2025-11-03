@@ -4,7 +4,6 @@
 #include "lexer.h"
 #include "strings.h"
 
-// TODO: support 'for <element> :: <container> {}'
 // TODO: support 'set <container>::<element> = <value>' for in place mutation
 
 #define TRACE_PARSER 0
@@ -42,6 +41,7 @@ Str NODE_TYPE_MAP[] = {
     [N_MATCH] = STRING("N_MATCH"),     [N_CASE] = STRING("N_CASE"),
     [N_DEFAULT] = STRING("N_DEFAULT"), [N_BIN] = STRING("N_BIN"),
     [N_CALL] = STRING("N_CALL"),       [N_PATH] = STRING("N_PATH"),
+    [N_FOR] = STRING("N_FOR"),
 };
 
 void Node_debug(const Node *n, size_t depth) {
@@ -71,6 +71,7 @@ void Node_debug(const Node *n, size_t depth) {
   case N_VAR:
   case N_ATOM:
   case N_BIN:
+  case N_FOR:
     Token_debug(n->token);
     break;
   case N_CALL:
@@ -330,7 +331,27 @@ Node *Parser_next(Parser *p) {
   case T_CURLY_LEFT:
     n = TRACE(Parser_obj);
     break;
-  case T_VAR: { // var <ident> <rhs>
+  case T_FOR: { // for <ident> :: <container> {  }
+    advance(p);
+    // we store the variable identifier in the for node
+    Node *_for = NODE_NEW(N_FOR, p->cur);
+    consume(p, T_IDENT);
+    consume(p, T_DOUBLEDOUBLEDOT);
+    Node *target = TRACE(Parser_next);
+    LIST_append(&_for->children, p->alloc, target);
+
+    Node *body = NODE_NEW(N_ARRAY, p->cur);
+    consume(p, T_CURLY_LEFT);
+    while (p->cur->type != T_EOF && p->cur->type != T_CURLY_RIGHT) {
+      Node *body_part = TRACE(Parser_next);
+      LIST_append(&body->children, p->alloc, body_part);
+    }
+    consume(p, T_CURLY_RIGHT);
+    LIST_append(&_for->children, p->alloc, body);
+    n = _for;
+    break;
+  }
+  case T_VAR: { // var <ident> = <rhs>
     consume(p, T_VAR);
     Token *ident = consume(p, T_IDENT);
     consume(p, T_EQUAL);

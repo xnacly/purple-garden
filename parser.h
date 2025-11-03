@@ -18,6 +18,8 @@ typedef enum {
   N_VAR,
   // defining functions
   N_FN,
+  // iterate over container
+  N_FOR,
   // conditional logic
   N_MATCH,
   // <condition> { <body> }

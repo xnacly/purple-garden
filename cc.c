@@ -147,6 +147,9 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     BC(OP_VAR, (uint32_t)n->token->string.hash);
     break;
   }
+  case N_FOR: {
+    break;
+  }
   case N_PATH: {
     // stdlib path lookup and compilation
     if (n->token->type == T_STD) {

@@ -1,4 +1,5 @@
 #include "std.h"
+#include "arr.c"
 #include "conv.c"
 #include "fmt.c"
 #include "fs.c"
@@ -51,6 +52,10 @@ static StdNode tree = PACKAGE("std",
               FUNCTION("int", &builtin_conv_int, 1),
               FUNCTION("num", &builtin_conv_num, 1),
               FUNCTION("str", &builtin_conv_str, 1),
+          ), 
+          PACKAGE("arr", 
+              FUNCTION("range", &builtin_arr_range, 2),
+              FUNCTION("new", &builtin_arr_new, 1),
           ), 
           PACKAGE("runtime", 
               FUNCTION("type", &builtin_runtime_type, 1),

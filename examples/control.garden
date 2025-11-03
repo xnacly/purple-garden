@@ -17,3 +17,7 @@ std::println(match {
 for x :: [1 2 3] {
     std::println(x)
 }
+
+for x :: std::arr::range(0 5) {
+    std::println(x)
+}
