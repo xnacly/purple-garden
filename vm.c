@@ -2,6 +2,7 @@
 
 #include "adts.h"
 #include "common.h"
+#include "gc.h"
 #include "mem.h"
 #include "strings.h"
 #include "vm.h"
@@ -22,11 +23,10 @@ Str OP_MAP[256] = {
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
 
-Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc) {
+Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Gc gc) {
   Vm vm = {0};
-  vm.alloc = alloc;
+  vm.gc = gc;
   vm.config = conf;
-
   vm.builtins = BUILTIN_MAP;
 
   vm.globals = CALL(static_alloc, request, (sizeof(Value) * GLOBAL_SIZE));
@@ -77,7 +77,7 @@ void freelist_push(FrameFreeList *fl, Frame *f) {
 }
 
 int Vm_run(Vm *vm) {
-  FrameFreeList *fl = &(FrameFreeList){.alloc = vm->alloc};
+  FrameFreeList *fl = &(FrameFreeList){.alloc = vm->gc.underlying};
 #if PREALLOCATE_FREELIST_SIZE
   freelist_preallocate(fl);
 #endif
@@ -113,21 +113,21 @@ int Vm_run(Vm *vm) {
       switch ((VM_New)arg) {
       case VM_NEW_ARRAY:
         v.type = V_ARRAY;
-        List *l = CALL(vm->alloc, request, sizeof(List));
+        List *l = gc_request(&vm->gc, sizeof(List), GC_OBJ_LIST);
         if (vm->size_hint == 0) {
           *l = (List){0};
         } else {
-          *l = List_new(vm->size_hint, vm->alloc);
+          *l = List_new(vm->size_hint, &vm->gc);
         }
         v.array = l;
         break;
-      case VM_NEW_OBJ: {
-        v.type = V_OBJ;
-        Map *m = CALL(vm->alloc, request, sizeof(Map));
-        *m = Map_new(vm->size_hint, vm->alloc);
-        v.obj = m;
-        break;
-      }
+      // case VM_NEW_OBJ: {
+      //   v.type = V_OBJ;
+      //   Map *m = CALL(vm->alloc, request, sizeof(Map));
+      //   *m = Map_new(vm->size_hint, vm->alloc);
+      //   v.obj = m;
+      //   break;
+      // }
       default:
         ASSERT(0, "OP_NEW unimplemented");
         break;
@@ -137,7 +137,7 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_APPEND:
-      List_append(vm->registers[arg].array, vm->registers[0], vm->alloc);
+      List_append(vm->registers[arg].array, vm->registers[0], &vm->gc);
       break;
     case OP_LOADG:
       vm->registers[0] = vm->globals[arg];
@@ -158,16 +158,27 @@ int Vm_run(Vm *vm) {
       break;
     case OP_VAR:
       Value v = vm->registers[0];
-      Map_insert_hash(&vm->frame->variable_table, arg, v, vm->alloc);
+      Map_insert_hash(&vm->frame->variable_table, arg, v, vm->gc.underlying);
       break;
     case OP_ADD: {
       Value *lhs = &vm->registers[0];
       Value *rhs = &vm->registers[arg];
 
       if (lhs->type == V_STR && rhs->type == V_STR) {
-        Str *s = CALL(vm->alloc, request, sizeof(Str));
-        *s = Str_concat(rhs->string, lhs->string, vm->alloc);
-        vm->registers[0] = (Value){.type = V_STR, .string = s};
+        Str *s = gc_request(&vm->gc, sizeof(Str), GC_OBJ_STR);
+        size_t len = lhs->string->len + rhs->string->len;
+        const uint8_t *buf = gc_request(&vm->gc, len, GC_OBJ_STR);
+        memcpy((void *)s, lhs->string->p, lhs->string->len);
+        memcpy((void *)(s + lhs->string->len), rhs->string->p,
+               rhs->string->len);
+        *s = (Str){
+            .p = buf,
+            .len = len,
+        };
+        vm->registers[0] = (Value){
+            .type = V_STR,
+            .string = s,
+        };
         break;
       }
 
@@ -416,6 +427,10 @@ int Vm_run(Vm *vm) {
         vm->frame = vm->frame->prev;
       }
       freelist_push(fl, old);
+
+      if (vm->gc.allocated >= vm->gc.threshold) {
+        gc_cycle(&vm->gc);
+      }
       break;
     }
     case OP_JMPF: {
@@ -438,11 +453,4 @@ int Vm_run(Vm *vm) {
   return 0;
 vm_end:
   return 1;
-}
-
-void Vm_destroy(Vm *vm) {
-  if (vm->alloc != NULL) {
-    CALL(vm->alloc, destroy);
-    free(vm->alloc);
-  }
 }

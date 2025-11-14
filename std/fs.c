@@ -36,14 +36,14 @@ static void builtin_fs_read_file(Vm *vm) {
     goto invalid;
   }
 
-  char *buf = CALL(vm->alloc, request, length);
+  char *buf = gc_request(&vm->gc, length, GC_OBJ_STR);
   ssize_t r = read(fd, buf, length);
   close(fd);
   if (r < 0) {
     goto invalid;
   }
 
-  Str *sbuf = CALL(vm->alloc, request, sizeof(Str));
+  Str *sbuf = gc_request(&vm->gc, sizeof(Str), GC_OBJ_STR);
   *sbuf = (Str){.len = length, .p = (const uint8_t *)buf};
 
   RETURN((Value){.type = V_STR, .string = sbuf, .is_some = true});

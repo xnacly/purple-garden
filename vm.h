@@ -2,6 +2,7 @@
 
 #include "adts.h"
 #include "common.h"
+#include "gc.h"
 #include <stdint.h>
 
 typedef struct {
@@ -10,9 +11,6 @@ typedef struct {
   uint64_t max_memory;
   // disables the standard library
   bool disable_std;
-  // disables garbage collection and allocates 'max_memory' with a bump
-  // allocator
-  bool disable_gc;
 } Vm_Config;
 
 #define ENCODE_ARG_COUNT_AND_OFFSET(COUNT, OFFSET)                             \
@@ -64,7 +62,6 @@ typedef struct __Vm {
 
   // current position in the bytecode
   size_t pc;
-  Value registers[REGISTERS + 1];
 
   // frame stores variables of the current scope, meta data and other required
   // data
@@ -81,7 +78,10 @@ typedef struct __Vm {
   builtin_function *builtins;
   size_t builtin_count;
 
-  Allocator *alloc;
+  Gc gc;
+
+  Value registers[REGISTERS + 1];
+
 #if DEBUG
   uint64_t instruction_counter[256];
 #endif
@@ -214,6 +214,5 @@ extern Str OP_MAP[];
 // Creates a new virtual machine with registered builtins, static_alloc is used
 // to allocate space for both the global pool and the byte code space, alloc is
 // used in the virtual machine itself
-Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc);
+Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Gc gc);
 int Vm_run(Vm *vm);
-void Vm_destroy(Vm *vm);

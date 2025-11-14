@@ -14,7 +14,10 @@ typedef struct {
   (Value) { .is_some = false, __VA_ARGS__ }
 
 #define CASE(in, r0)                                                           \
-  { .input = STRING(#in), .expected_r0 = r0, }
+  {                                                                            \
+      .input = STRING(#in),                                                    \
+      .expected_r0 = r0,                                                       \
+  }
 
 // stolen from common.(c|h) and adapted
 bool Value_cmp_deep(const Value *a, const Value *b) {
@@ -157,7 +160,7 @@ int main() {
   size_t len = sizeof(cases) / sizeof(Case);
   for (size_t i = 0; i < len; i++) {
     Case c = cases[i];
-    Vm_Config conf = (Vm_Config){.disable_gc = true};
+    Vm_Config conf = (Vm_Config){};
     Pg pg = pg_init(&conf);
     uint8_t code = pg_exec_Str(&pg, c.input);
 

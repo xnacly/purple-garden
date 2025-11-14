@@ -23,7 +23,7 @@
 #ifndef MIN_MEM
 #define MIN_MEM                                                                \
   INIT_BYTECODE_SIZE * sizeof(uint32_t) + 2 * GLOBAL_SIZE * sizeof(Value) +    \
-      MAX_BUILTIN_SIZE * sizeof(builtin_function)
+      MAX_BUILTIN_SIZE * sizeof(builtin_function) + GC_MIN_HEAP
 #endif
 
 #define REGISTERS 31

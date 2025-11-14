@@ -55,12 +55,13 @@ static void builtin_runtime_assert(Vm *vm) {
 static void builtin_runtime_gc_stats(Vm *vm) {
   // TODO: this fucking sucks, there has to be a better way, i urgenly need a
   // c->pg type macro
-  Stats c = CALL(vm->alloc, stats);
-  Map *m = CALL(vm->alloc, request, sizeof(Map));
-  Value map = (Value){.type = V_ARRAY, .obj = m};
-  Map_insert(m, &STRING("current"),
-             (Value){.type = V_INT, .integer = c.current}, vm->alloc);
-  Map_insert(m, &STRING("allocated"),
-             (Value){.type = V_INT, .integer = c.allocated}, vm->alloc);
-  RETURN(map);
+  // Stats c = CALL(vm->alloc, stats);
+  // Map *m = CALL(vm->alloc, request, sizeof(Map));
+  // Value map = (Value){.type = V_ARRAY, .obj = m};
+  // Map_insert(m, &STRING("current"),
+  //            (Value){.type = V_INT, .integer = c.current}, vm->alloc);
+  // Map_insert(m, &STRING("allocated"),
+  //            (Value){.type = V_INT, .integer = c.allocated}, vm->alloc);
+  // RETURN(map);
+  ASSERT(0, "UNIMPLEMENTED");
 }

@@ -14,7 +14,6 @@
 #include "mem.h"
 #include "parser.h"
 #include "strings.h"
-#include "unistd.h"
 #include "vm.h"
 
 #define VERBOSE_PUTS(fmt, ...)                                                 \
@@ -172,9 +171,8 @@ int main(int argc, char **argv) {
   Lexer lexer = Lexer_new(input);
   Parser parser = Parser_new(pipeline_allocator, &lexer);
 
-  // alloc is NULL here, because we are setting it later on, depending on the
-  // cli configuration
-  Vm vm = Vm_new((Vm_Config){}, pipeline_allocator, NULL);
+  Vm vm = Vm_new((Vm_Config){}, pipeline_allocator,
+                 gc_init(pipeline_allocator, &vm, GC_MIN_HEAP * 2));
   if (UNLIKELY(a.memory_usage)) {
     Stats s = CALL(pipeline_allocator, stats);
     double percent = (s.current * 100) / (double)s.allocated;
@@ -200,20 +198,11 @@ int main(int argc, char **argv) {
            s.allocated / 1024.0, percent);
   }
 
-  if (a.block_allocator != GC_MIN_HEAP) {
-    VERBOSE_PUTS(
-        "vm: got --block-allocator, using bump allocator with size %zuB/%zuKB",
-        a.block_allocator * 1024, a.block_allocator);
-    vm.alloc = bump_init(a.block_allocator * 1024, 0);
-  } else {
-    vm.alloc = xcgc_init(&vm, GC_MIN_HEAP, 0);
-  }
-
   int runtime_code = Vm_run(&vm);
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
 
   if (UNLIKELY(a.memory_usage)) {
-    Stats s = CALL(vm.alloc, stats);
+    Stats s = gc_stats(&vm.gc);
     double percent = (s.current * 100) / (double)s.allocated;
     printf("vm  : %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
@@ -223,14 +212,9 @@ int main(int argc, char **argv) {
     bytecode_stats(&vm);
   }
 
-  // BUG: does this interfer with not setting vm.alloc to NULL if __BLOCK_ALLOC
-  // > 0?; could result in double free OR use after free I think.
   CALL(pipeline_allocator, destroy);
   free(pipeline_allocator);
   VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");
-
-  Vm_destroy(&vm);
-  VERBOSE_PUTS("vm::Vm_destroy: teared vm down");
 
   if (a.run == NULL) {
     munmap((void *)input.p, input.len);

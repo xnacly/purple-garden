@@ -57,11 +57,13 @@ typedef struct {
   Stats (*stats)(void *ctx);
   // Allocator::request returns a handle to a block of memory of size `size`
   void *(*request)(void *ctx, size_t size);
+  // Allocator::recycle starts a cleanup cycle, for instance for a gc. NOP for
+  // bump allocator
+  void (*recycle)(void *ctx);
   // Allocator::destroy cleans state up and deallocates any owned memory areas
   void (*destroy)(void *ctx);
 } Allocator;
 
 Allocator *bump_init(uint64_t min_size, uint64_t max_size);
-Allocator *xcgc_init(void *vm, size_t min_size, size_t max_size);
 
 #endif
