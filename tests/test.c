@@ -153,6 +153,10 @@ int main() {
       CASE(std::None(), VAL(.type = V_NONE)),
       CASE(std::Some(true), VAL(.type = V_TRUE, .is_some = true)),
       CASE(std::Some(false), VAL(.type = V_FALSE, .is_some = true)),
+
+      // correct string concat
+      CASE("hello" + "world",
+           VAL(.type = V_STR, .string = &STRING("helloworld"))),
   };
 
   size_t passed = 0;

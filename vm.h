@@ -28,7 +28,7 @@ typedef enum {
 
 // PERF: maybe `n` is too many, but prefetching a recursion depth can have
 // some positive effects on the runtime performance
-#define PREALLOCATE_FREELIST_SIZE 1
+#define PREALLOCATE_FREELIST_SIZE 16
 
 // A frame represents a Scope, a new scope is created upon entering a function -
 // since functions are pure, there is no way to interact with the previous frame
@@ -79,6 +79,8 @@ typedef struct __Vm {
   size_t builtin_count;
 
   Gc gc;
+  // allocator for stack frames, we reuse it to not pollute the gc heap
+  Allocator *staticalloc;
 
   Value registers[REGISTERS + 1];
 

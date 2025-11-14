@@ -46,7 +46,7 @@ static void builtin_fs_read_file(Vm *vm) {
   Str *sbuf = gc_request(&vm->gc, sizeof(Str), GC_OBJ_STR);
   *sbuf = (Str){.len = length, .p = (const uint8_t *)buf};
 
-  RETURN((Value){.type = V_STR, .string = sbuf, .is_some = true});
+  RETURN((Value){.type = V_STR, .is_heap = 1, .string = sbuf, .is_some = true});
   return;
 
 invalid:

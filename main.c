@@ -171,8 +171,8 @@ int main(int argc, char **argv) {
   Lexer lexer = Lexer_new(input);
   Parser parser = Parser_new(pipeline_allocator, &lexer);
 
-  Vm vm = Vm_new((Vm_Config){}, pipeline_allocator,
-                 gc_init(pipeline_allocator, &vm, GC_MIN_HEAP * 2));
+  Vm vm =
+      Vm_new((Vm_Config){}, pipeline_allocator, gc_init(&vm, GC_MIN_HEAP * 2));
   if (UNLIKELY(a.memory_usage)) {
     Stats s = CALL(pipeline_allocator, stats);
     double percent = (s.current * 100) / (double)s.allocated;
@@ -214,6 +214,10 @@ int main(int argc, char **argv) {
 
   CALL(pipeline_allocator, destroy);
   free(pipeline_allocator);
+  CALL(vm.gc.old, destroy);
+  free(vm.gc.old);
+  CALL(vm.gc.new, destroy);
+  free(vm.gc.new);
   VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");
 
   if (a.run == NULL) {

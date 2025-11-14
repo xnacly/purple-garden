@@ -23,13 +23,14 @@ Str OP_MAP[256] = {
 
 static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
 
-Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Gc gc) {
+Vm Vm_new(Vm_Config conf, Allocator *staticalloc, Gc gc) {
   Vm vm = {0};
   vm.gc = gc;
   vm.config = conf;
   vm.builtins = BUILTIN_MAP;
+  vm.staticalloc = staticalloc;
 
-  vm.globals = CALL(static_alloc, request, (sizeof(Value) * GLOBAL_SIZE));
+  vm.globals = CALL(staticalloc, request, (sizeof(Value) * GLOBAL_SIZE));
   vm.globals[GLOBAL_FALSE] = *INTERNED_FALSE;
   vm.globals[GLOBAL_TRUE] = *INTERNED_TRUE;
   vm.globals[GLOBAL_NONE] = *INTERNED_NONE;
@@ -77,7 +78,7 @@ void freelist_push(FrameFreeList *fl, Frame *f) {
 }
 
 int Vm_run(Vm *vm) {
-  FrameFreeList *fl = &(FrameFreeList){.alloc = vm->gc.underlying};
+  FrameFreeList *fl = &(FrameFreeList){.alloc = vm->staticalloc};
 #if PREALLOCATE_FREELIST_SIZE
   freelist_preallocate(fl);
 #endif
@@ -113,6 +114,7 @@ int Vm_run(Vm *vm) {
       switch ((VM_New)arg) {
       case VM_NEW_ARRAY:
         v.type = V_ARRAY;
+        v.is_heap = 1;
         List *l = gc_request(&vm->gc, sizeof(List), GC_OBJ_LIST);
         if (vm->size_hint == 0) {
           *l = (List){0};
@@ -158,27 +160,21 @@ int Vm_run(Vm *vm) {
       break;
     case OP_VAR:
       Value v = vm->registers[0];
-      Map_insert_hash(&vm->frame->variable_table, arg, v, vm->gc.underlying);
+      // TODO: migrate this to the gc
+      Map_insert_hash(&vm->frame->variable_table, arg, v, vm->staticalloc);
       break;
     case OP_ADD: {
-      Value *lhs = &vm->registers[0];
-      Value *rhs = &vm->registers[arg];
+      Value *rhs = &vm->registers[0];
+      Value *lhs = &vm->registers[arg];
 
       if (lhs->type == V_STR && rhs->type == V_STR) {
-        Str *s = gc_request(&vm->gc, sizeof(Str), GC_OBJ_STR);
         size_t len = lhs->string->len + rhs->string->len;
-        const uint8_t *buf = gc_request(&vm->gc, len, GC_OBJ_STR);
-        memcpy((void *)s, lhs->string->p, lhs->string->len);
-        memcpy((void *)(s + lhs->string->len), rhs->string->p,
-               rhs->string->len);
-        *s = (Str){
-            .p = buf,
-            .len = len,
-        };
-        vm->registers[0] = (Value){
-            .type = V_STR,
-            .string = s,
-        };
+        Str *s = gc_request(&vm->gc, sizeof(Str), GC_OBJ_STR);
+        uint8_t *buf = gc_request(&vm->gc, len, GC_OBJ_RAW);
+        memcpy(buf, lhs->string->p, lhs->string->len);
+        memcpy(buf + lhs->string->len, rhs->string->p, rhs->string->len);
+        *s = (Str){.p = buf, .len = len};
+        vm->registers[0] = (Value){.type = V_STR, .is_heap = 1, .string = s};
         break;
       }
 

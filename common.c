@@ -73,20 +73,22 @@ void Value_debug(const Value *v) {
   case V_FALSE:
     break;
   case V_STR:
+    printf("::\"");
     Str_debug(v->string);
+    printf("\"");
     break;
   case V_DOUBLE:
-    printf("(%g)", v->floating);
+    printf("::(%g)", v->floating);
     break;
   case V_INT:
-    printf("(%ld)", v->integer);
+    printf("::(%ld)", v->integer);
     break;
   case V_OBJ:
     // TODO: V_OBJ
-    printf("({})");
+    printf("::({})");
     break;
   case V_ARRAY: {
-    printf("([");
+    printf("::[");
     uint64_t len = v->array->len;
     for (size_t i = 0; i < len; i++) {
       Value v_at_i = v->array->arr[i];
@@ -95,7 +97,7 @@ void Value_debug(const Value *v) {
         putc(' ', stdout);
       }
     }
-    printf("])");
+    printf("]");
     break;
   };
   default:

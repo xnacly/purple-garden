@@ -65,3 +65,5 @@ static void builtin_runtime_gc_stats(Vm *vm) {
   // RETURN(map);
   ASSERT(0, "UNIMPLEMENTED");
 }
+
+static void builtin_runtime_gc_cycle(Vm *vm) { gc_cycle(&vm->gc); }
