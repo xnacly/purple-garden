@@ -1,6 +1,2 @@
 # vim: filetype=python
-
-std::println("Hello"+" "+"World")
-# gc manual cycle: only the resulting "Hello World" should be considered alive,
-# since its still in r1 after the above 
-std::runtime::gc::cycle()
+std::println("Hello World")

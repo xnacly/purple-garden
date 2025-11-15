@@ -1,0 +1,4 @@
+# vim: filetype=python
+var combination = "Hello"+" "+"World"
+std::println(combination)
+std::runtime::gc::cycle()

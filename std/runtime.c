@@ -1,15 +1,15 @@
 #include "../vm.h"
 
-static const Str *OPTION = &STRING("option");
-static const Str *STR = &STRING("str");
-static const Str *NUM = &STRING("number");
-static const Str *BOOL = &STRING("bool");
-static const Str *OBJ = &STRING("obj");
-static const Str *ARR = &STRING("array");
+static Str *OPTION = &STRING("option");
+static Str *STR = &STRING("str");
+static Str *NUM = &STRING("number");
+static Str *BOOL = &STRING("bool");
+static Str *OBJ = &STRING("obj");
+static Str *ARR = &STRING("array");
 
 static void builtin_runtime_type(Vm *vm) {
   uint16_t offset = vm->arg_offset;
-  const Str *s;
+  Str *s;
   const Value *a = &ARG(0);
   if (a->is_some) {
     s = OPTION;

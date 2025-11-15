@@ -173,7 +173,8 @@ int Vm_run(Vm *vm) {
         uint8_t *buf = gc_request(&vm->gc, len, GC_OBJ_RAW);
         memcpy(buf, lhs->string->p, lhs->string->len);
         memcpy(buf + lhs->string->len, rhs->string->p, rhs->string->len);
-        *s = (Str){.p = buf, .len = len};
+        s->p = buf;
+        s->len = len;
         vm->registers[0] = (Value){.type = V_STR, .is_heap = 1, .string = s};
         break;
       }

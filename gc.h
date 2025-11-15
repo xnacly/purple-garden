@@ -17,6 +17,7 @@ typedef struct GcHeader {
   unsigned int marked : 1;
   unsigned int type : 3;
   uintptr_t payload;
+  uintptr_t forward;
   size_t size;
   struct GcHeader *next;
 } GcHeader;
