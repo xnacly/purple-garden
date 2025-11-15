@@ -22,16 +22,27 @@ typedef struct GcHeader {
   struct GcHeader *next;
 } GcHeader;
 
-// teogcv1 is a hybrid garbage collection strategy merging bump allocation,
-// mark-and-sweep, and semi-space copying. This makes it fast, low latency and
-// memory efficient. Its stages are:
+// The manchester garbage collector is based on a hybrid garbage collection
+// strategy merging bump allocation, mark-and-sweep, and semi-space copying.
+// This makes it fast, low latency and memory efficient by allocating in
+// contiguous blocks, being precise in reachability identification, relocating
+// live objects into a fresh allocation space and reducing fragmentation by
+// compacting live objects.
+//
+// The biggest downside is the slightly larger memory usage in comparison to
+// other strategies, since there is a need for two memory spaces of the same
+// size, and the rewriting of references after moving objects from one space to
+// the other.
+//
+// Its works in 4 stages:
 //
 // 1. marking reachable memory segments by walking the roots (virtual machine
 // registers, variable table)
 // 2. copying marked memory from the old bump allocator space to the new bump
 // allocator space
-// 3. resetting the old bump allocator space
-// 4. swapping the old bump allocator space with the new one
+// 3. rewriting all references to the old space to point to the new space
+// 4. swapping the old bump allocator space with the new one and resetting the
+// old space
 //
 // It is specifically tuned for short lived allocations and very high allocation
 // performance.
@@ -68,6 +79,9 @@ typedef struct GcHeader {
 //     | Swap Alloc  |
 //     | old <-> new |
 //     +-------------+
+//
+// Its short for manchester garbage collector, since I came up with its hybrid
+// approach while being on vacation in manchester.
 typedef struct {
   Allocator *old;
   Allocator *new;
