@@ -52,7 +52,14 @@ void *gc_request(Gc *gc, size_t size, ObjType t) {
   return (void *)payload;
 }
 
-Stats gc_stats(Gc *gc) { return CALL(gc->old, stats); }
+Stats gc_stats(Gc *gc) {
+  Stats old = CALL(gc->old, stats);
+  Stats new = CALL(gc->new, stats);
+  return (Stats){
+      .current = old.current + new.current,
+      .allocated = old.allocated + new.allocated,
+  };
+}
 
 static inline void *forward_ptr(void *payload) {
   if (!payload) {
@@ -185,7 +192,6 @@ void gc_cycle(Gc *gc) {
     mark(gc, &me->value);
   }
 
-  // simulated sweep
   GcHeader *new_head = NULL;
   size_t new_alloc = 0;
   for (GcHeader *h = gc->head; h; h = h->next) {

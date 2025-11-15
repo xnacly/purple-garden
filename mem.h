@@ -10,8 +10,8 @@
 // #endif
 // #endif
 
-// 50KB
-#define GC_MIN_HEAP 50 * 1024
+// 25KB
+#define GC_MIN_HEAP 25 * 1024
 
 typedef struct {
   size_t current;
