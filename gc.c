@@ -263,8 +263,8 @@ void gc_cycle(Gc *gc) {
   }
 
   gc->head = new_head;
-  CALL(gc->old, reset);
   Allocator *swap = gc->new;
+  CALL(swap, reset);
   gc->new = gc->old;
   gc->old = swap;
 #ifdef VERBOSE_GC

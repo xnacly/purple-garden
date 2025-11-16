@@ -113,12 +113,6 @@ void bump_reset(void *ctx) {
   b->size = b->blocks[0] ? b->block_sizes[0] : 0;
 
   b->total_used = 0;
-  b->total_allocated = b->blocks[0] ? b->block_sizes[0] : 0;
-
-  for (uint64_t i = 1; i < BUMP_MAX_BLOCKS; i++) {
-    b->block_sizes[i] = 0;
-    b->blocks[i] = NULL;
-  }
 }
 
 Allocator *bump_init(uint64_t min_size, uint64_t max_size) {
