@@ -24,8 +24,13 @@ void print_flag(SixFlag *f, bool long_option) {
     pre_and_postfix = "  ";
   }
 
-  printf("%c %c%c / %c%s", pre_and_postfix[0], SIX_OPTION_PREFIX, f->short_name,
-         SIX_OPTION_PREFIX, f->name);
+  if (f->short_name) {
+    printf("%c %c%c / %c%s", pre_and_postfix[0], SIX_OPTION_PREFIX,
+           f->short_name, SIX_OPTION_PREFIX, f->name);
+  } else {
+    printf("%c %c%s", pre_and_postfix[0], SIX_OPTION_PREFIX, f->name);
+  }
+
   if (f->type != SIX_BOOL) {
     printf(" <");
     switch (f->type) {

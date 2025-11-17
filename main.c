@@ -41,7 +41,13 @@
   X(run, 'r', S(""), STR, "executes the argument as if given inside a file")   \
   X(verbose, 'V', false, BOOL, "verbose logs")                                 \
   X(stats, 's', false, BOOL, "show statistics")                                \
-  X(version, 'v', false, BOOL, "display version information")
+  X(version, 'v', false, BOOL, "display version information")                  \
+  X(gc_max, 0, GC_MIN_HEAP * 64, LONG,                                         \
+    "set hard max gc space in bytes, default is GC_MIN_HEAP*64")               \
+  X(gc_size, 0, GC_MIN_HEAP * 2, LONG, "define gc heap size in bytes")         \
+  X(gc_limit, 0, 70, DOUBLE,                                                   \
+    "instruct memory usage amount for gc to start collecting, in percent "     \
+    "(5-99%)")
 
 typedef struct {
 #define X(NAME, SHORT, DEFAULT, TYPE, DESCRIPTION) typeof(DEFAULT) NAME;
