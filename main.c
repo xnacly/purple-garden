@@ -28,79 +28,51 @@
     }                                                                          \
   } while (0)
 
+#define S(str) (const char *)(str)
+#define CLI_ARGS                                                               \
+  X(block_allocator, 'b', (size_t)0, LONG,                                     \
+    "use block allocator with size instead of garbage collection")             \
+  X(aot_functions, 'a', false, BOOL, "compile all functions to machine code")  \
+  X(disassemble, 'd', false, BOOL,                                             \
+    "readable bytecode representation with labels, globals and comments")      \
+  X(memory_usage, 'm', false, BOOL,                                            \
+    "display the memory usage of parsing, compilation and the virtual "        \
+    "machine")                                                                 \
+  X(run, 'r', S(""), STR, "executes the argument as if given inside a file")   \
+  X(verbose, 'V', false, BOOL, "verbose logs")                                 \
+  X(stats, 's', false, BOOL, "show statistics")                                \
+  X(version, 'v', false, BOOL, "display version information")                  \
+  X(gc_max, 0, GC_MIN_HEAP * 64, LONG,                                         \
+    "set hard max gc space in bytes, default is GC_MIN_HEAP*64")               \
+  X(gc_size, 0, GC_MIN_HEAP * 2, LONG, "define gc heap size in bytes")         \
+  X(gc_limit, 0, 70, DOUBLE,                                                   \
+    "instruct memory usage amount for gc to start collecting, in percent "     \
+    "(5-99%)")
+
 typedef struct {
-  size_t block_allocator;
-  bool aot_functions;
-  bool disassemble;
-  bool memory_usage;
-  const char *run;
-  bool verbose;
-  bool stats;
-  int version;
+#define X(NAME, SHORT, DEFAULT, TYPE, DESCRIPTION) typeof(DEFAULT) NAME;
+  CLI_ARGS
+#undef X
   char *filename;
 } Args;
 
 Args Args_parse(int argc, char **argv) {
   enum {
-    __VERSION,
-    __DISASSEMBLE,
-    __BLOCK_ALLOC,
-    __AOT,
-    __MEMORY_USAGE,
-    __VERBOSE,
-    __STATS,
-    __RUN,
-  };
-
+#define X(NAME, SHORT, DEFAULT, TYPE, DESCRIPTION) __##NAME,
+    CLI_ARGS
+#undef X
+  } __cli_flag;
   SixFlag options[] = {
-      [__VERSION] = {.name = "version",
-                     .type = SIX_BOOL,
-                     .b = false,
-                     .short_name = 'v',
-                     .description = "display version information"},
-      [__DISASSEMBLE] =
-          {.name = "disassemble",
-           .short_name = 'd',
-           .type = SIX_BOOL,
-           .b = false,
-           .description =
-               "readable bytecode representation with labels, globals "
-               "and comments"},
-      [__BLOCK_ALLOC] =
-          {.name = "block-allocator",
-           .short_name = 'b',
-           .type = SIX_LONG,
-           .l = GC_MIN_HEAP,
-           .description =
-               "use block allocator with size instead of garbage collection"},
-      [__AOT] = {.name = "aot-functions",
-                 .short_name = 'a',
-                 .b = false,
-                 .type = SIX_BOOL,
-                 .description = "compile all functions to machine code"},
-      [__MEMORY_USAGE] = {.name = "memory-usage",
-                          .short_name = 'm',
-                          .b = false,
-                          .type = SIX_BOOL,
-                          .description = "display the memory usage of parsing, "
-                                         "compilation and the virtual "
-                                         "machine"},
-      [__VERBOSE] = {.name = "verbose",
-                     .short_name = 'V',
-                     .b = false,
-                     .type = SIX_BOOL,
-                     .description = "verbose logging"},
-      [__STATS] = {.name = "stats",
-                   .short_name = 's',
-                   .b = false,
-                   .type = SIX_BOOL,
-                   .description = "show statistics"},
-      [__RUN] = {.name = "run",
-                 .short_name = 'r',
-                 .s = "",
-                 .type = SIX_STR,
-                 .description =
-                     "executes the argument as if an input file was given"},
+#define X(NAME, SHORT, DEFAULT, TYPE, DESCRIPTION)                             \
+  [__##NAME] = {                                                               \
+      .name = #NAME,                                                           \
+      .short_name = SHORT,                                                     \
+      .type = SIX_##TYPE,                                                      \
+      .TYPE = DEFAULT,                                                         \
+      .description = DESCRIPTION,                                              \
+  },
+      CLI_ARGS
+#undef X
   };
   Args a = (Args){0};
   Six s = {
@@ -112,14 +84,12 @@ Args Args_parse(int argc, char **argv) {
   if (s.rest_count) {
     a.filename = s.rest[0];
   }
-  a.block_allocator = s.flags[__BLOCK_ALLOC].l;
-  a.aot_functions = s.flags[__AOT].b;
-  a.disassemble = s.flags[__DISASSEMBLE].b;
-  a.memory_usage = s.flags[__MEMORY_USAGE].b;
-  a.run = s.flags[__RUN].s;
-  a.verbose = s.flags[__VERBOSE].b;
-  a.stats = s.flags[__STATS].b;
-  a.version = s.flags[__VERSION].b;
+
+#define X(NAME, SHORT, DEFAULT, TYPE, DESCRIPTION)                             \
+  a.NAME = options[__##NAME].TYPE;
+
+  CLI_ARGS
+#undef X
 
   // command handling
   if (a.version) {
