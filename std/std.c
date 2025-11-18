@@ -60,7 +60,8 @@ static StdNode tree = PACKAGE("std",
           PACKAGE("runtime", 
               FUNCTION("type", &builtin_runtime_type, 1),
               PACKAGE("gc", 
-                  FUNCTION("stats", &builtin_runtime_gc_stats, 0)
+                  FUNCTION("stats", &builtin_runtime_gc_stats, 0),
+                  FUNCTION("cycle", &builtin_runtime_gc_cycle, 0)
               ),
           ), 
           FUNCTION("assert", &builtin_runtime_assert, 1),

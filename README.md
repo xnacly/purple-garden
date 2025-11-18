@@ -95,105 +95,81 @@ make PG=examples/ops.garden
 $ make release
 ./purple_garden
 # error: Missing a file? try `+h/+help`
-$ ./purple_garden +h
-# usage ./build/purple_garden: [ +v / +version] [ +d / +disassemble]
-#                              [ +b / +block-allocator <long=0>] [ +a / +aot-functions]
-#                              [ +m / +memory-usage] [ +V / +verbose]
-#                              [ +s / +stats] [ +r / +run <string=``>]
-#                              [ +h / +help] <file.garden>
-# 
-# Option:
-#           +v / +version
-#                 display version information
-# 
-#           +d / +disassemble
-#                 readable bytecode representation with labels, globals and comments
-# 
-#           +b / +block-allocator <long=0>
-#                 use block allocator with size instead of garbage collection
-# 
-#           +a / +aot-functions
-#                 compile all functions to machine code
-# 
-#           +m / +memory-usage
-#                 display the memory usage of parsing, compilation and the virtual machine
-# 
-#           +V / +verbose
-#                 verbose logging
-# 
-#           +s / +stats
-#                 show statistics
-# 
-#           +r / +run <string=``>
-#                 executes the argument as if an input file was given
-# 
-#           +h / +help
-#                 help page and usage
-# 
-# Examples:
-#         ./build/purple_garden +v +d \
-#                               +b 0 +a \
-#                               +m +V \
-#                               +s +r ""
-# 
-#         ./build/purple_garden +version +disassemble \
-#                               +block-allocator 0 +aot-functions \
-#                               +memory-usage +verbose \
-#                               +stats +run ""
+#$ ./purple_garden +h
+#usage ./build/purple_garden_debug: [ +b / +block_allocator <0>] [ +a / +aot_functions]
+#                                   [ +d / +disassemble] [ +m / +memory_usage]
+#                                   [ +r / +run <``>] [ +V / +verbose]
+#                                   [ +s / +stats] [ +v / +version]
+#                                   [ +gc_max <1638400>] [ +gc_size <51200>]
+#                                   [ +gc_limit <70>]
+#                                   [ +h / +help] <file.garden>
+#
+#Option:
+#          +b / +block_allocator <0>
+#                use block allocator with size instead of garbage collection
+#
+#          +a / +aot_functions
+#                compile all functions to machine code
+#
+#          +d / +disassemble
+#                readable bytecode representation with labels, globals and comments
+#
+#          +m / +memory_usage
+#                display the memory usage of parsing, compilation and the virtual machine
+#
+#          +r / +run <``>
+#                executes the argument as if given inside a file
+#
+#          +V / +verbose
+#                verbose logs
+#
+#          +s / +stats
+#                show statistics
+#
+#          +v / +version
+#                display version information
+#
+#          +gc_max <1638400>
+#                set hard max gc space in bytes, default is GC_MIN_HEAP*64
+#
+#          +gc_size <51200>
+#                define gc heap size in bytes
+#
+#          +gc_limit <70>
+#                instruct memory usage amount for gc to start collecting, in percent (5-99%)
+#
+#          +h / +help
+#                help page and usage
+#
+#Examples:
+#        ./build/purple_garden_debug +b 0 +a \
+#                                    +d +m \
+#                                    +r "" +V \
+#                                    +s +v \
+#                                    + 1638400 + 51200 \
+#                                    + 0
+#
+#        ./build/purple_garden_debug +block_allocator 0 +aot_functions \
+#                                    +disassemble +memory_usage \
+#                                    +run "" +verbose \
+#                                    +stats +version \
+#                                    +gc_max 1638400 +gc_size 51200 \
+#                                    +gc_limit 0
 ```
 
 ### Running tests
 
 ```sh
 $ make test
-# [+][PASS][Case 1/38] in=`test_return(3.1415)`
-# [+][PASS][Case 2/38] in=`test_return(0.1415)`
-# [+][PASS][Case 3/38] in=`test_return("string")`
-# [+][PASS][Case 4/38] in=`test_return('quoted)`
-# [+][PASS][Case 5/38] in=`test_return(false)`
-# [+][PASS][Case 6/38] in=`test_return(true) test_return(true) test_return(false)`
-# [+][PASS][Case 7/38] in=`test_return("hello")`
-# [+][PASS][Case 8/38] in=`2 + 2`
-# [+][PASS][Case 9/38] in=`5 - 3`
-# [+][PASS][Case 10/38] in=`3 * 4`
-# [+][PASS][Case 11/38] in=`6 / 2`
-# [+][PASS][Case 12/38] in=`1 + 2 - 1`
-# [+][PASS][Case 13/38] in=`2.0 + 2`
-# [+][PASS][Case 14/38] in=`2 + 2.0`
-# [+][PASS][Case 15/38] in=`5.0 - 3`
-# [+][PASS][Case 16/38] in=`5 - 3.0`
-# [+][PASS][Case 17/38] in=`3.0 * 4`
-# [+][PASS][Case 18/38] in=`3 * 4.0`
-# [+][PASS][Case 19/38] in=`6.0 / 2`
-# [+][PASS][Case 20/38] in=`6 / 2.0`
-# [+][PASS][Case 21/38] in=`len("hello")`
-# [+][PASS][Case 22/38] in=`len("hello") len("hello")`
-# [+][PASS][Case 23/38] in=`len("")`
-# [+][PASS][Case 24/38] in=`len("a")`
-# [+][PASS][Case 25/38] in=`1 = 1`
-# [+][PASS][Case 26/38] in=`"abc" = "abc"`
-# [+][PASS][Case 27/38] in=`3.1415 = 3.1415`
-# [+][PASS][Case 28/38] in=`true = true`
-# [+][PASS][Case 29/38] in=`true = false`
-# [+][PASS][Case 30/38] in=`false = false`
-# [+][PASS][Case 31/38] in=`var name = "user" test_return(name)`
-# [+][PASS][Case 32/38] in=`var age = 25 test_return(age)`
-# [+][PASS][Case 33/38] in=`fn ret(arg){arg} ret(25)`
-# [+][PASS][Case 34/38] in=`fn add25(arg){arg + 25} add25(25)`
-# [+][PASS][Case 35/38] in=`assert(true)`
-# [+][PASS][Case 36/38] in=`None()`
-# [+][PASS][Case 37/38] in=`Some(true)`
-# [+][PASS][Case 38/38] in=`Some(false)`
-# [=] 38/38 passed, 0 failed
 ```
 
 
 Tests are located in `tests/test.c` and a test is declared via the `CASE` macro:
 
 ```c
-      CASE(test_return(3.1415), VAL(.type = V_DOUBLE, .floating = 3.1415)),
-      CASE(test_return(0.1415), VAL(.type = V_DOUBLE, .floating = 0.1415)),
-      CASE(test_return("string"), VAL(.type = V_STR, .string = &STRING("string"))),
+      CASE(3.1415, VAL(.type = V_DOUBLE, .floating = 3.1415)),
+      CASE(0.1415, VAL(.type = V_DOUBLE, .floating = 0.1415)),
+      CASE("string", VAL(.type = V_STR, .string = &STRING("string"))),
 ```
 
 ### Disassembling bytecode
@@ -349,10 +325,11 @@ $ make profile
   - [x] objects
 - [ ] language constructs
   - [x] variables
-  - [ ] match
+  - [x] match
   - [x] functions
+  - [x] standard library
+  - [ ] iteration
   - [ ] pattern matching
-  - [ ] standard library
 - [x] builtins
   - [x] println
   - [x] print

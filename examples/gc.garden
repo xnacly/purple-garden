@@ -1,0 +1,10 @@
+# vim: filetype=python
+var combination = "Hello"+" "+"World"
+std::println(combination)
+# manual gc run to check if reachability is correct
+std::runtime::gc::cycle()
+# second gc run, just to stress everything
+std::runtime::gc::cycle()
+var combination = [combination+"|"+combination+"|"+combination]
+std::println(combination)
+std::runtime::gc::cycle()

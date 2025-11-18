@@ -2,6 +2,7 @@
 // packages, maps, arrays) usage
 #pragma once
 
+#include "gc.h"
 #include "mem.h"
 #include "strings.h"
 #include <string.h>
@@ -85,6 +86,7 @@ typedef struct Value Value;
 typedef struct Map Map;
 typedef struct List List;
 
+// TODO: migrate this to the new Gc struct
 Map Map_new(size_t cap, Allocator *a);
 void Map_clear(Map *m);
 void Map_insert(Map *m, const Str *s, Value v, Allocator *a);
@@ -92,7 +94,7 @@ void Map_insert_hash(Map *m, uint32_t hash, Value v, Allocator *a);
 Value Map_get(const Map *m, const Str *s);
 Value Map_get_hash(const Map *m, uint32_t hash);
 
-List List_new(size_t cap, Allocator *a);
+List List_new(size_t cap, Gc *gc);
 void List_clear(List *l);
 Value List_get(const List *l, size_t idx);
-void List_append(List *l, Value v, Allocator *a);
+void List_append(List *l, Value v, Gc *gc);
