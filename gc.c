@@ -263,10 +263,8 @@ void gc_cycle(Gc *gc) {
   }
 
   gc->head = new_head;
-  Allocator *swap = gc->new;
-  CALL(swap, reset);
-  gc->new = gc->old;
-  gc->old = swap;
+  SWAP_STRUCT(gc->old, gc->new);
+  CALL(gc->new, reset);
 #ifdef VERBOSE_GC
   printf("[GC][FIN] all cycles done, cleaned %zuB of %zuB used up (%.2f%%)\n",
          gc->allocated - new_alloc, gc->allocated,

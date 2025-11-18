@@ -28,6 +28,16 @@
 
 #define REGISTERS 31
 
+#define SWAP_STRUCT(A, B)                                                      \
+  do {                                                                         \
+    _Static_assert(__builtin_types_compatible_p(typeof(A), typeof(B)),         \
+                   "SWAP_STRUCT arguments must have identical types");         \
+                                                                               \
+    typeof(A) __swap_tmp = (A);                                                \
+    (A) = (B);                                                                 \
+    (B) = __swap_tmp;                                                          \
+  } while (0)
+
 #define UNLIKELY(condition) __builtin_expect(condition, 0)
 // TODO: not compiled out in release builds; rework this into a panic system and
 // compile asserts out for release

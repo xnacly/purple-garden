@@ -83,7 +83,9 @@ typedef struct GcHeader {
 // Its short for manchester garbage collector, since I came up with its hybrid
 // approach while being on vacation in manchester.
 typedef struct {
+  // from-space
   Allocator *old;
+  // to-space
   Allocator *new;
   void *vm;
   GcHeader *head;

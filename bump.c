@@ -110,8 +110,7 @@ void bump_reset(void *ctx) {
 
   b->pos = 0;
   b->len = 0;
-  b->size = b->blocks[0] ? b->block_sizes[0] : 0;
-
+  b->size = BUMP_MIN_START;
   b->total_used = 0;
 }
 
