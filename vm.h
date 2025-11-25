@@ -82,7 +82,7 @@ typedef struct __Vm {
   // allocator for stack frames, we reuse it to not pollute the gc heap
   Allocator *staticalloc;
 
-  Value registers[REGISTERS + 1];
+  Value registers[REGISTERS];
 
 #if DEBUG
   uint64_t instruction_counter[256];

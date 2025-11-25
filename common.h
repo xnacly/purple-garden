@@ -26,7 +26,7 @@
       MAX_BUILTIN_SIZE * sizeof(builtin_function)
 #endif
 
-#define REGISTERS 31
+#define REGISTERS 32
 
 #define SWAP_STRUCT(A, B)                                                      \
   do {                                                                         \

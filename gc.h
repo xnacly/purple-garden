@@ -10,7 +10,7 @@ typedef enum {
   // list has zero or more children
   GC_OBJ_LIST = 0b010,
   // map holds allocated buckets with owned children
-  GC_OBJ_MAP = 0b100,
+  GC_OBJ_MAP = 0b011,
 } ObjType;
 
 typedef struct GcHeader {

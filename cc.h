@@ -40,7 +40,7 @@ uint32_t *ByteCodeBuilder_to_buffer(const ByteCodeBuilder *bcb);
 // registers, what global slot is filled, what functions are defined by their
 // hashes
 typedef struct Ctx {
-  bool registers[REGISTERS + 1];
+  bool registers[REGISTERS];
   size_t global_hash_buckets[GLOBAL_SIZE];
   size_t register_allocated_count;
   CtxFunction hash_to_function[MAX_BUILTIN_SIZE];

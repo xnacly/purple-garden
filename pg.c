@@ -31,5 +31,9 @@ uint8_t pg_exec_file(Pg *pg, const char *filename) {
 
 void pg_destroy(Pg *pg) {
   CALL(pg->__alloc, destroy);
+  CALL(pg->__vm.gc.old, destroy);
+  free(pg->__vm.gc.old);
+  CALL(pg->__vm.gc.new, destroy);
+  free(pg->__vm.gc.new);
   free(pg->__alloc);
 }

@@ -5,6 +5,15 @@ std::println(combination)
 std::runtime::gc::cycle()
 # second gc run, just to stress everything
 std::runtime::gc::cycle()
+
 var combination = [combination+"|"+combination+"|"+combination]
 std::println(combination)
 std::runtime::gc::cycle()
+
+# new allocation
+# var combination = combination+combination
+fn child_scope {
+    # in this scope the gc needs to be able to mark the parent scope
+    std::runtime::gc::cycle()
+}
+child_scope()

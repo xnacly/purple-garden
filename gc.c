@@ -2,6 +2,7 @@
 #include "common.h"
 #include "mem.h"
 #include "vm.h"
+#include <stdint.h>
 #include <stdio.h>
 
 #define VERBOSE_GC 1
@@ -72,6 +73,11 @@ static inline void *forward_ptr(void *payload) {
     unreachable();
   }
 
+  if (old->type < GC_OBJ_RAW || old->type > GC_OBJ_MAP) {
+    // either already in newspace or not a heap object; return payload unchanged
+    return payload;
+  }
+
   if (old->forward) {
     return (void *)old->forward;
   }
@@ -127,6 +133,11 @@ static inline void mark(Gc *gc, const Value *val) {
     return;
   }
 
+  // TODO: remove this once this bug was fixed, currently no clue why this
+  // occurs
+  ASSERT((uintptr_t)payload > sizeof(GcHeader),
+         "payload too small, something is wrong");
+
   GcHeader *h = (GcHeader *)((char *)payload - sizeof(GcHeader));
   if (!h || h->marked) {
     return;
@@ -138,9 +149,8 @@ static inline void mark(Gc *gc, const Value *val) {
   case GC_OBJ_STR: {
     // a heap string is made up of both the string view and its inner buffer
     // holding the actual bytes, GC_OBJ_STR and GC_OBJ_RAW respectively
-    Str *s = (Str *)payload;
-    // mark embedded raw bytes
-    GcHeader *raw = (GcHeader *)((char *)s->p - sizeof(GcHeader));
+    GcHeader *raw =
+        (GcHeader *)((char *)((Str *)payload)->p - sizeof(GcHeader));
     raw->marked = true;
     break;
   }
@@ -174,7 +184,7 @@ void gc_cycle(Gc *gc) {
 #ifdef VERBOSE_GC
   puts("[GC][MARK]ing registers");
 #endif
-  for (size_t i = 0; i < REGISTERS + 1; i++) {
+  for (size_t i = 0; i < REGISTERS; i++) {
     const Value *ri = vm->registers + i;
     mark(gc, ri);
   }
@@ -182,14 +192,18 @@ void gc_cycle(Gc *gc) {
 #ifdef VERBOSE_GC
   puts("[GC][MARK]ing variable table");
 #endif
-  // TODO: this needs to walk up the chain, meaning all variables contained in
-  // the frames before this frame have to be marked too
-  for (size_t i = 0; i < vm->frame->variable_table.cap; i++) {
-    MapEntry *me = &vm->frame->variable_table.buckets[i];
-    if (!me->hash) {
-      continue;
+
+  for (Frame *f = vm->frame; f; f = f->prev) {
+#ifdef VERBOSE_GC
+    printf("[GC][MARK] walking variable table %p {.return_to_bytecode=%zu}\n",
+           f, f->return_to_bytecode);
+#endif
+    for (size_t i = 0; i < f->variable_table.cap; i++) {
+      MapEntry *me = &f->variable_table.buckets[i];
+      if (me->hash) {
+        mark(gc, &me->value);
+      }
     }
-    mark(gc, &me->value);
   }
 
   GcHeader *new_head = NULL;
@@ -219,18 +233,18 @@ void gc_cycle(Gc *gc) {
   }
 
   // rewriting all alive values to point to the newspace
-
-  for (size_t i = 0; i < REGISTERS + 1; i++) {
+  for (size_t i = 0; i < REGISTERS; i++) {
     Value *ri = &vm->registers[i];
     rewrite(gc, ri);
   }
 
-  for (size_t i = 0; i < vm->frame->variable_table.cap; i++) {
-    MapEntry *me = &vm->frame->variable_table.buckets[i];
-    if (!me->hash) {
-      continue;
+  for (Frame *f = vm->frame; f; f = f->prev) {
+    for (size_t i = 0; i < f->variable_table.cap; i++) {
+      MapEntry *me = &f->variable_table.buckets[i];
+      if (me->hash) {
+        rewrite(gc, &me->value);
+      }
     }
-    rewrite(gc, &me->value);
   }
 
   for (GcHeader *h = new_head; h; h = h->next) {
