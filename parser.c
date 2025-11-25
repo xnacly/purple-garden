@@ -410,16 +410,19 @@ Node *Parser_next(Parser *p) {
     n = match;
     break;
   }
-  case T_FN: { // fn <name>(<args>){ <body> }
+  case T_FN: { // fn <name> [:: <args>] { <body> }
     consume(p, T_FN);
     Token *ident = consume(p, T_IDENT);
     Node *fn = NODE_NEW(N_FN, ident);
 
     Node *params = NODE_NEW(N_ARRAY, p->cur);
-    consume(p, T_DOUBLEDOUBLEDOT);
-    while (p->cur->type != T_EOF && p->cur->type != T_CURLY_LEFT) {
-      Node *param = TRACE(Parser_next);
-      LIST_append(&params->children, p->alloc, param);
+    // { instead of :: means we don't have any arguments
+    if (p->cur->type != T_CURLY_LEFT) {
+      consume(p, T_DOUBLEDOUBLEDOT);
+      while (p->cur->type != T_EOF && p->cur->type != T_CURLY_LEFT) {
+        Node *param = TRACE(Parser_next);
+        LIST_append(&params->children, p->alloc, param);
+      }
     }
     LIST_append(&fn->children, p->alloc, params);
 

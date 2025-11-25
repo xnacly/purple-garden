@@ -60,6 +60,9 @@ inline bool Value_cmp(const Value *a, const Value *b) {
 }
 
 void Value_debug(const Value *v) {
+  if (!v) {
+    return;
+  }
   if (v->is_heap) {
     printf("GC<<");
   }
