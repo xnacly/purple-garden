@@ -21,7 +21,7 @@ Str OP_MAP[256] = {
     [OP_SIZE] = STRING("SIZE"),     [OP_IDX] = STRING("IDX"),
 };
 
-Vm Vm_new(Vm_Config conf, Allocator *staticalloc, Gc gc) {
+Vm Vm_new(Vm_Config conf, Allocator *staticalloc, Gc *gc) {
   Vm vm = {0};
   vm.gc = gc;
   vm.config = conf;
@@ -113,11 +113,11 @@ int Vm_run(Vm *vm) {
       case VM_NEW_ARRAY:
         v.type = V_ARRAY;
         v.is_heap = 1;
-        List *l = gc_request(&vm->gc, sizeof(List), GC_OBJ_LIST);
+        List *l = gc_request(vm->gc, sizeof(List), GC_OBJ_LIST);
         if (vm->size_hint == 0) {
           *l = (List){0};
         } else {
-          *l = List_new(vm->size_hint, &vm->gc);
+          *l = List_new(vm->size_hint, vm->gc);
         }
         v.array = l;
         break;
@@ -137,7 +137,7 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_APPEND:
-      List_append(vm->registers[arg].array, vm->registers[0], &vm->gc);
+      List_append(vm->registers[arg].array, vm->registers[0], vm->gc);
       break;
     case OP_LOADG:
       vm->registers[0] = vm->globals[arg];
@@ -167,8 +167,8 @@ int Vm_run(Vm *vm) {
 
       if (lhs->type == V_STR && rhs->type == V_STR) {
         size_t len = lhs->string->len + rhs->string->len;
-        Str *s = gc_request(&vm->gc, sizeof(Str), GC_OBJ_STR);
-        uint8_t *buf = gc_request(&vm->gc, len, GC_OBJ_RAW);
+        Str *s = gc_request(vm->gc, sizeof(Str), GC_OBJ_STR);
+        uint8_t *buf = gc_request(vm->gc, len, GC_OBJ_RAW);
         memcpy(buf, lhs->string->p, lhs->string->len);
         memcpy(buf + lhs->string->len, rhs->string->p, rhs->string->len);
         s->p = buf;
@@ -423,8 +423,9 @@ int Vm_run(Vm *vm) {
       }
       freelist_push(fl, old);
 
-      if (vm->gc.allocated >= vm->gc.threshold) {
-        gc_cycle(&vm->gc);
+      if (!vm->config.disable_gc &&
+          vm->gc->allocated >= (vm->config.gc_size * vm->config.gc_limit)) {
+        gc_cycle(vm->gc);
       }
       break;
     }

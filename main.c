@@ -28,9 +28,8 @@
     }                                                                          \
   } while (0)
 
-#define S(str) (const char *)(str)
 #define CLI_ARGS                                                               \
-  X(block_allocator, 'b', (size_t)0, LONG,                                     \
+  X(block_allocator, 'b', (long)0, LONG,                                       \
     "use block allocator with size instead of garbage collection")             \
   X(aot_functions, 'a', false, BOOL, "compile all functions to machine code")  \
   X(disassemble, 'd', false, BOOL,                                             \
@@ -38,16 +37,19 @@
   X(memory_usage, 'm', false, BOOL,                                            \
     "display the memory usage of parsing, compilation and the virtual "        \
     "machine")                                                                 \
-  X(run, 'r', S(""), STR, "executes the argument as if given inside a file")   \
+  X(run, 'r', (const char *)(""), STR,                                         \
+    "executes the argument as if given inside a file")                         \
   X(verbose, 'V', false, BOOL, "verbose logs")                                 \
   X(stats, 's', false, BOOL, "show statistics")                                \
   X(version, 'v', false, BOOL, "display version information")                  \
-  X(gc_max, 0, GC_MIN_HEAP * 64, LONG,                                         \
+  X(gc_max, 0, GC_MIN_HEAP * 64l, LONG,                                        \
     "set hard max gc space in bytes, default is GC_MIN_HEAP*64")               \
-  X(gc_size, 0, GC_MIN_HEAP * 2, LONG, "define gc heap size in bytes")         \
-  X(gc_limit, 0, 70, DOUBLE,                                                   \
+  X(gc_size, 0, GC_MIN_HEAP * 2l, LONG, "define gc heap size in bytes")        \
+  X(gc_limit, 0, 70.0, DOUBLE,                                                 \
     "instruct memory usage amount for gc to start collecting, in percent "     \
-    "(5-99%)")
+    "(5-99%)")                                                                 \
+  X(no_gc, 0, false, BOOL, "disable garbage collection")                       \
+  X(no_std, 0, false, BOOL, "limit the standard library to std::len")
 
 typedef struct {
 #define X(NAME, SHORT, DEFAULT, TYPE, DESCRIPTION) typeof(DEFAULT) NAME;
@@ -55,6 +57,39 @@ typedef struct {
 #undef X
   char *filename;
 } Args;
+
+void Args_print(Args args) {
+  printf("Args{\n");
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat"
+#pragma GCC diagnostic ignored "-Wfloat-equal"
+#define X(NAME, SHORT, DEFAULT, TYPE, DESCRIPTION)                             \
+  do {                                                                         \
+    printf("\t%s: ", #NAME);                                                   \
+    switch (#TYPE[0]) {                                                        \
+    case 'S':                                                                  \
+      printf("\"%s\"", args.NAME);                                             \
+      break;                                                                   \
+    case 'B':                                                                  \
+      printf("%s", args.NAME ? "true" : "false");                              \
+      break;                                                                   \
+    case 'L':                                                                  \
+      printf("%ld", (long)args.NAME);                                          \
+      break;                                                                   \
+    case 'D': /* DOUBLE */                                                     \
+      printf("%f", args.NAME);                                                 \
+      break;                                                                   \
+    default:                                                                   \
+      printf("<unknown>");                                                     \
+    }                                                                          \
+  } while (0);                                                                 \
+  puts(",");
+  CLI_ARGS
+#undef X
+#pragma GCC diagnostic pop
+  printf("}\n");
+}
 
 Args Args_parse(int argc, char **argv) {
   enum {
@@ -111,6 +146,9 @@ Args Args_parse(int argc, char **argv) {
 int main(int argc, char **argv) {
   struct timeval start_time, end_time;
   Args a = Args_parse(argc, argv);
+#if DEBUG
+  Args_print(a);
+#endif
 
   if (UNLIKELY(a.verbose)) {
     gettimeofday(&start_time, NULL);
@@ -141,8 +179,18 @@ int main(int argc, char **argv) {
   Lexer lexer = Lexer_new(input);
   Parser parser = Parser_new(pipeline_allocator, &lexer);
 
-  Vm vm =
-      Vm_new((Vm_Config){}, pipeline_allocator, gc_init(&vm, GC_MIN_HEAP * 2));
+  Gc gc = gc_init(a.gc_size);
+  Vm vm = Vm_new(
+      (Vm_Config){
+          .gc_size = a.gc_size,
+          .gc_limit = a.gc_limit,
+          .disable_gc = a.no_gc,
+          .max_memory = a.gc_max,
+          .disable_std = a.no_std,
+      },
+      pipeline_allocator, &gc);
+  gc.vm = &vm;
+
   if (UNLIKELY(a.memory_usage)) {
     Stats s = CALL(pipeline_allocator, stats);
     double percent = (s.current * 100) / (double)s.allocated;
@@ -172,7 +220,7 @@ int main(int argc, char **argv) {
   VERBOSE_PUTS("vm::Vm_run: executed byte code");
 
   if (UNLIKELY(a.memory_usage)) {
-    Stats s = gc_stats(&vm.gc);
+    Stats s = gc_stats(vm.gc);
     double percent = (s.current * 100) / (double)s.allocated;
     printf("vm  : %.2fKB of %.2fKB used (%f%%)\n", s.current / 1024.0,
            s.allocated / 1024.0, percent);
@@ -184,10 +232,10 @@ int main(int argc, char **argv) {
 
   CALL(pipeline_allocator, destroy);
   free(pipeline_allocator);
-  CALL(vm.gc.old, destroy);
-  free(vm.gc.old);
-  CALL(vm.gc.new, destroy);
-  free(vm.gc.new);
+  CALL(vm.gc->old, destroy);
+  free(vm.gc->old);
+  CALL(vm.gc->new, destroy);
+  free(vm.gc->new);
   VERBOSE_PUTS("mem::Allocator::destroy: Deallocated memory space");
 
   if (a.run == NULL) {

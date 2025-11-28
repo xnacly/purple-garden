@@ -89,11 +89,11 @@ typedef struct {
   Allocator *new;
   void *vm;
   GcHeader *head;
-  size_t threshold;
   size_t allocated;
+  size_t allocated_since_last_cycle;
 } Gc;
 
-Gc gc_init(void *vm, size_t threshold);
+Gc gc_init(size_t threshold);
 void *gc_request(Gc *gc, size_t size, ObjType t);
 Stats gc_stats(Gc *gc);
 void gc_cycle(Gc *gc);

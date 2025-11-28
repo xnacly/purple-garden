@@ -14,13 +14,12 @@ const char *GC_OBJ_TYPES[] = {
     [GC_OBJ_MAP] = "MAP",
 };
 
-Gc gc_init(void *vm, size_t threshold) {
+Gc gc_init(size_t gc_size) {
+  size_t half = gc_size / 2;
   return (Gc){
-      .old = bump_init(GC_MIN_HEAP, 0),
-      .new = bump_init(GC_MIN_HEAP, 0),
-      .vm = vm,
+      .old = bump_init(half, 0),
+      .new = bump_init(half, 0),
       .head = NULL,
-      .threshold = threshold,
   };
 }
 
@@ -43,6 +42,7 @@ void *gc_request(Gc *gc, size_t size, ObjType t) {
   h->next = gc->head;
   gc->head = h;
 
+  gc->allocated_since_last_cycle += size;
   gc->allocated += size;
 
 #ifdef VERBOSE_GC
@@ -113,6 +113,28 @@ static inline void rewrite(Gc *gc, Value *v) {
   }
 }
 
+void rewrite_nested(Gc *gc, Value *v) {
+  rewrite(gc, v);
+
+  switch (v->type) {
+  case V_ARRAY:
+    for (size_t i = 0; i < v->array->len; i++) {
+      rewrite_nested(gc, &v->array->arr[i]);
+    }
+    break;
+  case V_OBJ:
+    for (size_t i = 0; i < v->obj->cap; i++) {
+      MapEntry *me = &v->obj->buckets[i];
+      if (me->hash) {
+        rewrite_nested(gc, &me->value);
+      }
+    }
+    break;
+  default:
+    break;
+  }
+}
+
 static inline void mark(Gc *gc, const Value *val) {
   if (!val || !val->is_heap) {
     return;
@@ -133,10 +155,8 @@ static inline void mark(Gc *gc, const Value *val) {
     return;
   }
 
-  // TODO: remove this once this bug was fixed, currently no clue why this
-  // occurs
   ASSERT((uintptr_t)payload > sizeof(GcHeader),
-         "payload too small, something is wrong");
+         "payload too small, GC logic bug, this shouldnt happen");
 
   GcHeader *h = (GcHeader *)((char *)payload - sizeof(GcHeader));
   if (!h || h->marked) {
@@ -175,10 +195,17 @@ static inline void mark(Gc *gc, const Value *val) {
 };
 
 void gc_cycle(Gc *gc) {
+  if (!gc->allocated_since_last_cycle) {
+    return;
+  }
+  gc->allocated_since_last_cycle = 0;
   Vm *vm = ((Vm *)gc->vm);
 #ifdef VERBOSE_GC
   printf("[GC][MARK] starting marking at %.2f%% (%zuB) heap usage\n",
-         gc->allocated * 100 / (double)gc->threshold, gc->allocated);
+         gc->allocated * 100 /
+             (double)(CALL(gc->old, stats).allocated +
+                      CALL(gc->new, stats).allocated),
+         gc->allocated);
 #endif
 
 #ifdef VERBOSE_GC
@@ -242,7 +269,7 @@ void gc_cycle(Gc *gc) {
     for (size_t i = 0; i < f->variable_table.cap; i++) {
       MapEntry *me = &f->variable_table.buckets[i];
       if (me->hash) {
-        rewrite(gc, &me->value);
+        rewrite_nested(gc, &me->value);
       }
     }
   }
@@ -252,7 +279,7 @@ void gc_cycle(Gc *gc) {
     case GC_OBJ_LIST: {
       List *l = (List *)h->payload;
       for (size_t i = 0; i < l->len; i++) {
-        rewrite(gc, &l->arr[i]);
+        rewrite_nested(gc, &l->arr[i]);
       }
       break;
     }
@@ -261,7 +288,7 @@ void gc_cycle(Gc *gc) {
       for (size_t i = 0; i < m->cap; i++) {
         MapEntry *me = &m->buckets[i];
         if (me->hash) {
-          rewrite(gc, &me->value);
+          rewrite_nested(gc, &me->value);
         }
       }
       break;
