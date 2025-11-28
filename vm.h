@@ -75,7 +75,7 @@ typedef struct __Vm {
   // used for container sizes and stuff
   uint32_t size_hint;
 
-  builtin_function *builtins;
+  LIST_builtin_function builtins;
   size_t builtin_count;
 
   Gc gc;

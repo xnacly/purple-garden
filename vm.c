@@ -21,13 +21,11 @@ Str OP_MAP[256] = {
     [OP_SIZE] = STRING("SIZE"),     [OP_IDX] = STRING("IDX"),
 };
 
-static builtin_function BUILTIN_MAP[MAX_BUILTIN_SIZE];
-
 Vm Vm_new(Vm_Config conf, Allocator *staticalloc, Gc gc) {
   Vm vm = {0};
   vm.gc = gc;
   vm.config = conf;
-  vm.builtins = BUILTIN_MAP;
+  vm.builtins = LIST_new(builtin_function);
   vm.staticalloc = staticalloc;
 
   vm.globals = CALL(staticalloc, request, (sizeof(Value) * GLOBAL_SIZE));
@@ -88,22 +86,22 @@ int Vm_run(Vm *vm) {
     VM_OP op = vm->bytecode[vm->pc];
     uint32_t arg = vm->bytecode[vm->pc + 1];
 
-    // #define PRINT_REGISTERS 2
-    // #if DEBUG
-    //     vm->instruction_counter[op]++;
-    //     Str *str = &OP_MAP[op];
-    //     printf("[VM][%05zu|%05zu] %.*s%*.s=%010u", vm->pc, vm->pc + 1,
-    //            (int)str->len, str->p, 10 - (int)str->len, " ", arg);
-    // #if PRINT_REGISTERS
-    //     printf("{ ");
-    //     for (size_t i = 0; i < PRINT_REGISTERS; i++) {
-    //       Value_debug(&vm->registers[i]);
-    //       printf(" ");
-    //     }
-    //     printf("} ");
-    // #endif
-    //     puts("");
-    // #endif
+#define PRINT_REGISTERS 2
+#if DEBUG
+    vm->instruction_counter[op]++;
+    Str *str = &OP_MAP[op];
+    printf("[VM][%05zu|%05zu] %.*s%*.s=%010u", vm->pc, vm->pc + 1,
+           (int)str->len, str->p, 10 - (int)str->len, " ", arg);
+#if PRINT_REGISTERS
+    printf("{ ");
+    for (size_t i = 0; i < PRINT_REGISTERS; i++) {
+      Value_debug(&vm->registers[i]);
+      printf(" ");
+    }
+    printf("} ");
+#endif
+    puts("");
+#endif
 
     switch (op) {
     case OP_SIZE:
@@ -402,7 +400,7 @@ int Vm_run(Vm *vm) {
     case OP_SYS: {
       // at this point all builtins are just "syscalls" into an array of
       // function pointers
-      ((builtin_function)vm->builtins[arg])(vm);
+      ((builtin_function)LIST_get_UNSAFE(&vm->builtins, arg))(vm);
       vm->arg_count = 1;
       vm->arg_offset = 0;
       break;

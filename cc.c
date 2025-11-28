@@ -200,9 +200,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
       BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(argument_len,
                                               ctx->register_allocated_count));
-      ASSERT(vm->builtin_count + 1 < MAX_BUILTIN_SIZE, "Too many builtins");
-      BC(OP_SYS, vm->builtin_count);
-      vm->builtins[vm->builtin_count++] = sn->fn;
+      BC(OP_SYS, vm->builtin_count++);
+      LIST_append(&vm->builtins, vm->staticalloc, sn->fn);
     } else {
       compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 0));
       size_t rtarget = Ctx_allocate_register(ctx);
