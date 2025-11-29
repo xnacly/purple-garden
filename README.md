@@ -7,14 +7,14 @@ and gc, while allowing to disable the gc and stdlib fully.
 
 ```python
 fn greeting :: greetee {
-    println("hello world to:" greetee)
+    std::println("hello world to:" greetee)
 } 
-greeting("teo") # hello world to: user
+greeting(std::env::get("USER")) # hello world to: $USER
 
 fn tuplify :: v {
     [type(v) len(v)]
 } 
-println(tuplify("hello world")) # [str, 11]
+std::println(tuplify("hello world")) # [str, 11]
 ```
 
 ## Local Setup

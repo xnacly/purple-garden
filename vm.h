@@ -17,6 +17,8 @@ typedef struct {
   bool disable_gc;
   // reduce the standard library to std::len
   bool disable_std;
+  // start with empty env table
+  bool no_env;
 } Vm_Config;
 
 #define ENCODE_ARG_COUNT_AND_OFFSET(COUNT, OFFSET)                             \

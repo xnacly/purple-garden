@@ -7,7 +7,7 @@ std::println(add3(3.1415 3.1415 3.1415))
 fn greeting :: greetee {
     std::println("hello world to:" greetee)
 } 
-greeting("teo") # hello world to: user
+greeting(std::env::get("USER")) # hello world to: $USER
 
 # zero arguments, so no delimitor
 fn zero_args {

@@ -1,6 +1,7 @@
 #include "std.h"
 #include "arr.c"
 #include "conv.c"
+#include "env.c"
 #include "fmt.c"
 #include "fs.c"
 #include "math.c"
@@ -8,7 +9,6 @@
 #include "runtime.c"
 
 static void builtin_len(Vm *vm) {
-  ASSERT(vm->arg_count == 1, "len only works for a singular argument")
   const Value *a = &ARG(0);
   size_t len = 0;
   if (a->type == V_STR) {
@@ -63,7 +63,11 @@ static StdNode tree = PACKAGE("std",
                   FUNCTION("stats", &builtin_runtime_gc_stats, 0),
                   FUNCTION("cycle", &builtin_runtime_gc_cycle, 0)
               ),
-          ), 
+          ),
+          PACKAGE("env", 
+              FUNCTION("get", &builtin_env_get, 1),
+              FUNCTION("set", &builtin_env_set, 2)
+          ),
           FUNCTION("assert", &builtin_runtime_assert, 1),
           FUNCTION("println", &builtin_fmt_println, -1),
           FUNCTION("Some", &builtin_opt_some, 1),
@@ -87,11 +91,16 @@ static void compute_hashes(StdNode *node) {
   }
 }
 
-StdNode *std_tree(Vm_Config conf) {
+// std_tree defines the stdlib tree, its packages and functions, computes a hash
+// for all nodes and creates other inital states, like the env
+StdNode *std_tree(Vm_Config conf, Allocator *a) {
   StdNode *selected = &tree;
   if (conf.disable_std) {
     selected = &reduced;
+  } else {
+    setup_env(conf, a);
   }
+
   compute_hashes(selected);
   return selected;
 }

@@ -57,14 +57,14 @@ static size_t Ctx_allocate_register(Ctx *ctx) {
   ASSERT(ctx->register_allocated_count < REGISTERS, "cc: out of registers")
   ctx->registers[ctx->register_allocated_count] = true;
 #if DEBUG
-  printf("allocating r%zu\n", ctx->register_allocated_count);
+  printf("reserving r%zu\n", ctx->register_allocated_count);
 #endif
   return ctx->register_allocated_count++;
 }
 
 static void Ctx_free_register(Ctx *ctx, size_t i) {
   ASSERT(i < ctx->register_allocated_count, "cc: register index out of bounds");
-  ASSERT(ctx->registers[i], "cc: attempting to free unallocated register");
+  ASSERT(ctx->registers[i], "cc: attempting to free unreserved register");
   ctx->register_allocated_count--;
 #if DEBUG
   printf("freeing r%zu\n", ctx->register_allocated_count);
@@ -431,7 +431,7 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
       .global_hash_buckets = {0},
       .hash_to_function = {},
       .bcb = &bcb,
-      .std = std_tree(vm->config),
+      .std = std_tree(vm->config, alloc),
   };
 
   while (true) {

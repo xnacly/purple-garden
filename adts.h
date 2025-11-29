@@ -87,6 +87,7 @@ typedef struct Map Map;
 typedef struct List List;
 
 // TODO: migrate this to the new Gc struct
+// TODO: implement hash collision
 Map Map_new(size_t cap, Allocator *a);
 void Map_clear(Map *m);
 void Map_insert(Map *m, const Str *s, Value v, Allocator *a);

@@ -49,7 +49,8 @@
     "instruct memory usage amount for gc to start collecting, in percent "     \
     "(5-99%)")                                                                 \
   X(no_gc, 0, false, BOOL, "disable garbage collection")                       \
-  X(no_std, 0, false, BOOL, "limit the standard library to std::len")
+  X(no_std, 0, false, BOOL, "limit the standard library to std::len")          \
+  X(no_env, 0, false, BOOL, "skip importing of all env variables")
 
 typedef struct {
 #define X(NAME, SHORT, DEFAULT, TYPE, DESCRIPTION) typeof(DEFAULT) NAME;
@@ -187,6 +188,7 @@ int main(int argc, char **argv) {
           .disable_gc = a.no_gc,
           .max_memory = a.gc_max,
           .disable_std = a.no_std,
+          .no_env = a.no_env,
       },
       pipeline_allocator, &gc);
   gc.vm = &vm;
