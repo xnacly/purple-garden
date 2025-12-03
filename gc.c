@@ -182,7 +182,11 @@ static inline void mark(Gc *gc, const Value *val) {
     break;
   }
   case GC_OBJ_MAP:
-    ASSERT(0, "V_OBJ marking not implemented yet");
+    Map *m = (Map *)payload;
+    for (size_t i = 0; i < m->cap; i++) {
+      MapEntry e = m->buckets[i];
+      mark(gc, &e.value);
+    }
   default:
     return;
   }
