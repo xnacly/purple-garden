@@ -165,18 +165,6 @@ int Vm_run(Vm *vm) {
       Value *rhs = &vm->registers[0];
       Value *lhs = &vm->registers[arg];
 
-      if (lhs->type == V_STR && rhs->type == V_STR) {
-        size_t len = lhs->string->len + rhs->string->len;
-        Str *s = gc_request(vm->gc, sizeof(Str), GC_OBJ_STR);
-        uint8_t *buf = gc_request(vm->gc, len, GC_OBJ_RAW);
-        memcpy(buf, lhs->string->p, lhs->string->len);
-        memcpy(buf + lhs->string->len, rhs->string->p, rhs->string->len);
-        s->p = buf;
-        s->len = len;
-        vm->registers[0] = (Value){.type = V_STR, .is_heap = 1, .string = s};
-        break;
-      }
-
       int lhs_is_double = lhs->type == V_DOUBLE;
       int rhs_is_double = rhs->type == V_DOUBLE;
 

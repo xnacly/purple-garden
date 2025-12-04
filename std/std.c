@@ -7,6 +7,7 @@
 #include "math.c"
 #include "opt.c"
 #include "runtime.c"
+#include "str.c"
 
 static void builtin_len(Vm *vm) {
   const Value *a = &ARG(0);
@@ -40,6 +41,9 @@ static StdNode tree = PACKAGE("std",
           ), 
           PACKAGE("math", 
               FUNCTION("mod", &builtin_math_mod, 2), 
+          ), 
+          PACKAGE("str", 
+              FUNCTION("append", &builtin_str_append, -1), 
           ), 
           PACKAGE("opt", 
               FUNCTION("unwrap", &builtin_opt_unwrap, 1), 

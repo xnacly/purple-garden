@@ -1,5 +1,5 @@
 # vim: filetype=python
-fn add3 :: arg1 arg2 arg3  {
+fn add3 :: arg1 arg2 arg3 {
     arg1+arg2+arg3
 }
 std::println(add3(3.1415 3.1415 3.1415))
@@ -37,7 +37,6 @@ fn f1 :: a {
     }
 }
 f1(0)
-
 
 # compute n! with acumulator a
 fn factorial :: n a {
