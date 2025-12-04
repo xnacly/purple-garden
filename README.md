@@ -33,55 +33,83 @@ $ git clone https://github.com/xnacly/purple-garden.git
 nix develop
 
 # by default purple_garden fills $PG to be ./examples/hello-world.garden
-make
+make run
 
-# ./build/purple_garden_debug ./examples/hello-world.garden
-# #vim: filetype=python
-# 
-# #fmt/println is a predefined function responsible for writing to
-# #stdout
-# println("Hello World")
-# vmnew: 8.03KB of 24.25KB used (33.118557%)
-# ->Parser_comparison#T_IDENT
-#  ->Parser_expr#T_IDENT
-#   ->Parser_term#T_IDENT
-#    ->Parser_atom#T_IDENT
-#     ->Parser_next#T_STRING
-#      ->Parser_comparison#T_STRING
-#       ->Parser_expr#T_STRING
-#        ->Parser_term#T_STRING
-#         ->Parser_atom#T_STRING
-# N_CALL[println](
-#  N_ATOM[T_STRING][Hello World]{.hash=4420528118743043111}
+# Args{
+#         block_allocator: 0,
+#         aot_functions: false,
+#         disassemble: false,
+#         memory_usage: false,
+#         run: "",
+#         verbose: false,
+#         stats: false,
+#         version: false,
+#         gc_max: 1638400,
+#         gc_size: 51200,
+#         gc_limit: 70.000000,
+#         no_gc: false,
+#         no_std: false,
+#         no_env: false,
+# }
+# # vim: filetype=python
+# std::println("Hello" std::env::get("USER")) # Hello $USER
+# vmnew: 16.00KB of 40.25KB used (39.751553%)
+# N_PATH[T_STD](
+#  N_CALL[println](
+#   N_ATOM[T_STRING][Hello]{.hash=7201466553693376363},
+#   N_PATH[T_STD](
+#    N_IDENT[T_IDENT][env]{.hash=14046746036577462228},
+#    N_CALL[get](
+#     N_ATOM[T_STRING][USER]{.hash=10484170954014828594}
+#    )
+#   )
+#  )
 # )
-# allocating r1
+# [cc] Found std leaf function `println`: 0x419780
+# reserving r1
+# [cc] Found std leaf function `get`: 0x41a580
+# reserving r2
+# freeing r2
+# reserving r2
+# freeing r2
 # freeing r1
 # __globals:
-#         False; {idx=0}
-#         True; {idx=1}
-#         Option/None; {idx=2}
-#         Str(`Hello World`); {idx=3,hash=39}
+#         false; {idx=0}
+#         true; {idx=1}
+#         Option::None; {idx=2}
+#         str::"Hello"; {idx=3,hash=7201466553693376363}
+#         str::"USER"; {idx=4,hash=10484170954014828594}
 # 
 # __start:
-#         LOADG 3; Str(`Hello World`)
+#         LOADG 3; str::"Hello"
 #         STORE 1
-#         ARGS 128 ; count=1,offset=0
-#         BUILTIN 326
-# cc  : 10.77KB of 24.25KB used (44.426546%)
-# [VM][000000|00001] LOADG     =000003{ Option/None Option/None }
-# [VM][000002|00003] STORE     =000001{ Str(`Hello World`) Option/None }
-# [VM][000004|00005] ARGS      =000128{ Str(`Hello World`) Str(`Hello World`) }
-# [VM][000006|00007] BUILTIN   =000326{ Str(`Hello World`) Str(`Hello World`) }
-# Hello World
-# vm  : 4.02KB of 50.00KB used (8.046875%)
+#         LOADG 4; str::"USER"
+#         STORE 2
+#         ARGS 129 ; count=1,offset=1
+#         SYS 0
+#         STORE 2
+#         ARGS 256 ; count=2,offset=0
+#         SYS 1
+# cc  : 32.12KB of 40.25KB used (79.794255%)
+# [VM][00000|00001] LOADG     =0000000003{ Option::None Option::None }
+# [VM][00002|00003] STORE     =0000000001{ str::"Hello" Option::None }
+# [VM][00004|00005] LOADG     =0000000004{ str::"Hello" str::"Hello" }
+# [VM][00006|00007] STORE     =0000000002{ str::"USER" str::"Hello" }
+# [VM][00008|00009] ARGS      =0000000129{ str::"USER" str::"Hello" }
+# [VM][00010|00011] SYS       =0000000000{ str::"USER" str::"Hello" }
+# [VM][00012|00013] STORE     =0000000002{ str::"teo" str::"Hello" }
+# [VM][00014|00015] ARGS      =0000000256{ str::"teo" str::"Hello" }
+# [VM][00016|00017] SYS       =0000000001{ str::"teo" str::"Hello" }
+# Hello teo
+# vm  : 0.00KB of 50.00KB used (0.000000%)
 # | Opcode     | Compiled %               | Executed %               |
 # | ---------- | ------------------------ | ------------------------ |
-# | STORE      | 1               (25.00%) | 1               (25.00%) |
-# | ARGS       | 1               (25.00%) | 1               (25.00%) |
-# | BUILTIN    | 1               (25.00%) | 1               (25.00%) |
-# | LOADG      | 1               (25.00%) | 1               (25.00%) |
+# | STORE      | 3               (33.33%) | 3               (33.33%) |
+# | ARGS       | 2               (22.22%) | 2               (22.22%) |
+# | SYS        | 2               (22.22%) | 2               (22.22%) |
+# | LOADG      | 2               (22.22%) | 2               (22.22%) |
 # | ========== | ======================== | ======================== |
-# | ::<>       | 4               (99.99%) | 4               (99.99%) |
+# | ::<>       | 9               (99.99%) | 9               (99.99%) |
 
 # provide a custom file to execute
 make PG=examples/ops.garden
@@ -93,68 +121,65 @@ make PG=examples/ops.garden
 
 ```sh
 $ make release
-./purple_garden
+$ ./purple_garden
 # error: Missing a file? try `+h/+help`
-#$ ./purple_garden +h
-#usage ./build/purple_garden_debug: [ +b / +block_allocator <0>] [ +a / +aot_functions]
-#                                   [ +d / +disassemble] [ +m / +memory_usage]
-#                                   [ +r / +run <``>] [ +V / +verbose]
-#                                   [ +s / +stats] [ +v / +version]
-#                                   [ +gc_max <1638400>] [ +gc_size <51200>]
-#                                   [ +gc_limit <70>]
-#                                   [ +h / +help] <file.garden>
-#
-#Option:
-#          +b / +block_allocator <0>
-#                use block allocator with size instead of garbage collection
-#
-#          +a / +aot_functions
-#                compile all functions to machine code
-#
-#          +d / +disassemble
-#                readable bytecode representation with labels, globals and comments
-#
-#          +m / +memory_usage
-#                display the memory usage of parsing, compilation and the virtual machine
-#
-#          +r / +run <``>
-#                executes the argument as if given inside a file
-#
-#          +V / +verbose
-#                verbose logs
-#
-#          +s / +stats
-#                show statistics
-#
-#          +v / +version
-#                display version information
-#
-#          +gc_max <1638400>
-#                set hard max gc space in bytes, default is GC_MIN_HEAP*64
-#
-#          +gc_size <51200>
-#                define gc heap size in bytes
-#
-#          +gc_limit <70>
-#                instruct memory usage amount for gc to start collecting, in percent (5-99%)
-#
-#          +h / +help
-#                help page and usage
-#
-#Examples:
-#        ./build/purple_garden_debug +b 0 +a \
-#                                    +d +m \
-#                                    +r "" +V \
-#                                    +s +v \
-#                                    + 1638400 + 51200 \
-#                                    + 0
-#
-#        ./build/purple_garden_debug +block_allocator 0 +aot_functions \
-#                                    +disassemble +memory_usage \
-#                                    +run "" +verbose \
-#                                    +stats +version \
-#                                    +gc_max 1638400 +gc_size 51200 \
-#                                    +gc_limit 0
+$ ./purple_garden +h
+# usage ./build/purple_garden: [ +b/+block_allocator <0>] [ +a/+aot_functions]
+#                                    [ +d/+disassemble] [ +m/+memory_usage]
+#                                    [ +r/+run <``>] [ +V/+verbose]
+#                                    [ +s/+stats] [ +v/+version]
+#                                    [ +gc_max <1638400>] [ +gc_size <51200>]
+#                                    [ +gc_limit <70>] [ +no_gc]
+#                                    [ +no_std] [ +no_env]
+#                                    <file.garden>
+# 
+# Option:
+#           +b/+block_allocator <0>
+#                 use block allocator with size instead of garbage collection
+#           +a/+aot_functions
+#                 compile all functions to machine code
+#           +d/+disassemble
+#                 readable bytecode representation with labels, globals and comments
+#           +m/+memory_usage
+#                 display the memory usage of parsing, compilation and the virtual machine
+#           +r/+run <``>
+#                 executes the argument as if given inside a file
+#           +V/+verbose
+#                 verbose logs
+#           +s/+stats
+#                 show statistics
+#           +v/+version
+#                 display version information
+#           +gc_max <1638400>
+#                 set hard max gc space in bytes, default is GC_MIN_HEAP*64
+#           +gc_size <51200>
+#                 define gc heap size in bytes
+#           +gc_limit <70>
+#                 instruct memory usage amount for gc to start collecting, in percent (5-99%)
+#           +no_gc
+#                 disable garbage collection
+#           +no_std
+#                 limit the standard library to std::len
+#           +no_env
+#                 skip importing of all env variables
+#           +h/+help
+#                 help page and usage
+# Examples:
+#         ./build/purple_garden +b 0 +a \
+#                                     +d +m \
+#                                     +r "" +V \
+#                                     +s +v \
+#                                     + 1638400 + 51200 \
+#                                     + 0 + \
+#                                     + +
+# 
+#         ./build/purple_garden +block_allocator 0 +aot_functions \
+#                                     +disassemble +memory_usage \
+#                                     +run "" +verbose \
+#                                     +stats +version \
+#                                     +gc_max 1638400 +gc_size 51200 \
+#                                     +gc_limit 0 +no_gc \
+#                                     +no_std +no_env
 ```
 
 ### Running tests
@@ -185,69 +210,29 @@ For readable bytecode representation with labels, globals and comments.
 ```sh
 $ ./purple_garden +disassemble examples/hello-world.garden
 # [...] omitted - see below
-# Hello World
+# Hello teo
 ```
 
-Results in `Hello World` and of course bytecode disassembly:
+Results in `Hello teo` and of course bytecode disassembly:
 
 ```asm
 __globals:
-        False; {idx=0}
-        True; {idx=1}
-        Option/None; {idx=2}
-        Str(`Hello World`); {idx=3,hash=39}
-
-__entry:
-        LOADG 3; Str(`Hello World`)
-        STORE 1
-        ARGS 128 ; count=1,offset=0
-        BUILTIN 326
-```
-
-Or of course the benchmark example:
-
-```asm
-__globals:
-        False; {idx=0}
-        True; {idx=1}
-        Option/None; {idx=2}
-        Double(2.5); {idx=3}
+        false; {idx=0}
+        true; {idx=1}
+        Option::None; {idx=2}
+        str::"Hello"; {idx=3,hash=7201466553693376363}
+        str::"USER"; {idx=4,hash=10484170954014828594}
 
 __start:
-; comparer::{args=2,size=26}
-__0x000000[02F2]:
-        JMP 26
-        LOAD 1
-        VAR 140
-        LOAD 2
-        VAR 165
-        LOADV 140
+        LOADG 3; str::"Hello"
         STORE 1
-        LOADV 165
-        EQ 1
-        STORE 1
-        ARGS 128 ; count=1,offset=0
-        BUILTIN 603
-        LEAVE
-
-
-; inc::{args=1,size=20}
-__0x00001A[0087]:
-        JMP 46
-        LOAD 1
-        VAR 140
-        LOADV 140
-        STORE 1
-        LOADV 140
+        LOADG 4; str::"USER"
+        STORE 2
+        ARGS 129 ; count=1,offset=1
+        SYS 0
         STORE 2
         ARGS 256 ; count=2,offset=0
-        CALL 0; <comparer> $2
-        LEAVE
-
-        LOADG 3; Double(2.5)
-        STORE 1
-        ARGS 128 ; count=1,offset=0
-        CALL 26; <inc> $1
+        SYS 1
 ```
 
 The disassembler attempts to display as much information as possible:
@@ -261,22 +246,42 @@ The disassembler attempts to display as much information as possible:
 
 ### Benchmarks
 
-For benchmarking, remember to create a large sample size via the purple garden source code:
+For benchmarking, remember to create a large sample size via the purple garden
+source code:
 
-```sh
-$ wc -l examples/bench.garden
-# 250003 examples/bench.garden
-```
+```python
+# benchmarks/bin.garden
+fn bin_step :: n k i r {
+    match {
+        i = k { std::Some(r) }
+        {
+            bin_step(n k i+1 r * (n-i)/(i+1))
+        }
+    }
+}
 
-> This benchmark example is for optimizing tail calls, builtin dispatch and match performance:
+fn bin :: n k {
+    match {
+        k < 0 { std::None() }
+        k = 0 { std::Some(1) }
+        k = n { std::Some(1) }
+        {
+            var kk = match {
+                n - k < k { n - k }
+                { k }
+            }
+            bin_step(n kk 0 1)
+        }
+    }
+}
 
-```racket
-fn comparer :: a b { assert(a = b) }
-fn inc :: a { comparer(a a) }
-inc(2.5)
-inc(2.5)
-inc(2.5)
-; [...]
+std::assert(bin(1 1) = 1)
+std::assert(bin(1 0) = 1)
+std::assert(bin(6 3) = 20)
+std::assert(bin(6 5) = 6)
+std::assert(bin(10 5) = 252)
+std::assert(bin(20 15) = 15504)
+std::assert(bin(49 6) = 13983816)
 ```
 
 Running the whole thing with `make bench`, the time took for each stage is
@@ -284,22 +289,21 @@ notated between `[` and `]`.
 
 ```sh
 # built in time measurements
-$ make bench PG=examples/bench.garden
+$ make bench PG=benchmarks/bin.garden
 # [    0.0000ms] main::Args_parse: Parsed arguments
-# [    0.0080ms] io::IO_read_file_to_string: mmaped input of size=2250076B
-# [    0.0020ms] mem::init: Allocated memory block of size=24832B
-# [   34.6260ms] cc::cc: Flattened AST to byte code/global pool length=2000054/4 (8000216B/64B)
-# [   16.5160ms] vm::Vm_run: executed byte code
-# [    1.5930ms] mem::Allocator::destroy: Deallocated memory space
-# [    0.0010ms] vm::Vm_destroy: teared vm down
+# [    0.0070ms] io::IO_read_file_to_string: mmaped input of size=647B
+# [    0.0050ms] mem::init: Allocated memory block of size=41216B
+# [    0.0730ms] cc::cc: Flattened AST to byte code/global pool length=376/19 (1504B/304B)
+# [    0.0090ms] vm::Vm_run: executed byte code
+# [    0.0070ms] mem::Allocator::destroy: Deallocated memory space
 # [    0.0000ms] munmap: unmapped input
 
 # or hyperfine
 $ make release
-$ hyperfine "./build/purple_garden examples/bench.garden"
-# Benchmark 1: ./build/purple_garden examples/bench.garden
-#   Time (mean ± σ):      53.0 ms ±   0.7 ms    [User: 37.1 ms, System: 15.5 ms]
-#   Range (min … max):    52.2 ms …  54.9 ms    53 runs
+$ hyperfine "./build/purple_garden benchmarks/bin.garden" -N -w10
+# Benchmark 1: ./build/purple_garden benchmarks/bin.garden
+#   Time (mean ± σ):     610.4 µs ±  42.7 µs    [User: 288.9 µs, System: 245.5 µs]
+#   Range (min … max):   549.0 µs … 1074.5 µs    4807 runs
 ```
 
 ### Profiling
@@ -373,7 +377,5 @@ $ make profile
     - [x] `vm`: merge `LOAD` and `PUSH` consecutively into `PUSHG`
 - [ ] `vm`: lock I/O for the whole program execution for faster performance via `+lock-io`
 - [ ] `cc`: cache bytecode and global pool to omit frontend, disable via `+no-cache`
-- [ ] `gc`: mark and sweep garbage collection via `+gc:marksweep`
-- [ ] `gc`: generational garbage collection via `+gc:gen`
-- [ ] `gc`: reference counting via `+gc:rc`
+- [x] `gc`: hybrid garbage collection strategy combining: bump allocation, mark-and-sweep, and semi-space copying
 - [x] `gc`: allow for bump/block allocator with `+block-allocator`

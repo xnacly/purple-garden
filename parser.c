@@ -17,7 +17,7 @@ static size_t call_depth = 0;
            (int)TOKEN_TYPE_MAP[p->cur->type].len,                              \
            TOKEN_TYPE_MAP[p->cur->type].p);                                    \
     call_depth++;                                                              \
-    Node __n = (FUNC)(p);                                                      \
+    Node *__n = (FUNC)(p);                                                     \
     call_depth--;                                                              \
     __n;                                                                       \
   })

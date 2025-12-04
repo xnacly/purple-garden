@@ -21,12 +21,12 @@ void print_flag(SixFlag *f, bool long_option) {
   const char *pre_and_postfix = "[]";
   if (long_option) {
     putc('\t', stdout);
-    pre_and_postfix = "  ";
+    pre_and_postfix = " ";
   }
 
   if (f->short_name) {
-    printf("%c %c%c / %c%s", pre_and_postfix[0], SIX_OPTION_PREFIX,
-           f->short_name, SIX_OPTION_PREFIX, f->name);
+    printf("%c %c%c/%c%s", pre_and_postfix[0], SIX_OPTION_PREFIX, f->short_name,
+           SIX_OPTION_PREFIX, f->name);
   } else {
     printf("%c %c%s", pre_and_postfix[0], SIX_OPTION_PREFIX, f->name);
   }
@@ -61,7 +61,7 @@ void print_flag(SixFlag *f, bool long_option) {
 
   if (long_option) {
     if (f->description) {
-      printf("\n\t\t%s\n", f->description);
+      printf("\n\t\t%s", f->description);
     }
     putc('\n', stdout);
   }
@@ -87,7 +87,7 @@ static void usage(const char *pname, const Six *h) {
   }
 
   printf("\n%*.s ", (int)len, "");
-  print_flag(&HELP_FLAG, false);
+  // print_flag(&HELP_FLAG, false);
 
   if (h->name_for_rest_arguments) {
     puts(h->name_for_rest_arguments);
