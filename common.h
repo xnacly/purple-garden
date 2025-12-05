@@ -26,7 +26,17 @@
       MAX_BUILTIN_SIZE * sizeof(builtin_function)
 #endif
 
-#define REGISTERS 31
+#define REGISTERS 32
+
+#define SWAP_STRUCT(A, B)                                                      \
+  do {                                                                         \
+    _Static_assert(__builtin_types_compatible_p(typeof(A), typeof(B)),         \
+                   "SWAP_STRUCT arguments must have identical types");         \
+                                                                               \
+    typeof(A) __swap_tmp = (A);                                                \
+    (A) = (B);                                                                 \
+    (B) = __swap_tmp;                                                          \
+  } while (0)
 
 #define UNLIKELY(condition) __builtin_expect(condition, 0)
 // TODO: not compiled out in release builds; rework this into a panic system and
@@ -73,9 +83,10 @@ typedef struct List {
 typedef struct Value {
   // true if @Some, otherwise self is just a Value, if @None just .type=V_NONE
   unsigned int is_some : 1;
+  unsigned int is_heap : 1;
   unsigned int type : 3;
   union {
-    const Str *string;
+    Str *string;
     List *array;
     Map *obj;
     double floating;
