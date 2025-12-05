@@ -240,7 +240,7 @@ void gc_cycle(Gc *gc) {
   GcHeader *new_head = NULL;
   size_t new_alloc = 0;
   for (GcHeader *h = gc->head; h; h = h->next) {
-    if (!h->marked || h->forward) {
+    if (!h->marked) {
       continue;
     }
 

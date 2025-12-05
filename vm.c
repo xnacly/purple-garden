@@ -86,7 +86,7 @@ int Vm_run(Vm *vm) {
     VM_OP op = vm->bytecode[vm->pc];
     uint32_t arg = vm->bytecode[vm->pc + 1];
 
-#define PRINT_REGISTERS 2
+#define PRINT_REGISTERS 0
 #if DEBUG
     vm->instruction_counter[op]++;
     Str *str = &OP_MAP[op];
@@ -389,6 +389,9 @@ int Vm_run(Vm *vm) {
       // at this point all builtins are just "syscalls" into an array of
       // function pointers
       ((builtin_function)LIST_get_UNSAFE(&vm->builtins, arg))(vm);
+      for (size_t i = 0; i < vm->arg_count; i++) {
+        vm->registers[vm->arg_offset + i].is_heap = false;
+      }
       vm->arg_count = 1;
       vm->arg_offset = 0;
       break;
@@ -399,6 +402,9 @@ int Vm_run(Vm *vm) {
       f->return_to_bytecode = vm->pc;
       vm->frame = f;
       vm->pc = arg;
+      for (size_t i = 0; i < vm->arg_count; i++) {
+        vm->registers[vm->arg_offset + i].is_heap = false;
+      }
       vm->arg_count = 1;
       vm->arg_offset = 0;
       break;
