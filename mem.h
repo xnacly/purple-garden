@@ -10,8 +10,8 @@
 // #endif
 // #endif
 
-// 50KB
-#define GC_MIN_HEAP 50 * 1024
+// 25KB
+#define GC_MIN_HEAP 25 * 1024
 
 typedef struct {
   size_t current;
@@ -57,11 +57,13 @@ typedef struct {
   Stats (*stats)(void *ctx);
   // Allocator::request returns a handle to a block of memory of size `size`
   void *(*request)(void *ctx, size_t size);
+  // Allocator::reset keeps the allocated space intact, but resets all
+  // bookkeeping as if the allocator had no allocations
+  void (*reset)(void *ctx);
   // Allocator::destroy cleans state up and deallocates any owned memory areas
   void (*destroy)(void *ctx);
 } Allocator;
 
 Allocator *bump_init(uint64_t min_size, uint64_t max_size);
-Allocator *xcgc_init(void *vm, size_t min_size, size_t max_size);
 
 #endif
