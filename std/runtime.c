@@ -7,7 +7,7 @@ static Str *BOOL = &STRING("bool");
 static Str *OBJ = &STRING("obj");
 static Str *ARR = &STRING("array");
 
-static void builtin_runtime_type(Vm *vm) {
+static void pg_builtin_runtime_type(Vm *vm) {
   uint16_t offset = vm->arg_offset;
   Str *s;
   const Value *a = &ARG(0);
@@ -48,11 +48,11 @@ static void builtin_runtime_type(Vm *vm) {
   });
 }
 
-static void builtin_runtime_assert(Vm *vm) {
+static void pg_builtin_runtime_assert(Vm *vm) {
   ASSERT(ARG(0).type == V_TRUE, "Assertion");
 }
 
-static void builtin_runtime_gc_stats(Vm *vm) {
+static void pg_builtin_runtime_gc_stats(Vm *vm) {
   // TODO: this fucking sucks, there has to be a better way, i urgenly need a
   // c->pg type macro
   // Stats c = CALL(vm->alloc, stats);
@@ -66,7 +66,7 @@ static void builtin_runtime_gc_stats(Vm *vm) {
   ASSERT(0, "UNIMPLEMENTED");
 }
 
-static void builtin_runtime_gc_cycle(Vm *vm) {
+static void pg_builtin_runtime_gc_cycle(Vm *vm) {
   if (!vm->config.disable_gc) {
     gc_cycle(vm->gc);
   }

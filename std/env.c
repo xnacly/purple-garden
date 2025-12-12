@@ -27,13 +27,13 @@ static void setup_env(Vm_Config conf, Allocator *a) {
   *env = env_map;
 }
 
-static void builtin_env_get(Vm *vm) {
+static void pg_builtin_env_get(Vm *vm) {
   Value key = ARG(0);
   ASSERT(key.type == V_STR, "Env idx must be string");
   RETURN(Map_get(env, key.string));
 }
 
-static void builtin_env_set(Vm *vm) {
+static void pg_builtin_env_set(Vm *vm) {
   Value key = ARG(0);
   Value value = ARG(1);
   ASSERT(key.type == V_STR, "Env idx must be string");

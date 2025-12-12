@@ -1,6 +1,6 @@
 #include "../vm.h"
 
-static void builtin_arr_range(Vm *vm) {
+static void pg_builtin_arr_range(Vm *vm) {
   int64_t start = Value_as_int(&ARG(0));
   int64_t end = Value_as_int(&ARG(1));
 
@@ -23,7 +23,7 @@ static void builtin_arr_range(Vm *vm) {
   RETURN((Value){.type = V_ARRAY, .array = l});
 }
 
-static void builtin_arr_new(Vm *vm) {
+static void pg_builtin_arr_new(Vm *vm) {
   Value size = ARG(0);
   List *l = gc_request(vm->gc, sizeof(List), GC_OBJ_LIST);
   *l = List_new((size_t)Value_as_int(&size), vm->gc);

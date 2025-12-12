@@ -1,6 +1,6 @@
 #include "../vm.h"
 
-static void builtin_str_append(Vm *vm) {
+static void pg_builtin_str_append(Vm *vm) {
   ASSERT(vm->arg_count >= 2, "args must be at least 2");
   Value arg0 = ARG(0);
   ASSERT(arg0.type == V_STR, "arg0 must be a string");

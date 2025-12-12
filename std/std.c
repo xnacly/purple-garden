@@ -9,7 +9,7 @@
 #include "runtime.c"
 #include "str.c"
 
-static void builtin_len(Vm *vm) {
+static void pg_builtin_len(Vm *vm) {
   const Value *a = &ARG(0);
   size_t len = 0;
   if (a->type == V_STR) {
@@ -32,55 +32,55 @@ static void builtin_len(Vm *vm) {
 // clang-format off
 static StdNode tree = PACKAGE("std",
           PACKAGE("fmt", 
-              FUNCTION("print", &builtin_fmt_print, -1), 
-              FUNCTION("println", &builtin_fmt_println, -1),
+              FUNCTION("print", &pg_builtin_fmt_print, -1), 
+              FUNCTION("println", &pg_builtin_fmt_println, -1),
           ), 
           PACKAGE("fs", 
-              FUNCTION("read_file", &builtin_fs_read_file, 1), 
-              FUNCTION("write_file", &builtin_fs_write_file, 2),
+              FUNCTION("read_file", &pg_builtin_fs_read_file, 1), 
+              FUNCTION("write_file", &pg_builtin_fs_write_file, 2),
           ), 
           PACKAGE("math", 
-              FUNCTION("mod", &builtin_math_mod, 2), 
+              FUNCTION("mod", &pg_builtin_math_mod, 2), 
           ), 
           PACKAGE("str", 
-              FUNCTION("append", &builtin_str_append, -1), 
+              FUNCTION("append", &pg_builtin_str_append, -1), 
           ), 
           PACKAGE("opt", 
-              FUNCTION("unwrap", &builtin_opt_unwrap, 1), 
-              FUNCTION("expect", &builtin_opt_expect, 2),
-              FUNCTION("or", &builtin_opt_or, 2), 
-              FUNCTION("is_some", &builtin_opt_is_some, 1), 
-              FUNCTION("is_none", &builtin_opt_is_none, 1), 
+              FUNCTION("unwrap", &pg_builtin_opt_unwrap, 1), 
+              FUNCTION("expect", &pg_builtin_opt_expect, 2),
+              FUNCTION("or", &pg_builtin_opt_or, 2), 
+              FUNCTION("is_some", &pg_builtin_opt_is_some, 1), 
+              FUNCTION("is_none", &pg_builtin_opt_is_none, 1), 
           ), 
           PACKAGE("conv", 
-              FUNCTION("int", &builtin_conv_int, 1),
-              FUNCTION("num", &builtin_conv_num, 1),
-              FUNCTION("str", &builtin_conv_str, 1),
+              FUNCTION("int", &pg_builtin_conv_int, 1),
+              FUNCTION("num", &pg_builtin_conv_num, 1),
+              FUNCTION("str", &pg_builtin_conv_str, 1),
           ), 
           PACKAGE("arr", 
-              FUNCTION("range", &builtin_arr_range, 2),
-              FUNCTION("new", &builtin_arr_new, 1),
+              FUNCTION("range", &pg_builtin_arr_range, 2),
+              FUNCTION("new", &pg_builtin_arr_new, 1),
           ), 
           PACKAGE("runtime", 
-              FUNCTION("type", &builtin_runtime_type, 1),
+              FUNCTION("type", &pg_builtin_runtime_type, 1),
               PACKAGE("gc", 
-                  FUNCTION("stats", &builtin_runtime_gc_stats, 0),
-                  FUNCTION("cycle", &builtin_runtime_gc_cycle, 0)
+                  FUNCTION("stats", &pg_builtin_runtime_gc_stats, 0),
+                  FUNCTION("cycle", &pg_builtin_runtime_gc_cycle, 0)
               ),
           ),
           PACKAGE("env", 
-              FUNCTION("get", &builtin_env_get, 1),
-              FUNCTION("set", &builtin_env_set, 2)
+              FUNCTION("get", &pg_builtin_env_get, 1),
+              FUNCTION("set", &pg_builtin_env_set, 2)
           ),
-          FUNCTION("assert", &builtin_runtime_assert, 1),
-          FUNCTION("println", &builtin_fmt_println, -1),
-          FUNCTION("Some", &builtin_opt_some, 1),
-          FUNCTION("None", &builtin_opt_none, 0),
-          FUNCTION("len", &builtin_len, 1),
+          FUNCTION("assert", &pg_builtin_runtime_assert, 1),
+          FUNCTION("println", &pg_builtin_fmt_println, -1),
+          FUNCTION("Some", &pg_builtin_opt_some, 1),
+          FUNCTION("None", &pg_builtin_opt_none, 0),
+          FUNCTION("len", &pg_builtin_len, 1),
         );
 
 static StdNode reduced = PACKAGE("std", 
-          FUNCTION("len", &builtin_len, 1),
+          FUNCTION("len", &pg_builtin_len, 1),
         );
 // clang-format on
 

@@ -6,7 +6,7 @@
 
 #define MAX_PATH 256
 
-static void builtin_fs_read_file(Vm *vm) {
+static void pg_builtin_fs_read_file(Vm *vm) {
   Value path_value = ARG(0);
   if (path_value.string->len == 0)
     goto invalid;
@@ -53,7 +53,7 @@ invalid:
   RETURN(*INTERNED_NONE);
 }
 
-static void builtin_fs_write_file(Vm *vm) {
+static void pg_builtin_fs_write_file(Vm *vm) {
   Value path_value = ARG(0);
   Value content_value = ARG(1);
 
