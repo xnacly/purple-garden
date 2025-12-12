@@ -2,6 +2,8 @@
 
 #include "mem.h"
 
+#define VERBOSE_GC 1
+
 typedef enum {
   // just bytes
   GC_OBJ_RAW = 0b000,
@@ -16,9 +18,9 @@ typedef enum {
 typedef struct GcHeader {
   unsigned int marked : 1;
   unsigned int type : 3;
-  uintptr_t payload;
   uintptr_t forward;
-  size_t size;
+  // 16 bits is enough for most sizes, if issues occur, increase
+  uint16_t size;
   struct GcHeader *next;
 } GcHeader;
 

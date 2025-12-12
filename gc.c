@@ -5,8 +5,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define VERBOSE_GC 1
-
 const char *GC_OBJ_TYPES[] = {
     [GC_OBJ_RAW] = "RAW",
     [GC_OBJ_STR] = "STR",
@@ -28,9 +26,11 @@ void *gc_request(Gc *gc, size_t size, ObjType t) {
   void *allocation = gc->old->request(gc->old->ctx, size + sizeof(GcHeader));
 
   // +----------------------+ <- allocation (raw pointer)
-  // | GcHeader             |  <-- header
+  // | GcHeader             | <-- header
   // +----------------------+
-  // | payload (size bytes) | <-- data handed out as ptr to the user
+  // |                      |
+  // | payload (size B)     | <-- data handed out as ptr to the user
+  // |                      |
   // +----------------------+
 
   void *payload = (char *)allocation + sizeof(GcHeader);
@@ -38,7 +38,6 @@ void *gc_request(Gc *gc, size_t size, ObjType t) {
   h->type = t;
   h->marked = 0;
   h->size = size;
-  h->payload = (uintptr_t)payload;
   h->next = gc->head;
   gc->head = h;
 
@@ -192,7 +191,7 @@ static inline void mark(Gc *gc, const Value *val) {
   }
 
 #ifdef VERBOSE_GC
-  printf("[GC][MARK] marked value at %p::", (void *)h->payload);
+  printf("[GC][MARK] marked value at %p::", (void *)payload);
   Value_debug(val);
   puts("");
 #endif
@@ -245,9 +244,9 @@ void gc_cycle(Gc *gc) {
     }
 
 #ifdef VERBOSE_GC
-    printf("[GC][COPY] object at %p to newspace {.size=%ld, "
+    printf("[GC][COPY] object at %p to newspace {.size=%hu, "
            ".type=%s}\n",
-           (void *)h->payload, h->size, GC_OBJ_TYPES[h->type]);
+           (void *)h, h->size, GC_OBJ_TYPES[h->type]);
 #endif
 
     void *buf = CALL(gc->new, request, h->size + sizeof(GcHeader));
@@ -257,7 +256,6 @@ void gc_cycle(Gc *gc) {
     nh->next = new_head;
     new_head = nh;
     h->forward = (uintptr_t)new_payload;
-    nh->payload = (uintptr_t)new_payload;
     nh->forward = 0;
     nh->marked = 0;
     new_alloc += h->size;
@@ -281,14 +279,14 @@ void gc_cycle(Gc *gc) {
   for (GcHeader *h = new_head; h; h = h->next) {
     switch (h->type) {
     case GC_OBJ_LIST: {
-      List *l = (List *)h->payload;
+      List *l = (List *)((uint8_t *)h + sizeof(GcHeader));
       for (size_t i = 0; i < l->len; i++) {
         rewrite_nested(gc, &l->arr[i]);
       }
       break;
     }
     case GC_OBJ_MAP: {
-      Map *m = (Map *)h->payload;
+      Map *m = (Map *)((uint8_t *)h + sizeof(GcHeader));
       for (size_t i = 0; i < m->cap; i++) {
         MapEntry *me = &m->buckets[i];
         if (me->hash) {
@@ -298,7 +296,7 @@ void gc_cycle(Gc *gc) {
       break;
     }
     case GC_OBJ_STR: {
-      Str *str = (Str *)h->payload;
+      Str *str = (Str *)((uint8_t *)h + sizeof(GcHeader));
       str->p = forward_ptr((void *)str->p);
       break;
     }

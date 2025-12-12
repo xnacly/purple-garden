@@ -155,7 +155,8 @@ int main() {
       CASE(std::Some(false), VAL(.type = V_FALSE, .is_some = true)),
 
       // correct string concat
-      CASE("hello" + "world",
+      CASE(std::str::append("hello"
+                            "world"),
            VAL(.type = V_STR, .string = &STRING("helloworld"))),
   };
 
