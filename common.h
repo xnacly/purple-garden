@@ -26,7 +26,7 @@
       MAX_BUILTIN_SIZE * sizeof(builtin_function)
 #endif
 
-#define REGISTERS 32
+#define REGISTERS 16
 
 #define SWAP_STRUCT(A, B)                                                      \
   do {                                                                         \
@@ -83,6 +83,10 @@ typedef struct List {
 typedef struct Value {
   // true if @Some, otherwise self is just a Value, if @None just .type=V_NONE
   unsigned int is_some : 1;
+  // TODO: move this to Str.is_heap, since array, obj are always gc heap
+  // allocated, but Str can point to compile time known strings, only upon
+  // creating new strings in the runtime, String views are gc heap allocated,
+  // their inner buffer is too
   unsigned int is_heap : 1;
   unsigned int type : 3;
   union {
