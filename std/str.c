@@ -32,3 +32,32 @@ static void pg_builtin_str_append(Vm *vm) {
       .string = s,
   });
 }
+
+static void pg_builtin_str_lines(Vm *vm) {
+  Value arg = ARG(0);
+  ASSERT(arg.type == V_STR, "arg0 must be a string");
+
+  List *split = gc_request(vm->gc, sizeof(List), GC_OBJ_LIST);
+  *split = List_new(8, vm->gc);
+  size_t last_idx = 0;
+  for (size_t i = 0; i < arg.string->len; i++) {
+    if (arg.string->p[i] == '\n') {
+      Str *member = gc_request(vm->gc, sizeof(Str), GC_OBJ_STR);
+      member->p = arg.string->p + last_idx;
+      member->len = i - last_idx;
+      last_idx = i;
+      List_append(split,
+                  (Value){
+                      .type = V_STR,
+                      .string = member,
+                  },
+                  vm->gc);
+    }
+  }
+
+  RETURN({
+      .type = V_ARRAY,
+      .array = split,
+      .is_heap = true,
+  });
+}

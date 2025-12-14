@@ -107,7 +107,7 @@ static const bool space_table[256] = {
 
 #define JUMP_TO_CASE goto *jump_table[(int32_t)l->input.p[l->pos]]
 #define CASE(label, INTERN)                                                    \
-  label : {                                                                    \
+  label: {                                                                     \
     l->pos++;                                                                  \
     return (INTERN);                                                           \
   }
@@ -278,7 +278,8 @@ quoted: {
   return t;
 }
 
-string: {
+string: { // TODO: handle escaped characters like \t\n\"
+
   // skip "
   l->pos++;
   size_t start = l->pos;
