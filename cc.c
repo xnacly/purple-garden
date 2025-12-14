@@ -29,7 +29,7 @@ inline static Value token_to_value(Token *t, Allocator *a) {
     Str *s = CALL(a, request, sizeof(Str));
     *s = t->string;
     v.type = V_STR;
-    v.string = s;
+    v.string = *s;
     break;
   case T_TRUE:
     v.type = V_TRUE;
@@ -148,6 +148,7 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     break;
   }
   case N_FOR: {
+    // for <ident> :: <target> { <body> }
     break;
   }
   case N_PATH: {

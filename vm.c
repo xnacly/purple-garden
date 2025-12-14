@@ -295,7 +295,7 @@ int Vm_run(Vm *vm) {
       }
 
       if (lhs->type == V_STR && rhs->type == V_STR) {
-        if (Str_eq(lhs->string, rhs->string)) {
+        if (Str_eq(&lhs->string, &rhs->string)) {
           goto set_true;
         }
         goto set_false;
@@ -370,7 +370,7 @@ int Vm_run(Vm *vm) {
         if (idx.type != V_STR) {
           goto err;
         }
-        vm->registers[0] = Map_get(target.obj, idx.string);
+        vm->registers[0] = Map_get(target.obj, &idx.string);
         break;
       err:
       default:

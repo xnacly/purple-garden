@@ -86,7 +86,7 @@ typedef struct Value {
   unsigned int is_heap : 1;
   unsigned int type : 3;
   union {
-    Str *string;
+    Str string;
     List *array;
     Map *obj;
     double floating;
