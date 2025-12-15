@@ -43,7 +43,7 @@ void *gc_request(Gc *gc, size_t size, ObjType t) {
   gc->allocated_since_last_cycle += size;
   gc->allocated += size;
 
-#ifdef VERBOSE_GC
+#if VERBOSE_GC
   printf("[GC][REQU] type=%s, size=%zu, payload=%p\n", GC_OBJ_TYPES[t], size,
          payload);
 #endif
