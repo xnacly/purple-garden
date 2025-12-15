@@ -107,7 +107,7 @@ static const bool space_table[256] = {
 
 #define JUMP_TO_CASE goto *jump_table[(int32_t)l->input.p[l->pos]]
 #define CASE(label, INTERN)                                                    \
-  label: {                                                                     \
+  label : {                                                                    \
     l->pos++;                                                                  \
     return (INTERN);                                                           \
   }
@@ -345,7 +345,6 @@ void Token_debug(Token *token) {
   case T_DOUBLE:
   case T_INTEGER:
   case T_STRING:
-  case T_BUILTIN:
   case T_IDENT:
     putc('[', stdout);
     Str_debug(&token->string);

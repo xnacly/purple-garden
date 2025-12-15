@@ -81,7 +81,7 @@ typedef struct List {
 
 // Value represents a value known to the runtime
 typedef struct Value {
-  // true if @Some, otherwise self is just a Value, if @None just .type=V_NONE
+  // true if Some, otherwise self is just a Value, if None just .type=V_NONE
   unsigned int is_some : 1;
   unsigned int is_heap : 1;
   unsigned int type : 3;
