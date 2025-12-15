@@ -14,10 +14,7 @@ typedef struct {
   (Value) { .is_some = false, __VA_ARGS__ }
 
 #define CASE(in, r0)                                                           \
-  {                                                                            \
-      .input = STRING(#in),                                                    \
-      .expected_r0 = r0,                                                       \
-  }
+  { .input = STRING(#in), .expected_r0 = r0, }
 
 // stolen from common.(c|h) and adapted
 bool Value_cmp_deep(const Value *a, const Value *b) {
@@ -36,7 +33,7 @@ bool Value_cmp_deep(const Value *a, const Value *b) {
 
   switch (a->type) {
   case V_STR:
-    return Str_eq(a->string, b->string);
+    return Str_eq(&a->string, &b->string);
   case V_DOUBLE:
     double diff = a->floating - b->floating;
 #define PREC 1e-9
@@ -64,7 +61,7 @@ int main() {
       CASE(3.1415, VAL(.type = V_DOUBLE, .floating = 3.1415)),
       CASE(0.1415, VAL(.type = V_DOUBLE, .floating = 0.1415)),
 
-      CASE("string", VAL(.type = V_STR, .string = &STRING("string"))),
+      CASE("string", VAL(.type = V_STR, .string = STRING("string"))),
 
       {
           .input = ((Str){.len = sizeof("'quoted"
@@ -74,8 +71,8 @@ int main() {
                                                 "\0"}),
           .expected_r0 =
               (Value){.type = V_STR,
-                      .string = &((Str){.len = sizeof("quoted") - 1,
-                                        .p = (const uint8_t *)"quoted"})},
+                      .string = ((Str){.len = sizeof("quoted") - 1,
+                                       .p = (const uint8_t *)"quoted"})},
       },
       // TODO: this is for future me to implement
       // CASE("escaped string\"", BC(OP_LOAD, 0), VAL(.type = V_STRING, .string
@@ -83,7 +80,7 @@ int main() {
       CASE(false, VAL(.type = V_FALSE)),
       // checking if boolean interning works
       CASE(true true false, VAL(.type = V_FALSE)),
-      CASE("hello", VAL(.type = V_STR, .string = &STRING("hello"))),
+      CASE("hello", VAL(.type = V_STR, .string = STRING("hello"))),
 
       // too large integer and double values
       // https://github.com/xNaCly/purple-garden/issues/1
@@ -138,7 +135,7 @@ int main() {
 
       // variables
       CASE(var name = "user" name,
-           VAL(.type = V_STR, .string = &STRING("user"))),
+           VAL(.type = V_STR, .string = STRING("user"))),
       CASE(var age = 25 age, VAL(.type = V_INT, .integer = 25)),
 
       // functions
@@ -157,7 +154,7 @@ int main() {
       // correct string concat
       CASE(std::str::append("hello"
                             "world"),
-           VAL(.type = V_STR, .string = &STRING("helloworld"))),
+           VAL(.type = V_STR, .string = STRING("helloworld"))),
   };
 
   size_t passed = 0;
