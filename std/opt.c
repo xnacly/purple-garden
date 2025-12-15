@@ -1,14 +1,14 @@
 #include "../vm.h"
 
-static void builtin_opt_some(Vm *vm) {
+static void pg_builtin_opt_some(Vm *vm) {
   Value inner = ARG(0);
   inner.is_some = true;
   RETURN(inner);
 }
 
-static void builtin_opt_none(Vm *vm) { RETURN(*INTERNED_NONE); }
+static void pg_builtin_opt_none(Vm *vm) { RETURN(*INTERNED_NONE); }
 
-static void builtin_opt_or(Vm *vm) {
+static void pg_builtin_opt_or(Vm *vm) {
   Value lhs = ARG(0);
   Value rhs = ARG(1);
   ASSERT(Value_is_opt(&lhs), "Or: lhs wasnt an Optional");
@@ -20,7 +20,7 @@ static void builtin_opt_or(Vm *vm) {
   }
 }
 
-static void builtin_opt_unwrap(Vm *vm) {
+static void pg_builtin_opt_unwrap(Vm *vm) {
   Value v = ARG(0);
   ASSERT(v.type != V_NONE, "Unwrap: called on a Option::None value");
   ASSERT(v.is_some, "Unwrap: Attempted to unwrap a non optional value");
@@ -28,7 +28,7 @@ static void builtin_opt_unwrap(Vm *vm) {
   RETURN(v);
 }
 
-static void builtin_opt_expect(Vm *vm) {
+static void pg_builtin_opt_expect(Vm *vm) {
   Value v = ARG(0);
   Value msg = ARG(1);
   ASSERT(v.type != V_NONE, "Expect: %.*s", (int)msg.string->len, msg.string->p);
@@ -37,11 +37,11 @@ static void builtin_opt_expect(Vm *vm) {
   RETURN(v);
 }
 
-static void builtin_opt_is_some(Vm *vm) {
+static void pg_builtin_opt_is_some(Vm *vm) {
   Value v = ARG(0);
   RETURN({.type = ARG(0).is_some ? V_TRUE : V_FALSE});
 }
 
-static void builtin_opt_is_none(Vm *vm) {
+static void pg_builtin_opt_is_none(Vm *vm) {
   RETURN({.type = ARG(0).type == V_NONE ? V_TRUE : V_FALSE});
 }

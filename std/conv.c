@@ -3,7 +3,7 @@
 // reimplementation of Str_to_int64_t but with input verification, since
 // Str_to_int64_t expects the lexer to verify all inputs. Also supports prefix
 // via +-.
-static void builtin_conv_int(Vm *vm) {
+static void pg_builtin_conv_int(Vm *vm) {
   Value in = ARG(0);
   const Str *s = in.string;
   if (!s->len)
@@ -50,6 +50,6 @@ err:
   RETURN((Value){.type = V_NONE});
 }
 
-static void builtin_conv_num(Vm *vm) { TODO("builtin_conv_num") }
+static void pg_builtin_conv_num(Vm *vm) { TODO("builtin_conv_num") }
 
-static void builtin_conv_str(Vm *vm) { TODO("builtin_conv_str") }
+static void pg_builtin_conv_str(Vm *vm) { TODO("builtin_conv_str") }
