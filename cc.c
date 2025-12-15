@@ -178,6 +178,12 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
     // <ident> = <target>[<i>]
     BC(OP_LOAD, r_i);
+
+    BC(OP_LT, r_len);
+    size_t backfill_for_ending_loop_iter = BC_LEN;
+    BC(OP_JMPF, 0xAFFEDEAD)
+    BC(OP_LOAD, r_i);
+
     // extract member of <target> at <iterator>
     BC(OP_IDX, r_target);
     // put first member into the variable table at variable_hash
@@ -189,20 +195,15 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       compile(alloc, vm, ctx, LIST_get(&body->children, body_i));
     }
 
-    // TODO: there is an off by one error here, this doesnt work, it iterates
-    // one too far
-
     // post loop increment (i++ / r_i = r_i + 1)
     BC(OP_LOADI, 1);
     BC(OP_ADD, r_i);
     BC(OP_STORE, r_i);
-
-    // jump back to start_label if !(i > r_len)
-    BC(OP_LT, r_len)
-    BC(OP_JMPF, start_label);
+    BC(OP_JMP, start_label);
 
     ByteCodeBuilder_insert_arg(ctx->bcb, backfill_for_skipping_on_zero_len,
                                BC_LEN);
+    ByteCodeBuilder_insert_arg(ctx->bcb, backfill_for_ending_loop_iter, BC_LEN);
 
     Ctx_free_register(ctx, r_i);
     Ctx_free_register(ctx, r_len);
