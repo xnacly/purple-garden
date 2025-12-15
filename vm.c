@@ -171,9 +171,11 @@ int Vm_run(Vm *vm) {
       int rhs_is_double = rhs->type == V_DOUBLE;
 
       if (lhs_is_double | rhs_is_double) {
-        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
-        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
-        vm->registers[0].floating = b + a;
+        double lhs_double =
+            lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double rhs_double =
+            rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = lhs_double + rhs_double;
         vm->registers[0].type = V_DOUBLE;
         break;
       }
@@ -197,9 +199,11 @@ int Vm_run(Vm *vm) {
       int rhs_is_double = rhs->type == V_DOUBLE;
 
       if (lhs_is_double | rhs_is_double) {
-        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
-        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
-        vm->registers[0].floating = b - a;
+        double lhs_double =
+            lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double rhs_double =
+            rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = lhs_double - rhs_double;
         vm->registers[0].type = V_DOUBLE;
         break;
       }
@@ -223,9 +227,11 @@ int Vm_run(Vm *vm) {
       int rhs_is_double = rhs->type == V_DOUBLE;
 
       if (lhs_is_double | rhs_is_double) {
-        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
-        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
-        vm->registers[0].floating = b * a;
+        double lhs_double =
+            lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double rhs_double =
+            rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = lhs_double * rhs_double;
         vm->registers[0].type = V_DOUBLE;
         break;
       }
@@ -249,9 +255,11 @@ int Vm_run(Vm *vm) {
       int rhs_is_double = rhs->type == V_DOUBLE;
 
       if (lhs_is_double | rhs_is_double) {
-        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
-        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
-        vm->registers[0].floating = b / a;
+        double lhs_double =
+            lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double rhs_double =
+            rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = lhs_double / rhs_double;
         vm->registers[0].type = V_DOUBLE;
         break;
       }

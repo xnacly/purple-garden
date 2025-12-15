@@ -130,10 +130,14 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       // PERF: arithmetic optimisations like n+0=n; n*0=0; n*1=n, etc
       compile(alloc, vm, ctx, child);
     } else {
-      compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 0));
+      Node *lhs = LIST_get_UNSAFE(&n->children, 0);
+      Node *rhs = LIST_get_UNSAFE(&n->children, 1);
+
+      compile(alloc, vm, ctx, rhs);
       size_t r = Ctx_allocate_register(ctx);
       BC(OP_STORE, r);
-      compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 1));
+
+      compile(alloc, vm, ctx, lhs);
       BC(n->token->type, r);
       Ctx_free_register(ctx, r);
     }
