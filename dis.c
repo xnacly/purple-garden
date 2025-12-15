@@ -18,7 +18,7 @@ void disassemble(const Vm *vm, const Ctx *ctx, size_t offset, size_t length,
       Value_debug(&v);
       printf("; {idx=%zu", i);
       if (v.type == V_STR) {
-        printf(",hash=%lu", v.string->hash);
+        printf(",hash=%lu", v.string.hash);
       }
       printf("}\n\t");
     }
@@ -54,6 +54,9 @@ void disassemble(const Vm *vm, const Ctx *ctx, size_t offset, size_t length,
 
       // dont print the argument if its unused in the vm
       switch (op) {
+      case OP_LOADI:
+        printf(" #%zu ", arg);
+        break;
       case OP_ARGS:
         printf(" %zu ; count=%zu,offset=%zu", arg, DECODE_ARG_COUNT(arg),
                DECODE_ARG_OFFSET(arg));

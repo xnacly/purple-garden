@@ -43,8 +43,6 @@ typedef enum {
   T_DOUBLE,
   // whole numbers
   T_INTEGER,
-  // builtins in the format @<builtin>, but only
-  T_BUILTIN,
   // compile time builtins
   T_VAR,
   T_FN,
