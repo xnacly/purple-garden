@@ -8,10 +8,10 @@
 
 static void pg_builtin_fs_read_file(Vm *vm) {
   Value path_value = ARG(0);
-  if (path_value.string->len == 0)
+  if (path_value.string.len == 0)
     goto invalid;
 
-  const Str *path = path_value.string;
+  const Str *path = &path_value.string;
   if (path->len > MAX_PATH)
     goto invalid;
 
@@ -43,8 +43,7 @@ static void pg_builtin_fs_read_file(Vm *vm) {
     goto invalid;
   }
 
-  Str *sbuf = gc_request(vm->gc, sizeof(Str), GC_OBJ_STR);
-  *sbuf = (Str){.len = length, .p = (const uint8_t *)buf};
+  Str sbuf = (Str){.len = length, .p = (const uint8_t *)buf};
 
   RETURN((Value){.type = V_STR, .is_heap = 1, .string = sbuf, .is_some = true});
   return;
@@ -60,8 +59,8 @@ static void pg_builtin_fs_write_file(Vm *vm) {
   if (path_value.type != V_STR || content_value.type != V_STR)
     goto invalid;
 
-  const Str *path = path_value.string;
-  const Str *content = content_value.string;
+  const Str *path = &path_value.string;
+  const Str *content = &content_value.string;
   if (path->len == 0 || path->len > MAX_PATH)
     goto invalid;
 

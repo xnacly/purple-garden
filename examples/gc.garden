@@ -1,4 +1,4 @@
-# vim: filetype=python
+# vim: filetype=nix
 var combination = std::str::append("Hello" " " "World")
 std::println(combination)
 # manual gc run to check if reachability is correct

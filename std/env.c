@@ -18,8 +18,7 @@ static void setup_env(Vm_Config conf, Allocator *a) {
 
       Str key = {.p = (const uint8_t *)s, .len = eq - s};
       key.hash = Str_hash(&key);
-      Str *val = CALL(a, request, sizeof(Str));
-      *val = (Str){.p = (const uint8_t *)eq + 1, .len = strlen(eq + 1)};
+      Str val = (Str){.p = (const uint8_t *)eq + 1, .len = strlen(eq + 1)};
 
       Map_insert(&env_map, &key, (Value){.type = V_STR, .string = val}, a);
     }
@@ -30,7 +29,7 @@ static void setup_env(Vm_Config conf, Allocator *a) {
 static void pg_builtin_env_get(Vm *vm) {
   Value key = ARG(0);
   ASSERT(key.type == V_STR, "Env idx must be string");
-  RETURN(Map_get(env, key.string));
+  RETURN(Map_get(env, &key.string));
 }
 
 static void pg_builtin_env_set(Vm *vm) {
@@ -38,5 +37,5 @@ static void pg_builtin_env_set(Vm *vm) {
   Value value = ARG(1);
   ASSERT(key.type == V_STR, "Env idx must be string");
   ASSERT(value.type == V_STR, "Env val must be string");
-  Map_insert(env, key.string, value, vm->staticalloc);
+  Map_insert(env, &key.string, value, vm->staticalloc);
 }

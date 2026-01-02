@@ -9,7 +9,7 @@ static void print_value(const Value *v) {
     printf("Option::None");
     break;
   case V_STR:
-    Str_debug(v->string);
+    Str_debug(&v->string);
     break;
   case V_DOUBLE:
     printf("%g", v->floating);

@@ -359,8 +359,8 @@ $ make profile
 - [x] `lexer+parser+cc`: no dynamic allocations by using bump allocator
 - [x] `cc`: zero argument builtin calls and operations are skipped
 - [x] `cc`: bump allocator for globals and bytecode
-- [x] `cc`: replace `@<builtin>` calls with indexes into `builtin::BUILTIN_MAP` to move function lookup from runtime to compile time
-- [x] `cc`: compute `@<builtin>` indexes for identifiers via hash compare with precomputed builtin hashes
+- [x] `cc`: replace `std::<pkg>::<fn>` calls with indexes into `builtin::BUILTIN_MAP` to move function lookup from runtime to compile time
+- [x] `cc`: compute `std::<pkg>::<fn>` indexes for identifiers via hash compare with precomputed builtin hashes
 - [x] `cc`: intern strings and identifiers to deduplicate `Vm::globals`
 - [x] `cc`: single instances for `true` and `false` in the global pool
 - [x] `cc`: hash known identifiers and strings at compile time

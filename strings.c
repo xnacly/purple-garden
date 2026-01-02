@@ -18,9 +18,6 @@ Str Str_from(const char *s) {
 }
 
 Str Str_slice(const Str *str, size_t start, size_t end) {
-  ASSERT(end >= start, "Str_slice: Invalid slice range: end must be >= start");
-  ASSERT(end <= str->len, "Str_slice: Slice range exceeds string length");
-
   return (Str){
       .p = str->p + start,
       .len = end - start,

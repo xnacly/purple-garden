@@ -1,4 +1,4 @@
-# vim: filetype=python
+# vim: filetype=nix
 # arithmetics
 std::assert(3 = 1+2)
 std::assert(1 = 2-1)

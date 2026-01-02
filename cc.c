@@ -26,10 +26,8 @@ inline static Value token_to_value(Token *t, Allocator *a) {
   switch (t->type) {
   case T_STRING:
   case T_IDENT:
-    Str *s = CALL(a, request, sizeof(Str));
-    *s = t->string;
     v.type = V_STR;
-    v.string = s;
+    v.string = t->string;
     break;
   case T_TRUE:
     v.type = V_TRUE;
@@ -132,10 +130,14 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
       // PERF: arithmetic optimisations like n+0=n; n*0=0; n*1=n, etc
       compile(alloc, vm, ctx, child);
     } else {
-      compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 0));
+      Node *lhs = LIST_get_UNSAFE(&n->children, 0);
+      Node *rhs = LIST_get_UNSAFE(&n->children, 1);
+
+      compile(alloc, vm, ctx, rhs);
       size_t r = Ctx_allocate_register(ctx);
       BC(OP_STORE, r);
-      compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 1));
+
+      compile(alloc, vm, ctx, lhs);
       BC(n->token->type, r);
       Ctx_free_register(ctx, r);
     }
@@ -148,6 +150,68 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
     break;
   }
   case N_FOR: {
+
+    // for <ident> :: <target> { <body> }
+
+    // hash of <ident>
+    uint64_t variable_hash = n->token->string.hash;
+
+    Node *target_node = LIST_get(&n->children, 0);
+    compile(alloc, vm, ctx, target_node);
+    size_t r_target = Ctx_allocate_register(ctx);
+    BC(OP_STORE, r_target);
+
+    // len(<target>)
+    BC(OP_LEN, r_target)
+    size_t r_len = Ctx_allocate_register(ctx);
+    BC(OP_STORE, r_len);
+
+    // we want to bail early, if len(<target>) < 0
+    BC(OP_LOADI, 0);
+    BC(OP_LT, r_len);
+    size_t backfill_for_skipping_on_zero_len = BC_LEN;
+    BC(OP_JMPF, 0xAFFEDEAD);
+
+    // this keeps track of the current iteration
+    size_t r_i = Ctx_allocate_register(ctx);
+
+    // i = 0
+    BC(OP_LOADI, 0);
+    BC(OP_STORE, r_i);
+    size_t start_label = BC_LEN;
+
+    // <ident> = <target>[<i>]
+    BC(OP_LOAD, r_i);
+
+    BC(OP_LT, r_len);
+    size_t backfill_for_ending_loop_iter = BC_LEN;
+    BC(OP_JMPF, 0xAFFEDEAD)
+    BC(OP_LOAD, r_i);
+
+    // extract member of <target> at <iterator>
+    BC(OP_IDX, r_target);
+    // put first member into the variable table at variable_hash
+    BC(OP_VAR, variable_hash);
+
+    // compile <body>
+    Node *body = LIST_get(&n->children, 1);
+    for (size_t body_i = 0; body_i < body->children.len; body_i++) {
+      compile(alloc, vm, ctx, LIST_get(&body->children, body_i));
+    }
+
+    // post loop increment (i++ / r_i = r_i + 1)
+    BC(OP_LOADI, 1);
+    BC(OP_ADD, r_i);
+    BC(OP_STORE, r_i);
+    BC(OP_JMP, start_label);
+
+    ByteCodeBuilder_insert_arg(ctx->bcb, backfill_for_skipping_on_zero_len,
+                               BC_LEN);
+    ByteCodeBuilder_insert_arg(ctx->bcb, backfill_for_ending_loop_iter, BC_LEN);
+
+    Ctx_free_register(ctx, r_i);
+    Ctx_free_register(ctx, r_len);
+    Ctx_free_register(ctx, r_target);
     break;
   }
   case N_PATH: {

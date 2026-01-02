@@ -31,7 +31,7 @@ static void pg_builtin_opt_unwrap(Vm *vm) {
 static void pg_builtin_opt_expect(Vm *vm) {
   Value v = ARG(0);
   Value msg = ARG(1);
-  ASSERT(v.type != V_NONE, "Expect: %.*s", (int)msg.string->len, msg.string->p);
+  ASSERT(v.type != V_NONE, "Expect: %.*s", (int)msg.string.len, msg.string.p);
   ASSERT(v.is_some, "Expect: Attempted to expect a non optional value");
   v.is_some = false;
   RETURN(v);
