@@ -1,5 +1,5 @@
 # vim: filetype=python
-fn add3 :: arg1 arg2 arg3  {
+fn add3 :: arg1 arg2 arg3 {
     arg1+arg2+arg3
 }
 std::println(add3(3.1415 3.1415 3.1415))
@@ -7,8 +7,12 @@ std::println(add3(3.1415 3.1415 3.1415))
 fn greeting :: greetee {
     std::println("hello world to:" greetee)
 } 
-greeting("teo") # hello world to: user
+greeting(std::env::get("USER")) # hello world to: $USER
 
+# zero arguments, so no delimitor
+fn zero_args {
+    std::println("zero_args")
+}
 
 # tail calls 
 fn inc :: x {x + 1}
@@ -33,7 +37,6 @@ fn f1 :: a {
     }
 }
 f1(0)
-
 
 # compute n! with acumulator a
 fn factorial :: n a {

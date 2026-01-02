@@ -57,14 +57,14 @@ static size_t Ctx_allocate_register(Ctx *ctx) {
   ASSERT(ctx->register_allocated_count < REGISTERS, "cc: out of registers")
   ctx->registers[ctx->register_allocated_count] = true;
 #if DEBUG
-  printf("allocating r%zu\n", ctx->register_allocated_count);
+  printf("reserving r%zu\n", ctx->register_allocated_count);
 #endif
   return ctx->register_allocated_count++;
 }
 
 static void Ctx_free_register(Ctx *ctx, size_t i) {
   ASSERT(i < ctx->register_allocated_count, "cc: register index out of bounds");
-  ASSERT(ctx->registers[i], "cc: attempting to free unallocated register");
+  ASSERT(ctx->registers[i], "cc: attempting to free unreserved register");
   ctx->register_allocated_count--;
 #if DEBUG
   printf("freeing r%zu\n", ctx->register_allocated_count);
@@ -200,9 +200,8 @@ static void compile(Allocator *alloc, Vm *vm, Ctx *ctx, const Node *n) {
 
       BC(OP_ARGS, ENCODE_ARG_COUNT_AND_OFFSET(argument_len,
                                               ctx->register_allocated_count));
-      ASSERT(vm->builtin_count + 1 < MAX_BUILTIN_SIZE, "Too many builtins");
-      BC(OP_SYS, vm->builtin_count);
-      vm->builtins[vm->builtin_count++] = sn->fn;
+      BC(OP_SYS, vm->builtin_count++);
+      LIST_append(&vm->builtins, vm->staticalloc, sn->fn);
     } else {
       compile(alloc, vm, ctx, LIST_get_UNSAFE(&n->children, 0));
       size_t rtarget = Ctx_allocate_register(ctx);
@@ -432,7 +431,7 @@ Ctx cc(Vm *vm, Allocator *alloc, Parser *p) {
       .global_hash_buckets = {0},
       .hash_to_function = {},
       .bcb = &bcb,
-      .std = std_tree(vm->config),
+      .std = std_tree(vm->config, alloc),
   };
 
   while (true) {

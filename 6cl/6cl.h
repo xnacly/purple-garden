@@ -1,6 +1,6 @@
 /*
- * copied from https://github.com/xNaCly/6cl since I dont care about git
- * submodules, maybe in the future
+ * copied and adapted from https://github.com/xNaCly/6cl since I dont care about
+ * git submodules, maybe in the future
  * */
 #pragma once
 #include <stddef.h>
@@ -43,19 +43,19 @@ typedef struct {
   // for the option, or with the default value thats already set.
   union {
     // string value
-    const char *s;
+    const char *STR;
     // boolean value
-    bool b;
+    bool BOOL;
     // char value
-    char c;
+    char CHAR;
     // int value
-    int i;
+    int INT;
     // long value
-    long l;
+    long LONG;
     // float value
-    float f;
+    float FLOAT;
     // double value
-    double d;
+    double DOUBLE;
   };
 } SixFlag;
 

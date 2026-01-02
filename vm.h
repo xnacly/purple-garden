@@ -2,17 +2,23 @@
 
 #include "adts.h"
 #include "common.h"
+#include "gc.h"
 #include <stdint.h>
 
 typedef struct {
   // defines the maximum amount of memory purple garden is allowed to allocate,
   // if this is hit, the vm exits with a non zero code
   uint64_t max_memory;
-  // disables the standard library
-  bool disable_std;
-  // disables garbage collection and allocates 'max_memory' with a bump
-  // allocator
+  // define gc heap size in bytes
+  uint64_t gc_size;
+  // gc threshold in percent 5-99%
+  double gc_limit;
+  // disables the garbage collector
   bool disable_gc;
+  // reduce the standard library to std::len
+  bool disable_std;
+  // start with empty env table
+  bool no_env;
 } Vm_Config;
 
 #define ENCODE_ARG_COUNT_AND_OFFSET(COUNT, OFFSET)                             \
@@ -30,7 +36,7 @@ typedef enum {
 
 // PERF: maybe `n` is too many, but prefetching a recursion depth can have
 // some positive effects on the runtime performance
-#define PREALLOCATE_FREELIST_SIZE 1
+#define PREALLOCATE_FREELIST_SIZE 16
 
 // A frame represents a Scope, a new scope is created upon entering a function -
 // since functions are pure, there is no way to interact with the previous frame
@@ -64,7 +70,6 @@ typedef struct __Vm {
 
   // current position in the bytecode
   size_t pc;
-  Value registers[REGISTERS + 1];
 
   // frame stores variables of the current scope, meta data and other required
   // data
@@ -78,10 +83,17 @@ typedef struct __Vm {
   // used for container sizes and stuff
   uint32_t size_hint;
 
-  builtin_function *builtins;
+  // TODO: replace with dynamic array to make lookup O(1), instead of having to
+  // compute segment and offset, but this reuses a good abstraction thusfar
+  LIST_builtin_function builtins;
   size_t builtin_count;
 
-  Allocator *alloc;
+  Gc *gc;
+  // allocator for stack frames, we reuse it to not pollute the gc heap
+  Allocator *staticalloc;
+
+  Value registers[REGISTERS];
+
 #if DEBUG
   uint64_t instruction_counter[256];
 #endif
@@ -214,6 +226,5 @@ extern Str OP_MAP[];
 // Creates a new virtual machine with registered builtins, static_alloc is used
 // to allocate space for both the global pool and the byte code space, alloc is
 // used in the virtual machine itself
-Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Allocator *alloc);
+Vm Vm_new(Vm_Config conf, Allocator *static_alloc, Gc *gc);
 int Vm_run(Vm *vm);
-void Vm_destroy(Vm *vm);

@@ -17,41 +17,40 @@ typedef struct {
 
 #include <stdio.h>
 
-static const char *SIX_FLAG_TYPE_TO_MAP[] = {
-    [SIX_STR] = "string",    [SIX_BOOL] = "bool", [SIX_CHAR] = "char",
-    [SIX_INT] = "int",       [SIX_LONG] = "long", [SIX_FLOAT] = "float",
-    [SIX_DOUBLE] = "double",
-};
-
 void print_flag(SixFlag *f, bool long_option) {
   const char *pre_and_postfix = "[]";
   if (long_option) {
     putc('\t', stdout);
-    pre_and_postfix = "  ";
+    pre_and_postfix = " ";
   }
 
-  printf("%c %c%c / %c%s", pre_and_postfix[0], SIX_OPTION_PREFIX, f->short_name,
-         SIX_OPTION_PREFIX, f->name);
+  if (f->short_name) {
+    printf("%c %c%c/%c%s", pre_and_postfix[0], SIX_OPTION_PREFIX, f->short_name,
+           SIX_OPTION_PREFIX, f->name);
+  } else {
+    printf("%c %c%s", pre_and_postfix[0], SIX_OPTION_PREFIX, f->name);
+  }
+
   if (f->type != SIX_BOOL) {
-    printf(" <%s=", SIX_FLAG_TYPE_TO_MAP[f->type]);
+    printf(" <");
     switch (f->type) {
     case SIX_STR:
-      printf("`%s`", f->s);
+      printf("`%s`", f->STR);
       break;
     case SIX_CHAR:
-      putc(f->c, stdout);
+      putc(f->CHAR, stdout);
       break;
     case SIX_INT:
-      printf("%d", f->i);
+      printf("%d", f->INT);
       break;
     case SIX_LONG:
-      printf("%ld", f->l);
+      printf("%ld", f->LONG);
       break;
     case SIX_FLOAT:
-      printf("%g", f->f);
+      printf("%g", f->FLOAT);
       break;
     case SIX_DOUBLE:
-      printf("%g", f->d);
+      printf("%g", f->DOUBLE);
       break;
     default:
     }
@@ -62,7 +61,7 @@ void print_flag(SixFlag *f, bool long_option) {
 
   if (long_option) {
     if (f->description) {
-      printf("\n\t\t%s\n", f->description);
+      printf("\n\t\t%s", f->description);
     }
     putc('\n', stdout);
   }
@@ -88,7 +87,7 @@ static void usage(const char *pname, const Six *h) {
   }
 
   printf("\n%*.s ", (int)len, "");
-  print_flag(&HELP_FLAG, false);
+  // print_flag(&HELP_FLAG, false);
 
   if (h->name_for_rest_arguments) {
     puts(h->name_for_rest_arguments);
@@ -118,20 +117,20 @@ static void help(const char *pname, const Six *h) {
       }
       switch (s->type) {
       case SIX_STR:
-        printf(" \"%s\"", s->s);
+        printf(" \"%s\"", s->STR);
         break;
       case SIX_CHAR:
-        printf(" %c", s->c);
+        printf(" %c", s->CHAR);
         break;
       case SIX_INT:
-        printf(" %d", s->i);
+        printf(" %d", s->INT);
         break;
       case SIX_LONG:
-        printf(" %zu", s->l);
+        printf(" %zu", s->LONG);
         break;
       case SIX_FLOAT:
       case SIX_DOUBLE:
-        printf(" %g", s->f);
+        printf(" %g", s->FLOAT);
         break;
       case SIX_BOOL:
       default:
@@ -167,11 +166,11 @@ static int process_argument(SixFlag *f, size_t cur, size_t argc, char **argv) {
       fprintf(stderr, "No STRING value for option '%s'\n", f->name);
       return -1;
     }
-    f->s = argv[cur + 1];
+    f->STR = argv[cur + 1];
     break;
   }
   case SIX_BOOL:
-    f->b = true;
+    f->BOOL = true;
     offset = 0;
     break;
   case SIX_CHAR:
@@ -189,7 +188,7 @@ static int process_argument(SixFlag *f, size_t cur, size_t argc, char **argv) {
               f->name, f->short_name);
       return -1;
     }
-    f->c = argv[cur + 1][0];
+    f->CHAR = argv[cur + 1][0];
     break;
   case SIX_INT: {
     if (cur + 1 >= argc) {
@@ -199,7 +198,7 @@ static int process_argument(SixFlag *f, size_t cur, size_t argc, char **argv) {
     }
     char *tmp = argv[cur + 1];
     char *endptr = NULL;
-    int errno = 0;
+    int errno_6cl = 0;
     long val = strtol(tmp, &endptr, 10);
 
     if (endptr == tmp || *endptr != '\0') {
@@ -214,7 +213,7 @@ static int process_argument(SixFlag *f, size_t cur, size_t argc, char **argv) {
       return -1;
     }
 
-    f->i = (int)val;
+    f->INT = (int)val;
     break;
   }
   case SIX_LONG: {
@@ -240,7 +239,7 @@ static int process_argument(SixFlag *f, size_t cur, size_t argc, char **argv) {
       return -1;
     }
 
-    f->l = val;
+    f->LONG = val;
     break;
   }
   case SIX_FLOAT: {
@@ -266,7 +265,7 @@ static int process_argument(SixFlag *f, size_t cur, size_t argc, char **argv) {
       return -1;
     }
 
-    f->f = val;
+    f->FLOAT = val;
     break;
   }
   case SIX_DOUBLE: {
@@ -292,7 +291,7 @@ static int process_argument(SixFlag *f, size_t cur, size_t argc, char **argv) {
       return -1;
     }
 
-    f->d = val;
+    f->DOUBLE = val;
     break;
   }
   default:
@@ -346,7 +345,7 @@ void SixParse(Six *six, size_t argc, char **argv) {
     // check if short option
     if (arg_cur.len == 2) {
       int cc = arg_cur.p[1];
-      if (cc > 256 || cc < 0) {
+      if (cc < 0 || cc > 256) {
         fprintf(stderr, "Unkown short option '%c'\n", arg_cur.p[1]);
         goto err;
       }

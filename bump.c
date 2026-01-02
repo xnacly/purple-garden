@@ -55,19 +55,30 @@ void *bump_request(void *ctx, size_t size) {
   }
 
   if (aligned_pos + size > b_ctx->size) {
-    ASSERT(b_ctx->pos + 1 < BUMP_MAX_BLOCKS, "Out of block size");
-    uint64_t new_size = b_ctx->size * BUMP_GROWTH;
+    // this only happens if a reset was done, see the gc on why resetting this
+    // bump allocator is smart
+    if (b_ctx->pos + 1 < BUMP_MAX_BLOCKS &&
+        b_ctx->blocks[b_ctx->pos + 1] != NULL) {
+      // move to the next existing block
+      b_ctx->pos++;
+      b_ctx->size = b_ctx->block_sizes[b_ctx->pos];
+      b_ctx->len = 0;
+      aligned_pos = 0;
+    } else {
+      ASSERT(b_ctx->pos + 1 < BUMP_MAX_BLOCKS, "Out of block size");
+      uint64_t new_size = b_ctx->size * BUMP_GROWTH;
 
-    void *new_block = mmap(NULL, new_size, PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    ASSERT(new_block != MAP_FAILED, "Failed to mmap new block");
+      void *new_block = mmap(NULL, new_size, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+      ASSERT(new_block != MAP_FAILED, "Failed to mmap new block");
 
-    b_ctx->blocks[++b_ctx->pos] = new_block;
-    b_ctx->block_sizes[b_ctx->pos] = new_size;
-    b_ctx->size = new_size;
-    b_ctx->len = 0;
-    aligned_pos = 0;
-    b_ctx->total_allocated += new_size;
+      b_ctx->blocks[++b_ctx->pos] = new_block;
+      b_ctx->block_sizes[b_ctx->pos] = new_size;
+      b_ctx->size = new_size;
+      b_ctx->len = 0;
+      aligned_pos = 0;
+      b_ctx->total_allocated += new_size;
+    }
   }
 
   void *ptr = (char *)b_ctx->blocks[b_ctx->pos] + aligned_pos;
@@ -94,6 +105,15 @@ Stats bump_stats(void *ctx) {
                  .current = b_ctx->total_used};
 }
 
+void bump_reset(void *ctx) {
+  BumpCtx *b = (BumpCtx *)ctx;
+
+  b->pos = 0;
+  b->len = 0;
+  b->size = BUMP_MIN_START;
+  b->total_used = 0;
+}
+
 Allocator *bump_init(uint64_t min_size, uint64_t max_size) {
   BumpCtx *ctx = malloc(sizeof(BumpCtx));
   ASSERT(ctx != NULL, "failed to bump allocator context");
@@ -113,6 +133,7 @@ Allocator *bump_init(uint64_t min_size, uint64_t max_size) {
   a->destroy = bump_destroy;
   a->request = bump_request;
   a->stats = bump_stats;
+  a->reset = bump_reset;
 
   return a;
 }

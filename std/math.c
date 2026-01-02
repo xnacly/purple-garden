@@ -1,7 +1,7 @@
 #include "../vm.h"
 #include <math.h>
 
-static void builtin_math_mod(Vm *vm) {
+static void pg_builtin_math_mod(Vm *vm) {
   Value *lhs = &ARG(0);
   Value *rhs = &ARG(1);
 

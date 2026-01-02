@@ -1,2 +1,2 @@
 # vim: filetype=python
-std::println("Hello World")
+std::println("Hello" std::env::get("USER")) # Hello $USER

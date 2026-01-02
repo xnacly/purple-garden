@@ -1,4 +1,5 @@
 #include "adts.h"
+#include "gc.h"
 
 #include <stdint.h>
 
@@ -106,7 +107,7 @@ inline Value Map_get_hash(const Map *m, uint32_t hash) {
 Value Map_get(const Map *m, const Str *s) {
   uint32_t hash = s->hash;
   if (hash == 0) {
-    Str_hash(s);
+    hash = Str_hash(s);
   }
   return Map_get_hash(m, hash);
 }
@@ -114,12 +115,12 @@ Value Map_get(const Map *m, const Str *s) {
 void Map_insert(Map *m, const Str *s, Value v, Allocator *a) {
   uint32_t hash = s->hash;
   if (hash == 0) {
-    Str_hash(s);
+    hash = Str_hash(s);
   }
   Map_insert_hash(m, hash, v, a);
 }
 
-List List_new(size_t cap, Allocator *a) {
+List List_new(size_t cap, Gc *gc) {
 #define MIN_SIZE 8
 
   cap = cap < MIN_SIZE ? MIN_SIZE : cap;
@@ -127,7 +128,7 @@ List List_new(size_t cap, Allocator *a) {
   return (List){
       .cap = cap,
       .len = 0,
-      .arr = CALL(a, request, cap * sizeof(Value)),
+      .arr = gc_request(gc, cap * sizeof(Value), GC_OBJ_LIST),
   };
 }
 
@@ -141,12 +142,12 @@ Value List_get(const List *l, size_t idx) {
   return l->arr[idx];
 }
 
-void List_append(List *l, Value v, Allocator *a) {
+void List_append(List *l, Value v, Gc *gc) {
 #define GROWTH 2
   if (l->len + 1 > l->cap) {
     size_t new_cap = l->cap * GROWTH;
     Value *old = l->arr;
-    l->arr = CALL(a, request, sizeof(Value) * new_cap);
+    l->arr = gc_request(gc, sizeof(Value) * new_cap, GC_OBJ_LIST);
     l->cap = new_cap;
     memcpy(l->arr, old, l->len * sizeof(Value));
   }

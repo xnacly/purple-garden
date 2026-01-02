@@ -1,15 +1,15 @@
 #include "../vm.h"
 
-static const Str *OPTION = &STRING("option");
-static const Str *STR = &STRING("str");
-static const Str *NUM = &STRING("number");
-static const Str *BOOL = &STRING("bool");
-static const Str *OBJ = &STRING("obj");
-static const Str *ARR = &STRING("array");
+static Str *OPTION = &STRING("option");
+static Str *STR = &STRING("str");
+static Str *NUM = &STRING("number");
+static Str *BOOL = &STRING("bool");
+static Str *OBJ = &STRING("obj");
+static Str *ARR = &STRING("array");
 
-static void builtin_runtime_type(Vm *vm) {
+static void pg_builtin_runtime_type(Vm *vm) {
   uint16_t offset = vm->arg_offset;
-  const Str *s;
+  Str *s;
   const Value *a = &ARG(0);
   if (a->is_some) {
     s = OPTION;
@@ -48,19 +48,26 @@ static void builtin_runtime_type(Vm *vm) {
   });
 }
 
-static void builtin_runtime_assert(Vm *vm) {
+static void pg_builtin_runtime_assert(Vm *vm) {
   ASSERT(ARG(0).type == V_TRUE, "Assertion");
 }
 
-static void builtin_runtime_gc_stats(Vm *vm) {
+static void pg_builtin_runtime_gc_stats(Vm *vm) {
   // TODO: this fucking sucks, there has to be a better way, i urgenly need a
   // c->pg type macro
-  Stats c = CALL(vm->alloc, stats);
-  Map *m = CALL(vm->alloc, request, sizeof(Map));
-  Value map = (Value){.type = V_ARRAY, .obj = m};
-  Map_insert(m, &STRING("current"),
-             (Value){.type = V_INT, .integer = c.current}, vm->alloc);
-  Map_insert(m, &STRING("allocated"),
-             (Value){.type = V_INT, .integer = c.allocated}, vm->alloc);
-  RETURN(map);
+  // Stats c = CALL(vm->alloc, stats);
+  // Map *m = CALL(vm->alloc, request, sizeof(Map));
+  // Value map = (Value){.type = V_ARRAY, .obj = m};
+  // Map_insert(m, &STRING("current"),
+  //            (Value){.type = V_INT, .integer = c.current}, vm->alloc);
+  // Map_insert(m, &STRING("allocated"),
+  //            (Value){.type = V_INT, .integer = c.allocated}, vm->alloc);
+  // RETURN(map);
+  ASSERT(0, "UNIMPLEMENTED");
+}
+
+static void pg_builtin_runtime_gc_cycle(Vm *vm) {
+  if (!vm->config.disable_gc) {
+    gc_cycle(vm->gc);
+  }
 }
