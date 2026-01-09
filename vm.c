@@ -402,8 +402,12 @@ int Vm_run(Vm *vm) {
       f->return_to_bytecode = vm->pc;
       vm->frame = f;
       vm->pc = arg;
+      for (size_t i = 1; i < REGISTERS; i++) {
+        vm->frame->registers[i] = vm->registers[i];
+      }
       for (size_t i = 0; i < vm->arg_count; i++) {
-        vm->registers[vm->arg_offset + i].is_heap = false;
+        vm->registers[i + 1] = vm->registers[vm->arg_offset + i + 1];
+        vm->registers[i + 1].is_heap = false;
       }
       vm->arg_count = 1;
       vm->arg_offset = 0;
@@ -411,6 +415,9 @@ int Vm_run(Vm *vm) {
     }
     case OP_RET: {
       Frame *old = vm->frame;
+      for (size_t i = 1; i < REGISTERS; i++) {
+        vm->registers[i] = vm->frame->registers[i];
+      }
       if (vm->frame->prev) {
         vm->pc = vm->frame->return_to_bytecode;
         vm->frame = vm->frame->prev;
