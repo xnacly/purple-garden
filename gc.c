@@ -142,8 +142,7 @@ static inline void mark(Gc *gc, const Value *val) {
   case V_STR:
     // a heap string is made up of both the string view and its inner buffer
     // holding the actual bytes GC_OBJ_RAW respectively
-    GcHeader *raw =
-        (GcHeader *)((char *)((Str *)payload)->p - sizeof(GcHeader));
+    GcHeader *raw = (GcHeader *)((uint8_t *)val->string.p - sizeof(GcHeader));
     raw->marked = true;
     break;
     return;
