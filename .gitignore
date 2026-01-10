@@ -3,3 +3,4 @@ build/*
 tests/test
 # benchmarking
 examples/bench.*
+target

@@ -1,0 +1,10 @@
+[package]
+name = "purple-garden"
+version = "0.1.0"
+description = "Lean scripting language, designed and implemented with a focus on performance and a low memory profile "
+edition = "2024"
+
+[features]
+trace = []
+
+[dependencies]
