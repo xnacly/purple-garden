@@ -181,6 +181,7 @@ typedef struct Frame {
   // function
   size_t return_to_bytecode;
   Map variable_table;
+  Value registers[REGISTERS];
 } Frame;
 
 typedef struct __Vm Vm;
