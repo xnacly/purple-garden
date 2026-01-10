@@ -5,6 +5,139 @@
 #include "gc.h"
 #include <stdint.h>
 
+#define GLOBAL_FALSE 0
+#define GLOBAL_TRUE 1
+#define GLOBAL_NONE 2
+
+typedef enum {
+  // STORE rANY
+  //
+  // STORE a Value from r0 into an arbitrary register
+  OP_STORE,
+
+  // LOAD rANY
+  //
+  // LOAD a Value from rANY into r0
+  OP_LOAD,
+
+  // OP_ADD rANY
+  //
+  // add Value at rANY to r0, store result in r0
+  OP_ADD = 2,
+  // OP_SUB rANY
+  //
+  // subtract Value at rANY from r0, store result in r0
+  OP_SUB = 3,
+  // OP_MUL rANY
+  //
+  // multiply Value at rANY with r0, store result in r0
+  OP_MUL = 4,
+  // OP_DIV rANY
+  //
+  // divide Value at rANY with r0, store result in r0
+  OP_DIV = 5,
+
+  // OP_EQ rANY
+  //
+  // compares value at r0 and rANY via Value_cmp
+  OP_EQ = 6,
+
+  // OP_LT rANY
+  //
+  // numeric value at r0 < rANY
+  OP_LT = 7,
+
+  // OP_GT rANY
+  //
+  // numeric value at r0 > rANY
+  OP_GT = 8,
+
+  // OP_VAR hash
+  //
+  // stores the Value in the register r0 in the variable table via the
+  // hash
+  OP_VAR,
+
+  // OP_LOADV hash
+  //
+  // loads the Value stored in the variable table by hash
+  OP_LOADV,
+
+  // OP_ARGS aANY
+  //
+  // instructs the vm on how many values to pop of the argument stacks
+  OP_ARGS,
+
+  // OP_SYS bANY
+  //
+  // syscall into the vm->builtin with idx bANY
+  OP_SYS,
+
+  // OP_RET rANY
+  //
+  // Ends a scope
+  OP_RET,
+
+  // OP_CALL ADDR
+  //
+  // 1: enters a new stackframe, stores the last vm->pc in
+  // Frame.return_to_bytecode
+  //
+  // 2: jumps to ADDR
+  OP_CALL,
+
+  // OP_JMP bc
+  //
+  // Jumps to bc in bytecode index, does no bounds checking
+  OP_JMP,
+
+  // LOADG rANY
+  //
+  // LOADG a global from the const table to r0
+  OP_LOADG,
+
+  // LOADI imm
+  //
+  // LOAD a V_INT immediate into r0
+  OP_LOADI,
+
+  // JMPF bANY
+  //
+  // jump to bANY if r0 is false
+  OP_JMPF,
+
+  // NEW oType
+  //
+  // Creates an instance of the value defined via its argument, see enum
+  // VM_New
+  OP_NEW,
+
+  // APPEND rANY
+  //
+  // Appends r0 to rANY
+  OP_APPEND,
+
+  // SIZE uint32_t
+  //
+  // Specifices a size
+  OP_SIZE,
+
+  // LEN rANY
+  //
+  // Extracts the length from a container at rANY, stores it in r0
+  OP_LEN,
+
+  // Idx rANY
+  //
+  // Use the value in r0 to index into rANY
+  OP_IDX,
+
+  // DBG rANY
+  //
+  // debug print the value in rANY
+  OP_DBG,
+} VM_OP;
+
 typedef struct {
   // defines the maximum amount of memory purple garden is allowed to allocate,
   // if this is hit, the vm exits with a non zero code
@@ -48,6 +181,7 @@ typedef struct Frame {
   // function
   size_t return_to_bytecode;
   Map variable_table;
+  Value registers[REGISTERS];
 } Frame;
 
 typedef struct __Vm Vm;
@@ -98,124 +232,6 @@ typedef struct __Vm {
   uint64_t instruction_counter[256];
 #endif
 } Vm;
-
-#define GLOBAL_FALSE 0
-#define GLOBAL_TRUE 1
-#define GLOBAL_NONE 2
-
-typedef enum {
-  // STORE rANY
-  //
-  // STORE a Value from r0 into an arbitrary register
-  OP_STORE,
-
-  // LOAD rANY
-  //
-  // LOAD a Value from rANY into r0
-  OP_LOAD,
-
-  // OP_ADD rANY
-  //
-  // add Value at rANY to r0, store result in r0
-  OP_ADD = 2,
-  // OP_SUB rANY
-  //
-  // subtract Value at rANY from r0, store result in r0
-  OP_SUB = 3,
-  // OP_MUL rANY
-  //
-  // multiply Value at rANY with r0, store result in r0
-  OP_MUL = 4,
-  // OP_DIV rANY
-  //
-  // divide Value at rANY with r0, store result in r0
-  OP_DIV = 5,
-
-  // OP_EQ rANY
-  //
-  // compares value at r0 and rANY via Value_cmp
-  OP_EQ = 6,
-
-  // OP_LT rANY
-  //
-  // numeric value at r0 < rANY
-  OP_LT = 7,
-
-  // OP_GT rANY
-  //
-  // numeric value at r0 > rANY
-  OP_GT = 8,
-
-  // OP_VAR rANY
-  //
-  // stores the Value in the register rANY in the variable table via the
-  // identifier stored in r0
-  OP_VAR,
-
-  // OP_LOADV hash
-  //
-  // loads the Value stored in the variable table by hash
-  OP_LOADV,
-
-  // OP_ARGS aANY
-  //
-  // instructs the vm on how many values to pop of the argument stacks
-  OP_ARGS,
-
-  // OP_SYS bANY
-  //
-  // syscall into the vm->builtin with idx bANY
-  OP_SYS,
-
-  // OP_RET rANY
-  //
-  // Ends a scope
-  OP_RET,
-
-  // OP_CALL ADDR
-  //
-  // 1: enters a new stackframe, stores the last vm->pc in
-  // Frame.return_to_bytecode
-  //
-  // 2: jumps to ADDR
-  OP_CALL,
-
-  // OP_JMP bc
-  //
-  // Jumps to bc in bytecode index, does no bounds checking
-  OP_JMP,
-
-  // LOADG rANY
-  //
-  // LOADG a global from the const table to r0
-  OP_LOADG,
-
-  // JMPF bANY
-  //
-  // jump to bANY if r0 is false
-  OP_JMPF,
-
-  // NEW oType
-  //
-  // Creates an instance of the value defined via its argument, see enum
-  // VM_New
-  OP_NEW,
-
-  // APPEND rANY
-  //
-  // Appends r0 to rANY
-  OP_APPEND,
-
-  // Size uint32_t
-  //
-  // Specifices a size
-  OP_SIZE,
-
-  // Idx rANY
-  //
-  // Use the value in r0 to index into rANY
-  OP_IDX,
-} VM_OP;
 
 #define VM_ERR(fmt, ...)                                                       \
   fprintf(stderr, "[VM] ERROR: " fmt "\n", ##__VA_ARGS__);                     \

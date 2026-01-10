@@ -5,7 +5,7 @@
 // via +-.
 static void pg_builtin_conv_int(Vm *vm) {
   Value in = ARG(0);
-  const Str *s = in.string;
+  const Str *s = &in.string;
   if (!s->len)
     goto err;
 

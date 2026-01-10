@@ -278,7 +278,8 @@ quoted: {
   return t;
 }
 
-string: {
+string: { // TODO: handle escaped characters like \t\n\"
+
   // skip "
   l->pos++;
   size_t start = l->pos;
@@ -344,7 +345,6 @@ void Token_debug(Token *token) {
   case T_DOUBLE:
   case T_INTEGER:
   case T_STRING:
-  case T_BUILTIN:
   case T_IDENT:
     putc('[', stdout);
     Str_debug(&token->string);

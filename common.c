@@ -36,7 +36,7 @@ inline bool Value_cmp(const Value *a, const Value *b) {
 
   switch (a->type) {
   case V_STR:
-    return Str_eq(a->string, b->string);
+    return Str_eq(&a->string, &b->string);
   case V_DOUBLE:
     // PERF: can potentially be faster, since we omit need a function call, in
     // practice i havent seen any impact over the following construct. if
@@ -80,7 +80,7 @@ void Value_debug(const Value *v) {
     break;
   case V_STR:
     printf("::\"");
-    Str_debug(v->string);
+    Str_debug(&v->string);
     printf("\"");
     break;
   case V_DOUBLE:

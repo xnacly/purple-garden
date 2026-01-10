@@ -1,4 +1,4 @@
-# vim: filetype=python
+# vim: filetype=nix
 
 # std is a immutable module collection containing helpers and commonly used abstractions
 

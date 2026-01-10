@@ -7,7 +7,6 @@
 
 const char *GC_OBJ_TYPES[] = {
     [GC_OBJ_RAW] = "RAW",
-    [GC_OBJ_STR] = "STR",
     [GC_OBJ_LIST] = "LIST",
     [GC_OBJ_MAP] = "MAP",
 };
@@ -44,7 +43,7 @@ void *gc_request(Gc *gc, size_t size, ObjType t) {
   gc->allocated_since_last_cycle += size;
   gc->allocated += size;
 
-#ifdef VERBOSE_GC
+#if VERBOSE_GC
   printf("[GC][REQU] type=%s, size=%zu, payload=%p\n", GC_OBJ_TYPES[t], size,
          payload);
 #endif
@@ -98,8 +97,7 @@ static inline void rewrite(Gc *gc, Value *v) {
 
   switch ((ValueType)v->type) {
   case V_STR:
-    v->string->p = (const uint8_t *)forward_ptr((void *)v->string->p);
-    v->string = (Str *)forward_ptr((void *)v->string);
+    v->string.p = (const uint8_t *)forward_ptr((void *)v->string.p);
     break;
   case V_ARRAY:
     v->array = (List *)forward_ptr((void *)v->array);
@@ -142,8 +140,12 @@ static inline void mark(Gc *gc, const Value *val) {
   void *payload = NULL;
   switch ((ValueType)val->type) {
   case V_STR:
-    payload = (void *)val->string;
+    // a heap string is made up of both the string view and its inner buffer
+    // holding the actual bytes GC_OBJ_RAW respectively
+    GcHeader *raw = (GcHeader *)((uint8_t *)val->string.p - sizeof(GcHeader));
+    raw->marked = true;
     break;
+    return;
   case V_ARRAY:
     payload = (void *)val->array;
     break;
@@ -165,14 +167,6 @@ static inline void mark(Gc *gc, const Value *val) {
   h->marked = 1;
 
   switch ((ObjType)h->type) {
-  case GC_OBJ_STR: {
-    // a heap string is made up of both the string view and its inner buffer
-    // holding the actual bytes, GC_OBJ_STR and GC_OBJ_RAW respectively
-    GcHeader *raw =
-        (GcHeader *)((char *)((Str *)payload)->p - sizeof(GcHeader));
-    raw->marked = true;
-    break;
-  }
   case GC_OBJ_LIST: {
     List *l = (List *)payload;
     for (size_t i = 0; i < l->len; i++) {

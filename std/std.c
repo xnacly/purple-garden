@@ -13,7 +13,7 @@ static void pg_builtin_len(Vm *vm) {
   const Value *a = &ARG(0);
   size_t len = 0;
   if (a->type == V_STR) {
-    len = a->string->len;
+    len = a->string.len;
   } else if (a->type == V_ARRAY) {
     len = a->array->len;
   } else if (a->type == V_OBJ) {
@@ -44,6 +44,8 @@ static StdNode tree = PACKAGE("std",
           ), 
           PACKAGE("str", 
               FUNCTION("append", &pg_builtin_str_append, -1), 
+              FUNCTION("lines", &pg_builtin_str_lines, 1), 
+              FUNCTION("slice", &pg_builtin_str_slice, 3), 
           ), 
           PACKAGE("opt", 
               FUNCTION("unwrap", &pg_builtin_opt_unwrap, 1), 

@@ -8,17 +8,19 @@
 #include "vm.h"
 
 Str OP_MAP[256] = {
-    [OP_STORE] = STRING("STORE"),   [OP_LOAD] = STRING("LOAD"),
-    [OP_ADD] = STRING("ADD"),       [OP_SUB] = STRING("SUB"),
-    [OP_MUL] = STRING("MUL"),       [OP_DIV] = STRING("DIV"),
-    [OP_EQ] = STRING("EQ"),         [OP_LT] = STRING("LT"),
-    [OP_GT] = STRING("GT"),         [OP_VAR] = STRING("VAR"),
-    [OP_LOADV] = STRING("LOADV"),   [OP_ARGS] = STRING("ARGS"),
-    [OP_SYS] = STRING("SYS"),       [OP_RET] = STRING("RET"),
-    [OP_CALL] = STRING("CALL"),     [OP_JMP] = STRING("JMP"),
-    [OP_LOADG] = STRING("LOADG"),   [OP_JMPF] = STRING("JMPF"),
-    [OP_APPEND] = STRING("APPEND"), [OP_NEW] = STRING("NEW"),
-    [OP_SIZE] = STRING("SIZE"),     [OP_IDX] = STRING("IDX"),
+    [OP_STORE] = STRING("STORE"), [OP_LOAD] = STRING("LOAD"),
+    [OP_ADD] = STRING("ADD"),     [OP_SUB] = STRING("SUB"),
+    [OP_MUL] = STRING("MUL"),     [OP_DIV] = STRING("DIV"),
+    [OP_EQ] = STRING("EQ"),       [OP_LT] = STRING("LT"),
+    [OP_GT] = STRING("GT"),       [OP_VAR] = STRING("VAR"),
+    [OP_LOADV] = STRING("LOADV"), [OP_ARGS] = STRING("ARGS"),
+    [OP_SYS] = STRING("SYS"),     [OP_RET] = STRING("RET"),
+    [OP_CALL] = STRING("CALL"),   [OP_JMP] = STRING("JMP"),
+    [OP_LOADG] = STRING("LOADG"), [OP_JMPF] = STRING("JMPF"),
+    [OP_LOADI] = STRING("LOADI"), [OP_APPEND] = STRING("APPEND"),
+    [OP_NEW] = STRING("NEW"),     [OP_SIZE] = STRING("SIZE"),
+    [OP_LEN] = STRING("LEN"),     [OP_IDX] = STRING("IDX"),
+    [OP_DBG] = STRING("DBG"),
 };
 
 Vm Vm_new(Vm_Config conf, Allocator *staticalloc, Gc *gc) {
@@ -162,16 +164,18 @@ int Vm_run(Vm *vm) {
       Map_insert_hash(&vm->frame->variable_table, arg, v, vm->staticalloc);
       break;
     case OP_ADD: {
-      Value *rhs = &vm->registers[0];
-      Value *lhs = &vm->registers[arg];
+      Value *lhs = &vm->registers[0];
+      Value *rhs = &vm->registers[arg];
 
       int lhs_is_double = lhs->type == V_DOUBLE;
       int rhs_is_double = rhs->type == V_DOUBLE;
 
       if (lhs_is_double | rhs_is_double) {
-        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
-        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
-        vm->registers[0].floating = b + a;
+        double lhs_double =
+            lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double rhs_double =
+            rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = lhs_double + rhs_double;
         vm->registers[0].type = V_DOUBLE;
         break;
       }
@@ -183,11 +187,10 @@ int Vm_run(Vm *vm) {
                r.p);
       }
 
-      vm->registers[0].integer = rhs->integer + lhs->integer;
+      vm->registers[0].integer = lhs->integer + rhs->integer;
       vm->registers[0].type = V_INT;
       break;
     }
-
     case OP_SUB: {
       Value *lhs = &vm->registers[0];
       Value *rhs = &vm->registers[arg];
@@ -196,9 +199,11 @@ int Vm_run(Vm *vm) {
       int rhs_is_double = rhs->type == V_DOUBLE;
 
       if (lhs_is_double | rhs_is_double) {
-        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
-        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
-        vm->registers[0].floating = b - a;
+        double lhs_double =
+            lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double rhs_double =
+            rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = lhs_double - rhs_double;
         vm->registers[0].type = V_DOUBLE;
         break;
       }
@@ -210,11 +215,10 @@ int Vm_run(Vm *vm) {
                r.p);
       }
 
-      vm->registers[0].integer = rhs->integer - lhs->integer;
+      vm->registers[0].integer = lhs->integer - rhs->integer;
       vm->registers[0].type = V_INT;
       break;
     }
-
     case OP_MUL: {
       Value *lhs = &vm->registers[0];
       Value *rhs = &vm->registers[arg];
@@ -223,9 +227,11 @@ int Vm_run(Vm *vm) {
       int rhs_is_double = rhs->type == V_DOUBLE;
 
       if (lhs_is_double | rhs_is_double) {
-        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
-        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
-        vm->registers[0].floating = b * a;
+        double lhs_double =
+            lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double rhs_double =
+            rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = lhs_double * rhs_double;
         vm->registers[0].type = V_DOUBLE;
         break;
       }
@@ -237,11 +243,10 @@ int Vm_run(Vm *vm) {
                r.p);
       }
 
-      vm->registers[0].integer = rhs->integer * lhs->integer;
+      vm->registers[0].integer = lhs->integer * rhs->integer;
       vm->registers[0].type = V_INT;
       break;
     }
-
     case OP_DIV: {
       Value *lhs = &vm->registers[0];
       Value *rhs = &vm->registers[arg];
@@ -250,9 +255,11 @@ int Vm_run(Vm *vm) {
       int rhs_is_double = rhs->type == V_DOUBLE;
 
       if (lhs_is_double | rhs_is_double) {
-        double a = lhs_is_double ? lhs->floating : (double)lhs->integer;
-        double b = rhs_is_double ? rhs->floating : (double)rhs->integer;
-        vm->registers[0].floating = b / a;
+        double lhs_double =
+            lhs_is_double ? lhs->floating : (double)lhs->integer;
+        double rhs_double =
+            rhs_is_double ? rhs->floating : (double)rhs->integer;
+        vm->registers[0].floating = lhs_double / rhs_double;
         vm->registers[0].type = V_DOUBLE;
         break;
       }
@@ -264,11 +271,11 @@ int Vm_run(Vm *vm) {
                r.p);
       }
 
-      if (lhs->integer == 0) {
+      if (rhs->integer == 0) {
         VM_ERR("Division by zero");
       }
 
-      vm->registers[0].integer = rhs->integer / lhs->integer;
+      vm->registers[0].integer = lhs->integer / rhs->integer;
       vm->registers[0].type = V_INT;
       break;
     }
@@ -295,7 +302,7 @@ int Vm_run(Vm *vm) {
       }
 
       if (lhs->type == V_STR && rhs->type == V_STR) {
-        if (Str_eq(lhs->string, rhs->string)) {
+        if (Str_eq(&lhs->string, &rhs->string)) {
           goto set_true;
         }
         goto set_false;
@@ -322,8 +329,8 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_LT: {
-      Value lhs = vm->registers[arg];
-      Value rhs = vm->registers[0];
+      Value lhs = vm->registers[0];
+      Value rhs = vm->registers[arg];
 
       if (!((1 << lhs.type) & V_NUM_MASK) || !((1 << rhs.type) & V_NUM_MASK)) {
         Str l = VALUE_TYPE_MAP[lhs.type];
@@ -340,8 +347,9 @@ int Vm_run(Vm *vm) {
       break;
     }
     case OP_GT: {
-      Value lhs = vm->registers[arg];
-      Value rhs = vm->registers[0];
+      Value lhs = vm->registers[0];
+      Value rhs = vm->registers[arg];
+
       if (!((1 << lhs.type) & V_NUM_MASK) || !((1 << rhs.type) & V_NUM_MASK)) {
         Str l = VALUE_TYPE_MAP[lhs.type];
         Str r = VALUE_TYPE_MAP[rhs.type];
@@ -370,7 +378,7 @@ int Vm_run(Vm *vm) {
         if (idx.type != V_STR) {
           goto err;
         }
-        vm->registers[0] = Map_get(target.obj, idx.string);
+        vm->registers[0] = Map_get(target.obj, &idx.string);
         break;
       err:
       default:
@@ -379,6 +387,12 @@ int Vm_run(Vm *vm) {
         VM_ERR("Cant index into `%.*s` with `%.*s`", (int)t.len, t.p,
                (int)i.len, i.p);
       }
+      break;
+    }
+    case OP_DBG: {
+      printf("dbg[%zu][r%u]<<", vm->pc, arg);
+      Value_debug(&vm->registers[arg]);
+      puts(">>");
       break;
     }
     case OP_ARGS:
@@ -402,8 +416,12 @@ int Vm_run(Vm *vm) {
       f->return_to_bytecode = vm->pc;
       vm->frame = f;
       vm->pc = arg;
+      for (size_t i = 1; i < REGISTERS; i++) {
+        vm->frame->registers[i] = vm->registers[i];
+      }
       for (size_t i = 0; i < vm->arg_count; i++) {
-        vm->registers[vm->arg_offset + i].is_heap = false;
+        vm->registers[i + 1] = vm->registers[vm->arg_offset + i + 1];
+        vm->registers[i + 1].is_heap = false;
       }
       vm->arg_count = 1;
       vm->arg_offset = 0;
@@ -411,6 +429,9 @@ int Vm_run(Vm *vm) {
     }
     case OP_RET: {
       Frame *old = vm->frame;
+      for (size_t i = 1; i < REGISTERS; i++) {
+        vm->registers[i] = vm->frame->registers[i];
+      }
       if (vm->frame->prev) {
         vm->pc = vm->frame->return_to_bytecode;
         vm->frame = vm->frame->prev;
@@ -433,6 +454,27 @@ int Vm_run(Vm *vm) {
     case OP_JMP: {
       vm->pc = arg;
       continue;
+    }
+    case OP_LOADI: {
+      vm->registers[0] = (Value){.type = V_INT, .integer = arg};
+      break;
+    }
+    case OP_LEN: {
+      Value *t = &vm->registers[arg];
+      switch ((ValueType)t->type) {
+      case V_STR:
+        vm->registers[0] = (Value){.type = V_INT, .integer = t->string.len};
+        break;
+      case V_ARRAY:
+        vm->registers[0] = (Value){.type = V_INT, .integer = t->array->len};
+        break;
+      case V_OBJ:
+        vm->registers[0] = (Value){.type = V_INT, .integer = t->obj->len};
+        break;
+      default:
+        VM_ERR("Can only call LEN on Str, Array and Obj");
+      }
+      break;
     }
     default:
       VM_ERR("Unimplemented instruction `%.*s`", (int)OP_MAP[op].len,

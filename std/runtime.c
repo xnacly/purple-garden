@@ -44,7 +44,7 @@ static void pg_builtin_runtime_type(Vm *vm) {
 
   RETURN({
       .type = V_STR,
-      .string = s,
+      .string = *s,
   });
 }
 

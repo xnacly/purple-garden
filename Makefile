@@ -8,7 +8,7 @@ FLAGS := -std=c23 \
         -Wno-ignored-qualifiers -Wno-unused-parameter \
         -Wno-unused-function -Wno-unused-variable -Wno-aggregate-return \
         -Wno-override-init \
-		-Wno-unused-command-line-argument -lm
+		-Wno-unused-command-line-argument
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -63,24 +63,24 @@ $(OBJ_DIR)/%.o: %.c | $(OBJ_DIR)
 $(DEBUG_BIN): COMPILE_FLAGS := $(DEBUG_EXTRA)
 $(DEBUG_BIN): LINK_FLAGS := $(DEBUG_EXTRA)
 $(DEBUG_BIN): $(OBJ) | $(BIN_DIR)
-	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@
+	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@ -lm
 
 # Release build
 $(RELEASE_BIN): COMPILE_FLAGS := $(RELEASE_FLAGS)
 $(RELEASE_BIN): LINK_FLAGS := $(RELEASE_FLAGS) $(RELEASE_EXTRA)
 $(RELEASE_BIN): $(OBJ) | $(BIN_DIR)
-	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@
+	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@ -lm
 
 # Bench build
 $(BENCH_BIN): COMPILE_FLAGS := $(RELEASE_FLAGS)
 $(BENCH_BIN): LINK_FLAGS := $(RELEASE_FLAGS) $(BENCH_EXTRA)
 $(BENCH_BIN): $(OBJ) | $(BIN_DIR)
-	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@
+	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@ -lm
 
 $(TEST_BIN): COMPILE_FLAGS := $(TEST_EXTRA)
 $(TEST_BIN): LINK_FLAGS := $(TEST_EXTRA)
 $(TEST_BIN): $(TEST_OBJ) | $(BIN_DIR)
-	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@
+	$(CC) $(FLAGS) $(LINK_FLAGS) $^ -o $@ -lm
 
 # lib build
 $(BIN_DIR)/libpg.a: $(SRC_OBJ) | $(BIN_DIR)

@@ -81,7 +81,7 @@ typedef struct List {
 
 // Value represents a value known to the runtime
 typedef struct Value {
-  // true if @Some, otherwise self is just a Value, if @None just .type=V_NONE
+  // true if Some, otherwise self is just a Value, if None just .type=V_NONE
   unsigned int is_some : 1;
   // TODO: move this to Str.is_heap, since array, obj are always gc heap
   // allocated, but Str can point to compile time known strings, only upon
@@ -90,7 +90,7 @@ typedef struct Value {
   unsigned int is_heap : 1;
   unsigned int type : 3;
   union {
-    Str *string;
+    Str string;
     List *array;
     Map *obj;
     double floating;
