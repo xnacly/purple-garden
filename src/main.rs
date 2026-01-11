@@ -77,7 +77,7 @@ fn main() {
                         token: (Token {
                             line: 0,
                             col: 0,
-                            t: (Type::Integer("4")),
+                            t: (Type::Double("3.1415")),
                         }),
                         inner: (InnerNode::Atom),
                     }),
@@ -99,11 +99,10 @@ fn main() {
         e.render();
         std::process::exit(1);
     }
+    cc.dis();
 
     let mut vm = cc.finalize();
     if let Err(e) = vm.run() {
         Into::<PgError>::into(e).render();
     }
-
-    dbg!(&vm.registers[0]);
 }

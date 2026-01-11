@@ -1,6 +1,7 @@
 use std::{hash::Hash, num};
 
 mod ctx;
+mod dis;
 mod reg;
 
 use crate::{
