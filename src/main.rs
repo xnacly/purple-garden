@@ -1,6 +1,11 @@
 #![allow(dead_code, unused_variables)]
 
-use crate::op::Op;
+use crate::{
+    ast::{InnerNode, Node},
+    lex::{Token, Type},
+    op::Op,
+    vm::Vm,
+};
 
 mod ast;
 mod cc;
@@ -31,31 +36,69 @@ type Todo = ();
 // - build optimising x86 jit with ssa via -O2
 // - allow for writing bytecode to disk
 fn main() {
-    let bytecode: Vec<Op> = vec![
-        Op::LoadImm { dst: 0, value: 10 },
-        Op::LoadImm { dst: 1, value: 32 },
-        Op::Add {
-            dst: 0,
-            lhs: 0,
-            rhs: 1,
+    let ast = Node {
+        token: Token {
+            line: 0,
+            col: 0,
+            t: (Type::Asteriks),
         },
-        Op::StoreLocal { slot: 0, src: 0 },
-        Op::LoadLocal { slot: 0, dst: 2 },
-        Op::LoadGlobal { dst: 0, idx: 1 },
-        Op::Call {
-            func: 1,
-            args_start: 0,
-            args_len: 2,
+        inner: InnerNode::Bin {
+            lhs: Box::new(Node {
+                token: (Token {
+                    line: 0,
+                    col: 0,
+                    t: (Type::Plus),
+                }),
+                inner: (InnerNode::Bin {
+                    lhs: Box::new(Node {
+                        token: (Token {
+                            line: 0,
+                            col: 0,
+                            t: (Type::Integer("2")),
+                        }),
+                        inner: (InnerNode::Atom),
+                    }),
+                    rhs: Box::new(Node {
+                        token: (Token {
+                            line: 0,
+                            col: 0,
+                            t: (Type::Integer("3")),
+                        }),
+                        inner: (InnerNode::Atom),
+                    }),
+                }),
+            }),
+            rhs: Box::new(Node {
+                token: (Token {
+                    line: 0,
+                    col: 0,
+                    t: (Type::Minus),
+                }),
+                inner: (InnerNode::Bin {
+                    lhs: Box::new(Node {
+                        token: (Token {
+                            line: 0,
+                            col: 0,
+                            t: (Type::Integer("4")),
+                        }),
+                        inner: (InnerNode::Atom),
+                    }),
+                    rhs: Box::new(Node {
+                        token: (Token {
+                            line: 0,
+                            col: 0,
+                            t: (Type::Integer("1")),
+                        }),
+                        inner: (InnerNode::Atom),
+                    }),
+                }),
+            }),
         },
-        Op::Sys {
-            ptr: |_, _| {},
-            args_start: 0,
-            args_len: 1,
-        },
-        Op::Ret,
-    ];
+    };
 
-    for (i, op) in bytecode.iter().enumerate() {
-        println!("{:04} {:?}", i, op)
-    }
+    let mut cc = cc::Cc::new();
+    let _ = cc.compile(ast).expect("Failed to compile node");
+
+    let mut vm = cc.finalize();
+    vm.run();
 }
