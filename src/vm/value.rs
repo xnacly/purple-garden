@@ -1,4 +1,4 @@
-use crate::{cc::Const, err::PgError};
+use crate::cc::Const;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Value<'v> {
@@ -25,15 +25,5 @@ impl<'c> From<Const<'c>> for Value<'c> {
             Const::Double(bits) => Value::Double(f64::from_bits(bits)),
             Const::Str(str) => Value::Str(str),
         }
-    }
-}
-
-impl<'v> Value<'v> {
-    fn as_i64() -> Result<i64, PgError> {
-        todo!()
-    }
-
-    fn as_double() -> Result<i64, PgError> {
-        todo!()
     }
 }

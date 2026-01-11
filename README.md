@@ -19,4 +19,17 @@ std::println(tuplify("hello world")) # [str, 11]
 
 ## Features / Design goals
 
-## Setup
+- be as fast as I can get it to be; which is very fast
+- do the first, but be safe
+- embeddability, low friction for interop with rust
+- be memory efficient
+
+## Local Setup
+
+> Since purple garden is a rust project, it requires cargo, it also requires
+> nightly, due to its usage of branch predictions in the virtual machine
+
+```shell
+git clone git@github.com:xnacly/purple-garden.git
+cargo +nightly run -- --help
+```

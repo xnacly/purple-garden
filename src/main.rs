@@ -1,10 +1,10 @@
 #![allow(dead_code, unused_variables)]
+#![cfg_attr(feature = "nightly", feature(likely_unlikely))]
 
 use crate::{
     ast::{InnerNode, Node},
+    err::PgError,
     lex::{Token, Type},
-    op::Op,
-    vm::Vm,
 };
 
 mod ast;
@@ -20,8 +20,6 @@ mod op;
 mod parser;
 /// register based virtual machine
 mod vm;
-
-type Todo = ();
 
 // TODO:
 // - port pg cli to serde
@@ -97,8 +95,15 @@ fn main() {
     };
 
     let mut cc = cc::Cc::new();
-    let _ = cc.compile(ast).expect("Failed to compile node");
+    if let Err(e) = cc.compile(ast) {
+        e.render();
+        std::process::exit(1);
+    }
 
     let mut vm = cc.finalize();
-    vm.run();
+    if let Err(e) = vm.run() {
+        Into::<PgError>::into(e).render();
+    }
+
+    dbg!(&vm.registers[0]);
 }

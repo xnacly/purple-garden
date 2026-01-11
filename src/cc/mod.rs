@@ -12,7 +12,7 @@ use crate::{
     err::PgError,
     lex::Type,
     op::Op,
-    vm::{Value, Vm},
+    vm::{CallFrame, Value, Vm},
 };
 
 /// Compile time Value representation
@@ -156,6 +156,10 @@ impl<'cc> Cc<'cc> {
         let mut v = Vm::new();
         v.bytecode = self.buf;
         v.globals = self.ctx.globals_vec.into_iter().map(Value::from).collect();
+        v.frames.push(CallFrame {
+            return_to: 0,
+            locals_base: 0,
+        });
         v
     }
 }
