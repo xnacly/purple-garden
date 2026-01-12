@@ -65,11 +65,14 @@ impl<'l> Lexer<'l> {
     }
 
     fn advance(&mut self) {
-        self.pos += 1;
-        self.col += 1;
-        if let Some(b'\n') = self.cur() {
-            self.line += 1;
-            self.col = 0;
+        if let Some(b) = self.cur() {
+            self.pos += 1;
+            if b == b'\n' {
+                self.line += 1;
+                self.col = 0;
+            } else {
+                self.col += 1;
+            }
         }
     }
 
