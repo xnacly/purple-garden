@@ -6,10 +6,10 @@ use crate::{
 
 #[derive(Debug)]
 pub struct PgError {
-    msg: Option<String>,
-    line: usize,
-    start: usize,
-    end: usize,
+    pub msg: Option<String>,
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
 impl From<&Token<'_>> for PgError {
@@ -18,7 +18,7 @@ impl From<&Token<'_>> for PgError {
             Type::String(i) | Type::Ident(i) | Type::Double(i) | Type::Integer(i) => i.len(),
             Type::True => 4,
             Type::False | Type::Match => 5,
-            Type::Let | Type::Std | Type::For => 3,
+            Type::Let | Type::For => 3,
             Type::Fn | Type::DoubleColon => 2,
             // all others are a single byte long
             _ => 1,
