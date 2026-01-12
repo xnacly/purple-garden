@@ -39,6 +39,10 @@ pub enum Op<'vm> {
         lhs: u8,
         rhs: u8,
     },
+    Not {
+        dst: u8,
+        src: u8,
+    },
     Mov {
         dst: u8,
         src: u8,
@@ -59,34 +63,12 @@ pub enum Op<'vm> {
         slot: u16,
         src: u8,
     },
-    Size {
-        dst: u8,
-        value: u32,
-    },
-    New {
-        dst: u8,
-        size: u8,
-        new_type: New,
-    },
-    Append {
-        container: u8,
-        src: u8,
-    },
-    Len {
-        dst: u8,
-        src: u8,
-    },
-    Idx {
-        dst: u8,
-        container: u8,
-        index: u8,
-    },
     Jmp {
-        target: usize,
+        target: u16,
     },
     JmpF {
         cond: u8,
-        target: usize,
+        target: u16,
     },
     Call {
         func: u16,
@@ -99,20 +81,4 @@ pub enum Op<'vm> {
         args_len: u8,
     },
     Ret,
-    /// specifically for tailcall optimisation, see https://en.wikipedia.org/wiki/Tail_call
-    Tail {
-        func: u16,
-        args_start: u8,
-        args_len: u8,
-    },
-    RetMultiple {
-        /// used for peephole optimisation, merging multiple RET into a single RET with a count
-        times: u8,
-    },
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum New {
-    Object,
-    Array,
 }

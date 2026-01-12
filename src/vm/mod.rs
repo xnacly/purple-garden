@@ -169,9 +169,51 @@ impl<'vm> Vm<'vm> {
                     }
                     .into()
                 }
+                Op::Not { dst, src } => {
+                    *unsafe_get_mut!(self.registers, *dst) = match unsafe_get!(self.registers, *src)
+                    {
+                        Value::True => Value::False,
+                        Value::False => Value::True,
+                        Value::Int(inner) => Value::Int(inner * -1),
+                        Value::Double(inner) => Value::Double(inner * -1.0),
+                        _ => {
+                            return Err(Anomaly::TypeIncompatible { pc: self.pc });
+                        }
+                    }
+                }
                 Op::Mov { dst, src } => {
                     *unsafe_get_mut!(self.registers, *dst) =
                         unsafe_get!(self.registers, *src).clone();
+                }
+                Op::Jmp { target } => {
+                    self.pc = *target as usize;
+                    continue;
+                }
+                Op::JmpF { target, cond } => {
+                    if let Value::True = unsafe_get!(self.registers, *cond) {
+                        self.pc = *target as usize;
+                        continue;
+                    }
+                }
+                Op::Call {
+                    func,
+                    args_start,
+                    args_len,
+                } => {
+                    // TODO: what to put into locals_base here?
+                    self.frames.push(CallFrame {
+                        return_to: self.pc,
+                        locals_base: 0,
+                    });
+                    // TODO: what about the arguments?
+                    self.pc = *func as usize;
+                    continue;
+                }
+                Op::Ret => {
+                    let Some(frame) = self.frames.pop() else {
+                        unreachable!("Op::Ret had no frame to drop, this is a compiler bug");
+                    };
+                    self.pc = frame.return_to;
                 }
                 _ => {
                     dbg!(instruction);
@@ -184,4 +226,118 @@ impl<'vm> Vm<'vm> {
 
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod ops {
+    use crate::{
+        op::Op,
+        vm::{CallFrame, Value, Vm},
+    };
+
+    #[test]
+    fn load_global() {
+        let mut vm = Vm::new();
+        vm.globals = vec![Value::Double(3.1415)];
+        vm.bytecode = vec![Op::LoadGlobal { dst: 0, idx: 0 }];
+        if let Err(err) = vm.run() {
+            panic!("{} failed due to {:?}", "test", err);
+        }
+
+        assert_eq!(vm.registers[0], Value::Double(3.1415))
+    }
+
+    macro_rules! cases {
+        ($($ident:tt :: $bytecode:expr => $expected:expr),*) => {
+            $(
+                #[test]
+                fn $ident() {
+                    let mut vm = Vm::new();
+                    vm.bytecode = $bytecode;
+                    vm.frames.push(CallFrame {
+                        return_to: 0,
+                        locals_base: 0,
+                    });
+                    if let Err(err) = vm.run() {
+                        panic!("{} failed due to {:?}", stringify!($ident), err);
+                    }
+
+                    assert_eq!(vm.registers[0], $expected.into())
+                }
+            )*
+        };
+    }
+
+    cases!(
+        load_imm :: vec![Op::LoadImm{dst: 0, value: 0xDEADAFFE}] => 0xDEADAFFE,
+        // TODO: [Value::stack] has to be large enough for all slots somehow, so I need to walk
+        // self.ctx.locals and add enough space for all slots?
+        //
+        // store_local :: vec![
+        //     Op::LoadImm{dst: 0, value: 0xDEADAFFE},
+        //     Op::StoreLocal { slot: 0, src: 0 },
+        //     Op::LoadLocal {slot: 0, dst: 0}
+        // ] => 0xDEADAFFE
+        add :: vec![
+            Op::LoadImm{dst: 0, value: 5},
+            Op::LoadImm{dst: 1, value: 7},
+            Op::Add {dst:0, lhs: 0, rhs: 1}
+        ] => 12,
+        sub :: vec![
+            Op::LoadImm{dst: 0, value: 5},
+            Op::LoadImm{dst: 1, value: 7},
+            Op::Sub {dst:0, lhs: 0, rhs: 1}
+        ] => -2,
+        div :: vec![
+            Op::LoadImm{dst: 0, value: 15},
+            Op::LoadImm{dst: 1, value: 3},
+            Op::Div {dst:0, lhs: 0, rhs: 1}
+        ] => 5,
+        mul :: vec![
+            Op::LoadImm{dst: 0, value: 15},
+            Op::LoadImm{dst: 1, value: 3},
+            Op::Mul {dst:0, lhs: 0, rhs: 1}
+        ] => 45,
+        eq :: vec![
+            Op::LoadImm{dst: 0, value: 5},
+            Op::LoadImm{dst: 1, value: 5},
+            Op::Eq {dst:0, lhs: 0, rhs: 1}
+        ] => true,
+        eq_false :: vec![
+            Op::LoadImm{dst: 0, value: 5},
+            Op::LoadImm{dst: 1, value: 3},
+            Op::Eq {dst:0, lhs: 0, rhs: 1}
+        ] => false,
+        not :: vec![
+            Op::LoadImm{dst: 0, value: 5},
+            Op::Not {dst:0, src: 0}
+        ] => -5,
+        not_negative :: vec![
+            Op::LoadImm{dst: 0, value: -5},
+            Op::Not {dst:0, src: 0}
+        ] => 5,
+        mov :: vec![
+            Op::LoadImm{dst: 1, value: 64},
+            Op::Mov {dst:0, src: 1}
+        ] => 64,
+        jmp :: vec![
+            Op::Jmp {target: 2},
+            // this is skipped:
+            Op::LoadImm{dst: 0, value: 1},
+            // execution resumes here
+            Op::LoadImm{dst: 0, value: 2},
+        ] => 2,
+        jmpf :: vec![
+            Op::LoadImm{dst: 0, value: 5},
+            Op::LoadImm{dst: 1, value: 3},
+            // this is false
+            Op::Eq {dst:0, lhs: 0, rhs: 1},
+            // we check for false and jump to 2 if false
+            Op::JmpF {target: 2, cond: 0},
+            // this is skipped:
+            Op::LoadImm{dst: 0, value: 1},
+            // execution resumes here
+            Op::LoadImm{dst: 0, value: 2},
+        ] => 2
+    );
 }

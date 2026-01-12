@@ -4,6 +4,7 @@ pub enum Anomaly {
     DivisionByZero { pc: usize },
     UndefinedLocal { pc: usize },
     Unimplemented { pc: usize },
+    // TODO: this needs some kind of data for expected types, maybe hardcoded &'static str?
     TypeIncompatible { pc: usize },
 }
 
