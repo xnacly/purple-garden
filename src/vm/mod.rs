@@ -60,7 +60,7 @@ impl<'vm> Vm<'vm> {
         Self {
             registers: [const { Value::UnDef }; REGISTER_COUNT],
             stack: Vec::with_capacity(1024),
-            frames: Vec::with_capacity(REGISTER_COUNT),
+            frames: Vec::with_capacity(64),
             pc: 0,
             bytecode: vec![],
             globals: vec![],
@@ -154,6 +154,24 @@ impl<'vm> Vm<'vm> {
                     };
 
                     *unsafe_get_mut!(self.registers, *dst) = result;
+                }
+                Op::Eq { dst, lhs, rhs } => {
+                    let lhs = unsafe_get!(self.registers, *lhs);
+                    let rhs = unsafe_get!(self.registers, *rhs);
+
+                    *unsafe_get_mut!(self.registers, *dst) = match (lhs, rhs) {
+                        (Value::True, Value::True) | (Value::False, Value::False) => true,
+                        (Value::Double(lhs), Value::Double(rhs)) => (lhs - rhs) < f64::EPSILON,
+                        (Value::Int(lhs), Value::Int(rhs)) => lhs == rhs,
+                        (Value::Str(lhs), Value::Str(rhs)) => lhs == rhs,
+                        (Value::String(lhs), Value::Str(rhs)) => lhs == rhs,
+                        _ => false,
+                    }
+                    .into()
+                }
+                Op::Mov { dst, src } => {
+                    *unsafe_get_mut!(self.registers, *dst) =
+                        unsafe_get!(self.registers, *src).clone();
                 }
                 _ => {
                     dbg!(instruction);
