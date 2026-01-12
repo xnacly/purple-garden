@@ -64,6 +64,15 @@ impl<'l> Lexer<'l> {
         }
     }
 
+    fn make_err(&self, msg: impl Into<String>, start: usize) -> PgError {
+        PgError {
+            msg: Some(msg.into()),
+            line: self.line,
+            start,
+            end: self.col,
+        }
+    }
+
     fn advance(&mut self) {
         if let Some(b) = self.cur() {
             self.pos += 1;
@@ -93,12 +102,10 @@ impl<'l> Lexer<'l> {
             self.advance()
         }
 
-        let t = match self.cur().ok_or_else(|| PgError {
-            msg: Some("Unexpected end of file".into()),
-            line: self.line,
-            start: self.col,
-            end: self.col,
-        })? {
+        let t = match self
+            .cur()
+            .ok_or_else(|| self.make_err("Unexpected end of file", self.col))?
+        {
             b'(' => self.make_tok(Type::DelimitLeft),
             b')' => self.make_tok(Type::DelimitRight),
             b'+' => self.make_tok(Type::Plus),
@@ -118,16 +125,23 @@ impl<'l> Lexer<'l> {
             b']' => self.make_tok(Type::BraketRight),
             b'{' => self.make_tok(Type::CurlyLeft),
             b'}' => self.make_tok(Type::CurlyRight),
-
-            // TODO: atoms
-            // TODO: keywords
-            c @ _ => {
-                return Err(PgError {
-                    msg: Some(format!("Unknown charcter `{}`", c)),
-                    line: self.line,
-                    start: self.col,
-                    end: self.col,
-                });
+            b'"' => todo!("strings"),
+            c => {
+                if c.is_ascii_alphabetic() {
+                    let start = self.pos;
+                    self.advance();
+                    while self.cur().is_some_and(|b| b.is_ascii_alphabetic()) {
+                        self.advance();
+                    }
+                    self.make_tok(Type::String(
+                        str::from_utf8(&self.input[start..self.pos])
+                            .map_err(|_| self.make_err("Invalid ut8 input", self.col))?,
+                    ))
+                } else if c.is_ascii_digit() {
+                    todo!("numbers");
+                } else {
+                    return Err(self.make_err(format!("Unknown charcter `{}`", c), self.col));
+                }
             }
         };
 
