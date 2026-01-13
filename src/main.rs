@@ -52,9 +52,9 @@ struct Args {
     /// Readable immediate representation
     #[arg(short, long)]
     ir: bool,
-    /// Readable register print
+    /// Readable used register print
     #[arg(short, long)]
-    regs: bool,
+    registers: bool,
 
     /// Limit the standard library to necessities
     #[arg(long)]
@@ -81,7 +81,7 @@ fn main() {
     };
 
     if args.ast {
-        println!(
+        print!(
             "{}",
             ast.iter()
                 .map(|n| n.to_string())
@@ -107,11 +107,11 @@ fn main() {
         Into::<PgError>::into(e).render();
     }
 
-    if args.regs {
+    if args.registers {
         for i in 0..vm::REGISTER_COUNT {
             let val = &vm.registers[i];
             if let Value::UnDef = val {
-                break;
+                continue;
             }
             println!("r{i}={:?}", val);
         }
