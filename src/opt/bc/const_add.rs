@@ -15,6 +15,7 @@ pub fn const_add(window: &mut [crate::op::Op]) {
             };
             window[1] = Op::Nop;
             window[2] = Op::Nop;
+            opt_trace!("const_add", "fused two imm loads and an add");
         }
     }
 }

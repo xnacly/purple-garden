@@ -106,7 +106,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    if args.opt > 1 {
+    if args.opt >= 1 {
         opt::bc(&mut cc.buf);
     }
 
