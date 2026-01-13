@@ -7,7 +7,7 @@ mod reg;
 use crate::{
     ast::{InnerNode, Node},
     cc::{
-        ctx::{Context, Locals},
+        ctx::{Context, Local},
         reg::RegisterAllocator,
     },
     err::PgError,
@@ -59,18 +59,18 @@ impl<'cc> Cc<'cc> {
         r
     }
 
-    /// compile is a simple wrapper around self.cc to make sure all registers are deallocated after their lifetime ends
-    pub fn compile(&mut self, ast: Node<'cc>) -> Result<(), PgError> {
-        let register = self.cc(ast)?;
-        self.register.free(register);
+    pub fn compile(&mut self, ast: &'cc [Node<'cc>]) -> Result<(), PgError> {
+        for n in ast {
+            let _ = self.cc(n)?;
+        }
         Ok(())
     }
 
-    fn cc(&mut self, ast: Node<'cc>) -> Result<u8, PgError> {
+    fn cc(&mut self, ast: &Node<'cc>) -> Result<u8, PgError> {
         #[cfg(feature = "trace")]
         println!("Cc::cc({:?})", &ast.token.t);
 
-        Ok(match ast.inner {
+        Ok(match &ast.inner {
             InnerNode::Atom => {
                 let constant = match &ast.token.t {
                     Type::Integer(s) => {
@@ -106,16 +106,13 @@ impl<'cc> Cc<'cc> {
                     unreachable!("InnerNode::Ident");
                 };
 
-                let slot = self.ctx.locals.resolve(name).ok_or_else(|| {
+                self.ctx.locals.resolve(name).ok_or_else(|| {
                     PgError::with_msg(format!("Undefined variable `{name}`"), &ast.token)
-                })?;
-                let dst = self.register.alloc();
-                self.buf.push(Op::LoadLocal { dst, slot });
-                dst
+                })?
             }
             InnerNode::Bin { lhs, rhs } => {
-                let lhs = self.cc(*lhs)?;
-                let rhs = self.cc(*rhs)?;
+                let lhs = self.cc(lhs.as_ref())?;
+                let rhs = self.cc(rhs.as_ref())?;
 
                 let dst = self.register.alloc();
                 self.buf.push(match ast.token.t {
@@ -134,19 +131,18 @@ impl<'cc> Cc<'cc> {
                 dst
             }
             InnerNode::Let { rhs } => {
-                let src = self.cc(*rhs)?;
+                let src = self.cc(&rhs)?;
                 let Type::Ident(name) = ast.token.t else {
                     unreachable!("InnerNode::Let");
                 };
-                let slot = self.ctx.locals.define(name).ok_or_else(|| {
+
+                self.ctx.locals.bind(name, src).ok_or_else(|| {
                     PgError::with_msg(format!("`{name}` is already defined"), &ast.token)
                 })?;
-
-                self.buf.push(Op::StoreLocal { slot, src });
                 src
             }
             InnerNode::Fn { args, body } => {
-                self.ctx.locals = Locals::default();
+                self.ctx.locals = Local::default();
                 todo!("Cc::InnerNode::Fn");
             }
             _ => todo!("{:?}", ast),
@@ -196,12 +192,12 @@ mod cc {
     #[test]
     fn atom_false() {
         let mut cc = Cc::new();
-        let ast = Node {
+        let ast = vec![Node {
             token: token!(Type::False),
             inner: InnerNode::Atom,
-        };
+        }];
 
-        let _ = cc.compile(ast).expect("Failed to compile node");
+        let _ = cc.compile(&ast).expect("Failed to compile node");
         let expected_idx: usize = 0;
         assert_eq!(
             cc.buf,
@@ -216,12 +212,12 @@ mod cc {
     #[test]
     fn atom_true() {
         let mut cc = Cc::new();
-        let ast = Node {
+        let ast = vec![Node {
             token: token!(Type::True),
             inner: InnerNode::Atom,
-        };
+        }];
 
-        let _ = cc.compile(ast).expect("Failed to compile node");
+        let _ = cc.compile(&ast).expect("Failed to compile node");
         let expected_idx: usize = 1;
         assert_eq!(
             cc.buf,
@@ -236,12 +232,12 @@ mod cc {
     #[test]
     fn atom_string() {
         let mut cc = Cc::new();
-        let ast = Node {
+        let ast = vec![Node {
             token: token!(Type::String("hola")),
             inner: InnerNode::Atom,
-        };
+        }];
 
-        let _ = cc.compile(ast).expect("Failed to compile node");
+        let _ = cc.compile(&ast).expect("Failed to compile node");
         let expected_idx: usize = 2;
         assert_eq!(
             cc.buf,
@@ -256,22 +252,22 @@ mod cc {
     #[test]
     fn atom_int() {
         let mut cc = Cc::new();
-        let ast = Node {
+        let ast = vec![Node {
             token: token!(Type::Integer("25")),
             inner: InnerNode::Atom,
-        };
-        let _ = cc.compile(ast).expect("Failed to compile node");
+        }];
+        let _ = cc.compile(&ast).expect("Failed to compile node");
         assert_eq!(cc.buf, vec![Op::LoadImm { dst: 0, value: 25 }],);
     }
 
     #[test]
     fn atom_double() {
         let mut cc = Cc::new();
-        let ast = Node {
+        let ast = vec![Node {
             token: token!(Type::Double("3.1415")),
             inner: InnerNode::Atom,
-        };
-        let _ = cc.compile(ast).expect("Failed to compile node");
+        }];
+        let _ = cc.compile(&ast).expect("Failed to compile node");
         let expected_idx: usize = 2;
         assert_eq!(
             cc.buf,
@@ -287,42 +283,22 @@ mod cc {
     }
 
     #[test]
-    fn atom_ident() {
-        let mut cc = Cc::new();
-        cc.ctx.locals.define("thisisavariablename").unwrap();
-        let name = "thisisavariablename";
-        let ast = Node {
-            token: token!(Type::Ident(name)),
-            inner: InnerNode::Ident,
-        };
-        let _ = cc.compile(ast).expect("Failed to compile node");
-        let expected_slot: u16 = 0;
-        assert_eq!(
-            cc.buf,
-            vec![Op::LoadLocal {
-                dst: 0,
-                slot: expected_slot
-            }],
-        );
-    }
-
-    #[test]
     fn atom_ident_undefined_is_error() {
         let mut cc = Cc::new();
 
-        let ast = node! {
+        let ast = vec![node! {
             token!(Type::Ident("x")),
             InnerNode::Ident
-        };
+        }];
 
-        assert!(cc.compile(ast).is_err());
+        assert!(cc.compile(&ast).is_err());
     }
 
     #[test]
     fn r#let() {
         let mut cc = Cc::new();
 
-        let ast = node! {
+        let ast = vec![node! {
             token!(Type::Ident("x")),
             InnerNode::Let {
                 rhs: Box::new(node!{
@@ -330,18 +306,11 @@ mod cc {
                     InnerNode::Atom
                 }),
             }
-        };
+        }];
 
-        let _ = cc.compile(ast).expect("Failed to compile node");
+        let _ = cc.compile(&ast).expect("Failed to compile node");
         let src: u8 = 0;
-
-        assert_eq!(
-            cc.buf,
-            vec![
-                Op::LoadImm { dst: 0, value: 25 },
-                Op::StoreLocal { slot: 0, src }
-            ],
-        );
+        assert_eq!(cc.buf, vec![Op::LoadImm { dst: 0, value: 25 },],);
     }
 
     #[test]
@@ -364,21 +333,99 @@ mod cc {
             },
         ];
 
-        for node in ast {
-            let _ = cc.compile(node).expect("Failed to compile node");
-        }
+        let _ = cc.compile(&ast).expect("Failed to compile node");
 
         assert_eq!(
             cc.buf,
-            vec![
-                Op::LoadImm {
-                    dst: 0,
-                    value: -5000
-                },
-                Op::StoreLocal { slot: 0, src: 0 },
-                Op::LoadLocal { slot: 0, dst: 0 },
-            ],
+            vec![Op::LoadImm {
+                dst: 0,
+                value: -5000
+            }],
         );
+    }
+
+    #[test]
+    fn let_redefinition_is_error() {
+        let mut cc = Cc::new();
+
+        let ast = vec![
+            node! {
+                token!(Type::Ident("x")),
+                InnerNode::Let {
+                    rhs: Box::new(node!{
+                        token!(Type::Integer("-5000")),
+                        InnerNode::Atom
+                    }),
+                }
+            },
+            node! {
+                token!(Type::Ident("x")),
+                InnerNode::Let {
+                    rhs: Box::new(node!{
+                        token!(Type::Integer("-5000")),
+                        InnerNode::Atom
+                    }),
+                }
+            },
+        ];
+
+        assert!(cc.compile(&ast).is_err());
+    }
+
+    #[test]
+    fn multiple_lets_distinct_registers() {
+        let mut cc = Cc::new();
+
+        let ast = vec![
+            node! {
+                token!(Type::Ident("x")),
+                InnerNode::Let {
+                    rhs: Box::new(node!{
+                        token!(Type::Integer("161")),
+                        InnerNode::Atom
+                    }),
+                }
+            },
+            node! {
+                token!(Type::Ident("y")),
+                InnerNode::Let {
+                    rhs: Box::new(node!{
+                        token!(Type::Integer("187")),
+                        InnerNode::Atom
+                    }),
+                }
+            },
+        ];
+
+        let _ = cc.compile(&ast).unwrap();
+
+        assert!(matches!(cc.buf[0], Op::LoadImm { dst: 0, value: 161 }));
+        assert!(matches!(cc.buf[1], Op::LoadImm { dst: 1, value: 187 }));
+    }
+
+    #[test]
+    fn ident_emits_no_ops() {
+        let mut cc = Cc::new();
+
+        let ast = vec![
+            node! {
+                token!(Type::Ident("x")),
+                InnerNode::Let {
+                    rhs: Box::new(node!{
+                        token!(Type::Integer("-5000")),
+                        InnerNode::Atom
+                    }),
+                }
+            },
+            node! {
+                token!(Type::Ident("x")),
+                InnerNode::Ident
+            },
+        ];
+
+        cc.compile(&ast).unwrap();
+
+        assert_eq!(cc.buf.len(), 1);
     }
 
     #[test]
@@ -406,7 +453,8 @@ mod cc {
                     rhs: Box::new(node!(token!(Type::Integer("45")), InnerNode::Atom)),
                 },
             };
-            let _ = cc.compile(ast).expect("Failed to compile node");
+            let r = cc.cc(&ast).expect("Failed to compile node");
+            cc.register.free(r);
             let expected_op = make_op(2, 0, 1);
             assert_eq!(
                 cc.buf,
@@ -423,7 +471,7 @@ mod cc {
 
     #[test]
     fn bin_nested() {
-        let ast = Node {
+        let ast = vec![Node {
             token: token!(Type::Asteriks),
             inner: InnerNode::Bin {
                 lhs: Box::new(node!(
@@ -441,9 +489,9 @@ mod cc {
                     }
                 )),
             },
-        };
+        }];
         let mut cc = Cc::new();
-        let _ = cc.compile(ast).expect("Failed to compile node");
+        let _ = cc.compile(&ast).expect("Failed to compile node");
         assert_eq!(
             cc.buf,
             vec![

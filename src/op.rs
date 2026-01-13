@@ -55,14 +55,6 @@ pub enum Op<'vm> {
         dst: u8,
         idx: u32,
     },
-    LoadLocal {
-        slot: u16,
-        dst: u8,
-    },
-    StoreLocal {
-        slot: u16,
-        src: u8,
-    },
     Jmp {
         target: u16,
     },

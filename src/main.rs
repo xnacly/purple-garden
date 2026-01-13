@@ -1,11 +1,9 @@
 #![allow(dead_code, unused_variables)]
 #![cfg_attr(feature = "nightly", feature(likely_unlikely))]
 
-use crate::{
-    ast::{InnerNode, Node},
-    err::PgError,
-    lex::{Token, Type},
-};
+use std::fs;
+
+use crate::{err::PgError, lex::Lexer, parser::Parser};
 
 mod ast;
 mod cc;
@@ -21,81 +19,44 @@ mod parser;
 /// register based virtual machine
 mod vm;
 
-// TODO:
-// - port pg cli to serde
-// - port frontend (lexer, parser)
-//      - port tokens
-//      - port ast
-// - port cc
-// - port vm fully
-// - port gc
-// - implement very good errors
-// - build peephole optimisation (constant folding, load elim) and x86 jit, can be enabled via -O1
-// - build optimising x86 jit with ssa via -O2
-// - allow for writing bytecode to disk
+#[derive(clap::Parser)]
+#[command(about, version, long_about=None)]
+struct Args {
+    /// Can be 0 for none, 1 for IR based optimisations like constant
+    /// folding, rewrites, etc. And can be 2 for optimising ssa passes and JIT
+    #[arg(short = 'O')]
+    opt: usize,
+    /// readable bytecode representation with labels, globals and comments
+    #[arg(short, long)]
+    disassemble: bool,
+    /// limit the standard library to necessities
+    #[arg(long)]
+    no_std: bool,
+    /// skip importing of env variables
+    #[arg(long)]
+    no_env: bool,
+    /// disable garbage collection
+    #[arg(long)]
+    no_gc: bool,
+    file: String,
+}
+
 fn main() {
-    let ast = Node {
-        token: Token {
-            line: 0,
-            col: 0,
-            t: (Type::Asteriks),
-        },
-        inner: InnerNode::Bin {
-            lhs: Box::new(Node {
-                token: (Token {
-                    line: 0,
-                    col: 0,
-                    t: (Type::Plus),
-                }),
-                inner: (InnerNode::Bin {
-                    lhs: Box::new(Node {
-                        token: (Token {
-                            line: 0,
-                            col: 0,
-                            t: (Type::Integer("2")),
-                        }),
-                        inner: (InnerNode::Atom),
-                    }),
-                    rhs: Box::new(Node {
-                        token: (Token {
-                            line: 0,
-                            col: 0,
-                            t: (Type::Integer("3")),
-                        }),
-                        inner: (InnerNode::Atom),
-                    }),
-                }),
-            }),
-            rhs: Box::new(Node {
-                token: (Token {
-                    line: 0,
-                    col: 0,
-                    t: (Type::Minus),
-                }),
-                inner: (InnerNode::Bin {
-                    lhs: Box::new(Node {
-                        token: (Token {
-                            line: 0,
-                            col: 0,
-                            t: (Type::Double("3.1415")),
-                        }),
-                        inner: (InnerNode::Atom),
-                    }),
-                    rhs: Box::new(Node {
-                        token: (Token {
-                            line: 0,
-                            col: 0,
-                            t: (Type::Integer("1")),
-                        }),
-                        inner: (InnerNode::Atom),
-                    }),
-                }),
-            }),
-        },
+    let args = <Args as clap::Parser>::parse();
+    let input = fs::read(args.file).expect("Failed to read from file");
+    let lexer = Lexer::new(&input);
+    let ast = match Parser::new(lexer).parse() {
+        Ok(a) => a,
+        Err(e) => {
+            e.render();
+            std::process::exit(1);
+        }
     };
 
+    // TODO: add ir creation pass here
+
     let mut cc = cc::Cc::new();
-    if let Err(e) = cc.compile(ast) {
+    if let Err(e) = cc.compile(&ast) {
         e.render();
         std::process::exit(1);
     }

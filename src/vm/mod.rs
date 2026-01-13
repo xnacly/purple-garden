@@ -1,7 +1,7 @@
 mod anomaly;
 mod value;
 
-pub const REGISTER_COUNT: usize = 32;
+pub const REGISTER_COUNT: usize = 64;
 pub use crate::vm::anomaly::Anomaly;
 pub use crate::vm::value::Value;
 
@@ -20,7 +20,6 @@ pub struct Vm<'vm> {
     pub registers: [Value<'vm>; REGISTER_COUNT],
     pub pc: usize,
 
-    pub stack: Vec<Value<'vm>>,
     pub frames: Vec<CallFrame>,
 
     pub bytecode: Vec<Op<'vm>>,
@@ -59,7 +58,6 @@ impl<'vm> Vm<'vm> {
     pub fn new() -> Self {
         Self {
             registers: [const { Value::UnDef }; REGISTER_COUNT],
-            stack: Vec::with_capacity(1024),
             frames: Vec::with_capacity(64),
             pc: 0,
             bytecode: vec![],
@@ -81,20 +79,6 @@ impl<'vm> Vm<'vm> {
                 Op::LoadGlobal { dst, idx } => {
                     *unsafe_get_mut!(self.registers, *dst) =
                         unsafe_get!(self.globals, *idx).clone();
-                }
-                Op::LoadLocal { slot, dst } => {
-                    let frame = self.frames.last().unwrap();
-                    let idx = frame.locals_base + *slot as usize;
-                    *unsafe_get_mut!(self.registers, *dst) = self
-                        .stack
-                        .get(idx)
-                        .cloned()
-                        .ok_or_else(|| Anomaly::UndefinedLocal { pc: self.pc })?;
-                }
-                Op::StoreLocal { slot, src } => {
-                    let frame = self.frames.last().unwrap();
-                    let idx = frame.locals_base + *slot as usize;
-                    self.stack[idx] = unsafe_get!(self.registers, *src).clone();
                 }
                 Op::Add { dst, lhs, rhs } => {
                     let lhs = unsafe_get!(self.registers, *lhs);

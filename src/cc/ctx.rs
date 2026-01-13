@@ -2,26 +2,27 @@ use std::collections::HashMap;
 
 use crate::cc::Const;
 
+/// Used to encode binding resolution, for instance:
+///
+///     let x = 5
+///
+/// [x] is assigned a free registers and this register is used for the dst for its [rhs]
 #[derive(Debug, Default)]
-pub struct Locals<'cc> {
-    slots: HashMap<&'cc str, u16>,
-    next_slot: u16,
+pub struct Local<'cc> {
+    bindings: HashMap<&'cc str, u8>,
 }
 
-impl<'cc> Locals<'cc> {
-    pub fn define(&mut self, name: &'cc str) -> Option<u16> {
-        if self.slots.contains_key(name) {
+impl<'cc> Local<'cc> {
+    pub fn bind(&mut self, name: &'cc str, r: u8) -> Option<u8> {
+        if self.bindings.contains_key(name) {
             return None;
         }
-
-        let slot = self.next_slot;
-        self.next_slot += 1;
-        self.slots.insert(name, slot);
-        Some(slot)
+        self.bindings.insert(name, r);
+        Some(r)
     }
 
-    pub fn resolve(&self, name: &str) -> Option<u16> {
-        self.slots.get(name).copied()
+    pub fn resolve(&self, name: &'cc str) -> Option<u8> {
+        self.bindings.get(name).copied()
     }
 }
 
@@ -29,7 +30,7 @@ impl<'cc> Locals<'cc> {
 pub struct Context<'ctx> {
     pub globals: HashMap<Const<'ctx>, usize>,
     pub globals_vec: Vec<Const<'ctx>>,
-    pub locals: Locals<'ctx>,
+    pub locals: Local<'ctx>,
 }
 
 impl<'ctx> Context<'ctx> {

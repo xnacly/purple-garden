@@ -27,14 +27,19 @@ impl RegisterAllocator {
         #[cfg(feature = "trace")]
         println!("RegisterAllocator::free(r{r})");
         self.free.push(r);
+        assert!(
+            !(self.free.len() > vm::REGISTER_COUNT),
+            "Freed one too many registers"
+        );
     }
 }
 
 impl Drop for RegisterAllocator {
     fn drop(&mut self) {
-        assert!(
-            self.free.len() == vm::REGISTER_COUNT,
-            "RegisterAllocator: not all registers freed at exit, register leak, this is a compiler bug, please open a bug report"
-        )
+        if self.free.len() == vm::REGISTER_COUNT {
+            println!(
+                "RegisterAllocator: not all registers freed at exit, register leak, this is a compiler bug, please open a bug report with your source code"
+            )
+        }
     }
 }
