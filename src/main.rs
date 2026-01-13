@@ -12,9 +12,14 @@ mod err;
 /// simple mark and sweep garbage collector, will be replaced by a manchester garbage collector in
 /// the future
 mod gc;
+mod ir;
+/// baseline just in time compilation for x86
+mod jit;
 mod lex;
 /// purple garden bytecode virtual machine operations
 mod op;
+/// collection of ir and bytecode optimisation passes
+mod opt;
 mod parser;
 /// register based virtual machine
 mod vm;
@@ -91,6 +96,9 @@ fn main() {
     }
 
     // TODO: add ir creation pass here
+    if args.ir {
+        println!("no ir implementation yet");
+    }
 
     let mut cc = cc::Cc::new();
     if let Err(e) = cc.compile(&ast) {
@@ -98,11 +106,16 @@ fn main() {
         std::process::exit(1);
     }
 
+    if args.opt > 1 {
+        opt::bc(&mut cc.buf);
+    }
+
     if args.disassemble {
         cc.dis();
     }
 
     let mut vm = cc.finalize();
+
     if let Err(e) = vm.run() {
         Into::<PgError>::into(e).render();
     }

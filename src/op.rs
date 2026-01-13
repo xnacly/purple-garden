@@ -73,4 +73,5 @@ pub enum Op<'vm> {
         args_len: u8,
     },
     Ret,
+    Nop,
 }

@@ -1,44 +1,10 @@
+mod tok;
+
 use crate::err::PgError;
 
-#[derive(Debug, Clone)]
-pub enum Type<'t> {
-    DelimitLeft,
-    DelimitRight,
-    Plus,
-    Minus,
-    Asteriks,
-    Slash,
-    Equal,
-    LessThan,
-    GreaterThan,
-    Exlaim,
-    Colon,
-    DoubleColon,
-    BraketLeft,
-    BraketRight,
-    CurlyLeft,
-    CurlyRight,
-
-    String(&'t str),
-    Ident(&'t str),
-    Double(&'t str),
-    Integer(&'t str),
-
-    True,
-    False,
-    Let,
-    Fn,
-    Match,
-    For,
-}
+pub use tok::{Token, Type};
 
 #[derive(Debug)]
-pub struct Token<'t> {
-    pub line: usize,
-    pub col: usize,
-    pub t: Type<'t>,
-}
-
 pub struct Lexer<'l> {
     input: &'l [u8],
     pos: usize,
@@ -133,6 +99,7 @@ impl<'l> Lexer<'l> {
                     while self.cur().is_some_and(|b| b.is_ascii_alphabetic()) {
                         self.advance();
                     }
+
                     self.make_tok(Type::String(
                         str::from_utf8(&self.input[start..self.pos])
                             .map_err(|_| self.make_err("Invalid ut8 input", self.col))?,

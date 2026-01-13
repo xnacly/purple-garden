@@ -28,8 +28,8 @@ pub enum Const<'c> {
 
 #[derive(Debug)]
 pub struct Cc<'cc> {
-    buf: Vec<Op<'cc>>,
-    ctx: Context<'cc>,
+    pub buf: Vec<Op<'cc>>,
+    pub ctx: Context<'cc>,
     register: RegisterAllocator,
 }
 

@@ -1,7 +1,8 @@
 use crate::vm;
 
-/// The simplest register allocation strategy I could think of, will probably explode on heavy
-/// usage... Works by keeping a list of currently free registers
+/// Works by keeping a list of currently free registers, pushing is equivalent to freeing a
+/// register, while popping is an allocation. Loosely based on [Poletto, Massimiliano, and Vivek
+/// Sarkar. "Linear scan register allocation."](https://c9x.me/compile/bib/linearscan.pdf)
 #[derive(Debug)]
 pub struct RegisterAllocator {
     free: Vec<u8>,
