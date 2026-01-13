@@ -1,4 +1,4 @@
-use crate::lex::Token;
+use crate::lex::{Token, Type};
 
 #[derive(Debug)]
 pub enum InnerNode<'inner> {
@@ -72,4 +72,54 @@ pub enum InnerNode<'inner> {
 pub struct Node<'node> {
     pub token: Token<'node>,
     pub inner: InnerNode<'node>,
+}
+
+impl<'a> Node<'a> {
+    fn fmt_sexpr(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
+        let pad = "  ".repeat(indent);
+
+        match &self.inner {
+            InnerNode::Atom => writeln!(f, "{}{:?}", pad, self.token.t),
+            InnerNode::Ident => {
+                if let Type::Ident(ident) = &self.token.t {
+                    writeln!(f, "{}{}", pad, ident)
+                } else {
+                    unreachable!()
+                }
+            }
+            InnerNode::Bin { lhs, rhs } => {
+                writeln!(f, "{}({:?}", pad, self.token.t)?;
+                lhs.fmt_sexpr(f, indent + 1)?;
+                rhs.fmt_sexpr(f, indent + 1)?;
+                writeln!(f, "{})", pad)
+            }
+            InnerNode::Array { members } => {
+                writeln!(f, "{}[", pad)?;
+                for member in members {
+                    member.fmt_sexpr(f, indent + 1)?;
+                }
+                writeln!(f, "{}]", pad)
+            }
+            InnerNode::Object { pairs } => {
+                writeln!(f, "{}{{", pad)?;
+                for (k, v) in pairs {
+                    k.fmt_sexpr(f, indent + 1)?;
+                    v.fmt_sexpr(f, indent + 1)?;
+                }
+                writeln!(f, "{}}}", pad)
+            }
+            InnerNode::Let { rhs } => {
+                writeln!(f, "{}(let", pad)?;
+                rhs.fmt_sexpr(f, indent + 1)?;
+                writeln!(f, "{})", pad)
+            }
+            _ => writeln!(f, "{}<todo {:?}>", pad, self.inner),
+        }
+    }
+}
+
+impl<'a> std::fmt::Display for Node<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt_sexpr(f, 0)
+    }
 }

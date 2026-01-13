@@ -33,13 +33,3 @@ impl RegisterAllocator {
         );
     }
 }
-
-impl Drop for RegisterAllocator {
-    fn drop(&mut self) {
-        if self.free.len() == vm::REGISTER_COUNT {
-            println!(
-                "RegisterAllocator: not all registers freed at exit, register leak, this is a compiler bug, please open a bug report with your source code"
-            )
-        }
-    }
-}

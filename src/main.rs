@@ -3,7 +3,7 @@
 
 use std::fs;
 
-use crate::{err::PgError, lex::Lexer, parser::Parser};
+use crate::{err::PgError, lex::Lexer, parser::Parser, vm::Value};
 
 mod ast;
 mod cc;
@@ -22,20 +22,47 @@ mod vm;
 #[derive(clap::Parser)]
 #[command(about, version, long_about=None)]
 struct Args {
-    /// Can be 0 for none, 1 for IR based optimisations like constant
-    /// folding, rewrites, etc. And can be 2 for optimising ssa passes and JIT
-    #[arg(short = 'O')]
+    /// Set optimisation level. Higher levels increase compile time. All levels preserve language
+    /// semantics.
+    ///
+    /// 0: Baseline lowering with no optimisation passes.
+    ///
+    /// 1: Local IR and bytecode optimisations:
+    ///    constant folding and propagation, arithmetic simplification,
+    ///    peephole bytecode cleanup, redundant load elimination.
+    ///
+    /// 2: Global IR optimisations:
+    ///    SSA construction, control-flow aware dead code elimination,
+    ///    register lifetime minimisation, copy propagation.
+    ///    Includes all -O1 optimisations.
+    ///
+    /// 3: Aggressive compile-time optimisations:
+    ///    function inlining, guarded operator specialisation,
+    ///    constant hoisting, aggressive register reuse.
+    ///    Includes all -O2 optimisations.
+    #[arg(short = 'O', default_value_t = 0)]
     opt: usize,
-    /// readable bytecode representation with labels, globals and comments
+
+    /// Readable bytecode
     #[arg(short, long)]
     disassemble: bool,
-    /// limit the standard library to necessities
+    /// Readable abstract syntax tree
+    #[arg(short, long)]
+    ast: bool,
+    /// Readable immediate representation
+    #[arg(short, long)]
+    ir: bool,
+    /// Readable register print
+    #[arg(short, long)]
+    regs: bool,
+
+    /// Limit the standard library to necessities
     #[arg(long)]
     no_std: bool,
-    /// skip importing of env variables
+    /// Skip importing of env variables
     #[arg(long)]
     no_env: bool,
-    /// disable garbage collection
+    /// Disable garbage collection
     #[arg(long)]
     no_gc: bool,
     file: String,
@@ -53,6 +80,16 @@ fn main() {
         }
     };
 
+    if args.ast {
+        println!(
+            "{}",
+            ast.iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
     // TODO: add ir creation pass here
 
     let mut cc = cc::Cc::new();
@@ -60,10 +97,23 @@ fn main() {
         e.render();
         std::process::exit(1);
     }
-    cc.dis();
+
+    if args.disassemble {
+        cc.dis();
+    }
 
     let mut vm = cc.finalize();
     if let Err(e) = vm.run() {
         Into::<PgError>::into(e).render();
+    }
+
+    if args.regs {
+        for i in 0..vm::REGISTER_COUNT {
+            let val = &vm.registers[i];
+            if let Value::UnDef = val {
+                break;
+            }
+            println!("r{i}={:?}", val);
+        }
     }
 }
