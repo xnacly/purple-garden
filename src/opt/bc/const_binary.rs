@@ -1,9 +1,17 @@
 use crate::op::Op;
 
-/// const_binary fuses LoadImm{ dst: a, value: x }, LoadImm{ dst: b, value: y }, <BIN> { dst, lhs:
-/// a, rhs: b } into LoadImm { dst, value: x <BIN> y }; where BIN := Add | Sub | Mul | Div
+/// const_binary fuses
+///
+///     LoadImm{ dst: a, value: x },
+///     LoadImm{ dst: b, value: y },
+///     bin { dst, lhs: a, rhs: b }
+///
+/// into
+///
+///     LoadImm { dst, value: x bin y }
+///
+/// where bin := Add | Sub | Mul | Div
 pub fn const_binary(window: &mut [Op]) {
-    dbg!(&window);
     let [
         Op::LoadImm { dst: a, value: x },
         Op::LoadImm { dst: b, value: y },
