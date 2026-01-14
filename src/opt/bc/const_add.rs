@@ -1,7 +1,7 @@
 use crate::op::Op;
 
 /// const_add fuses LoadImm{ dst: a, value: x }, LoadImm{ dst: b, value: y }, Add { dst, lhs: a, rhs: b } into LoadImm { dst, value: x+y }
-pub fn const_add(window: &mut [crate::op::Op]) {
+pub fn const_add(window: &mut [Op]) {
     if let [
         Op::LoadImm { dst: a, value: x },
         Op::LoadImm { dst: b, value: y },

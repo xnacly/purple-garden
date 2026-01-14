@@ -3,6 +3,10 @@
 
 use std::fs;
 
+macro_rules! trace {
+    ($fmt:expr) => {};
+}
+
 use crate::{err::PgError, lex::Lexer, parser::Parser, vm::Value};
 
 mod ast;
@@ -58,7 +62,7 @@ struct Args {
     #[arg(short, long)]
     ir: bool,
     /// Readable used register print
-    #[arg(short, long)]
+    #[arg(long)]
     registers: bool,
 
     /// Limit the standard library to necessities
@@ -70,12 +74,22 @@ struct Args {
     /// Disable garbage collection
     #[arg(long)]
     no_gc: bool,
-    file: String,
+
+    /// run a single string passed via this flag instead of a file
+    #[arg(short)]
+    run: Option<String>,
+
+    file: Option<String>,
 }
 
 fn main() {
     let args = <Args as clap::Parser>::parse();
-    let input = fs::read(args.file).expect("Failed to read from file");
+    let input = match args.run {
+        Some(i) => i.as_bytes().to_vec(),
+        None => fs::read(args.file.expect("No file or `-r` specified"))
+            .expect("Failed to read from file")
+            .to_vec(),
+    };
     let lexer = Lexer::new(&input);
     let ast = match Parser::new(lexer).parse() {
         Ok(a) => a,

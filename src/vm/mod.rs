@@ -70,7 +70,7 @@ impl<'vm> Vm<'vm> {
             let instruction = unsafe_get!(self.bytecode, self.pc);
 
             #[cfg(feature = "trace")]
-            println!("[vm] {:#?}", instruction);
+            println!("[vm][{:04}] {:?}", self.pc, instruction);
 
             match instruction {
                 Op::LoadImm { dst, value } => {
