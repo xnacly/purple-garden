@@ -1,7 +1,7 @@
-mod const_add;
+mod const_binary;
 mod self_move;
 
-pub use const_add::const_add;
+pub use const_binary::const_binary;
 pub use self_move::self_move;
 
 #[cfg(test)]
@@ -20,7 +20,7 @@ mod bc {
     }
 
     #[test]
-    fn const_add() {
+    fn const_binary() {
         let mut bc = vec![
             Op::LoadImm { dst: 0, value: 1 },
             Op::LoadImm { dst: 1, value: 2 },
@@ -29,11 +29,42 @@ mod bc {
                 lhs: 0,
                 rhs: 1,
             },
+            Op::LoadImm { dst: 0, value: 1 },
+            Op::LoadImm { dst: 1, value: 2 },
+            Op::Sub {
+                dst: 0,
+                lhs: 0,
+                rhs: 1,
+            },
+            Op::LoadImm { dst: 0, value: 3 },
+            Op::LoadImm { dst: 1, value: 5 },
+            Op::Mul {
+                dst: 0,
+                lhs: 0,
+                rhs: 1,
+            },
+            Op::LoadImm { dst: 0, value: 64 },
+            Op::LoadImm { dst: 1, value: 8 },
+            Op::Div {
+                dst: 0,
+                lhs: 0,
+                rhs: 1,
+            },
         ];
-        crate::opt::bc::const_add(&mut bc);
+
+        for i in 0..=bc.len().saturating_sub(3) {
+            crate::opt::bc::const_binary(&mut bc[i..i + 3]);
+        }
+
+        bc.retain(|op| *op != Op::Nop);
         assert_eq!(
             bc,
-            vec![Op::LoadImm { dst: 0, value: 3 }, Op::Nop, Op::Nop,]
+            vec![
+                Op::LoadImm { dst: 0, value: 3 },
+                Op::LoadImm { dst: 0, value: -1 },
+                Op::LoadImm { dst: 0, value: 15 },
+                Op::LoadImm { dst: 0, value: 8 },
+            ]
         )
     }
 }

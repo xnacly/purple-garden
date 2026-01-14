@@ -1,7 +1,7 @@
 use crate::op::Op;
 
 macro_rules! opt_trace {
-    ($optimisation:literal, $text:literal) => {
+    ($optimisation:literal, $text:expr) => {
         #[cfg(feature = "trace")]
         println!("[opt::{}]: {}", $optimisation, $text);
     };
@@ -10,7 +10,7 @@ macro_rules! opt_trace {
 /// ir based optimisations
 mod ir;
 
-/// bytecode based optimisations
+/// bytecode based optimisations, mainly peephole
 mod bc;
 
 pub fn ir(ir: ()) {
@@ -19,12 +19,15 @@ pub fn ir(ir: ()) {
 
 const WINDOW_SIZE: usize = 3;
 
-/// bytecode optimisations are done in place
+/// Peephole optimisations
+///
+/// See:
+/// - [Peephole optimization - wikipedia](https://en.wikipedia.org/wiki/Peephole_optimization)
+/// - [W. M. McKeeman "Peephole Optimization"](https://dl.acm.org/doi/epdf/10.1145/364995.365000)
 pub fn bc(bc: &mut Vec<Op>) {
-    let len = bc.len();
-    for i in 0..len.saturating_sub(WINDOW_SIZE) {
+    for i in 0..=bc.len().saturating_sub(WINDOW_SIZE) {
         let window = &mut bc[i..i + WINDOW_SIZE];
-        bc::const_add(window);
+        bc::const_binary(window);
         bc::self_move(window);
     }
 
