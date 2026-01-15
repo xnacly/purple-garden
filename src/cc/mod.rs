@@ -78,11 +78,18 @@ impl<'cc> Cc<'cc> {
                             PgError::with_msg(e.to_string(), &ast.token)
                         })?;
 
-                        let r = self.register.alloc();
-                        self.buf.push(Op::LoadImm { dst: r, value });
+                        if value > i32::MAX as i64 {
+                            Const::Int(value)
+                        } else {
+                            let r = self.register.alloc();
+                            self.buf.push(Op::LoadImm {
+                                dst: r,
+                                value: value as i32,
+                            });
 
-                        // early bail, since we do LoadG for the other values
-                        return Ok(r);
+                            // early bail, since we do LoadG for the other values
+                            return Ok(r);
+                        }
                     }
                     Type::Double(s) => Const::Double(
                         s.parse::<f64>()
@@ -238,15 +245,14 @@ mod cc {
         }];
 
         let _ = cc.compile(&ast).expect("Failed to compile node");
-        let expected_idx: usize = 2;
         assert_eq!(
             cc.buf,
             vec![Op::LoadGlobal {
                 dst: 0,
-                idx: expected_idx as u32
+                idx: cc.ctx.globals_vec.len() as u32 - 1
             }],
         );
-        assert_eq!(cc.ctx.globals_vec[expected_idx], Const::Str("hola"));
+        assert_eq!(cc.ctx.globals_vec.last(), Some(&Const::Str("hola")));
     }
 
     #[test]
@@ -261,6 +267,26 @@ mod cc {
     }
 
     #[test]
+    fn atom_too_large_for_i32() {
+        let mut cc = Cc::new();
+        let inner = i64::from(i32::MAX) + 1;
+        let inner_as_str = inner.to_string();
+        let ast = vec![Node {
+            token: token!(Type::Integer(&inner_as_str)),
+            inner: InnerNode::Atom,
+        }];
+        let _ = cc.compile(&ast).expect("Failed to compile node");
+        assert_eq!(
+            cc.buf,
+            vec![Op::LoadGlobal {
+                dst: 0,
+                idx: cc.ctx.globals_vec.len() as u32 - 1
+            }],
+        );
+        assert_eq!(cc.ctx.globals_vec.last(), Some(&Const::Int(inner)));
+    }
+
+    #[test]
     fn atom_double() {
         let mut cc = Cc::new();
         let ast = vec![Node {
@@ -268,17 +294,16 @@ mod cc {
             inner: InnerNode::Atom,
         }];
         let _ = cc.compile(&ast).expect("Failed to compile node");
-        let expected_idx: usize = 2;
         assert_eq!(
             cc.buf,
             vec![Op::LoadGlobal {
                 dst: 0,
-                idx: expected_idx as u32
+                idx: cc.ctx.globals_vec.len() as u32 - 1
             }],
         );
         assert_eq!(
-            cc.ctx.globals_vec[expected_idx],
-            Const::Double((3.1415_f64).to_bits())
+            cc.ctx.globals_vec.last(),
+            Some(&Const::Double((3.1415_f64).to_bits()))
         );
     }
 
