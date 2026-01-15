@@ -73,3 +73,12 @@ pub enum Op {
     Ret,
     Nop,
 }
+
+#[cfg(test)]
+mod op {
+
+    #[test]
+    fn op_size_8_byte() {
+        assert_eq!(std::mem::size_of::<crate::op::Op>(), 8);
+    }
+}
