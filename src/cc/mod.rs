@@ -28,7 +28,7 @@ pub enum Const<'c> {
 
 #[derive(Debug)]
 pub struct Cc<'cc> {
-    pub buf: Vec<Op<'cc>>,
+    pub buf: Vec<Op>,
     pub ctx: Context<'cc>,
     register: RegisterAllocator,
 }
@@ -433,7 +433,7 @@ mod cc {
         use crate::lex::Type::*;
         use crate::op::Op::*;
 
-        let tests: Vec<(Type, fn(u8, u8, u8) -> Op<'static>)> = vec![
+        let tests: Vec<(Type, fn(u8, u8, u8) -> Op)> = vec![
             (Plus, |dst, lhs, rhs| Add { dst, lhs, rhs }),
             (Minus, |dst, lhs, rhs| Sub { dst, lhs, rhs }),
             (Asteriks, |dst, lhs, rhs| Mul { dst, lhs, rhs }),

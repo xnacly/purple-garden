@@ -1,9 +1,7 @@
-use crate::vm::BuiltinFn;
-
 #[derive(Debug)]
 #[allow(unpredictable_function_pointer_comparisons)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub enum Op<'vm> {
+pub enum Op {
     Add {
         dst: u8,
         lhs: u8,
@@ -49,7 +47,7 @@ pub enum Op<'vm> {
     },
     LoadImm {
         dst: u8,
-        value: i64,
+        value: i32,
     },
     LoadGlobal {
         dst: u8,
@@ -68,7 +66,7 @@ pub enum Op<'vm> {
         args_len: u8,
     },
     Sys {
-        ptr: BuiltinFn<'vm>,
+        idx: u8,
         args_start: u8,
         args_len: u8,
     },

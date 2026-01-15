@@ -30,10 +30,13 @@ impl Cc<'_> {
                         args_len,
                     } => format!("call {func}, {args_start}, {args_len}"),
                     Op::Sys {
-                        ptr,
+                        idx,
                         args_start,
                         args_len,
-                    } => format!("sys {:p}, {args_start}, {args_len}", ptr),
+                    } => format!(
+                        "sys {idx}, {args_start}, {args_len}; {}",
+                        "<syscall_name_here>"
+                    ),
                     Op::Ret => "ret".into(),
                     Op::Nop => "nop".into(),
                 }

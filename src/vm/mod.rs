@@ -22,7 +22,7 @@ pub struct Vm<'vm> {
 
     pub frames: Vec<CallFrame>,
 
-    pub bytecode: Vec<Op<'vm>>,
+    pub bytecode: Vec<Op>,
     pub globals: Vec<Value<'vm>>,
 }
 
@@ -74,7 +74,7 @@ impl<'vm> Vm<'vm> {
 
             match instruction {
                 Op::LoadImm { dst, value } => {
-                    *unsafe_get_mut!(self.registers, *dst) = Value::Int(*value)
+                    *unsafe_get_mut!(self.registers, *dst) = Value::Int(*value as i64)
                 }
                 Op::LoadGlobal { dst, idx } => {
                     *unsafe_get_mut!(self.registers, *dst) =
@@ -253,7 +253,7 @@ mod ops {
     }
 
     cases!(
-        load_imm :: vec![Op::LoadImm{dst: 0, value: 0xDEADAFFE}] => 0xDEADAFFE,
+        load_imm :: vec![Op::LoadImm{dst: 0, value: 0xDEAD}] => 0xDEAD,
         // TODO: [Value::stack] has to be large enough for all slots somehow, so I need to walk
         // self.ctx.locals and add enough space for all slots?
         //
