@@ -6,6 +6,7 @@ use crate::vm;
 #[derive(Debug)]
 pub struct RegisterAllocator {
     free: Vec<u8>,
+    marks: Vec<usize>,
 }
 
 impl RegisterAllocator {
@@ -13,6 +14,7 @@ impl RegisterAllocator {
         Self {
             // reversing the register count makes the lower registers "hot"
             free: (0..vm::REGISTER_COUNT as u8).rev().collect(),
+            marks: Vec::with_capacity(16),
         }
     }
 
@@ -32,5 +34,17 @@ impl RegisterAllocator {
             !(self.free.len() > vm::REGISTER_COUNT),
             "Freed one too many registers"
         );
+    }
+
+    pub fn mark(&mut self) {
+        self.marks.push(self.free.len())
+    }
+
+    pub fn reset_to_last_mark(&mut self) {
+        if let Some(mark) = self.marks.pop() {
+            self.free.truncate(mark);
+        } else {
+            panic!("No mark to reset to");
+        }
     }
 }

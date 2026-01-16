@@ -172,6 +172,8 @@ impl<'cc> Cc<'cc> {
                     pc: self.buf.len(),
                 };
 
+                self.register.mark();
+
                 for arg in args {
                     let Type::Ident(name) = arg.token.t else {
                         unreachable!("Function argument names must be identifiers");
@@ -197,7 +199,7 @@ impl<'cc> Cc<'cc> {
                     }
                 }
 
-                // adhere to calling convention if we have a value to return
+                // adhere to calling convention if we have a value to return, it needs to be in r0
                 if let Some(src) = result_register {
                     self.buf.push(Op::Mov { dst: 0, src });
                 }
@@ -210,9 +212,15 @@ impl<'cc> Cc<'cc> {
 
                 self.ctx.functions.insert(name, func);
 
+                self.register.reset_to_last_mark();
+
                 // restore outer locals:
                 self.ctx.locals = prev_locals;
                 None
+            }
+            InnerNode::Call { args } => {
+                // TODO:
+                todo!("Cc::cc(InnerNode::Call)");
             }
             _ => todo!("{:?}", ast),
         })
@@ -253,6 +261,40 @@ mod cc {
                 t: $expr,
             }
         };
+    }
+
+    #[test]
+    fn function_call() {
+        let ast = vec![
+            node! {
+                token!(Type::Ident("empty")),
+                InnerNode::Fn {
+                    args: vec![],
+                    body: vec![],
+                }
+            },
+            node! {
+                token!(Type::Ident("empty")),
+                InnerNode::Call {
+                    args: vec![],
+                }
+            },
+        ];
+
+        let mut cc = Cc::new();
+        let _ = cc.compile(&ast).unwrap();
+        assert_eq!(
+            cc.buf,
+            vec![
+                Op::Jmp { target: 2 },
+                Op::Ret,
+                Op::Call {
+                    func: 1,
+                    args_start: 0,
+                    args_len: 0
+                }
+            ]
+        );
     }
 
     #[test]
