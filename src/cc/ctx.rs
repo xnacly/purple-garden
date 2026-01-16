@@ -29,7 +29,7 @@ impl<'cc> Local<'cc> {
 #[derive(Debug, Clone)]
 pub struct Func<'cc> {
     pub name: &'cc str,
-    pub args: usize,
+    pub args: u8,
     pub size: usize,
     pub pc: usize,
 }

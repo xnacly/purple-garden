@@ -178,14 +178,9 @@ impl<'vm> Vm<'vm> {
                         continue;
                     }
                 }
-                Op::Call {
-                    func,
-                    args_start,
-                    args_len,
-                } => {
+                Op::Call { func } => {
                     self.frames.push(CallFrame { return_to: self.pc });
                     self.pc = *func as usize;
-                    // TODO: call register setup
                     continue;
                 }
                 Op::Ret => {
@@ -248,14 +243,6 @@ mod ops {
 
     cases!(
         load_imm :: vec![Op::LoadImm{dst: 0, value: 0xDEAD}] => 0xDEAD,
-        // TODO: [Value::stack] has to be large enough for all slots somehow, so I need to walk
-        // self.ctx.locals and add enough space for all slots?
-        //
-        // store_local :: vec![
-        //     Op::LoadImm{dst: 0, value: 0xDEADAFFE},
-        //     Op::StoreLocal { slot: 0, src: 0 },
-        //     Op::LoadLocal {slot: 0, dst: 0}
-        // ] => 0xDEADAFFE
         add :: vec![
             Op::LoadImm{dst: 0, value: 5},
             Op::LoadImm{dst: 1, value: 7},

@@ -42,19 +42,14 @@ impl Cc<'_> {
                     ),
                     Op::Jmp { target } => format!("jmp {target}"),
                     Op::JmpF { cond, target } => format!("jmpf r{cond}, {target}"),
-                    Op::Call {
-                        func,
-                        args_start,
-                        args_len,
-                    } => format!("call {func}, {args_start}, {args_len}"),
-                    Op::Sys {
-                        idx,
-                        args_start,
-                        args_len,
-                    } => format!(
-                        "sys {idx}, {args_start}, {args_len}; {}",
-                        "<syscall_name_here>"
+                    Op::Call { func } => format!(
+                        "call {}",
+                        reverse_function_lookup_table
+                            .get(&(*func as usize))
+                            .unwrap()
+                            .name
                     ),
+                    Op::Sys { .. } => format!("sys <syscall_name_here>",),
                     Op::Ret => "ret".into(),
                     Op::Nop => "nop".into(),
                 }

@@ -26,6 +26,33 @@ pub enum Const<'c> {
     Str(&'c str),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct Reg {
+    id: u8,
+    perm: bool,
+}
+
+impl From<u8> for Reg {
+    fn from(value: u8) -> Self {
+        Reg {
+            id: value,
+            perm: false,
+        }
+    }
+}
+
+impl From<Reg> for u8 {
+    fn from(value: Reg) -> Self {
+        value.id
+    }
+}
+
+impl From<&Reg> for u8 {
+    fn from(value: &Reg) -> Self {
+        value.id
+    }
+}
+
 #[derive(Debug)]
 pub struct Cc<'cc> {
     pub buf: Vec<Op>,
@@ -66,7 +93,7 @@ impl<'cc> Cc<'cc> {
         Ok(())
     }
 
-    fn cc(&mut self, ast: &Node<'cc>) -> Result<Option<u8>, PgError> {
+    fn cc(&mut self, ast: &Node<'cc>) -> Result<Option<Reg>, PgError> {
         #[cfg(feature = "trace")]
         println!("Cc::cc({:?})", &ast.token.t);
 
@@ -88,7 +115,7 @@ impl<'cc> Cc<'cc> {
                             });
 
                             // early bail, since we do LoadG for the other values
-                            return Ok(Some(r));
+                            return Ok(Some(r.into()));
                         }
                     }
                     Type::Double(s) => Const::Double(
@@ -106,22 +133,26 @@ impl<'cc> Cc<'cc> {
                     ),
                 };
 
-                Some(self.load_const(constant))
+                Some(self.load_const(constant).into())
             }
             InnerNode::Ident => {
                 let Type::Ident(name) = ast.token.t else {
                     unreachable!("InnerNode::Ident");
                 };
 
-                Some(self.ctx.locals.resolve(name).ok_or_else(|| {
-                    PgError::with_msg(format!("Undefined variable `{name}`"), &ast.token)
-                })?)
+                Some(Reg {
+                    id: self.ctx.locals.resolve(name).ok_or_else(|| {
+                        PgError::with_msg(format!("Undefined variable `{name}`"), &ast.token)
+                    })?,
+                    perm: true,
+                })
             }
             InnerNode::Bin { lhs, rhs } => {
-                let lhs = self.cc(lhs.as_ref())?.unwrap();
-                let rhs = self.cc(rhs.as_ref())?.unwrap();
+                let lhs_reg = self.cc(lhs.as_ref())?.unwrap();
+                let rhs_reg = self.cc(rhs.as_ref())?.unwrap();
 
                 let dst = self.register.alloc();
+                let (lhs, rhs) = ((&lhs_reg).into(), (&rhs_reg).into());
                 self.buf.push(match ast.token.t {
                     Type::Plus => Op::Add { dst, lhs, rhs },
                     Type::Minus => Op::Sub { dst, lhs, rhs },
@@ -133,9 +164,14 @@ impl<'cc> Cc<'cc> {
                     _ => unreachable!(),
                 });
 
-                self.register.free(lhs);
-                self.register.free(rhs);
-                Some(dst)
+                if let Reg { id, perm: false } = lhs_reg {
+                    self.register.free(id);
+                };
+                if let Reg { id, perm: false } = rhs_reg {
+                    self.register.free(id);
+                };
+
+                Some(dst.into())
             }
             InnerNode::Let { rhs } => {
                 let src = self.cc(&rhs)?;
@@ -143,9 +179,15 @@ impl<'cc> Cc<'cc> {
                     unreachable!("InnerNode::Let");
                 };
 
-                self.ctx.locals.bind(name, src.unwrap()).ok_or_else(|| {
-                    PgError::with_msg(format!("binding `{name}` is already defined"), &ast.token)
-                })?;
+                self.ctx
+                    .locals
+                    .bind(name, src.unwrap().into())
+                    .ok_or_else(|| {
+                        PgError::with_msg(
+                            format!("binding `{name}` is already defined"),
+                            &ast.token,
+                        )
+                    })?;
                 None
             }
             InnerNode::Fn { args, body } => {
@@ -167,20 +209,23 @@ impl<'cc> Cc<'cc> {
 
                 let mut func = ctx::Func {
                     name,
-                    args: args.len(),
+                    args: args.len() as u8,
                     size: 0,
                     pc: self.buf.len(),
                 };
 
                 self.register.mark();
 
-                for arg in args {
+                for (i, arg) in args.into_iter().enumerate() {
                     let Type::Ident(name) = arg.token.t else {
                         unreachable!("Function argument names must be identifiers");
                     };
 
-                    let r = self.register.alloc();
-                    self.ctx.locals.bind(name, r).ok_or_else(|| {
+                    // we need to reserver all registers from r0..rN, so the arguments arent
+                    // clobbered by other operations
+                    let _ = self.register.alloc();
+
+                    self.ctx.locals.bind(name, i as u8).ok_or_else(|| {
                         PgError::with_msg(
                             format!("binding `{name}` is already defined"),
                             &ast.token,
@@ -193,15 +238,16 @@ impl<'cc> Cc<'cc> {
                     if let Some(r) = self.cc(field)? {
                         if i == body.len() - 1 {
                             result_register = Some(r);
-                        } else {
-                            self.register.free(r);
                         }
                     }
                 }
 
                 // adhere to calling convention if we have a value to return, it needs to be in r0
                 if let Some(src) = result_register {
-                    self.buf.push(Op::Mov { dst: 0, src });
+                    self.buf.push(Op::Mov {
+                        dst: 0,
+                        src: src.into(),
+                    });
                 }
                 self.buf.push(Op::Ret);
 
@@ -219,8 +265,45 @@ impl<'cc> Cc<'cc> {
                 None
             }
             InnerNode::Call { args } => {
-                // TODO:
-                todo!("Cc::cc(InnerNode::Call)");
+                let Type::Ident(name) = ast.token.t else {
+                    unreachable!("InnerNode::Call's token can only be an ident");
+                };
+
+                let resolved_func = self
+                    .ctx
+                    .functions
+                    .get_mut(name)
+                    .ok_or_else(|| {
+                        PgError::with_msg(format!("function `{name}` is not defined"), &ast.token)
+                    })?
+                    .clone();
+
+                if resolved_func.args != args.len() as u8 {
+                    return Err(PgError::with_msg(
+                        format!(
+                            "function `{name}` requires {} arguments, got {}",
+                            resolved_func.args,
+                            args.len()
+                        ),
+                        &ast.token,
+                    ));
+                }
+
+                self.register.mark();
+                for (i, arg) in args.into_iter().enumerate() {
+                    let r = self.cc(arg)?;
+                    if let Some(r) = r {
+                        self.buf.push(Op::Mov {
+                            dst: i as u8,
+                            src: r.into(),
+                        });
+                    }
+                }
+                self.buf.push(Op::Call {
+                    func: resolved_func.pc as u32,
+                });
+                self.register.reset_to_last_mark();
+                Some(0.into())
             }
             _ => todo!("{:?}", ast),
         })
@@ -264,7 +347,112 @@ mod cc {
     }
 
     #[test]
-    fn function_call() {
+    /// (fn sum_three (a b c) (+ a (+ b c)))
+    fn three_arg_call() {
+        let ast = vec![
+            node! {
+                token!(Type::Ident("sum_three")),
+                InnerNode::Fn {
+                    args: vec![
+                        node!(token!(Type::Ident("a")), InnerNode::Ident),
+                        node!(token!(Type::Ident("b")), InnerNode::Ident),
+                        node!(token!(Type::Ident("c")), InnerNode::Ident),
+                    ],
+                    body: vec![
+                        node!(
+                            token!(Type::Plus),
+                            InnerNode::Bin {
+                                lhs: Box::new(node!(token!(Type::Ident("a")), InnerNode::Ident)),
+                                rhs: Box::new(node!(
+                                    token!(Type::Plus),
+                                    InnerNode::Bin {
+                                        lhs: Box::new(node!(token!(Type::Ident("b")), InnerNode::Ident)),
+                                        rhs: Box::new(node!(token!(Type::Ident("c")), InnerNode::Ident)),
+                                    }
+                                )),
+                            }
+                        )
+                    ],
+                }
+            },
+            // Call the function with constants: sum_three(1, 2, 3)
+            node! {
+                token!(Type::Ident("sum_three")),
+                InnerNode::Call {
+                    args: vec![
+                        node!(token!(Type::Integer("1")), InnerNode::Atom),
+                        node!(token!(Type::Integer("2")), InnerNode::Atom),
+                        node!(token!(Type::Integer("3")), InnerNode::Atom),
+                    ],
+                }
+            },
+        ];
+
+        let mut cc = Cc::new();
+        let _ = cc.compile(&ast).unwrap();
+
+        assert_eq!(
+            cc.buf,
+            vec![
+                Op::Jmp { target: 5 },
+                Op::Add {
+                    dst: 0,
+                    lhs: 1,
+                    rhs: 2
+                },
+                Op::Add {
+                    dst: 1,
+                    lhs: 0,
+                    rhs: 0
+                },
+                Op::Mov { dst: 0, src: 1 },
+                Op::Ret,
+                Op::LoadImm { dst: 0, value: 1 },
+                Op::Mov { dst: 0, src: 0 },
+                Op::LoadImm { dst: 1, value: 2 },
+                Op::Mov { dst: 1, src: 1 },
+                Op::LoadImm { dst: 2, value: 3 },
+                Op::Mov { dst: 2, src: 2 },
+                Op::Call { func: 1 }
+            ]
+        );
+    }
+
+    #[test]
+    fn single_arg_call() {
+        let ast = vec![
+            node! {
+                token!(Type::Ident("indirecton")),
+                InnerNode::Fn {
+                    args: vec![node!(token!(Type::Ident("x")), InnerNode::Ident)],
+                    body: vec![node!(token!(Type::Ident("x")), InnerNode::Ident)],
+                }
+            },
+            node! {
+                token!(Type::Ident("indirecton")),
+                InnerNode::Call {
+                    args: vec![node!(token!(Type::Integer("161")), InnerNode::Atom)],
+                }
+            },
+        ];
+
+        let mut cc = Cc::new();
+        let _ = cc.compile(&ast).unwrap();
+        assert_eq!(
+            cc.buf,
+            vec![
+                Op::Jmp { target: 3 },
+                Op::Mov { dst: 0, src: 0 },
+                Op::Ret,
+                Op::LoadImm { dst: 0, value: 161 },
+                Op::Mov { dst: 0, src: 0 },
+                Op::Call { func: 1 }
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_call() {
         let ast = vec![
             node! {
                 token!(Type::Ident("empty")),
@@ -285,16 +473,21 @@ mod cc {
         let _ = cc.compile(&ast).unwrap();
         assert_eq!(
             cc.buf,
-            vec![
-                Op::Jmp { target: 2 },
-                Op::Ret,
-                Op::Call {
-                    func: 1,
-                    args_start: 0,
-                    args_len: 0
-                }
-            ]
+            vec![Op::Jmp { target: 2 }, Op::Ret, Op::Call { func: 1 }]
         );
+    }
+
+    #[test]
+    fn undefined_call() {
+        let ast = vec![node! {
+            token!(Type::Ident("unkown")),
+            InnerNode::Call {
+                args: vec![],
+            }
+        }];
+
+        let mut cc = Cc::new();
+        assert!(dbg!(cc.compile(&ast)).is_err());
     }
 
     #[test]
@@ -342,11 +535,11 @@ mod cc {
             vec![
                 Op::Jmp { target: 4 },
                 Op::Mul {
-                    dst: 1,
+                    dst: 0,
                     lhs: 0,
                     rhs: 0
                 },
-                Op::Mov { dst: 0, src: 1 },
+                Op::Mov { dst: 0, src: 0 },
                 Op::Ret
             ]
         );
@@ -634,9 +827,7 @@ mod cc {
                     rhs: Box::new(node!(token!(Type::Integer("45")), InnerNode::Atom)),
                 },
             };
-            if let Some(r) = cc.cc(&ast).expect("Failed to compile node") {
-                cc.register.free(r);
-            }
+            let _ = cc.cc(&ast).expect("Failed to compile node");
             let expected_op = make_op(2, 0, 1);
             assert_eq!(
                 cc.buf,

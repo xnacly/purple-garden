@@ -1,6 +1,6 @@
 use crate::lex::{Token, Type};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum InnerNode<'inner> {
     /// inner value is encoded in super::Node::token
     Atom,
@@ -68,7 +68,7 @@ pub enum InnerNode<'inner> {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Node<'node> {
     pub token: Token<'node>,
     pub inner: InnerNode<'node>,
@@ -121,19 +121,36 @@ impl<'a> Node<'a> {
                     unreachable!();
                 };
                 write!(f, "{}(fn {} (", pad, name)?;
-                for (i, arg) in args.iter().enumerate() {
-                    let Type::Ident(arg_name) = arg.token.t else {
-                        unreachable!();
-                    };
-                    if i == args.len() - 1 {
-                        write!(f, "{}", arg_name)?;
-                    } else {
-                        write!(f, "{}, ", arg_name)?;
+                if args.is_empty() {
+                    write!(f, ")")?;
+                } else {
+                    for (i, arg) in args.iter().enumerate() {
+                        let Type::Ident(arg_name) = arg.token.t else {
+                            unreachable!();
+                        };
+                        if i == args.len() - 1 {
+                            write!(f, "{}", arg_name)?;
+                        } else {
+                            write!(f, "{} ", arg_name)?;
+                        }
                     }
+                    writeln!(f, ")")?;
                 }
-                writeln!(f, ")")?;
                 for (i, node) in body.iter().enumerate() {
                     node.fmt_sexpr(f, indent + 1)?;
+                }
+                writeln!(f, "{})", pad)
+            }
+            InnerNode::Call { args } => {
+                let Type::Ident(name) = self.token.t else {
+                    unreachable!();
+                };
+                write!(f, "{}({}", pad, name)?;
+                if !args.is_empty() {
+                    writeln!(f)?;
+                    for arg in args {
+                        arg.fmt_sexpr(f, indent + 1)?;
+                    }
                 }
                 writeln!(f, "{})", pad)
             }

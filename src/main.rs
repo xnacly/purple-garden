@@ -53,17 +53,20 @@ struct Args {
     opt: usize,
 
     /// Readable bytecode
-    #[arg(short, long)]
+    #[arg(short = 'D', long)]
     disassemble: bool,
     /// Readable abstract syntax tree
-    #[arg(short, long)]
+    #[arg(short = 'A', long)]
     ast: bool,
     /// Readable immediate representation
-    #[arg(short, long)]
+    #[arg(short = 'I', long)]
     ir: bool,
     /// Readable used register print
-    #[arg(long)]
+    #[arg(short = 'R', long)]
     registers: bool,
+    /// Generate backtraces for function calls
+    #[arg(short = 'B', long)]
+    backtrace: bool,
 
     /// Limit the standard library to necessities
     #[arg(long)]
@@ -105,7 +108,7 @@ fn main() {
             ast.iter()
                 .map(|n| n.to_string())
                 .collect::<Vec<_>>()
-                .join(", ")
+                .join("")
         );
     }
 

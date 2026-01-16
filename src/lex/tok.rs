@@ -30,7 +30,7 @@ pub enum Type<'t> {
     For,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token<'t> {
     pub line: usize,
     pub col: usize,
