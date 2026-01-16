@@ -1,0 +1,17 @@
+[package]
+name = "purple-garden"
+version = "0.1.0"
+description = "Lean scripting language, designed and implemented with a focus on performance and a low memory profile "
+edition = "2024"
+
+[features]
+trace = []
+nightly = []
+
+[dependencies]
+clap = { version = "4.5.54", features = ["derive"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
