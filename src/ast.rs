@@ -109,8 +109,32 @@ impl<'a> Node<'a> {
                 writeln!(f, "{}}}", pad)
             }
             InnerNode::Let { rhs } => {
-                writeln!(f, "{}(let", pad)?;
+                let Type::Ident(name) = self.token.t else {
+                    unreachable!();
+                };
+                writeln!(f, "{}(let {}", pad, name)?;
                 rhs.fmt_sexpr(f, indent + 1)?;
+                writeln!(f, "{})", pad)
+            }
+            InnerNode::Fn { args, body } => {
+                let Type::Ident(name) = self.token.t else {
+                    unreachable!();
+                };
+                write!(f, "{}(fn {} (", pad, name)?;
+                for (i, arg) in args.iter().enumerate() {
+                    let Type::Ident(arg_name) = arg.token.t else {
+                        unreachable!();
+                    };
+                    if i == args.len() - 1 {
+                        write!(f, "{}", arg_name)?;
+                    } else {
+                        write!(f, "{}, ", arg_name)?;
+                    }
+                }
+                writeln!(f, ")")?;
+                for (i, node) in body.iter().enumerate() {
+                    node.fmt_sexpr(f, indent + 1)?;
+                }
                 writeln!(f, "{})", pad)
             }
             _ => writeln!(f, "{}<todo {:?}>", pad, self.inner),

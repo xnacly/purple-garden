@@ -26,10 +26,19 @@ impl<'cc> Local<'cc> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Func<'cc> {
+    pub name: &'cc str,
+    pub args: usize,
+    pub size: usize,
+    pub pc: usize,
+}
+
 #[derive(Debug, Default)]
 pub struct Context<'ctx> {
     pub globals: HashMap<Const<'ctx>, usize>,
     pub globals_vec: Vec<Const<'ctx>>,
+    pub functions: HashMap<&'ctx str, Func<'ctx>>,
     pub locals: Local<'ctx>,
 }
 

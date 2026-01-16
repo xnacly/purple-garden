@@ -10,7 +10,6 @@ use crate::op::Op;
 #[derive(Default, Debug)]
 pub struct CallFrame {
     pub return_to: usize,
-    pub locals_base: usize,
 }
 
 pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>, &[Value<'vm>]) -> Option<Value<'vm>>;
@@ -184,13 +183,9 @@ impl<'vm> Vm<'vm> {
                     args_start,
                     args_len,
                 } => {
-                    // TODO: what to put into locals_base here?
-                    self.frames.push(CallFrame {
-                        return_to: self.pc,
-                        locals_base: 0,
-                    });
-                    // TODO: what about the arguments?
+                    self.frames.push(CallFrame { return_to: self.pc });
                     self.pc = *func as usize;
+                    // TODO: call register setup
                     continue;
                 }
                 Op::Ret => {
@@ -240,7 +235,6 @@ mod ops {
                     vm.bytecode = $bytecode;
                     vm.frames.push(CallFrame {
                         return_to: 0,
-                        locals_base: 0,
                     });
                     if let Err(err) = vm.run() {
                         panic!("{} failed due to {:?}", stringify!($ident), err);

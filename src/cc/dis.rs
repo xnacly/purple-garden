@@ -1,10 +1,28 @@
-use crate::{cc::Cc, op::Op};
+use std::collections::HashMap;
+
+use crate::{
+    cc::{Cc, ctx::Func},
+    op::Op,
+};
 
 impl Cc<'_> {
     // TODO: disconnect this from the compiler so finalize doesnt annoy us
     pub fn dis(&self) {
+        let reverse_function_lookup_table: HashMap<usize, Func> = self
+            .ctx
+            .functions
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (v.pc, v))
+            .collect();
+
         println!("__entry: ");
+
         for (i, b) in self.buf.iter().enumerate() {
+            if let Some(func) = reverse_function_lookup_table.get(&i) {
+                println!("__{}: ", func.name);
+                println!("; 0x{:04X} args={};size={}", func.pc, func.args, func.size);
+            }
             println!(
                 "\t{}",
                 match b {

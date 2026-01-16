@@ -15,63 +15,46 @@ impl<'p> Parser<'p> {
 
     pub fn parse(self) -> Result<Vec<Node<'p>>, PgError> {
         let ast = Node {
-            token: Token {
+            token: (Token {
                 line: 0,
                 col: 0,
-                t: (Type::Asteriks),
-            },
-            inner: InnerNode::Bin {
-                lhs: Box::new(Node {
+                t: (Type::Ident("square")),
+            }),
+            inner: (InnerNode::Fn {
+                args: vec![Node {
                     token: (Token {
                         line: 0,
                         col: 0,
-                        t: (Type::Plus),
+                        t: (Type::Ident("n")),
+                    }),
+                    inner: (InnerNode::Ident),
+                }],
+                body: vec![Node {
+                    token: (Token {
+                        line: 0,
+                        col: 0,
+                        t: (Type::Asteriks),
                     }),
                     inner: (InnerNode::Bin {
                         lhs: Box::new(Node {
                             token: (Token {
                                 line: 0,
                                 col: 0,
-                                t: (Type::Integer("2")),
+                                t: (Type::Ident("n")),
                             }),
-                            inner: (InnerNode::Atom),
+                            inner: (InnerNode::Ident),
                         }),
                         rhs: Box::new(Node {
                             token: (Token {
                                 line: 0,
                                 col: 0,
-                                t: (Type::Integer("3")),
+                                t: (Type::Ident("n")),
                             }),
-                            inner: (InnerNode::Atom),
+                            inner: (InnerNode::Ident),
                         }),
                     }),
-                }),
-                rhs: Box::new(Node {
-                    token: (Token {
-                        line: 0,
-                        col: 0,
-                        t: (Type::Minus),
-                    }),
-                    inner: (InnerNode::Bin {
-                        lhs: Box::new(Node {
-                            token: (Token {
-                                line: 0,
-                                col: 0,
-                                t: (Type::Integer("4")),
-                            }),
-                            inner: (InnerNode::Atom),
-                        }),
-                        rhs: Box::new(Node {
-                            token: (Token {
-                                line: 0,
-                                col: 0,
-                                t: (Type::Integer("1")),
-                            }),
-                            inner: (InnerNode::Atom),
-                        }),
-                    }),
-                }),
-            },
+                }],
+            }),
         };
 
         Ok(vec![ast])
