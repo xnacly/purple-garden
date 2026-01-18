@@ -90,9 +90,9 @@ cargo +nightly run -- --help
     \                           /
      +- Baseline interpreter --+
      |
-     ] [vm][0000] LoadImm { dst: 2, value: 5 }
-     ] [vm][0001] LoadImm { dst: 3, value: 3 }
-     ] [vm][0002] Mul { dst: 0, lhs: 2, rhs: 3 }
+     ]: [vm][0000] LoadImm { dst: 2, value: 5 }
+     ]: [vm][0001] LoadImm { dst: 3, value: 3 }
+     ]: [vm][0002] Mul { dst: 0, lhs: 2, rhs: 3 }
      |
      '
 ```

@@ -1,1 +1,1 @@
-// TODO: think of a working IR
+pub enum IrNode {}

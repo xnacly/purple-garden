@@ -6,7 +6,6 @@ use crate::{
 };
 
 impl Cc<'_> {
-    // TODO: disconnect this from the compiler so finalize doesnt annoy us
     pub fn dis(&self) {
         let reverse_function_lookup_table: HashMap<usize, Func> = self
             .ctx
