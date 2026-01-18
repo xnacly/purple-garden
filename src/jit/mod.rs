@@ -1,4 +1,4 @@
-use crate::ir::IrNode;
+use crate::ir;
 
 pub struct ExecBuffer {
     ptr: *mut u8,
@@ -15,8 +15,8 @@ impl<'jit> Bjit<'jit> {
         Bjit { buf }
     }
 
-    pub fn aarch64_from(ir: &[IrNode]) {}
+    pub fn aarch64_from(ir: &[ir::Func]) {}
 
     /// https://c9x.me/x86/
-    pub fn x86_from(ir: &[IrNode]) {}
+    pub fn x86_from(ir: &[ir::Func]) {}
 }

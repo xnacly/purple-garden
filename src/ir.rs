@@ -1,1 +1,179 @@
-pub enum IrNode {}
+//! The purple garden immediate representation, it aims to have/be:
+//!
+//! - Explicit data flow
+//!
+//! - No hidden control flow
+//!
+//! - No implicit state mutation
+//!
+//! - Stable semantics under rewriting
+//!
+//! - Cheap to analyze
+
+use std::fmt::Display;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Id(u32);
+
+pub enum Instr {
+    Add {
+        dst: Id,
+        lhs: Id,
+        rhs: Id,
+    },
+    Sub {
+        dst: Id,
+        lhs: Id,
+        rhs: Id,
+    },
+    Mul {
+        dst: Id,
+        lhs: Id,
+        rhs: Id,
+    },
+    Div {
+        dst: Id,
+        lhs: Id,
+        rhs: Id,
+    },
+
+    LoadConst {
+        dst: Id,
+        // TODO: crate::cc::Const needs to be ripped out from cc into ir
+        value: crate::cc::Const<'static>,
+    },
+
+    Call {
+        dst: Option<Id>,
+        func: Id,
+        args: Vec<Id>,
+    },
+}
+
+pub enum Terminator {
+    Return(Option<Id>),
+    // TODO: think about passing block params
+    Jump(Id),
+    Branch { cond: Id, yes: Id, no: Id },
+}
+
+pub struct Block {
+    // TODO: think about passing block params
+    id: Id,
+    instructions: Vec<Instr>,
+    term: Terminator,
+}
+
+pub struct Func {
+    id: Id,
+    args: Vec<Id>,
+    blocks: Vec<Block>,
+}
+
+impl Display for Func {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "fn @f{}(", self.id.0)?;
+        for (i, arg) in self.args.iter().enumerate() {
+            if i + 1 == self.args.len() {
+                write!(f, "%v{}", arg.0)?;
+            } else {
+                write!(f, "%v{}, ", arg.0)?;
+            }
+        }
+        writeln!(f, ") {{")?;
+
+        for block in self.blocks.iter() {
+            writeln!(f, "b{}:", block.id.0)?;
+            for ins in block.instructions.iter() {
+                match ins {
+                    Instr::Add { dst, lhs, rhs } => {
+                        writeln!(f, "%v{} = add %v{}, %v{}", dst.0, lhs.0, rhs.0)?
+                    }
+                    Instr::Sub { dst, lhs, rhs } => {
+                        writeln!(f, "%v{} = sub %v{}, %v{}", dst.0, lhs.0, rhs.0)?
+                    }
+                    Instr::Mul { dst, lhs, rhs } => {
+                        writeln!(f, "%v{} = mul %v{}, %v{}", dst.0, lhs.0, rhs.0)?
+                    }
+                    Instr::Div { dst, lhs, rhs } => {
+                        writeln!(f, "%v{} = div %v{}, %v{}", dst.0, lhs.0, rhs.0)?
+                    }
+                    Instr::LoadConst { dst, value } => writeln!(f, "%v{} = {:?}", dst.0, value)?,
+                    Instr::Call { dst, func, args } => {
+                        if let Some(dst) = dst {
+                            write!(f, "%v{} = ", dst.0)?;
+                        }
+
+                        write!(f, "@f{}(", func.0)?;
+
+                        for (i, arg) in args.iter().enumerate() {
+                            if i + 1 == args.len() {
+                                write!(f, "%v{}", arg.0)?;
+                            } else {
+                                write!(f, "%v{}, ", arg.0)?;
+                            }
+                        }
+                        writeln!(f, ")")?;
+                    }
+                }
+            }
+
+            match &block.term {
+                Terminator::Return(id) => {
+                    if let Some(id) = id {
+                        writeln!(f, "ret %v{}", id.0)?
+                    } else {
+                        writeln!(f, "ret")?
+                    }
+                }
+                Terminator::Jump(id) => writeln!(f, "jmp %b{}", id.0)?,
+                Terminator::Branch { cond, yes, no } => {
+                    writeln!(f, "br %v{}, b{}, b{}", cond.0, yes.0, no.0)?
+                }
+            }
+        }
+
+        writeln!(f, "}}")
+    }
+}
+
+#[cfg(test)]
+mod ir {
+    #[test]
+    fn print_ir_example() {
+        use crate::ir::*;
+
+        let v0 = Id(0);
+        let v1 = Id(1);
+        let v2 = Id(2);
+        let v3 = Id(3);
+        let v4 = Id(4);
+
+        let b0 = Id(0);
+
+        let block0 = Block {
+            id: b0,
+            instructions: vec![
+                Instr::Add {
+                    dst: v3,
+                    lhs: v1,
+                    rhs: v2,
+                },
+                Instr::Add {
+                    dst: v4,
+                    lhs: v0,
+                    rhs: v3,
+                },
+            ],
+            term: Terminator::Return(Some(v4)),
+        };
+
+        let func = Func {
+            id: Id(0),
+            args: vec![v0, v1, v2],
+            blocks: vec![block0],
+        };
+
+        println!("{}", func);
+    }
+}
