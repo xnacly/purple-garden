@@ -1,84 +1,14 @@
-//! The purple garden immediate representation, it aims to have/be:
-//!
-//! - Explicit data flow
-//!
-//! - No hidden control flow
-//!
-//! - No implicit state mutation
-//!
-//! - Stable semantics under rewriting
-//!
-//! - Cheap to analyze
-
 use std::fmt::Display;
 
-/// Compile time Value representation
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
-pub enum Const<'c> {
-    False,
-    True,
-    Int(i64),
-    Double(u64),
-    Str(&'c str),
+use crate::ir::{Func, Instr, Terminator, TypeId};
+
+impl Display for TypeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{:?}", self.id.0, self.ty)
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Id(u32);
-
-pub enum Instr<'instr> {
-    Add {
-        dst: Id,
-        lhs: Id,
-        rhs: Id,
-    },
-    Sub {
-        dst: Id,
-        lhs: Id,
-        rhs: Id,
-    },
-    Mul {
-        dst: Id,
-        lhs: Id,
-        rhs: Id,
-    },
-    Div {
-        dst: Id,
-        lhs: Id,
-        rhs: Id,
-    },
-
-    LoadConst {
-        dst: Id,
-        value: Const<'instr>,
-    },
-
-    Call {
-        dst: Option<Id>,
-        func: Id,
-        args: Vec<Id>,
-    },
-}
-
-pub enum Terminator {
-    Return(Option<Id>),
-    Jump { id: Id, params: Vec<Id> },
-    Branch { cond: Id, yes: Id, no: Id },
-}
-
-pub struct Block<'block> {
-    id: Id,
-    instructions: Vec<Instr<'block>>,
-    params: Vec<Id>,
-    term: Terminator,
-}
-
-pub struct Func<'func> {
-    id: Id,
-    entry: Id,
-    blocks: Vec<Block<'func>>,
-}
-
-impl Display for Func<'_> {
+impl Display for Func {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let entry_block = self
             .blocks
@@ -89,12 +19,12 @@ impl Display for Func<'_> {
         write!(f, "fn @f{}(", self.id.0)?;
         for (i, arg) in entry_block.params.iter().enumerate() {
             if i + 1 == entry_block.params.len() {
-                write!(f, "%v{}", arg.0)?;
+                write!(f, "%v{}", arg)?;
             } else {
-                write!(f, "%v{}, ", arg.0)?;
+                write!(f, "%v{}, ", arg)?;
             }
         }
-        writeln!(f, ") {{")?;
+        writeln!(f, ") -> {:?} {{", self.ret)?;
 
         for block in self.blocks.iter() {
             if block.params.is_empty() || block.id == entry_block.id {
@@ -107,27 +37,28 @@ impl Display for Func<'_> {
                     block
                         .params
                         .iter()
-                        .map(|p| format!("%v{}", p.0))
+                        .map(|p| format!("%v{}", p))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )?;
             }
 
             for ins in &block.instructions {
+                write!(f, "\t")?;
                 match ins {
                     Instr::Add { dst, lhs, rhs } => {
-                        writeln!(f, "%v{} = add %v{}, %v{}", dst.0, lhs.0, rhs.0)?
+                        writeln!(f, "%v{} = add %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
                     Instr::Sub { dst, lhs, rhs } => {
-                        writeln!(f, "%v{} = sub %v{}, %v{}", dst.0, lhs.0, rhs.0)?
+                        writeln!(f, "%v{} = sub %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
                     Instr::Mul { dst, lhs, rhs } => {
-                        writeln!(f, "%v{} = mul %v{}, %v{}", dst.0, lhs.0, rhs.0)?
+                        writeln!(f, "%v{} = mul %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
                     Instr::Div { dst, lhs, rhs } => {
-                        writeln!(f, "%v{} = div %v{}, %v{}", dst.0, lhs.0, rhs.0)?
+                        writeln!(f, "%v{} = div %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
-                    Instr::LoadConst { dst, value } => writeln!(f, "%v{} = {:?}", dst.0, value)?,
+                    Instr::LoadConst { dst, value } => writeln!(f, "%v{} = {:?}", dst, value)?,
                     Instr::Call { dst, func, args } => {
                         if let Some(dst) = dst {
                             write!(f, "%v{} = ", dst.0)?;
@@ -145,6 +76,7 @@ impl Display for Func<'_> {
                 }
             }
 
+            write!(f, "\t")?;
             match &block.term {
                 Terminator::Return(Some(id)) => writeln!(f, "ret %v{}", id.0)?,
                 Terminator::Return(None) => writeln!(f, "ret")?,
@@ -180,11 +112,26 @@ mod ir {
     fn print_ir_example() {
         use crate::ir::*;
 
-        let v0 = Id(0);
-        let v1 = Id(1);
-        let v2 = Id(2);
-        let v3 = Id(3);
-        let v4 = Id(4);
+        let v0 = TypeId {
+            ty: Type::Int,
+            id: Id(0),
+        };
+        let v1 = TypeId {
+            ty: Type::Int,
+            id: Id(1),
+        };
+        let v2 = TypeId {
+            ty: Type::Int,
+            id: Id(2),
+        };
+        let v3 = TypeId {
+            ty: Type::Int,
+            id: Id(3),
+        };
+        let v4 = TypeId {
+            ty: Type::Int,
+            id: Id(4),
+        };
 
         let b0 = Id(0);
 
@@ -194,20 +141,21 @@ mod ir {
             instructions: vec![
                 Instr::Add {
                     dst: v3,
-                    lhs: v1,
-                    rhs: v2,
+                    lhs: v1.id,
+                    rhs: v2.id,
                 },
                 Instr::Add {
                     dst: v4,
-                    lhs: v0,
-                    rhs: v3,
+                    lhs: v0.id,
+                    rhs: v3.id,
                 },
             ],
-            term: Terminator::Return(Some(v4)),
+            term: Terminator::Return(Some(v4.id)),
         };
 
         let func = Func {
             id: Id(0),
+            ret: Some(Type::Int),
             entry: block0.id,
             blocks: vec![block0],
         };

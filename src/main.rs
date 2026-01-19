@@ -1,7 +1,7 @@
 #![allow(dead_code, unused_variables)]
 #![cfg_attr(feature = "nightly", feature(likely_unlikely))]
 
-use std::fs;
+use std::{fs, process::exit};
 
 macro_rules! trace {
     ($fmt:literal, $($value:expr),*) => {
@@ -16,8 +16,8 @@ mod ast;
 mod cc;
 /// pretty print errors
 mod err;
-/// simple mark and sweep garbage collector, will be replaced by a manchester garbage collector in
-/// the future
+/// simple mark and sweep garbage collector, will be replaced by a manchester style garbage
+/// collector in the future
 mod gc;
 mod ir;
 /// baseline just in time compilation for x86
@@ -115,9 +115,19 @@ fn main() {
         );
     }
 
-    // TODO: add ir creation pass here
+    let mut lower = ir::lower::Lower::new();
+    let ir = match lower.ir_from(&ast) {
+        Ok(ir) => ir,
+        Err(e) => {
+            e.render();
+            std::process::exit(1);
+        }
+    };
+
     if args.ir {
-        println!("no ir implementation yet");
+        for func in ir.iter() {
+            println!("{func}");
+        }
     }
 
     let mut cc = cc::Cc::new();
