@@ -1,5 +1,6 @@
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type<'t> {
+    Eof,
     DelimitLeft,
     DelimitRight,
     Plus,

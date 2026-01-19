@@ -63,9 +63,27 @@ impl<'l> Lexer<'l> {
         self.pos >= self.input.len()
     }
 
+    fn as_keyword(&self, inner: &'l str) -> Option<Token<'l>> {
+        let as_type = Some(match inner {
+            "true" => Type::True,
+            "false" => Type::False,
+            "let" => Type::Let,
+            "fn" => Type::Fn,
+            "match" => Type::Match,
+            "for" => Type::For,
+            _ => return None,
+        })?;
+
+        Some(self.make_tok(as_type))
+    }
+
     pub fn next(&mut self) -> Result<Token<'l>, PgError> {
         while matches!(self.cur(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
             self.advance()
+        }
+
+        if self.at_end() {
+            return Ok(self.make_tok(Type::Eof));
         }
 
         let t = match self
@@ -91,24 +109,61 @@ impl<'l> Lexer<'l> {
             b']' => self.make_tok(Type::BraketRight),
             b'{' => self.make_tok(Type::CurlyLeft),
             b'}' => self.make_tok(Type::CurlyRight),
-            b'"' => todo!("strings"),
-            c => {
-                if c.is_ascii_alphabetic() {
-                    let start = self.pos;
-                    self.advance();
-                    while self.cur().is_some_and(|b| b.is_ascii_alphabetic()) {
-                        self.advance();
-                    }
+            b'"' => {
+                self.advance();
+                let start = self.pos;
 
-                    self.make_tok(Type::String(
-                        str::from_utf8(&self.input[start..self.pos])
-                            .map_err(|_| self.make_err("Invalid ut8 input", self.col))?,
-                    ))
-                } else if c.is_ascii_digit() {
-                    todo!("numbers");
-                } else {
-                    return Err(self.make_err(format!("Unknown charcter `{}`", c), self.col));
+                while !self.at_end() && !matches!(self.cur(), Some(b'"')) {
+                    // TODO: deal with escapes here
+                    self.advance();
                 }
+
+                if self.cur() != Some(b'"') {
+                    return Err(self.make_err("Unterminated string", self.col));
+                }
+
+                self.make_tok(Type::String(
+                    str::from_utf8(&self.input[start..self.pos])
+                        .map_err(|_| self.make_err("Invalid ut8 input", self.col))?,
+                ))
+            }
+            c if c.is_ascii_alphabetic() => {
+                let start = self.pos;
+                self.advance();
+                while self
+                    .cur()
+                    .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+                {
+                    self.advance();
+                }
+
+                let inner = str::from_utf8(&self.input[start..self.pos])
+                    .map_err(|_| self.make_err("Invalid ut8 input", self.col))?;
+
+                return Ok(match self.as_keyword(inner) {
+                    Some(as_keyword) => as_keyword,
+                    None => self.make_tok(Type::Ident(inner)),
+                });
+            }
+            c if c.is_ascii_digit() => {
+                let start = self.pos;
+                let mut is_double = false;
+                while self.cur().is_some_and(|b| b.is_ascii_digit() || b == b'.') {
+                    is_double = is_double || self.cur() == Some(b'.');
+                    self.advance();
+                }
+
+                let inner = str::from_utf8(&self.input[start..self.pos])
+                    .map_err(|_| self.make_err("Invalid ut8 input", self.col))?;
+
+                return Ok(if is_double {
+                    self.make_tok(Type::Double(inner))
+                } else {
+                    self.make_tok(Type::Integer(inner))
+                });
+            }
+            c => {
+                return Err(self.make_err(format!("Unknown character `{}`", c as char), self.col));
             }
         };
 
@@ -119,9 +174,197 @@ impl<'l> Lexer<'l> {
 
     pub fn all(&mut self) -> Result<Vec<Token<'l>>, PgError> {
         let mut raindrain = Vec::with_capacity(1024);
-        while !self.at_end() {
-            raindrain.push(self.next()?);
+        loop {
+            let t = self.next()?;
+            if t.t == Type::Eof {
+                break;
+            } else {
+                raindrain.push(t);
+            }
         }
         Ok(raindrain)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lex(input: &str) -> Vec<Type<'_>> {
+        let mut l = Lexer::new(input.as_bytes());
+        l.all()
+            .expect("lexer error")
+            .into_iter()
+            .map(|t| t.t)
+            .collect()
+    }
+
+    #[test]
+    fn single_char_tokens() {
+        let toks = lex("()+-*/=<>![]{}:");
+        assert_eq!(
+            toks,
+            vec![
+                Type::DelimitLeft,
+                Type::DelimitRight,
+                Type::Plus,
+                Type::Minus,
+                Type::Asteriks,
+                Type::Slash,
+                Type::Equal,
+                Type::LessThan,
+                Type::GreaterThan,
+                Type::Exlaim,
+                Type::BraketLeft,
+                Type::BraketRight,
+                Type::CurlyLeft,
+                Type::CurlyRight,
+                Type::Colon,
+            ]
+        );
+    }
+
+    #[test]
+    fn double_colon() {
+        let toks = lex(":: :");
+        assert_eq!(toks, vec![Type::DoubleColon, Type::Colon,]);
+    }
+
+    #[test]
+    fn identifiers() {
+        let toks = lex("foo bar baz");
+        assert_eq!(
+            toks,
+            vec![Type::Ident("foo"), Type::Ident("bar"), Type::Ident("baz"),]
+        );
+    }
+
+    #[test]
+    fn integers() {
+        let toks = lex("0 123 42");
+        assert_eq!(
+            toks,
+            vec![
+                Type::Integer("0"),
+                Type::Integer("123"),
+                Type::Integer("42"),
+            ]
+        );
+    }
+
+    #[test]
+    fn doubles() {
+        let toks = lex("1.0 3.14");
+        assert_eq!(toks, vec![Type::Double("1.0"), Type::Double("3.14"),]);
+    }
+
+    #[test]
+    fn mixed_expression() {
+        let toks = lex("(sum 1 2)");
+        assert_eq!(
+            toks,
+            vec![
+                Type::DelimitLeft,
+                Type::Ident("sum"),
+                Type::Integer("1"),
+                Type::Integer("2"),
+                Type::DelimitRight,
+            ]
+        );
+    }
+
+    #[test]
+    fn whitespace_and_newlines() {
+        let toks = lex("(\n  foo\t42 \r)");
+        assert_eq!(
+            toks,
+            vec![
+                Type::DelimitLeft,
+                Type::Ident("foo"),
+                Type::Integer("42"),
+                Type::DelimitRight,
+            ]
+        );
+    }
+
+    #[test]
+    fn string_literal() {
+        let toks = lex("\"hello\"");
+        assert_eq!(toks, vec![Type::String("hello")]);
+    }
+
+    #[test]
+    fn unknown_character_errors() {
+        let mut l = Lexer::new(b"$");
+        let err = l.next().unwrap_err();
+    }
+
+    #[test]
+    fn keywords() {
+        assert_eq!(
+            lex("
+    true
+    false
+    let
+    fn
+    match
+    for
+    "),
+            vec![
+                Type::True,
+                Type::False,
+                Type::Let,
+                Type::Fn,
+                Type::Match,
+                Type::For,
+            ]
+        )
+    }
+
+    #[test]
+    fn unterminated_string() {
+        let mut l = Lexer::new(b"\"hello");
+        let err = l.next().unwrap_err();
+    }
+
+    #[test]
+    fn leading_dot_numbers() {
+        let toks = lex("0.5 1.");
+        assert_eq!(toks, vec![Type::Double("0.5"), Type::Double("1.")]);
+    }
+
+    #[test]
+    fn multiple_dots_in_number() {
+        let toks = lex("1.2.3");
+        assert_eq!(toks, vec![Type::Double("1.2.3")]);
+    }
+
+    #[test]
+    fn identifier_keyword_adjacency() {
+        let toks = lex("truex fnx");
+        assert_eq!(toks, vec![Type::Ident("truex"), Type::Ident("fnx"),]);
+    }
+
+    #[test]
+    fn repeated_eof_calls() {
+        let mut l = Lexer::new(b"");
+        let t1 = l.next().unwrap();
+        let t2 = l.next().unwrap();
+        assert_eq!(t1.t, Type::Eof);
+        assert_eq!(t2.t, Type::Eof);
+    }
+
+    #[test]
+    fn weird_colons() {
+        let toks = lex("::: :: :");
+        assert_eq!(
+            toks,
+            vec![
+                Type::DoubleColon,
+                Type::Colon,
+                Type::DoubleColon,
+                Type::Colon,
+            ]
+        );
     }
 }
