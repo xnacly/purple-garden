@@ -65,15 +65,21 @@ pub struct Block {
 
 pub struct Func {
     id: Id,
-    args: Vec<Id>,
+    entry: Id,
     blocks: Vec<Block>,
 }
 
 impl Display for Func {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let entry_block = self
+            .blocks
+            .iter()
+            .find(|b| b.id == self.entry)
+            .expect("Func.entry does not reference a valid block");
+
         write!(f, "fn @f{}(", self.id.0)?;
-        for (i, arg) in self.args.iter().enumerate() {
-            if i + 1 == self.args.len() {
+        for (i, arg) in entry_block.params.iter().enumerate() {
+            if i + 1 == entry_block.params.len() {
                 write!(f, "%v{}", arg.0)?;
             } else {
                 write!(f, "%v{}, ", arg.0)?;
@@ -82,7 +88,7 @@ impl Display for Func {
         writeln!(f, ") {{")?;
 
         for block in self.blocks.iter() {
-            if block.params.is_empty() {
+            if block.params.is_empty() || block.id == entry_block.id {
                 writeln!(f, "b{}:", block.id.0)?;
             } else {
                 writeln!(
@@ -97,7 +103,8 @@ impl Display for Func {
                         .join(", ")
                 )?;
             }
-            for ins in block.instructions.iter() {
+
+            for ins in &block.instructions {
                 match ins {
                     Instr::Add { dst, lhs, rhs } => {
                         writeln!(f, "%v{} = add %v{}, %v{}", dst.0, lhs.0, rhs.0)?
@@ -116,9 +123,7 @@ impl Display for Func {
                         if let Some(dst) = dst {
                             write!(f, "%v{} = ", dst.0)?;
                         }
-
                         write!(f, "@f{}(", func.0)?;
-
                         for (i, arg) in args.iter().enumerate() {
                             if i + 1 == args.len() {
                                 write!(f, "%v{}", arg.0)?;
@@ -132,20 +137,15 @@ impl Display for Func {
             }
 
             match &block.term {
-                Terminator::Return(id) => {
-                    if let Some(id) = id {
-                        writeln!(f, "ret %v{}", id.0)?
-                    } else {
-                        writeln!(f, "ret")?
-                    }
-                }
+                Terminator::Return(Some(id)) => writeln!(f, "ret %v{}", id.0)?,
+                Terminator::Return(None) => writeln!(f, "ret")?,
                 Terminator::Jump { id, params } => {
                     if params.is_empty() {
-                        writeln!(f, "jmp %b{}", id.0)?
+                        writeln!(f, "jmp b{}", id.0)?
                     } else {
                         writeln!(
                             f,
-                            "jmp %b{}({})",
+                            "jmp b{}({})",
                             id.0,
                             params
                                 .iter()
@@ -199,7 +199,7 @@ mod ir {
 
         let func = Func {
             id: Id(0),
-            args: vec![v0, v1, v2],
+            entry: block0.id,
             blocks: vec![block0],
         };
 
