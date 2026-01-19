@@ -14,7 +14,7 @@ mod ir;
 mod bc;
 
 pub fn ir(ir: ()) {
-    ()
+    todo!("opt::ir")
 }
 
 const WINDOW_SIZE: usize = 3;

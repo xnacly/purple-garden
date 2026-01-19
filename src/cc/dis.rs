@@ -48,7 +48,7 @@ impl Cc<'_> {
                             .unwrap()
                             .name
                     ),
-                    Op::Sys { .. } => format!("sys <syscall_name_here>",),
+                    Op::Sys { .. } => "sys <syscall_name_here>".to_string(),
                     Op::Ret => "ret".into(),
                     Op::Nop => "nop".into(),
                 }

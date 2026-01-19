@@ -26,6 +26,7 @@ pub struct Vm<'vm> {
 }
 
 /// trap in the vm; return Err(<anomaly>) if expr == true
+#[allow(unused)]
 #[cfg(feature = "nightly")]
 macro_rules! trap_if {
     ($condition:expr, $anomaly:expr) => {
@@ -35,7 +36,8 @@ macro_rules! trap_if {
     };
 }
 
-// stable fallback
+/// non-nightly fallback for trap_if
+#[allow(unused)]
 #[cfg(not(feature = "nightly"))]
 macro_rules! trap_if {
     ($condition:expr, $anomaly:expr) => {
@@ -68,8 +70,7 @@ impl<'vm> Vm<'vm> {
         while self.pc < self.bytecode.len() {
             let instruction = unsafe_get!(self.bytecode, self.pc);
 
-            #[cfg(feature = "trace")]
-            println!("[vm][{:04}] {:?}", self.pc, instruction);
+            trace!("[vm][{:04}] {:?}", self.pc, instruction);
 
             match instruction {
                 Op::LoadImm { dst, value } => {

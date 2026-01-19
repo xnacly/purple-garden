@@ -4,7 +4,10 @@
 use std::fs;
 
 macro_rules! trace {
-    ($fmt:expr) => {};
+    ($fmt:literal, $($value:expr),*) => {
+        #[cfg(feature = "trace")]
+        println!($fmt, $($value),*);
+    };
 }
 
 use crate::{err::PgError, lex::Lexer, parser::Parser, vm::Value};

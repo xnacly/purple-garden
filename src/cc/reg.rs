@@ -19,8 +19,7 @@ impl RegisterAllocator {
     }
 
     pub fn alloc(&mut self) -> u8 {
-        #[cfg(feature = "trace")]
-        println!("RegisterAllocator::alloc(r{:?})", self.free.last().unwrap());
+        trace!("RegisterAllocator::alloc(r{:?})", self.free.last().unwrap());
         self.free.pop().unwrap_or_else(|| {
             panic!("RegisterAllocator: out of registers, do open a bug report please")
         })
@@ -44,8 +43,7 @@ impl RegisterAllocator {
             last_reg = self.free.pop().unwrap();
         }
 
-        #[cfg(feature = "trace")]
-        println!(
+        trace!(
             "RegisterAllocator::alloc(r{}..r{})",
             last_reg,
             last_reg + 1 - n
@@ -55,11 +53,10 @@ impl RegisterAllocator {
     }
 
     pub fn free(&mut self, r: u8) {
-        #[cfg(feature = "trace")]
-        println!("RegisterAllocator::free(r{r})");
+        trace!("RegisterAllocator::free(r{})", r);
         self.free.push(r);
         assert!(
-            !(self.free.len() > vm::REGISTER_COUNT),
+            self.free.len() <= vm::REGISTER_COUNT,
             "Freed one too many registers"
         );
     }

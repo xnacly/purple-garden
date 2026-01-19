@@ -1,4 +1,4 @@
-use std::{hash::Hash, num};
+use std::num;
 
 mod ctx;
 mod dis;
@@ -11,20 +11,11 @@ use crate::{
         reg::RegisterAllocator,
     },
     err::PgError,
+    ir::Const,
     lex::Type,
     op::Op,
     vm::{CallFrame, Value, Vm},
 };
-
-/// Compile time Value representation
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
-pub enum Const<'c> {
-    False,
-    True,
-    Int(i64),
-    Double(u64),
-    Str(&'c str),
-}
 
 #[derive(Debug, PartialEq, Eq)]
 struct Reg {
@@ -94,8 +85,7 @@ impl<'cc> Cc<'cc> {
     }
 
     fn cc(&mut self, ast: &Node<'cc>) -> Result<Option<Reg>, PgError> {
-        #[cfg(feature = "trace")]
-        println!("Cc::cc({:?})", &ast.token.t);
+        trace!("Cc::cc({:?})", &ast.token.t);
 
         Ok(match &ast.inner {
             InnerNode::Atom => {
@@ -174,7 +164,7 @@ impl<'cc> Cc<'cc> {
                 Some(dst.into())
             }
             InnerNode::Let { rhs } => {
-                let src = self.cc(&rhs)?;
+                let src = self.cc(rhs)?;
                 let Type::Ident(name) = ast.token.t else {
                     unreachable!("InnerNode::Let");
                 };
@@ -216,7 +206,7 @@ impl<'cc> Cc<'cc> {
 
                 self.register.mark();
 
-                for (i, arg) in args.into_iter().enumerate() {
+                for (i, arg) in args.iter().enumerate() {
                     let Type::Ident(name) = arg.token.t else {
                         unreachable!("Function argument names must be identifiers");
                     };
@@ -235,10 +225,10 @@ impl<'cc> Cc<'cc> {
 
                 let mut result_register = None;
                 for (i, field) in body.iter().enumerate() {
-                    if let Some(r) = self.cc(field)? {
-                        if i == body.len() - 1 {
-                            result_register = Some(r);
-                        }
+                    if let Some(r) = self.cc(field)?
+                        && i == body.len() - 1
+                    {
+                        result_register = Some(r);
                     }
                 }
 
@@ -290,7 +280,7 @@ impl<'cc> Cc<'cc> {
                 }
 
                 self.register.mark();
-                for (i, arg) in args.into_iter().enumerate() {
+                for (i, arg) in args.iter().enumerate() {
                     let r = self.cc(arg)?;
                     if let Some(r) = r {
                         self.buf.push(Op::Mov {

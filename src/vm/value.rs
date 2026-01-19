@@ -1,4 +1,4 @@
-use crate::cc::Const;
+use crate::ir::Const;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Value<'v> {
@@ -49,18 +49,5 @@ impl From<f64> for Value<'_> {
 impl<'s> From<&'s str> for Value<'s> {
     fn from(value: &'s str) -> Self {
         Value::Str(value)
-    }
-}
-
-impl<'v, T> From<Option<T>> for Value<'v>
-where
-    T: Into<Value<'v>>,
-{
-    fn from(mut value: Option<T>) -> Self {
-        if let Some(inner) = value.take() {
-            value.into()
-        } else {
-            Value::UnDef
-        }
     }
 }

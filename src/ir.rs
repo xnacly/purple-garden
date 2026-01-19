@@ -12,10 +12,20 @@
 
 use std::fmt::Display;
 
+/// Compile time Value representation
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+pub enum Const<'c> {
+    False,
+    True,
+    Int(i64),
+    Double(u64),
+    Str(&'c str),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Id(u32);
 
-pub enum Instr {
+pub enum Instr<'instr> {
     Add {
         dst: Id,
         lhs: Id,
@@ -39,8 +49,7 @@ pub enum Instr {
 
     LoadConst {
         dst: Id,
-        // TODO: crate::cc::Const needs to be ripped out from cc into ir
-        value: crate::cc::Const<'static>,
+        value: Const<'instr>,
     },
 
     Call {
@@ -56,20 +65,20 @@ pub enum Terminator {
     Branch { cond: Id, yes: Id, no: Id },
 }
 
-pub struct Block {
+pub struct Block<'block> {
     id: Id,
-    instructions: Vec<Instr>,
+    instructions: Vec<Instr<'block>>,
     params: Vec<Id>,
     term: Terminator,
 }
 
-pub struct Func {
+pub struct Func<'func> {
     id: Id,
     entry: Id,
-    blocks: Vec<Block>,
+    blocks: Vec<Block<'func>>,
 }
 
-impl Display for Func {
+impl Display for Func<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let entry_block = self
             .blocks

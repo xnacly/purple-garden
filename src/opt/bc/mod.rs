@@ -1,6 +1,7 @@
 mod const_binary;
 mod self_move;
 
+#[allow(unused)]
 pub use const_binary::const_binary;
 pub use self_move::self_move;
 
