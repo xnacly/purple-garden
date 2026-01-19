@@ -27,7 +27,10 @@ const WINDOW_SIZE: usize = 3;
 pub fn bc(bc: &mut Vec<Op>) {
     for i in 0..=bc.len().saturating_sub(WINDOW_SIZE) {
         let window = &mut bc[i..i + WINDOW_SIZE];
-        bc::const_binary(window);
+        // Disabled, due to https://news.ycombinator.com/item?id=46624396, specifically:
+        // "[...] [This] breaks using temporary registers after the optimisation."
+        //
+        // bc::const_binary(window);
         bc::self_move(window);
     }
 
