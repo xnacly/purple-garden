@@ -52,15 +52,14 @@ pub enum Instr {
 
 pub enum Terminator {
     Return(Option<Id>),
-    // TODO: think about passing block params
-    Jump(Id),
+    Jump { id: Id, params: Vec<Id> },
     Branch { cond: Id, yes: Id, no: Id },
 }
 
 pub struct Block {
-    // TODO: think about passing block params
     id: Id,
     instructions: Vec<Instr>,
+    params: Vec<Id>,
     term: Terminator,
 }
 
@@ -83,7 +82,21 @@ impl Display for Func {
         writeln!(f, ") {{")?;
 
         for block in self.blocks.iter() {
-            writeln!(f, "b{}:", block.id.0)?;
+            if block.params.is_empty() {
+                writeln!(f, "b{}:", block.id.0)?;
+            } else {
+                writeln!(
+                    f,
+                    "b{}({}):",
+                    block.id.0,
+                    block
+                        .params
+                        .iter()
+                        .map(|p| format!("%v{}", p.0))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )?;
+            }
             for ins in block.instructions.iter() {
                 match ins {
                     Instr::Add { dst, lhs, rhs } => {
@@ -126,7 +139,22 @@ impl Display for Func {
                         writeln!(f, "ret")?
                     }
                 }
-                Terminator::Jump(id) => writeln!(f, "jmp %b{}", id.0)?,
+                Terminator::Jump { id, params } => {
+                    if params.is_empty() {
+                        writeln!(f, "jmp %b{}", id.0)?
+                    } else {
+                        writeln!(
+                            f,
+                            "jmp %b{}({})",
+                            id.0,
+                            params
+                                .iter()
+                                .map(|p| format!("%v{}", p.0))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )?
+                    }
+                }
                 Terminator::Branch { cond, yes, no } => {
                     writeln!(f, "br %v{}, b{}, b{}", cond.0, yes.0, no.0)?
                 }
@@ -153,6 +181,7 @@ mod ir {
 
         let block0 = Block {
             id: b0,
+            params: vec![v0, v1, v2],
             instructions: vec![
                 Instr::Add {
                     dst: v3,
