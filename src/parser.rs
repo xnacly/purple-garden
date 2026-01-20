@@ -34,6 +34,19 @@ impl<'p> Parser<'p> {
         }
     }
 
+    fn expect_ident(&mut self) -> Result<Token<'p>, PgError> {
+        if let Type::Ident(_) = self.cur.t {
+            let matched = self.cur.clone();
+            self.next()?;
+            Ok(matched)
+        } else {
+            Err(PgError::with_msg(
+                format!("Expected an identifier, got {:?}", self.cur.t),
+                &self.cur,
+            ))
+        }
+    }
+
     fn next(&mut self) -> Result<(), PgError> {
         self.cur = self.lex.next()?;
         Ok(())
@@ -67,20 +80,16 @@ impl<'p> Parser<'p> {
         }
     }
 
+    /// `let <name> = <rhs>`
     fn parse_let(&mut self) -> Result<Node<'p>, PgError> {
         self.expect(Type::Let)?;
-        let cur = self.cur.clone();
-        let Type::Ident(name) = cur.t else {
-            return Err(PgError::with_msg(
-                "Wanted an ident for the lhs of a let stmt",
-                &self.cur,
-            ));
-        };
-
-        self.next()?;
+        let name = self.expect_ident()?;
         self.expect(Type::Equal)?;
-        let rhs = Box::new(self.parse_prefix()?);
-        Ok(Node::Let { name: cur, rhs })
+
+        Ok(Node::Let {
+            name,
+            rhs: Box::new(self.parse_prefix()?),
+        })
     }
 
     fn parse_fn(&mut self) -> Result<Node<'p>, PgError> {
