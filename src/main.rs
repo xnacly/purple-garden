@@ -1,7 +1,7 @@
 #![allow(dead_code, unused_variables)]
 #![cfg_attr(feature = "nightly", feature(likely_unlikely))]
 
-use std::{fs, process::exit};
+use std::fs;
 
 macro_rules! trace {
     ($fmt:literal, $($value:expr),*) => {
@@ -152,7 +152,7 @@ fn main() {
 
     if args.registers {
         for i in 0..vm::REGISTER_COUNT {
-            let val = &vm.registers[i];
+            let val = &vm.r[i];
             if let Value::UnDef = val {
                 continue;
             }

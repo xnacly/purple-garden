@@ -8,6 +8,7 @@ pub enum Type<'t> {
     Asteriks,
     Slash,
     Equal,
+    DoubleEqual,
     LessThan,
     GreaterThan,
     Exlaim,

@@ -100,6 +100,10 @@ impl<'l> Lexer<'l> {
             b'-' => self.make_tok(Type::Minus),
             b'*' => self.make_tok(Type::Asteriks),
             b'/' => self.make_tok(Type::Slash),
+            b'=' if matches!(self.peek(), Some(b'=')) => {
+                self.advance();
+                self.make_tok(Type::DoubleEqual)
+            }
             b'=' => self.make_tok(Type::Equal),
             b'<' => self.make_tok(Type::LessThan),
             b'>' => self.make_tok(Type::GreaterThan),
@@ -229,9 +233,9 @@ mod tests {
     }
 
     #[test]
-    fn double_colon() {
-        let toks = lex(":: :");
-        assert_eq!(toks, vec![Type::DoubleColon, Type::Colon,]);
+    fn double_char_tokens() {
+        let toks = lex(":: ==");
+        assert_eq!(toks, vec![Type::DoubleColon, Type::DoubleEqual]);
     }
 
     #[test]

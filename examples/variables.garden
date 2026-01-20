@@ -1,5 +1,5 @@
 # vim: filetype=nix
-var str = "hi"
-var number = 12
-var bool = true
+let str = "hi"
+let number = 12
+let bool = true
 std::println(str number bool)

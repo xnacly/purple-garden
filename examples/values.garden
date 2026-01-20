@@ -25,20 +25,9 @@ std::println(
   # different type lists
   [1 "hello" "world" true false]
   # indexing into lists
-  [161]::0
+  [161][0]
 )
 
-var arr = [161 [["hello"] "world"] 787]
-var target = arr::1
-std::println(target::0::0 target::1)
-
-# objects
-
-# quoted via 'user-name to allow symbols in identifiers
-# var obj = { 'user-name "dummy" }
-# println(obj) # { user-name: "dummy" }
-# obj::'user-name = "xnacly"
-# println(
-#   obj # { user-name: "xnacly" }
-#   obj::'user-name # "xnacly"
-# )
+let arr = [161 [["hello"] "world"] 787]
+let target = arr[1]
+std::println(target[0][0] target[1])

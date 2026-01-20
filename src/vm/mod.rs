@@ -16,7 +16,7 @@ pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>, &[Value<'vm>]) -> Option<Value<'vm>>;
 
 #[derive(Debug)]
 pub struct Vm<'vm> {
-    pub registers: [Value<'vm>; REGISTER_COUNT],
+    pub r: [Value<'vm>; REGISTER_COUNT],
     pub pc: usize,
 
     pub frames: Vec<CallFrame>,
@@ -58,7 +58,7 @@ macro_rules! unsafe_get {
 impl<'vm> Vm<'vm> {
     pub fn new() -> Self {
         Self {
-            registers: [const { Value::UnDef }; REGISTER_COUNT],
+            r: [const { Value::UnDef }; REGISTER_COUNT],
             frames: Vec::with_capacity(64),
             pc: 0,
             bytecode: vec![],
@@ -74,15 +74,14 @@ impl<'vm> Vm<'vm> {
 
             match instruction {
                 Op::LoadImm { dst, value } => {
-                    *unsafe_get_mut!(self.registers, *dst) = Value::Int(*value as i64)
+                    *unsafe_get_mut!(self.r, *dst) = Value::Int(*value as i64)
                 }
                 Op::LoadGlobal { dst, idx } => {
-                    *unsafe_get_mut!(self.registers, *dst) =
-                        unsafe_get!(self.globals, *idx).clone();
+                    *unsafe_get_mut!(self.r, *dst) = unsafe_get!(self.globals, *idx).clone();
                 }
                 Op::Add { dst, lhs, rhs } => {
-                    let lhs = unsafe_get!(self.registers, *lhs);
-                    let rhs = unsafe_get!(self.registers, *rhs);
+                    let lhs = unsafe_get!(self.r, *lhs);
+                    let rhs = unsafe_get!(self.r, *rhs);
 
                     let result = match (lhs, rhs) {
                         (Value::Int(l), Value::Int(r)) => Value::Int(l + r),
@@ -92,11 +91,11 @@ impl<'vm> Vm<'vm> {
                         _ => return Err(Anomaly::TypeIncompatible { pc: self.pc }),
                     };
 
-                    *unsafe_get_mut!(self.registers, *dst) = result;
+                    *unsafe_get_mut!(self.r, *dst) = result;
                 }
                 Op::Sub { dst, lhs, rhs } => {
-                    let lhs = unsafe_get!(self.registers, *lhs);
-                    let rhs = unsafe_get!(self.registers, *rhs);
+                    let lhs = unsafe_get!(self.r, *lhs);
+                    let rhs = unsafe_get!(self.r, *rhs);
 
                     let result = match (lhs, rhs) {
                         (Value::Int(l), Value::Int(r)) => Value::Int(l - r),
@@ -106,11 +105,11 @@ impl<'vm> Vm<'vm> {
                         _ => return Err(Anomaly::TypeIncompatible { pc: self.pc }),
                     };
 
-                    *unsafe_get_mut!(self.registers, *dst) = result;
+                    *unsafe_get_mut!(self.r, *dst) = result;
                 }
                 Op::Mul { dst, lhs, rhs } => {
-                    let lhs = unsafe_get!(self.registers, *lhs);
-                    let rhs = unsafe_get!(self.registers, *rhs);
+                    let lhs = unsafe_get!(self.r, *lhs);
+                    let rhs = unsafe_get!(self.r, *rhs);
 
                     let result = match (lhs, rhs) {
                         (Value::Int(l), Value::Int(r)) => Value::Int(l * r),
@@ -120,11 +119,11 @@ impl<'vm> Vm<'vm> {
                         _ => return Err(Anomaly::TypeIncompatible { pc: self.pc }),
                     };
 
-                    *unsafe_get_mut!(self.registers, *dst) = result;
+                    *unsafe_get_mut!(self.r, *dst) = result;
                 }
                 Op::Div { dst, lhs, rhs } => {
-                    let lhs = unsafe_get!(self.registers, *lhs);
-                    let rhs = unsafe_get!(self.registers, *rhs);
+                    let lhs = unsafe_get!(self.r, *lhs);
+                    let rhs = unsafe_get!(self.r, *rhs);
 
                     let result = match (lhs, rhs) {
                         (Value::Int(_), Value::Int(0)) | (Value::Double(_), Value::Int(0)) => {
@@ -137,13 +136,13 @@ impl<'vm> Vm<'vm> {
                         (_, _) => return Err(Anomaly::TypeIncompatible { pc: self.pc }),
                     };
 
-                    *unsafe_get_mut!(self.registers, *dst) = result;
+                    *unsafe_get_mut!(self.r, *dst) = result;
                 }
                 Op::Eq { dst, lhs, rhs } => {
-                    let lhs = unsafe_get!(self.registers, *lhs);
-                    let rhs = unsafe_get!(self.registers, *rhs);
+                    let lhs = unsafe_get!(self.r, *lhs);
+                    let rhs = unsafe_get!(self.r, *rhs);
 
-                    *unsafe_get_mut!(self.registers, *dst) = match (lhs, rhs) {
+                    *unsafe_get_mut!(self.r, *dst) = match (lhs, rhs) {
                         (Value::True, Value::True) | (Value::False, Value::False) => true,
                         (Value::Double(lhs), Value::Double(rhs)) => (lhs - rhs) < f64::EPSILON,
                         (Value::Int(lhs), Value::Int(rhs)) => lhs == rhs,
@@ -154,8 +153,7 @@ impl<'vm> Vm<'vm> {
                     .into()
                 }
                 Op::Not { dst, src } => {
-                    *unsafe_get_mut!(self.registers, *dst) = match unsafe_get!(self.registers, *src)
-                    {
+                    *unsafe_get_mut!(self.r, *dst) = match unsafe_get!(self.r, *src) {
                         Value::True => Value::False,
                         Value::False => Value::True,
                         Value::Int(inner) => Value::Int(inner * -1),
@@ -166,15 +164,14 @@ impl<'vm> Vm<'vm> {
                     }
                 }
                 Op::Mov { dst, src } => {
-                    *unsafe_get_mut!(self.registers, *dst) =
-                        unsafe_get!(self.registers, *src).clone();
+                    *unsafe_get_mut!(self.r, *dst) = unsafe_get!(self.r, *src).clone();
                 }
                 Op::Jmp { target } => {
                     self.pc = *target as usize;
                     continue;
                 }
                 Op::JmpF { target, cond } => {
-                    if let Value::True = unsafe_get!(self.registers, *cond) {
+                    if let Value::True = unsafe_get!(self.r, *cond) {
                         self.pc = *target as usize;
                         continue;
                     }
@@ -219,7 +216,7 @@ mod ops {
             panic!("{} failed due to {:?}", "test", err);
         }
 
-        assert_eq!(vm.registers[0], Value::Double(3.1415))
+        assert_eq!(vm.r[0], Value::Double(3.1415))
     }
 
     macro_rules! cases {
@@ -236,7 +233,7 @@ mod ops {
                         panic!("{} failed due to {:?}", stringify!($ident), err);
                     }
 
-                    assert_eq!(vm.registers[0], $expected.into())
+                    assert_eq!(vm.r[0], $expected.into())
                 }
             )*
         };

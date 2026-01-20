@@ -60,7 +60,7 @@ pub enum InnerNode<'inner> {
     /// std::runtime::gc::cycle()
     Path {
         /// runtime, gc
-        members: Vec<Node<'inner>>,
+        members: Vec<Token<'inner>>,
         /// cycle
         ///
         /// always Node::Call, I'd say :^)
