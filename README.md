@@ -8,7 +8,7 @@ memory control, and optional garbage collection.
 fn greeting(greetee: str) {
     std::println("hello world to:" greetee)
 } 
-greeting(std::env::get("USER"))  # hello world to: $USER
+greeting(std::env::get("USER")) # hello world to: $USER
 ```
 
 ## Features / Design Goals
@@ -17,7 +17,8 @@ greeting(std::env::get("USER"))  # hello world to: $USER
   optimisations (both IR and peephole)
 - JIT compilation for runtime hotspots
 - Embeddable with minimal friction for Rust interop
-- Memory efficient, with an optional garbage collector and a minimal standard library
+- Memory efficient, with an optional garbage collector and a minimal standard
+  library
 
 ## Local Setup
 

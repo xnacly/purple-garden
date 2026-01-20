@@ -1,45 +1,46 @@
 # vim: filetype=python
-fn add3(arg1:int arg2:int arg3:int): int {
+fn add3(arg1:int arg2:int arg3:int) int {
     arg1+arg2+arg3
 }
 std::println(add3(3.1415 3.1415 3.1415))
 
-fn greeting(greetee:str){
+fn greeting(greetee:str) void {
     std::println("hello world to:" greetee)
 } 
 greeting(std::env::get("USER")) # hello world to: $USER
 
-# zero arguments, so no delimitor
-fn zero_args() {
+# technically this would be required to be `fn zero_args() void`, but the
+# parser notices this and inserts it on its own
+fn zero_args {
     std::println("zero_args")
 }
 
 # tail calls 
-fn inc(x:int):int {x + 1}
-fn call1(x:int):int {inc(x)}
-fn call2(x:int):int {call1(x)}
-fn call3(x:int):int {call2(x)}
-fn call4(x:int):int {call3(x)}
-fn call5(x:int):int {call4(x)}
+fn inc(x:int) int {x + 1}
+fn call1(x:int) int {inc(x)}
+fn call2(x:int) int {call1(x)}
+fn call3(x:int) int {call2(x)}
+fn call4(x:int) int {call3(x)}
+fn call5(x:int) int {call4(x)}
 std::println(call5(0))
 
-fn tuplify(v:str):[int str] {
+fn tuplify(v:str) [int str] {
     [len(v) v]
 } 
 std::println(tuplify("hello world")) # [11, "hello world"]
 
-fn f1(a: int){
+fn f1(a:int) ?int {
     match {
         a<100000 {
-            f1(a+1)
+            std::Some(f1(a+1))
         }
-        {  }
+        { std::None }
     }
 }
 f1(0)
 
 # compute n! with acumulator a
-fn factorial(n:int a:int): int {
+fn factorial(n:int a:int) int {
     match {
         n == 0 { a }
         { factorial(n-1 n*a) }
@@ -49,7 +50,7 @@ fn factorial(n:int a:int): int {
 let n = 18
 std::println(factorial(n 1))
 
-fn bin_step(n:int k:int i:int r):option[int] {
+fn bin_step(n:int k:int i:int r:int) ?int {
     match {
         i = k { std::Some(r) }
         {
@@ -58,7 +59,7 @@ fn bin_step(n:int k:int i:int r):option[int] {
     }
 }
 
-fn bin(n:int k:int):option[int] {
+fn bin(n:int k:int) ?int {
     match {
         k < 0 { std::None() }
         k == 0 { std::Some(1) }

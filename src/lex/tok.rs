@@ -12,6 +12,7 @@ pub enum Type<'t> {
     LessThan,
     GreaterThan,
     Exlaim,
+    Question,
     Colon,
     DoubleColon,
     BraketLeft,
@@ -37,6 +38,7 @@ pub enum Type<'t> {
     TInt,
     TDouble,
     TBool,
+    TVoid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

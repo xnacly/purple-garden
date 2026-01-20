@@ -75,6 +75,7 @@ impl<'l> Lexer<'l> {
             "int" => Type::TInt,
             "double" => Type::TDouble,
             "bool" => Type::TBool,
+            "void" => Type::TVoid,
             _ => return None,
         })?;
 
@@ -108,6 +109,7 @@ impl<'l> Lexer<'l> {
             b'<' => self.make_tok(Type::LessThan),
             b'>' => self.make_tok(Type::GreaterThan),
             b'!' => self.make_tok(Type::Exlaim),
+            b'?' => self.make_tok(Type::Question),
             b':' if matches!(self.peek(), Some(b':')) => {
                 self.advance();
                 self.make_tok(Type::DoubleColon)
@@ -180,6 +182,7 @@ impl<'l> Lexer<'l> {
         Ok(t)
     }
 
+    #[cfg(test)]
     pub fn all(&mut self) -> Result<Vec<Token<'l>>, PgError> {
         let mut raindrain = Vec::with_capacity(1024);
         loop {
@@ -209,7 +212,7 @@ mod tests {
 
     #[test]
     fn single_char_tokens() {
-        let toks = lex("()+-*/=<>![]{}:");
+        let toks = lex("()+-*/=<>![]{}:?");
         assert_eq!(
             toks,
             vec![
@@ -228,6 +231,7 @@ mod tests {
                 Type::CurlyLeft,
                 Type::CurlyRight,
                 Type::Colon,
+                Type::Question,
             ]
         );
     }
@@ -302,9 +306,10 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
     fn unknown_character_errors() {
         let mut l = Lexer::new(b"$");
-        let err = l.next().unwrap_err();
+        l.next().unwrap();
     }
 
     #[test]
@@ -321,6 +326,7 @@ mod tests {
     int
     double
     bool
+    void
     "),
             vec![
                 Type::True,
@@ -333,14 +339,16 @@ mod tests {
                 Type::TInt,
                 Type::TDouble,
                 Type::TBool,
+                Type::TVoid,
             ]
         )
     }
 
     #[test]
+    #[should_panic]
     fn unterminated_string() {
         let mut l = Lexer::new(b"\"hello");
-        let err = l.next().unwrap_err();
+        l.next().unwrap();
     }
 
     #[test]
