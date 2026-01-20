@@ -2,44 +2,44 @@
 
 # matrix.garden aims to perform a 400x400 matrix multiplication as fast as
 # possible
-var size = 400
+let size = 400
 
 # create matrices
-var a = std::arr::new(size)
-var b = std::arr::new(size)
-var c = std::arr::new(size)
+let a = std::arr::new(size)
+let b = std::arr::new(size)
+let c = std::arr::new(size)
 
 # fill matrices
 for i :: a {
-    var row_a = std::arr::new(size)
-    var row_b = std::arr::new(size)
-    var row_c = std::arr::new(size)
+    let row_a = std::arr::new(size)
+    let row_b = std::arr::new(size)
+    let row_c = std::arr::new(size)
     for j :: row_a {
-        set row_a::j = 3 * i + j
-        set row_b::j = i - 3 * j
-        set row_c::j = 0.0
+        row_a[j] = 3 * i + j
+        row_b[j] = i - 3 * j
+        row_c[j] = 0.0
     }
-    set a::i = row_a
-    set b::i = row_b
-    set c::i = row_c
+    a[i] = row_a
+    b[i] = row_b
+    c[i] = row_c
 }
 
 # multiply matrices
 for i :: a {
-    for j :: a::i {
-        var s = 0.0
-        for k :: a::i {
-            s = s + a::i::k * b::k::j
+    for j :: a[i] {
+        let s = 0.0
+        for k :: a[i] {
+            s = s + a[i][k] * b[k][j]
         }
-        set c::i::j = s
+        c[i][j] = s
     }
 }
 
 # check result
-var check = 0.0
+let check = 0.0
 for i :: c {
-    for j :: c::i {
-        check = check + c::i::j
+    for j :: c[i] {
+        check = check + c[i][j]
     }
 }
 

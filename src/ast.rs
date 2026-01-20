@@ -66,6 +66,11 @@ pub enum InnerNode<'inner> {
         /// always Node::Call, I'd say :^)
         leaf: Box<Node<'inner>>,
     },
+
+    Idx {
+        target: Box<Node<'inner>>,
+        index: Box<Node<'inner>>,
+    },
 }
 
 #[derive(Debug, Clone)]
