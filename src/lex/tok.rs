@@ -23,12 +23,19 @@ pub enum Type<'t> {
     Double(&'t str),
     Integer(&'t str),
 
+    // keywords
     True,
     False,
     Let,
     Fn,
     Match,
     For,
+
+    // type keywords
+    TStr,
+    TInt,
+    TDouble,
+    TBool,
 }
 
 #[derive(Debug, Clone)]

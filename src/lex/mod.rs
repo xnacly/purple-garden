@@ -71,6 +71,10 @@ impl<'l> Lexer<'l> {
             "fn" => Type::Fn,
             "match" => Type::Match,
             "for" => Type::For,
+            "str" => Type::TStr,
+            "int" => Type::TInt,
+            "double" => Type::TDouble,
+            "bool" => Type::TBool,
             _ => return None,
         })?;
 
@@ -309,6 +313,10 @@ mod tests {
     fn
     match
     for
+    str
+    int
+    double
+    bool
     "),
             vec![
                 Type::True,
@@ -317,6 +325,10 @@ mod tests {
                 Type::Fn,
                 Type::Match,
                 Type::For,
+                Type::TStr,
+                Type::TInt,
+                Type::TDouble,
+                Type::TBool,
             ]
         )
     }
