@@ -39,7 +39,7 @@ pub enum Type<'t> {
     TBool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token<'t> {
     pub line: usize,
     pub col: usize,

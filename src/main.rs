@@ -96,8 +96,8 @@ fn main() {
             .expect("Failed to read from file")
             .to_vec(),
     };
-    let lexer = Lexer::new(&input);
-    let ast = match Parser::new(lexer).parse() {
+    let mut lexer = Lexer::new(&input);
+    let ast = match Parser::new(&mut lexer).map(|n| n.parse()).flatten() {
         Ok(a) => a,
         Err(e) => {
             e.render();

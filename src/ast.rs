@@ -1,15 +1,20 @@
 use crate::lex::{Token, Type};
 
-#[derive(Debug, Clone)]
-pub enum InnerNode<'inner> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Node<'inner> {
     /// inner value is encoded in super::Node::token
-    Atom,
-    Ident,
+    Atom {
+        raw: Token<'inner>,
+    },
+    Ident {
+        name: Token<'inner>,
+    },
 
     /// lhs +-*/ rhs
     ///
     /// kind is encoded in super::Node::token
     Bin {
+        op: Token<'inner>,
         lhs: Box<Node<'inner>>,
         rhs: Box<Node<'inner>>,
     },
@@ -28,6 +33,7 @@ pub enum InnerNode<'inner> {
     ///
     /// name is encoded in super::Node::token
     Let {
+        name: Token<'inner>,
         rhs: Box<Node<'inner>>,
     },
 
@@ -35,7 +41,8 @@ pub enum InnerNode<'inner> {
     ///
     /// name is encoded in super::Node::token
     Fn {
-        args: Vec<Node<'inner>>,
+        name: Token<'inner>,
+        args: Vec<Token<'inner>>,
         body: Vec<Node<'inner>>,
     },
 
@@ -54,6 +61,7 @@ pub enum InnerNode<'inner> {
     ///
     /// name is encoded in super::Node::token
     Call {
+        name: Token<'inner>,
         args: Vec<Node<'inner>>,
     },
 
@@ -73,39 +81,33 @@ pub enum InnerNode<'inner> {
     },
 }
 
-#[derive(Debug, Clone)]
-pub struct Node<'node> {
-    pub token: Token<'node>,
-    pub inner: InnerNode<'node>,
-}
-
 impl<'a> Node<'a> {
     fn fmt_sexpr(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
         let pad = "  ".repeat(indent);
 
-        match &self.inner {
-            InnerNode::Atom => writeln!(f, "{}{:?}", pad, self.token.t),
-            InnerNode::Ident => {
-                if let Type::Ident(ident) = &self.token.t {
-                    writeln!(f, "{}{}", pad, ident)
+        match &self {
+            Node::Atom { raw } => writeln!(f, "{}{:?}", pad, raw),
+            Node::Ident { name } => {
+                if let Type::Ident(name) = name.t {
+                    writeln!(f, "{}{}", pad, name)
                 } else {
                     unreachable!()
                 }
             }
-            InnerNode::Bin { lhs, rhs } => {
-                writeln!(f, "{}({:?}", pad, self.token.t)?;
+            Node::Bin { op, lhs, rhs } => {
+                writeln!(f, "{}({:?}", pad, op)?;
                 lhs.fmt_sexpr(f, indent + 1)?;
                 rhs.fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)
             }
-            InnerNode::Array { members } => {
+            Node::Array { members } => {
                 writeln!(f, "{}[", pad)?;
                 for member in members {
                     member.fmt_sexpr(f, indent + 1)?;
                 }
                 writeln!(f, "{}]", pad)
             }
-            InnerNode::Object { pairs } => {
+            Node::Object { pairs } => {
                 writeln!(f, "{}{{", pad)?;
                 for (k, v) in pairs {
                     k.fmt_sexpr(f, indent + 1)?;
@@ -113,16 +115,16 @@ impl<'a> Node<'a> {
                 }
                 writeln!(f, "{}}}", pad)
             }
-            InnerNode::Let { rhs } => {
-                let Type::Ident(name) = self.token.t else {
+            Node::Let { name, rhs } => {
+                let Type::Ident(name) = name.t else {
                     unreachable!();
                 };
                 writeln!(f, "{}(let {}", pad, name)?;
                 rhs.fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)
             }
-            InnerNode::Fn { args, body } => {
-                let Type::Ident(name) = self.token.t else {
+            Node::Fn { name, args, body } => {
+                let Type::Ident(name) = name.t else {
                     unreachable!();
                 };
                 write!(f, "{}(fn {} (", pad, name)?;
@@ -130,7 +132,7 @@ impl<'a> Node<'a> {
                     write!(f, ")")?;
                 } else {
                     for (i, arg) in args.iter().enumerate() {
-                        let Type::Ident(arg_name) = arg.token.t else {
+                        let Type::Ident(arg_name) = arg.t else {
                             unreachable!();
                         };
                         if i == args.len() - 1 {
@@ -146,8 +148,8 @@ impl<'a> Node<'a> {
                 }
                 writeln!(f, "{})", pad)
             }
-            InnerNode::Call { args } => {
-                let Type::Ident(name) = self.token.t else {
+            Node::Call { name, args } => {
+                let Type::Ident(name) = name.t else {
                     unreachable!();
                 };
                 write!(f, "{}({}", pad, name)?;
@@ -159,7 +161,7 @@ impl<'a> Node<'a> {
                 }
                 writeln!(f, "{})", pad)
             }
-            _ => writeln!(f, "{}<todo {:?}>", pad, self.inner),
+            _ => writeln!(f, "{}<todo {:?}>", pad, self),
         }
     }
 }

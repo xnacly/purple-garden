@@ -18,7 +18,6 @@ impl Lower<'_> {
 
     /// Lower [ast] into a list of Func nodes, the entry point is always `__pg_entry`
     pub fn ir_from(&mut self, ast: &[Node]) -> Result<Vec<Func>, PgError> {
-        dbg!(ast);
         Ok(vec![])
     }
 }

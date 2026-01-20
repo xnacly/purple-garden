@@ -5,7 +5,7 @@ mod dis;
 mod reg;
 
 use crate::{
-    ast::{InnerNode, Node},
+    ast::Node,
     cc::{
         ctx::{Context, Local},
         reg::RegisterAllocator,
@@ -87,12 +87,12 @@ impl<'cc> Cc<'cc> {
     fn cc(&mut self, ast: &Node<'cc>) -> Result<Option<Reg>, PgError> {
         trace!("Cc::cc({:?})", &ast.token.t);
 
-        Ok(match &ast.inner {
-            InnerNode::Atom => {
-                let constant = match &ast.token.t {
+        Ok(match &ast {
+            Node::Atom { raw } => {
+                let constant = match &raw.t {
                     Type::Integer(s) => {
                         let value = s.parse().map_err(|e: num::ParseIntError| {
-                            PgError::with_msg(e.to_string(), &ast.token)
+                            PgError::with_msg(e.to_string(), raw)
                         })?;
 
                         if value > i32::MAX as i64 {
@@ -111,7 +111,7 @@ impl<'cc> Cc<'cc> {
                     Type::Double(s) => Const::Double(
                         s.parse::<f64>()
                             .map_err(|e: num::ParseFloatError| {
-                                PgError::with_msg(e.to_string(), &ast.token)
+                                PgError::with_msg(e.to_string(), raw)
                             })?
                             .to_bits(),
                     ),
@@ -125,25 +125,25 @@ impl<'cc> Cc<'cc> {
 
                 Some(self.load_const(constant).into())
             }
-            InnerNode::Ident => {
-                let Type::Ident(name) = ast.token.t else {
-                    unreachable!("InnerNode::Ident");
+            Node::Ident { name } => {
+                let Type::Ident(ident_name) = name.t else {
+                    unreachable!("Node::Ident.name.t not Type::Ident, compiler bug");
                 };
 
                 Some(Reg {
-                    id: self.ctx.locals.resolve(name).ok_or_else(|| {
-                        PgError::with_msg(format!("Undefined variable `{name}`"), &ast.token)
+                    id: self.ctx.locals.resolve(ident_name).ok_or_else(|| {
+                        PgError::with_msg(format!("Undefined variable `{ident_name}`"), name)
                     })?,
                     perm: true,
                 })
             }
-            InnerNode::Bin { lhs, rhs } => {
+            Node::Bin { op, lhs, rhs } => {
                 let lhs_reg = self.cc(lhs.as_ref())?.unwrap();
                 let rhs_reg = self.cc(rhs.as_ref())?.unwrap();
 
                 let dst = self.register.alloc();
                 let (lhs, rhs) = ((&lhs_reg).into(), (&rhs_reg).into());
-                self.buf.push(match ast.token.t {
+                self.buf.push(match op.t {
                     Type::Plus => Op::Add { dst, lhs, rhs },
                     Type::Minus => Op::Sub { dst, lhs, rhs },
                     Type::Asteriks => Op::Mul { dst, lhs, rhs },
@@ -163,24 +163,21 @@ impl<'cc> Cc<'cc> {
 
                 Some(dst.into())
             }
-            InnerNode::Let { rhs } => {
+            Node::Let { name, rhs } => {
                 let src = self.cc(rhs)?;
-                let Type::Ident(name) = ast.token.t else {
-                    unreachable!("InnerNode::Let");
+                let Type::Ident(let_name) = name.t else {
+                    unreachable!("Node::Let.name.t not Type::Ident, compiler bug");
                 };
 
                 self.ctx
                     .locals
-                    .bind(name, src.unwrap().into())
+                    .bind(let_name, src.unwrap().into())
                     .ok_or_else(|| {
-                        PgError::with_msg(
-                            format!("binding `{name}` is already defined"),
-                            &ast.token,
-                        )
+                        PgError::with_msg(format!("binding `{let_name}` is already defined"), name)
                     })?;
                 None
             }
-            InnerNode::Fn { args, body } => {
+            Node::Fn { name, args, body } => {
                 let prev_locals = std::mem::take(&mut self.ctx.locals);
                 self.ctx.locals = Local::default();
 
@@ -190,15 +187,15 @@ impl<'cc> Cc<'cc> {
                 let skip_jmp = self.buf.len();
                 self.buf.push(Op::Jmp { target: 0 });
 
-                let Type::Ident(name) = ast.token.t else {
+                let Type::Ident(fn_name) = name.t else {
                     unreachable!(
                         "This should be a Token::Ident, it was {:?}, this is a compiler bug",
-                        ast.token.t
+                        name
                     );
                 };
 
                 let mut func = ctx::Func {
-                    name,
+                    name: fn_name,
                     args: args.len() as u8,
                     size: 0,
                     pc: self.buf.len(),
@@ -207,8 +204,8 @@ impl<'cc> Cc<'cc> {
                 self.register.mark();
 
                 for (i, arg) in args.iter().enumerate() {
-                    let Type::Ident(name) = arg.token.t else {
-                        unreachable!("Function argument names must be identifiers");
+                    let Type::Ident(name) = arg.t else {
+                        unreachable!("Function argument names must be identifiers, compiler bug");
                     };
 
                     // we need to reserver all registers from r0..rN, so the arguments arent
@@ -216,10 +213,7 @@ impl<'cc> Cc<'cc> {
                     let _ = self.register.alloc();
 
                     self.ctx.locals.bind(name, i as u8).ok_or_else(|| {
-                        PgError::with_msg(
-                            format!("binding `{name}` is already defined"),
-                            &ast.token,
-                        )
+                        PgError::with_msg(format!("binding `{name}` is already defined"), arg)
                     })?;
                 }
 
@@ -246,7 +240,7 @@ impl<'cc> Cc<'cc> {
                     target: self.buf.len() as u16,
                 };
 
-                self.ctx.functions.insert(name, func);
+                self.ctx.functions.insert(fn_name, func);
 
                 self.register.reset_to_last_mark();
 
@@ -254,28 +248,28 @@ impl<'cc> Cc<'cc> {
                 self.ctx.locals = prev_locals;
                 None
             }
-            InnerNode::Call { args } => {
-                let Type::Ident(name) = ast.token.t else {
+            Node::Call { name, args } => {
+                let Type::Ident(call_name) = name.t else {
                     unreachable!("InnerNode::Call's token can only be an ident");
                 };
 
                 let resolved_func = self
                     .ctx
                     .functions
-                    .get_mut(name)
+                    .get_mut(call_name)
                     .ok_or_else(|| {
-                        PgError::with_msg(format!("function `{name}` is not defined"), &ast.token)
+                        PgError::with_msg(format!("function `{call_name}` is not defined"), name)
                     })?
                     .clone();
 
                 if resolved_func.args != args.len() as u8 {
                     return Err(PgError::with_msg(
                         format!(
-                            "function `{name}` requires {} arguments, got {}",
+                            "function `{call_name}` requires {} arguments, got {}",
                             resolved_func.args,
                             args.len()
                         ),
-                        &ast.token,
+                        name,
                     ));
                 }
 

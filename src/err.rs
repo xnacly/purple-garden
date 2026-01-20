@@ -32,12 +32,6 @@ impl From<&Token<'_>> for PgError {
     }
 }
 
-impl From<&Node<'_>> for PgError {
-    fn from(value: &Node<'_>) -> Self {
-        (&value.token).into()
-    }
-}
-
 impl From<Anomaly> for PgError {
     fn from(value: Anomaly) -> Self {
         // TODO: do some prep in anomaly for finding out which ast node resulted in what bytecode
