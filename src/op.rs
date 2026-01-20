@@ -2,6 +2,7 @@
 #[allow(unpredictable_function_pointer_comparisons)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum Op {
+    // TODO: rename all to I* for integers, introduce secondary operator for D* (double)
     Add { dst: u8, lhs: u8, rhs: u8 },
     Sub { dst: u8, lhs: u8, rhs: u8 },
     Mul { dst: u8, lhs: u8, rhs: u8 },
@@ -11,6 +12,7 @@ pub enum Op {
     Gt { dst: u8, lhs: u8, rhs: u8 },
     Not { dst: u8, src: u8 },
     Mov { dst: u8, src: u8 },
+
     LoadImm { dst: u8, value: i32 },
     LoadGlobal { dst: u8, idx: u32 },
     Jmp { target: u16 },

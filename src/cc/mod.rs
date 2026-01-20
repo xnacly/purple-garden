@@ -177,7 +177,9 @@ impl<'cc> Cc<'cc> {
                     })?;
                 None
             }
-            Node::Fn { name, args, body } => {
+            Node::Fn {
+                name, args, body, ..
+            } => {
                 let prev_locals = std::mem::take(&mut self.ctx.locals);
                 self.ctx.locals = Local::default();
 
@@ -203,7 +205,7 @@ impl<'cc> Cc<'cc> {
 
                 self.register.mark();
 
-                for (i, arg) in args.iter().enumerate() {
+                for (i, (arg, _)) in args.iter().enumerate() {
                     let Type::Ident(name) = arg.t else {
                         unreachable!("Function argument names must be identifiers, compiler bug");
                     };

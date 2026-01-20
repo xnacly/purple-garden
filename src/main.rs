@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_variables)]
 #![cfg_attr(feature = "nightly", feature(likely_unlikely))]
 
 use std::fs;

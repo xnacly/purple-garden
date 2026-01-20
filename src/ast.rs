@@ -2,54 +2,49 @@ use crate::lex::{Token, Type};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Node<'inner> {
-    /// inner value is encoded in super::Node::token
-    Atom {
-        raw: Token<'inner>,
-    },
-    Ident {
-        name: Token<'inner>,
-    },
+    /// String|Double|Integer|True|False
+    Atom { raw: Token<'inner> },
 
-    /// lhs +-*/ rhs
-    ///
-    /// kind is encoded in super::Node::token
+    /// <identifier>
+    Ident { name: Token<'inner> },
+
+    /// <lhs> <op> <rhs>
     Bin {
         op: Token<'inner>,
         lhs: Box<Node<'inner>>,
         rhs: Box<Node<'inner>>,
     },
 
-    /// [members]
-    Array {
-        members: Vec<Node<'inner>>,
-    },
+    /// [<member0> <member1>]
+    Array { members: Vec<Node<'inner>> },
 
-    /// { key: value }
+    /// { <key0>: <value0> <key1>: <value1> }
     Object {
         pairs: Vec<(Node<'inner>, Node<'inner>)>,
     },
 
-    /// let name = "a string for instance"
-    ///
-    /// name is encoded in super::Node::token
+    /// let <name> = <rhs>
     Let {
         name: Token<'inner>,
         rhs: Box<Node<'inner>>,
     },
 
-    /// fn square(a) { a * a }
-    ///
-    /// name is encoded in super::Node::token
+    /// fn <name>(<arg0:type0> <arg1:type1>): <return_type> {
+    ///     <body>
+    /// }
     Fn {
         name: Token<'inner>,
-        args: Vec<Token<'inner>>,
+        /// (<identifier>, <type>)
+        args: Vec<(Token<'inner>, TypeExpr<'inner>)>,
+        return_type: Option<TypeExpr<'inner>>,
         body: Vec<Node<'inner>>,
     },
 
     /// match {
-    ///     true && true { false }
-    ///     5 == 6 { // impossible }
-    ///     5 != 6 { // thats true }
+    ///    <condition> <body>
+    ///    <condition> <body>
+    ///    <condition> <body>
+    ///    <default>
     /// }
     Match {
         /// [(condition, body)]
@@ -57,28 +52,40 @@ pub enum Node<'inner> {
         default: Option<Box<Node<'inner>>>,
     },
 
-    /// square(25 5)
-    ///
-    /// name is encoded in super::Node::token
+    /// <name>(<args>)
     Call {
         name: Token<'inner>,
         args: Vec<Node<'inner>>,
     },
 
-    /// std::runtime::gc::cycle()
+    /// <path0>::<path1>::<leaf>
     Path {
-        /// runtime, gc
         members: Vec<Token<'inner>>,
-        /// cycle
-        ///
-        /// always Node::Call, I'd say :^)
         leaf: Box<Node<'inner>>,
     },
 
+    /// <target>[<index>]
     Idx {
         target: Box<Node<'inner>>,
         index: Box<Node<'inner>>,
     },
+
+    /// for <param> :: <target> { <body> }
+    For {
+        target: Box<Node<'inner>>,
+        param: Token<'inner>,
+        body: Vec<Node<'inner>>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeExpr<'te> {
+    /// atom types like: int, str, double, bool
+    Atom(Token<'te>),
+    /// optionals work via ?<type_expr>
+    Option(Box<TypeExpr<'te>>),
+    /// Tuple / Array via [<type_expr0> <type_expr1>]
+    Tuple(Vec<TypeExpr<'te>>),
 }
 
 impl<'a> Node<'a> {
@@ -123,7 +130,12 @@ impl<'a> Node<'a> {
                 rhs.fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)
             }
-            Node::Fn { name, args, body } => {
+            Node::Fn {
+                name,
+                args,
+                body,
+                return_type,
+            } => {
                 let Type::Ident(name) = name.t else {
                     unreachable!();
                 };
@@ -132,13 +144,13 @@ impl<'a> Node<'a> {
                     write!(f, ")")?;
                 } else {
                     for (i, arg) in args.iter().enumerate() {
-                        let Type::Ident(arg_name) = arg.t else {
+                        let (Type::Ident(arg_name), type_name) = (&arg.0.t, &arg.1) else {
                             unreachable!();
                         };
                         if i == args.len() - 1 {
-                            write!(f, "{}", arg_name)?;
+                            write!(f, "{}:{:?}", arg_name, type_name)?;
                         } else {
-                            write!(f, "{} ", arg_name)?;
+                            write!(f, "{}:{:?} ", arg_name, type_name)?;
                         }
                     }
                     writeln!(f, ")")?;
@@ -146,7 +158,7 @@ impl<'a> Node<'a> {
                 for (i, node) in body.iter().enumerate() {
                     node.fmt_sexpr(f, indent + 1)?;
                 }
-                writeln!(f, "{})", pad)
+                writeln!(f, "{})->{:?}", pad, return_type)
             }
             Node::Call { name, args } => {
                 let Type::Ident(name) = name.t else {
