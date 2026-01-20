@@ -23,10 +23,9 @@ impl<'p> Parser<'p> {
         self.cur.t == Type::Eof
     }
 
-    fn expect(&mut self, ty: Type) -> Result<&Token<'p>, PgError> {
+    fn expect(&mut self, ty: Type) -> Result<(), PgError> {
         if self.cur.t == ty {
-            self.next()?;
-            Ok(&self.cur)
+            self.next()
         } else {
             Err(PgError::with_msg(
                 format!("Expected `{:?}`, got {:?}", ty, self.cur.t),
@@ -54,9 +53,13 @@ impl<'p> Parser<'p> {
             Type::Fn => self.parse_fn(),
             Type::Match => self.parse_match(),
             Type::For => self.parse_for(),
-            Type::Ident(_) => Ok(Node::Ident {
-                name: self.cur.clone(),
-            }),
+            Type::Ident(_) => {
+                let i = Node::Ident {
+                    name: self.cur.clone(),
+                };
+                self.next()?;
+                Ok(i)
+            }
             Type::String(_) | Type::Integer(_) | Type::Double(_) | Type::True | Type::False => {
                 self.parse_atom()
             }
