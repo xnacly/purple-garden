@@ -97,28 +97,34 @@ impl<'p> Parser<'p> {
     }
 
     fn parse_match(&mut self) -> Result<Node<'p>, PgError> {
-        todo!();
+        todo!("Parser::parse_match");
     }
 
     fn parse_for(&mut self) -> Result<Node<'p>, PgError> {
-        todo!();
+        todo!("Parser::parse_for");
     }
 
     fn parse_expr(&mut self) -> Result<Node<'p>, PgError> {
-        todo!();
+        todo!("Parser::expr");
     }
 
     fn parse_atom(&mut self) -> Result<Node<'p>, PgError> {
-        let atom = match self.cur.t {
+        let atom_or_wrapped_expression = match self.cur.t {
             Type::String(_) | Type::Integer(_) | Type::Double(_) | Type::True | Type::False => {
                 Node::Atom {
                     raw: self.cur.clone(),
                 }
             }
-            _ => todo!("Parser::parse_atom$pratt_parsing"),
+            Type::BraceLeft => {
+                self.next()?;
+                let e = self.parse_expr()?;
+                self.expect(Type::BraceRight)?;
+                e
+            }
+            _ => todo!("Parser::parse_atom$error handling"),
         };
         self.next()?;
-        Ok(atom)
+        Ok(atom_or_wrapped_expression)
     }
 }
 

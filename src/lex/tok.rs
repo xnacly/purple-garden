@@ -1,8 +1,8 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type<'t> {
     Eof,
-    DelimitLeft,
-    DelimitRight,
+    BraceLeft,
+    BraceRight,
     Plus,
     Minus,
     Asteriks,

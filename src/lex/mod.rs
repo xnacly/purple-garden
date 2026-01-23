@@ -95,8 +95,8 @@ impl<'l> Lexer<'l> {
             .cur()
             .ok_or_else(|| self.make_err("Unexpected end of file", self.col))?
         {
-            b'(' => self.make_tok(Type::DelimitLeft),
-            b')' => self.make_tok(Type::DelimitRight),
+            b'(' => self.make_tok(Type::BraceLeft),
+            b')' => self.make_tok(Type::BraceRight),
             b'+' => self.make_tok(Type::Plus),
             b'-' => self.make_tok(Type::Minus),
             b'*' => self.make_tok(Type::Asteriks),
@@ -216,8 +216,8 @@ mod tests {
         assert_eq!(
             toks,
             vec![
-                Type::DelimitLeft,
-                Type::DelimitRight,
+                Type::BraceLeft,
+                Type::BraceRight,
                 Type::Plus,
                 Type::Minus,
                 Type::Asteriks,
@@ -276,11 +276,11 @@ mod tests {
         assert_eq!(
             toks,
             vec![
-                Type::DelimitLeft,
+                Type::BraceLeft,
                 Type::Ident("sum"),
                 Type::Integer("1"),
                 Type::Integer("2"),
-                Type::DelimitRight,
+                Type::BraceRight,
             ]
         );
     }
@@ -291,10 +291,10 @@ mod tests {
         assert_eq!(
             toks,
             vec![
-                Type::DelimitLeft,
+                Type::BraceLeft,
                 Type::Ident("foo"),
                 Type::Integer("42"),
-                Type::DelimitRight,
+                Type::BraceRight,
             ]
         );
     }
