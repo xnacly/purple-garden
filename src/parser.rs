@@ -1,5 +1,5 @@
 use crate::{
-    ast::Node,
+    ast::{Node, TypeExpr},
     err::PgError,
     lex::{Lexer, Token, Type},
 };
@@ -25,13 +25,15 @@ impl<'p> Parser<'p> {
 
     fn expect(&mut self, ty: Type) -> Result<(), PgError> {
         if self.cur.t == ty {
-            self.next()
+            self.next()?;
         } else {
-            Err(PgError::with_msg(
+            return Err(PgError::with_msg(
                 format!("Expected `{:?}`, got {:?}", ty, self.cur.t),
                 &self.cur,
-            ))
+            ));
         }
+
+        Ok(())
     }
 
     fn expect_ident(&mut self) -> Result<Token<'p>, PgError> {
@@ -92,8 +94,11 @@ impl<'p> Parser<'p> {
         })
     }
 
+    /// fn <name>(<arg0:type0> <arg1:type1>): <return_type> {
+    ///     <body>
+    /// }
     fn parse_fn(&mut self) -> Result<Node<'p>, PgError> {
-        todo!();
+        todo!("Parser::parse_fn");
     }
 
     fn parse_match(&mut self) -> Result<Node<'p>, PgError> {
@@ -121,10 +126,57 @@ impl<'p> Parser<'p> {
                 self.expect(Type::BraceRight)?;
                 e
             }
-            _ => todo!("Parser::parse_atom$error handling"),
+            _ => {
+                return Err(PgError::with_msg(
+                    "Expected atom or expr wrapped by ()",
+                    self.cur(),
+                ));
+            }
         };
         self.next()?;
         Ok(atom_or_wrapped_expression)
+    }
+
+    fn parse_type(&mut self) -> Result<TypeExpr<'p>, PgError> {
+        let Token { t, .. } = self.cur();
+        Ok(match t {
+            // Optionals: ?<type>
+            Type::Question => {
+                self.next()?;
+                TypeExpr::Option(Box::new(self.parse_type()?))
+            }
+            // Arrays: [<type>]
+            Type::BraketLeft => {
+                self.next()?;
+                let inner = Box::new(self.parse_type()?);
+                self.expect(Type::BraketRight)?;
+                TypeExpr::Array(inner)
+            }
+            // Atom types
+            Type::TStr | Type::TInt | Type::TBool | Type::TVoid | Type::TDouble => {
+                let tt = TypeExpr::Atom(self.cur().clone());
+                self.next()?;
+
+                // Map/object <type>[<type>]
+                if self.cur().t == Type::BraketLeft {
+                    self.next()?;
+                    let value = self.parse_type()?;
+                    self.expect(Type::BraketRight)?;
+                    TypeExpr::Map {
+                        key: Box::new(tt),
+                        value: Box::new(value),
+                    }
+                } else {
+                    tt
+                }
+            }
+            _ => {
+                return Err(PgError::with_msg(
+                    "Bad type, expected either type, ?type, [type] or type[type], where type is str, int, double, bool or void",
+                    self.cur(),
+                ));
+            }
+        })
     }
 }
 

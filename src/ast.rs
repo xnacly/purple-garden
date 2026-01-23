@@ -80,12 +80,17 @@ pub enum Node<'inner> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeExpr<'te> {
-    /// atom types like: int, str, double, bool
+    /// atom types like: int, str, double, bool and void
     Atom(Token<'te>),
     /// optionals work via ?<type_expr>
     Option(Box<TypeExpr<'te>>),
-    /// Tuple / Array via [<type_expr0> <type_expr1>]
-    Tuple(Vec<TypeExpr<'te>>),
+    /// Array via [<type>]
+    Array(Box<TypeExpr<'te>>),
+    /// Map via <key_type>[<value_type>]
+    Map {
+        key: Box<TypeExpr<'te>>,
+        value: Box<TypeExpr<'te>>,
+    },
 }
 
 impl<'a> Node<'a> {

@@ -83,6 +83,7 @@ impl<'l> Lexer<'l> {
     }
 
     pub fn next(&mut self) -> Result<Token<'l>, PgError> {
+        // TODO: comments
         while matches!(self.cur(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
             self.advance()
         }
