@@ -98,7 +98,7 @@ impl<'a> Node<'a> {
         let pad = "  ".repeat(indent);
 
         match &self {
-            Node::Atom { raw } => writeln!(f, "{}{:?}", pad, raw),
+            Node::Atom { raw } => writeln!(f, "{}{:?}", pad, raw.t),
             Node::Ident { name } => {
                 if let Type::Ident(name) = name.t {
                     writeln!(f, "{}{}", pad, name)
@@ -160,7 +160,7 @@ impl<'a> Node<'a> {
                     }
                     writeln!(f, ")")?;
                 }
-                for (i, node) in body.iter().enumerate() {
+                for node in body {
                     node.fmt_sexpr(f, indent + 1)?;
                 }
                 writeln!(f, "{})->{:?}", pad, return_type)

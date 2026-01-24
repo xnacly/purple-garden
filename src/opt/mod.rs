@@ -25,6 +25,10 @@ const WINDOW_SIZE: usize = 3;
 /// - [Peephole optimization - wikipedia](https://en.wikipedia.org/wiki/Peephole_optimization)
 /// - [W. M. McKeeman "Peephole Optimization"](https://dl.acm.org/doi/epdf/10.1145/364995.365000)
 pub fn bc(bc: &mut Vec<Op>) {
+    if bc.len() < WINDOW_SIZE {
+        return;
+    }
+
     for i in 0..=bc.len().saturating_sub(WINDOW_SIZE) {
         let window = &mut bc[i..i + WINDOW_SIZE];
         // Disabled, due to https://news.ycombinator.com/item?id=46624396, specifically:

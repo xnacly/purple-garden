@@ -85,8 +85,6 @@ impl<'cc> Cc<'cc> {
     }
 
     fn cc(&mut self, ast: &Node<'cc>) -> Result<Option<Reg>, PgError> {
-        trace!("Cc::cc({:?})", &ast.token.t);
-
         Ok(match &ast {
             Node::Atom { raw } => {
                 let constant = match &raw.t {

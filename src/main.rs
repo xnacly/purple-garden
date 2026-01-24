@@ -54,7 +54,11 @@ struct Args {
     #[arg(short = 'O', default_value_t = 0)]
     opt: usize,
 
-    /// Readable bytecode
+    /// Compile the target into native machine code and execute said code
+    #[arg(short = 'N', long)]
+    native: bool,
+
+    /// Readable bytecode or machine code, depending on execution strategy
     #[arg(short = 'D', long)]
     disassemble: bool,
     /// Readable abstract syntax tree
@@ -67,6 +71,9 @@ struct Args {
     #[arg(short = 'R', long)]
     registers: bool,
     /// Generate backtraces for function calls
+    ///
+    /// Technically a brain child of my interview at apple in which we talked about ways of implementing
+    /// backtraces for error display for javascript.
     #[arg(short = 'B', long)]
     backtrace: bool,
 
@@ -79,19 +86,22 @@ struct Args {
     /// Disable garbage collection
     #[arg(long)]
     no_gc: bool,
+    /// Disable Just In Time compilation
+    #[arg(long)]
+    no_jit: bool,
 
     /// run a single string passed via this flag instead of a file
     #[arg(short)]
     run: Option<String>,
 
-    file: Option<String>,
+    target: Option<String>,
 }
 
 fn main() {
     let args = <Args as clap::Parser>::parse();
     let input = match args.run {
         Some(i) => i.as_bytes().to_vec(),
-        None => fs::read(args.file.expect("No file or `-r` specified"))
+        None => fs::read(args.target.expect("No file or `-r` specified"))
             .expect("Failed to read from file")
             .to_vec(),
     };

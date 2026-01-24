@@ -4,6 +4,8 @@ use crate::{
     lex::{Lexer, Token, Type},
 };
 
+/// Parsing the token stream one token at a time into the abstract syntax tree, see
+/// [ast.rs](./ast.rs) for documentation regarding each node and the way those should be parsed.
 pub struct Parser<'p> {
     lex: &'p mut Lexer<'p>,
     cur: Token<'p>,
@@ -82,7 +84,6 @@ impl<'p> Parser<'p> {
         }
     }
 
-    /// `let <name> = <rhs>`
     fn parse_let(&mut self) -> Result<Node<'p>, PgError> {
         self.expect(Type::Let)?;
         let name = self.expect_ident()?;
@@ -94,9 +95,6 @@ impl<'p> Parser<'p> {
         })
     }
 
-    /// fn <name>(<arg0:type0> <arg1:type1>): <return_type> {
-    ///     <body>
-    /// }
     fn parse_fn(&mut self) -> Result<Node<'p>, PgError> {
         todo!("Parser::parse_fn");
     }
