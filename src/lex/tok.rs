@@ -20,10 +20,10 @@ pub enum Type<'t> {
     CurlyLeft,
     CurlyRight,
 
-    String(&'t str),
-    Ident(&'t str),
-    Double(&'t str),
-    Integer(&'t str),
+    RawString(&'t str),
+    RawIdent(&'t str),
+    RawDouble(&'t str),
+    RawInteger(&'t str),
 
     // keywords
     True,
@@ -34,11 +34,11 @@ pub enum Type<'t> {
     For,
 
     // type keywords
-    TStr,
-    TInt,
-    TDouble,
-    TBool,
-    TVoid,
+    Str,
+    Int,
+    Double,
+    Bool,
+    Void,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

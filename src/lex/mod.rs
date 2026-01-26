@@ -71,11 +71,11 @@ impl<'l> Lexer<'l> {
             "fn" => Type::Fn,
             "match" => Type::Match,
             "for" => Type::For,
-            "str" => Type::TStr,
-            "int" => Type::TInt,
-            "double" => Type::TDouble,
-            "bool" => Type::TBool,
-            "void" => Type::TVoid,
+            "str" => Type::Str,
+            "int" => Type::Int,
+            "double" => Type::Double,
+            "bool" => Type::Bool,
+            "void" => Type::Void,
             _ => return None,
         })?;
 
@@ -139,7 +139,7 @@ impl<'l> Lexer<'l> {
                     return Err(self.make_err("Unterminated string", self.col));
                 }
 
-                self.make_tok(Type::String(
+                self.make_tok(Type::RawString(
                     str::from_utf8(&self.input[start..self.pos])
                         .map_err(|_| self.make_err("Invalid ut8 input", self.col))?,
                 ))
@@ -149,7 +149,7 @@ impl<'l> Lexer<'l> {
                 self.advance();
                 while self
                     .cur()
-                    .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+                    .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
                 {
                     self.advance();
                 }
@@ -159,7 +159,7 @@ impl<'l> Lexer<'l> {
 
                 return Ok(match self.as_keyword(inner) {
                     Some(as_keyword) => as_keyword,
-                    None => self.make_tok(Type::Ident(inner)),
+                    None => self.make_tok(Type::RawIdent(inner)),
                 });
             }
             c if c.is_ascii_digit() => {
@@ -174,9 +174,9 @@ impl<'l> Lexer<'l> {
                     .map_err(|_| self.make_err("Invalid ut8 input", self.col))?;
 
                 return Ok(if is_double {
-                    self.make_tok(Type::Double(inner))
+                    self.make_tok(Type::RawDouble(inner))
                 } else {
-                    self.make_tok(Type::Integer(inner))
+                    self.make_tok(Type::RawInteger(inner))
                 });
             }
             c => {
@@ -254,7 +254,11 @@ mod tests {
         let toks = lex("foo bar baz");
         assert_eq!(
             toks,
-            vec![Type::Ident("foo"), Type::Ident("bar"), Type::Ident("baz"),]
+            vec![
+                Type::RawIdent("foo"),
+                Type::RawIdent("bar"),
+                Type::RawIdent("baz"),
+            ]
         );
     }
 
@@ -264,9 +268,9 @@ mod tests {
         assert_eq!(
             toks,
             vec![
-                Type::Integer("0"),
-                Type::Integer("123"),
-                Type::Integer("42"),
+                Type::RawInteger("0"),
+                Type::RawInteger("123"),
+                Type::RawInteger("42"),
             ]
         );
     }
@@ -274,7 +278,7 @@ mod tests {
     #[test]
     fn doubles() {
         let toks = lex("1.0 3.14");
-        assert_eq!(toks, vec![Type::Double("1.0"), Type::Double("3.14"),]);
+        assert_eq!(toks, vec![Type::RawDouble("1.0"), Type::RawDouble("3.14"),]);
     }
 
     #[test]
@@ -284,9 +288,9 @@ mod tests {
             toks,
             vec![
                 Type::BraceLeft,
-                Type::Ident("sum"),
-                Type::Integer("1"),
-                Type::Integer("2"),
+                Type::RawIdent("sum"),
+                Type::RawInteger("1"),
+                Type::RawInteger("2"),
                 Type::BraceRight,
             ]
         );
@@ -299,8 +303,8 @@ mod tests {
             toks,
             vec![
                 Type::BraceLeft,
-                Type::Ident("foo"),
-                Type::Integer("42"),
+                Type::RawIdent("foo"),
+                Type::RawInteger("42"),
                 Type::BraceRight,
             ]
         );
@@ -309,7 +313,7 @@ mod tests {
     #[test]
     fn string_literal() {
         let toks = lex("\"hello\"");
-        assert_eq!(toks, vec![Type::String("hello")]);
+        assert_eq!(toks, vec![Type::RawString("hello")]);
     }
 
     #[test]
@@ -342,11 +346,11 @@ mod tests {
                 Type::Fn,
                 Type::Match,
                 Type::For,
-                Type::TStr,
-                Type::TInt,
-                Type::TDouble,
-                Type::TBool,
-                Type::TVoid,
+                Type::Str,
+                Type::Int,
+                Type::Double,
+                Type::Bool,
+                Type::Void,
             ]
         )
     }
@@ -361,19 +365,19 @@ mod tests {
     #[test]
     fn leading_dot_numbers() {
         let toks = lex("0.5 1.");
-        assert_eq!(toks, vec![Type::Double("0.5"), Type::Double("1.")]);
+        assert_eq!(toks, vec![Type::RawDouble("0.5"), Type::RawDouble("1.")]);
     }
 
     #[test]
     fn multiple_dots_in_number() {
         let toks = lex("1.2.3");
-        assert_eq!(toks, vec![Type::Double("1.2.3")]);
+        assert_eq!(toks, vec![Type::RawDouble("1.2.3")]);
     }
 
     #[test]
     fn identifier_keyword_adjacency() {
         let toks = lex("truex fnx");
-        assert_eq!(toks, vec![Type::Ident("truex"), Type::Ident("fnx"),]);
+        assert_eq!(toks, vec![Type::RawIdent("truex"), Type::RawIdent("fnx"),]);
     }
 
     #[test]

@@ -15,7 +15,9 @@ pub struct PgError {
 impl From<&Token<'_>> for PgError {
     fn from(value: &Token) -> Self {
         let len = match value.t {
-            Type::String(i) | Type::Ident(i) | Type::Double(i) | Type::Integer(i) => i.len(),
+            Type::RawString(i) | Type::RawIdent(i) | Type::RawDouble(i) | Type::RawInteger(i) => {
+                i.len()
+            }
             Type::True => 4,
             Type::False | Type::Match => 5,
             Type::Let | Type::For => 3,

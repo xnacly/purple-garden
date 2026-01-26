@@ -30,12 +30,14 @@ pub fn bc(bc: &mut Vec<Op>) {
     }
 
     for i in 0..=bc.len().saturating_sub(WINDOW_SIZE) {
-        let window = &mut bc[i..i + WINDOW_SIZE];
+        let _window = &mut bc[i..i + WINDOW_SIZE];
         // Disabled, due to https://news.ycombinator.com/item?id=46624396, specifically:
         // "[...] [This] breaks using temporary registers after the optimisation."
         //
         // bc::const_binary(window);
-        bc::self_move(window);
+
+        // Disabled, since jump offsets are required to still fit correctly
+        // bc::self_move(window);
     }
 
     bc.retain(|op| !matches!(op, Op::Nop))

@@ -88,7 +88,7 @@ impl<'vm> Vm<'vm> {
                         (Value::Double(l), Value::Int(r)) => Value::Double(l + *r as f64),
                         (Value::Int(l), Value::Double(r)) => Value::Double(*l as f64 + r),
                         (Value::Double(l), Value::Double(r)) => Value::Double(l + r),
-                        _ => return Err(Anomaly::TypeIncompatible { pc: self.pc }),
+                        _ => todo!(),
                     };
 
                     *unsafe_get_mut!(self.r, *dst) = result;
@@ -102,7 +102,7 @@ impl<'vm> Vm<'vm> {
                         (Value::Double(l), Value::Int(r)) => Value::Double(l - *r as f64),
                         (Value::Int(l), Value::Double(r)) => Value::Double(*l as f64 - r),
                         (Value::Double(l), Value::Double(r)) => Value::Double(l - r),
-                        _ => return Err(Anomaly::TypeIncompatible { pc: self.pc }),
+                        _ => todo!(),
                     };
 
                     *unsafe_get_mut!(self.r, *dst) = result;
@@ -116,7 +116,7 @@ impl<'vm> Vm<'vm> {
                         (Value::Double(l), Value::Int(r)) => Value::Double(l * *r as f64),
                         (Value::Int(l), Value::Double(r)) => Value::Double(*l as f64 * r),
                         (Value::Double(l), Value::Double(r)) => Value::Double(l * r),
-                        _ => return Err(Anomaly::TypeIncompatible { pc: self.pc }),
+                        _ => todo!(),
                     };
 
                     *unsafe_get_mut!(self.r, *dst) = result;
@@ -133,7 +133,7 @@ impl<'vm> Vm<'vm> {
                         // promoting to Double necessary
                         (Value::Double(l), Value::Int(r)) => Value::Double(l / (*r as f64)),
                         (Value::Int(l), Value::Double(r)) => Value::Double((*l as f64) / r),
-                        (_, _) => return Err(Anomaly::TypeIncompatible { pc: self.pc }),
+                        _ => todo!(),
                     };
 
                     *unsafe_get_mut!(self.r, *dst) = result;
@@ -158,9 +158,7 @@ impl<'vm> Vm<'vm> {
                         Value::False => Value::True,
                         Value::Int(inner) => Value::Int(inner * -1),
                         Value::Double(inner) => Value::Double(inner * -1.0),
-                        _ => {
-                            return Err(Anomaly::TypeIncompatible { pc: self.pc });
-                        }
+                        _ => todo!(),
                     }
                 }
                 Op::Mov { dst, src } => {

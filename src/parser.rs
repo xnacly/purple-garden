@@ -39,7 +39,7 @@ impl<'p> Parser<'p> {
     }
 
     fn expect_ident(&mut self) -> Result<Token<'p>, PgError> {
-        if let Type::Ident(_) = self.cur.t {
+        if let Type::RawIdent(_) = self.cur.t {
             let matched = self.cur.clone();
             self.next()?;
             Ok(matched)
@@ -70,16 +70,27 @@ impl<'p> Parser<'p> {
             Type::Fn => self.parse_fn(),
             Type::Match => self.parse_match(),
             Type::For => self.parse_for(),
-            Type::Ident(_) => {
-                let i = Node::Ident {
-                    name: self.cur.clone(),
-                };
+            Type::RawIdent(_) => {
+                let name = self.cur.clone();
                 self.next()?;
-                Ok(i)
+                // we are in a function call
+                Ok(if self.cur().t == Type::BraceLeft {
+                    self.next()?;
+                    let mut args = vec![];
+                    while self.cur().t != Type::BraceRight {
+                        args.push(self.parse_prefix()?);
+                    }
+                    self.next()?;
+                    Node::Call { name, args }
+                } else {
+                    Node::Ident { name }
+                })
             }
-            Type::String(_) | Type::Integer(_) | Type::Double(_) | Type::True | Type::False => {
-                self.parse_atom()
-            }
+            Type::RawString(_)
+            | Type::RawInteger(_)
+            | Type::RawDouble(_)
+            | Type::True
+            | Type::False => self.parse_atom(),
             _ => self.parse_expr(),
         }
     }
@@ -96,7 +107,34 @@ impl<'p> Parser<'p> {
     }
 
     fn parse_fn(&mut self) -> Result<Node<'p>, PgError> {
-        todo!("Parser::parse_fn");
+        self.next()?;
+        let name = self.expect_ident()?;
+
+        self.expect(Type::BraceLeft)?;
+        let mut args = vec![];
+        while self.cur().t != Type::BraceRight {
+            let arg_name = self.expect_ident()?;
+            self.expect(Type::Colon)?;
+            let arg_type = self.parse_type()?;
+            args.push((arg_name, arg_type));
+        }
+        self.expect(Type::BraceRight)?;
+
+        let return_type = self.parse_type()?;
+
+        let mut body = vec![];
+        self.expect(Type::CurlyLeft)?;
+        while self.cur().t != Type::CurlyRight {
+            body.push(self.parse_prefix()?);
+        }
+        self.expect(Type::CurlyRight)?;
+
+        Ok(Node::Fn {
+            name,
+            args,
+            return_type,
+            body,
+        })
     }
 
     fn parse_match(&mut self) -> Result<Node<'p>, PgError> {
@@ -113,11 +151,13 @@ impl<'p> Parser<'p> {
 
     fn parse_atom(&mut self) -> Result<Node<'p>, PgError> {
         let atom_or_wrapped_expression = match self.cur.t {
-            Type::String(_) | Type::Integer(_) | Type::Double(_) | Type::True | Type::False => {
-                Node::Atom {
-                    raw: self.cur.clone(),
-                }
-            }
+            Type::RawString(_)
+            | Type::RawInteger(_)
+            | Type::RawDouble(_)
+            | Type::True
+            | Type::False => Node::Atom {
+                raw: self.cur.clone(),
+            },
             Type::BraceLeft => {
                 self.next()?;
                 let e = self.parse_expr()?;
@@ -151,7 +191,7 @@ impl<'p> Parser<'p> {
                 TypeExpr::Array(inner)
             }
             // Atom types
-            Type::TStr | Type::TInt | Type::TBool | Type::TVoid | Type::TDouble => {
+            Type::Str | Type::Int | Type::Bool | Type::Void | Type::Double => {
                 let tt = TypeExpr::Atom(self.cur().clone());
                 self.next()?;
 
@@ -200,13 +240,13 @@ mod happy {
                 name: Token {
                     line: 0,
                     col: "let variable_name".len(),
-                    t: Type::Ident("variable_name")
+                    t: Type::RawIdent("variable_name")
                 },
                 rhs: Box::new(Node::Atom {
                     raw: Token {
                         line: 0,
                         col: "let variable_name = 5".len(),
-                        t: Type::Integer("5"),
+                        t: Type::RawInteger("5"),
                     },
                 })
             }]

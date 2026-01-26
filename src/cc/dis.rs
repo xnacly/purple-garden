@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use crate::{
     cc::{Cc, ctx::Func},
+    ir::Const,
     op::Op,
+    vm,
 };
 
 impl Cc<'_> {
@@ -12,16 +14,27 @@ impl Cc<'_> {
             .functions
             .clone()
             .into_iter()
-            .map(|(k, v)| (v.pc, v))
+            .map(|(_, v)| (v.pc, v))
+            .collect();
+
+        let reverse_global_lookup_table: HashMap<_, _> = self
+            .ctx
+            .globals
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (v, k))
             .collect();
 
         println!("__entry: ");
 
         for (i, b) in self.buf.iter().enumerate() {
             if let Some(func) = reverse_function_lookup_table.get(&i) {
-                println!("__{}: ", func.name);
-                println!("; 0x{:04X} args={};size={}", func.pc, func.args, func.size);
+                println!(
+                    "__{}: \t\t\t; 0x{:04X} args={};size={}",
+                    func.name, func.pc, func.args, func.size
+                );
             }
+
             println!(
                 "\t{}",
                 match b {
@@ -35,10 +48,10 @@ impl Cc<'_> {
                     Op::Not { dst, src } => format!("not r{dst}, r{src}"),
                     Op::Mov { dst, src } => format!("mov r{dst}, r{src}"),
                     Op::LoadImm { dst, value } => format!("load_imm r{dst}, #{value}"),
-                    Op::LoadGlobal { dst, idx } => format!(
-                        "load_global r{dst}, {idx} ; {:?}",
-                        self.ctx.globals_vec.get(*idx as usize)
-                    ),
+                    Op::LoadGlobal { dst, idx } => format!("load_global r{dst}, {idx} \t; {:?}", {
+                        let raw_global = reverse_global_lookup_table.get(&(*idx as usize));
+                        <Const<'_> as Into<vm::Value>>::into(*raw_global.unwrap())
+                    }),
                     Op::Jmp { target } => format!("jmp {target}"),
                     Op::JmpF { cond, target } => format!("jmpf r{cond}, {target}"),
                     Op::Call { func } => format!(

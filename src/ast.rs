@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::lex::{Token, Type};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,14 +31,14 @@ pub enum Node<'inner> {
         rhs: Box<Node<'inner>>,
     },
 
-    /// fn <name>(<arg0:type0> <arg1:type1>): <return_type> {
+    /// fn <name>(<arg0:type0> <arg1:type1>) <return_type> {
     ///     <body>
     /// }
     Fn {
         name: Token<'inner>,
         /// (<identifier>, <type>)
         args: Vec<(Token<'inner>, TypeExpr<'inner>)>,
-        return_type: Option<TypeExpr<'inner>>,
+        return_type: TypeExpr<'inner>,
         body: Vec<Node<'inner>>,
     },
 
@@ -93,6 +95,17 @@ pub enum TypeExpr<'te> {
     },
 }
 
+impl Display for TypeExpr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeExpr::Atom(token) => write!(f, "{:?}", token.t),
+            TypeExpr::Option(type_expr) => write!(f, "?{}", type_expr),
+            TypeExpr::Array(type_expr) => write!(f, "[{}]", type_expr),
+            TypeExpr::Map { key, value } => write!(f, "{}[{}]", key, value),
+        }
+    }
+}
+
 impl<'a> Node<'a> {
     fn fmt_sexpr(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
         let pad = "  ".repeat(indent);
@@ -100,7 +113,7 @@ impl<'a> Node<'a> {
         match &self {
             Node::Atom { raw } => writeln!(f, "{}{:?}", pad, raw.t),
             Node::Ident { name } => {
-                if let Type::Ident(name) = name.t {
+                if let Type::RawIdent(name) = name.t {
                     writeln!(f, "{}{}", pad, name)
                 } else {
                     unreachable!()
@@ -128,7 +141,7 @@ impl<'a> Node<'a> {
                 writeln!(f, "{}}}", pad)
             }
             Node::Let { name, rhs } => {
-                let Type::Ident(name) = name.t else {
+                let Type::RawIdent(name) = name.t else {
                     unreachable!();
                 };
                 writeln!(f, "{}(let {}", pad, name)?;
@@ -141,32 +154,28 @@ impl<'a> Node<'a> {
                 body,
                 return_type,
             } => {
-                let Type::Ident(name) = name.t else {
+                let Type::RawIdent(name) = name.t else {
                     unreachable!();
                 };
                 write!(f, "{}(fn {} (", pad, name)?;
-                if args.is_empty() {
-                    write!(f, ")")?;
-                } else {
-                    for (i, arg) in args.iter().enumerate() {
-                        let (Type::Ident(arg_name), type_name) = (&arg.0.t, &arg.1) else {
-                            unreachable!();
-                        };
-                        if i == args.len() - 1 {
-                            write!(f, "{}:{:?}", arg_name, type_name)?;
-                        } else {
-                            write!(f, "{}:{:?} ", arg_name, type_name)?;
-                        }
+                for (i, arg) in args.iter().enumerate() {
+                    let (Type::RawIdent(arg_name), type_name) = (&arg.0.t, &arg.1) else {
+                        unreachable!();
+                    };
+                    if i == args.len() - 1 {
+                        write!(f, "{}:{}", arg_name, type_name)?;
+                    } else {
+                        write!(f, "{}:{} ", arg_name, type_name)?;
                     }
-                    writeln!(f, ")")?;
                 }
+                write!(f, ")")?;
                 for node in body {
                     node.fmt_sexpr(f, indent + 1)?;
                 }
-                writeln!(f, "{})->{:?}", pad, return_type)
+                writeln!(f, "{})->{}", pad, return_type)
             }
             Node::Call { name, args } => {
-                let Type::Ident(name) = name.t else {
+                let Type::RawIdent(name) = name.t else {
                     unreachable!();
                 };
                 write!(f, "{}({}", pad, name)?;
