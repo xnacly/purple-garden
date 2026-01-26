@@ -83,7 +83,13 @@ impl<'l> Lexer<'l> {
     }
 
     pub fn next(&mut self) -> Result<Token<'l>, PgError> {
-        // TODO: comments
+        if self.cur().is_some_and(|c| c == b'#') {
+            self.advance();
+            while !self.at_end() && self.cur().is_some_and(|c| c != b'\n') {
+                self.advance();
+            }
+        }
+
         while matches!(self.cur(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
             self.advance()
         }
