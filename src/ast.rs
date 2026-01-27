@@ -113,7 +113,7 @@ impl<'a> Node<'a> {
         match &self {
             Node::Atom { raw } => writeln!(f, "{}{:?}", pad, raw.t),
             Node::Ident { name } => {
-                if let Type::RawIdent(name) = name.t {
+                if let Type::Ident(name) = name.t {
                     writeln!(f, "{}{}", pad, name)
                 } else {
                     unreachable!()
@@ -141,7 +141,7 @@ impl<'a> Node<'a> {
                 writeln!(f, "{}}}", pad)
             }
             Node::Let { name, rhs } => {
-                let Type::RawIdent(name) = name.t else {
+                let Type::Ident(name) = name.t else {
                     unreachable!();
                 };
                 writeln!(f, "{}(let {}", pad, name)?;
@@ -154,12 +154,12 @@ impl<'a> Node<'a> {
                 body,
                 return_type,
             } => {
-                let Type::RawIdent(name) = name.t else {
+                let Type::Ident(name) = name.t else {
                     unreachable!();
                 };
                 write!(f, "{}(fn {} (", pad, name)?;
                 for (i, arg) in args.iter().enumerate() {
-                    let (Type::RawIdent(arg_name), type_name) = (&arg.0.t, &arg.1) else {
+                    let (Type::Ident(arg_name), type_name) = (&arg.0.t, &arg.1) else {
                         unreachable!();
                     };
                     if i == args.len() - 1 {
@@ -175,7 +175,7 @@ impl<'a> Node<'a> {
                 writeln!(f, "{})->{}", pad, return_type)
             }
             Node::Call { name, args } => {
-                let Type::RawIdent(name) = name.t else {
+                let Type::Ident(name) = name.t else {
                     unreachable!();
                 };
                 write!(f, "{}({}", pad, name)?;

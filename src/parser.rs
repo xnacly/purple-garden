@@ -39,7 +39,7 @@ impl<'p> Parser<'p> {
     }
 
     fn expect_ident(&mut self) -> Result<Token<'p>, PgError> {
-        if let Type::RawIdent(_) = self.cur.t {
+        if let Type::Ident(_) = self.cur.t {
             let matched = self.cur.clone();
             self.next()?;
             Ok(matched)
@@ -70,7 +70,7 @@ impl<'p> Parser<'p> {
             Type::Fn => self.parse_fn(),
             Type::Match => self.parse_match(),
             Type::For => self.parse_for(),
-            Type::RawIdent(_) => {
+            Type::Ident(_) => {
                 let name = self.cur.clone();
                 self.next()?;
                 // we are in a function call
@@ -86,11 +86,7 @@ impl<'p> Parser<'p> {
                     Node::Ident { name }
                 })
             }
-            Type::RawString(_)
-            | Type::RawInteger(_)
-            | Type::RawDouble(_)
-            | Type::True
-            | Type::False => self.parse_atom(),
+            Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => self.parse_atom(),
             _ => self.parse_expr(),
         }
     }
@@ -151,11 +147,7 @@ impl<'p> Parser<'p> {
 
     fn parse_atom(&mut self) -> Result<Node<'p>, PgError> {
         let atom_or_wrapped_expression = match self.cur.t {
-            Type::RawString(_)
-            | Type::RawInteger(_)
-            | Type::RawDouble(_)
-            | Type::True
-            | Type::False => Node::Atom {
+            Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => Node::Atom {
                 raw: self.cur.clone(),
             },
             Type::BraceLeft => {
@@ -218,38 +210,143 @@ impl<'p> Parser<'p> {
     }
 }
 
-/// Happy path ofc :^)
 #[cfg(test)]
-mod happy {
+mod tests {
     use crate::{
-        ast::Node,
+        ast::{Node, TypeExpr},
         lex::{Lexer, Token, Type},
         parser::Parser,
     };
 
-    #[test]
-    fn parse_let() {
-        let input = "let variable_name = 5";
-        let mut l = Lexer::new(input.as_bytes());
-        let p = Parser::new(&mut l).unwrap();
-        let ast = p.parse().unwrap();
+    macro_rules! mk_tok {
+        ($type:expr) => {
+            Token {
+                line: 0,
+                col: 0,
+                t: $type,
+            }
+        };
+    }
 
-        assert_eq!(
-            ast,
+    macro_rules! table_parse_types {
+        ($group:ident,$(($name:ident,$input:literal,$expected:expr))*) => {
+            mod $group {
+                use super::*;
+
+                $(
+                    #[test]
+                    fn $name() {
+                        let mut l = Lexer::new($input.as_bytes());
+                        let mut p = Parser::new(&mut l).unwrap();
+                        let tt = p.parse_type().unwrap();
+                        assert_eq!(tt, $expected);
+                    }
+                )*
+            }
+        };
+    }
+
+    table_parse_types! {
+        parse_types_atom,
+        (int,"int",TypeExpr::Atom(mk_tok!(Type::Int)))
+        (double,"double", TypeExpr::Atom(mk_tok!(Type::Double)))
+        (str,"str", TypeExpr::Atom(mk_tok!(Type::Str)))
+        (bool,"bool", TypeExpr::Atom(mk_tok!(Type::Bool)))
+        (void,"void", TypeExpr::Atom(mk_tok!(Type::Void)))
+    }
+
+    table_parse_types! {
+        parse_types_option,
+        (int,"?int", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Int)))))
+        (double,"?double", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Double)))))
+        (str,"?str", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Str)))))
+        (bool,"?bool", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Bool)))))
+        (void,"?void", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))
+        (double_wrapped,"??void", TypeExpr::Option(Box::new(TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))))
+    }
+
+    table_parse_types! {
+        parse_types_array,
+        (int,"[int]", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Int)))))
+        (double,"[double]", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Double)))))
+        (str,"[str]", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Str)))))
+        (bool,"[bool]", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Bool)))))
+        (void,"[void]", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))
+        (double_wrapped,"[[void]]", TypeExpr::Array(Box::new(TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))))
+    }
+
+    table_parse_types! {
+        parse_types_map,
+        (str_to_int,"str[int]", TypeExpr::Map{
+            key: Box::new(TypeExpr::Atom(mk_tok!(Type::Str))),
+            value: Box::new(TypeExpr::Atom(mk_tok!(Type::Int))),
+        })
+        (int_to_str,"int[str]", TypeExpr::Map{
+            key: Box::new(TypeExpr::Atom(mk_tok!(Type::Int))),
+            value: Box::new(TypeExpr::Atom(mk_tok!(Type::Str))),
+        })
+        (int_to_optional_str,"int[?str]", TypeExpr::Map{
+            key: Box::new(TypeExpr::Atom(mk_tok!(Type::Int))),
+            value: Box::new(
+                TypeExpr::Option(
+                    Box::new(
+                        TypeExpr::Atom(mk_tok!(Type::Str)),
+                        )
+                    )
+                ),
+        })
+        (set_like_str_to_void,"str[void]", TypeExpr::Map{
+            key: Box::new(TypeExpr::Atom(mk_tok!(Type::Str))),
+            value: Box::new(TypeExpr::Atom(mk_tok!(Type::Void))),
+        })
+        (str_to_map_of_maps,"str[str[void]]", TypeExpr::Map{
+            key: Box::new(TypeExpr::Atom(mk_tok!(Type::Str))),
+            value: Box::new(TypeExpr::Map{
+                key: Box::new(TypeExpr::Atom(mk_tok!(Type::Str))),
+                value: Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))
+            }),
+        })
+    }
+
+    macro_rules! table {
+        ($group:ident,$(($name:ident,$input:literal,$expected:expr))*) => {
+            mod $group {
+                use super::*;
+
+                $(
+                    #[test]
+                    fn $name() {
+                        let mut l = Lexer::new($input.as_bytes());
+                        let p = Parser::new(&mut l).unwrap();
+                        let tt = p.parse().unwrap();
+                        assert_eq!(tt, $expected);
+                    }
+                )*
+            }
+        };
+    }
+
+    table! {
+        happy_path,
+        (
+            binding,
+            "let variable_name = 5",
             vec![Node::Let {
-                name: Token {
-                    line: 0,
-                    col: "let variable_name".len(),
-                    t: Type::RawIdent("variable_name")
-                },
+                name: mk_tok!(Type::Ident("variable_name")),
                 rhs: Box::new(Node::Atom {
-                    raw: Token {
-                        line: 0,
-                        col: "let variable_name = 5".len(),
-                        t: Type::RawInteger("5"),
-                    },
+                    raw: mk_tok!(Type::I("5")),
                 })
             }]
-        );
+        )
+        (
+            function,
+            "fn zero_args() void {}",
+            vec![Node::Fn {
+                name: mk_tok!(Type::Ident("zero_args")),
+                args: vec![],
+                return_type: TypeExpr::Atom(mk_tok!(Type::Void)),
+                body: vec![],
+            }]
+        )
     }
 }

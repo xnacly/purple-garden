@@ -88,7 +88,7 @@ impl<'cc> Cc<'cc> {
         Ok(match &ast {
             Node::Atom { raw } => {
                 let constant = match &raw.t {
-                    Type::RawInteger(s) => {
+                    Type::I(s) => {
                         let value = s.parse().map_err(|e: num::ParseIntError| {
                             PgError::with_msg(e.to_string(), raw)
                         })?;
@@ -106,14 +106,14 @@ impl<'cc> Cc<'cc> {
                             return Ok(Some(r.into()));
                         }
                     }
-                    Type::RawDouble(s) => Const::Double(
+                    Type::D(s) => Const::Double(
                         s.parse::<f64>()
                             .map_err(|e: num::ParseFloatError| {
                                 PgError::with_msg(e.to_string(), raw)
                             })?
                             .to_bits(),
                     ),
-                    Type::RawString(s) => Const::Str(s),
+                    Type::S(s) => Const::Str(s),
                     Type::True => Const::True,
                     Type::False => Const::False,
                     _ => unreachable!(
@@ -124,7 +124,7 @@ impl<'cc> Cc<'cc> {
                 Some(self.load_const(constant).into())
             }
             Node::Ident { name } => {
-                let Type::RawIdent(ident_name) = name.t else {
+                let Type::Ident(ident_name) = name.t else {
                     unreachable!("Node::Ident.name.t not Type::Ident, compiler bug");
                 };
 
@@ -163,7 +163,7 @@ impl<'cc> Cc<'cc> {
             }
             Node::Let { name, rhs } => {
                 let src = self.cc(rhs)?;
-                let Type::RawIdent(let_name) = name.t else {
+                let Type::Ident(let_name) = name.t else {
                     unreachable!("Node::Let.name.t not Type::Ident, compiler bug");
                 };
 
@@ -187,7 +187,7 @@ impl<'cc> Cc<'cc> {
                 let skip_jmp = self.buf.len();
                 self.buf.push(Op::Jmp { target: 0 });
 
-                let Type::RawIdent(fn_name) = name.t else {
+                let Type::Ident(fn_name) = name.t else {
                     unreachable!(
                         "This should be a Token::Ident, it was {:?}, this is a compiler bug",
                         name
@@ -204,7 +204,7 @@ impl<'cc> Cc<'cc> {
                 self.register.mark();
 
                 for (i, (arg, _)) in args.iter().enumerate() {
-                    let Type::RawIdent(name) = arg.t else {
+                    let Type::Ident(name) = arg.t else {
                         unreachable!("Function argument names must be identifiers, compiler bug");
                     };
 
@@ -249,7 +249,7 @@ impl<'cc> Cc<'cc> {
                 None
             }
             Node::Call { name, args } => {
-                let Type::RawIdent(call_name) = name.t else {
+                let Type::Ident(call_name) = name.t else {
                     unreachable!("InnerNode::Call's token can only be an ident");
                 };
 

@@ -20,10 +20,14 @@ pub enum Type<'t> {
     CurlyLeft,
     CurlyRight,
 
-    RawString(&'t str),
-    RawIdent(&'t str),
-    RawDouble(&'t str),
-    RawInteger(&'t str),
+    /// compile time known string
+    S(&'t str),
+    /// double
+    D(&'t str),
+    /// integer
+    I(&'t str),
+    /// literal identifier
+    Ident(&'t str),
 
     // keywords
     True,
@@ -41,9 +45,23 @@ pub enum Type<'t> {
     Void,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct Token<'t> {
     pub line: usize,
     pub col: usize,
     pub t: Type<'t>,
+}
+
+#[cfg(test)]
+impl PartialEq for Token<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.t == other.t
+    }
+}
+
+#[cfg(not(test))]
+impl PartialEq for Token<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.line == other.line && self.col == other.col && self.t == other.t
+    }
 }
