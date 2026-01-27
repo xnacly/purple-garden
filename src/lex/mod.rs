@@ -88,6 +88,10 @@ impl<'l> Lexer<'l> {
             while !self.at_end() && self.cur().is_some_and(|c| c != b'\n') {
                 self.advance();
             }
+            // skip newline
+            self.advance();
+
+            return self.next();
         }
 
         while matches!(self.cur(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
@@ -115,7 +119,7 @@ impl<'l> Lexer<'l> {
             b'=' => self.make_tok(Type::Equal),
             b'<' => self.make_tok(Type::LessThan),
             b'>' => self.make_tok(Type::GreaterThan),
-            b'!' => self.make_tok(Type::Exlaim),
+            b'!' => self.make_tok(Type::Exclaim),
             b'?' => self.make_tok(Type::Question),
             b':' if matches!(self.peek(), Some(b':')) => {
                 self.advance();
@@ -232,7 +236,7 @@ mod tests {
                 Type::Equal,
                 Type::LessThan,
                 Type::GreaterThan,
-                Type::Exlaim,
+                Type::Exclaim,
                 Type::BraketLeft,
                 Type::BraketRight,
                 Type::CurlyLeft,

@@ -120,7 +120,7 @@ impl<'a> Node<'a> {
                 }
             }
             Node::Bin { op, lhs, rhs } => {
-                writeln!(f, "{}({:?}", pad, op)?;
+                writeln!(f, "{}({:?}", pad, op.t)?;
                 lhs.fmt_sexpr(f, indent + 1)?;
                 rhs.fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)

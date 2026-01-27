@@ -7,6 +7,7 @@ pub enum Value<'v> {
     True,
     False,
     Int(i64),
+    // TODO: see https://research.swtch.com/fp (Floating-Point Printing and Parsing Can Be Simple)
     Double(f64),
     /// a view into the bytes of the interpreters input, compile time strings
     Str(&'v str),

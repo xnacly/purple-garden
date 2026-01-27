@@ -11,7 +11,7 @@ pub enum Type<'t> {
     DoubleEqual,
     LessThan,
     GreaterThan,
-    Exlaim,
+    Exclaim,
     Question,
     Colon,
     DoubleColon,

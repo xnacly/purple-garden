@@ -70,24 +70,7 @@ impl<'p> Parser<'p> {
             Type::Fn => self.parse_fn(),
             Type::Match => self.parse_match(),
             Type::For => self.parse_for(),
-            Type::Ident(_) => {
-                let name = self.cur.clone();
-                self.next()?;
-                // we are in a function call
-                Ok(if self.cur().t == Type::BraceLeft {
-                    self.next()?;
-                    let mut args = vec![];
-                    while self.cur().t != Type::BraceRight {
-                        args.push(self.parse_prefix()?);
-                    }
-                    self.next()?;
-                    Node::Call { name, args }
-                } else {
-                    Node::Ident { name }
-                })
-            }
-            Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => self.parse_atom(),
-            _ => self.parse_expr(),
+            _ => self.parse_expr(0),
         }
     }
 
@@ -141,30 +124,95 @@ impl<'p> Parser<'p> {
         todo!("Parser::parse_for");
     }
 
-    fn parse_expr(&mut self) -> Result<Node<'p>, PgError> {
-        todo!("Parser::expr");
-    }
-
-    fn parse_atom(&mut self) -> Result<Node<'p>, PgError> {
-        let atom_or_wrapped_expression = match self.cur.t {
-            Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => Node::Atom {
-                raw: self.cur.clone(),
-            },
+    fn parse_expr(&mut self, min_bp: u8) -> Result<Node<'p>, PgError> {
+        let mut lhs = match self.cur().t {
+            Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => {
+                let raw = self.cur.clone();
+                self.next()?;
+                Node::Atom { raw }
+            }
+            Type::Ident(_) => {
+                let name = self.cur.clone();
+                self.next()?;
+                // we are in a function call
+                if self.cur().t == Type::BraceLeft {
+                    self.next()?;
+                    let mut args = vec![];
+                    while self.cur().t != Type::BraceRight {
+                        args.push(self.parse_prefix()?);
+                    }
+                    self.next()?;
+                    Node::Call { name, args }
+                } else {
+                    Node::Ident { name }
+                }
+            }
             Type::BraceLeft => {
                 self.next()?;
-                let e = self.parse_expr()?;
+                let e = self.parse_expr(0)?;
                 self.expect(Type::BraceRight)?;
                 e
             }
-            _ => {
-                return Err(PgError::with_msg(
-                    "Expected atom or expr wrapped by ()",
-                    self.cur(),
-                ));
+            Type::Plus | Type::Minus => {
+                let rbp = Parser::prefix_binding_power(&self.cur().t);
+                self.next()?;
+                let _ = self.parse_expr(rbp)?;
+                todo!("prefix operations")
             }
+            _ => todo!("{:?}", self.cur().t),
         };
-        self.next()?;
-        Ok(atom_or_wrapped_expression)
+
+        loop {
+            let op = match self.cur().t {
+                Type::Plus
+                | Type::Minus
+                | Type::Asteriks
+                | Type::Slash
+                | Type::Equal
+                | Type::DoubleEqual
+                | Type::LessThan
+                | Type::GreaterThan => self.cur().clone(),
+                Type::Eof | _ => break,
+            };
+
+            if let Some((lbp, rbp)) = Parser::infix_binding_power(&op.t) {
+                if lbp < min_bp {
+                    break;
+                }
+
+                self.next()?;
+
+                let rhs = self.parse_expr(rbp)?;
+                lhs = Node::Bin {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                };
+
+                continue;
+            }
+
+            break;
+        }
+
+        Ok(lhs)
+    }
+
+    fn prefix_binding_power(op: &Type) -> u8 {
+        // add !<expr>,?<expr>, the latter being the try operator
+        match op {
+            Type::Plus | Type::Minus => 5,
+            _ => unreachable!(),
+        }
+    }
+
+    fn infix_binding_power(op: &Type) -> Option<(u8, u8)> {
+        // TODO: add !=,==,?,>,<,<=,>=
+        Some(match op {
+            Type::Plus | Type::Minus => (1, 2),
+            Type::Asteriks | Type::Slash => (3, 4),
+            _ => return None,
+        })
     }
 
     fn parse_type(&mut self) -> Result<TypeExpr<'p>, PgError> {
@@ -346,6 +394,23 @@ mod tests {
                 args: vec![],
                 return_type: TypeExpr::Atom(mk_tok!(Type::Void)),
                 body: vec![],
+            }]
+        )
+        (
+            expression,
+            "3+0.1415*5/27",
+            vec![Node::Bin{
+                op: mk_tok!(Type::Plus),
+                lhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("3")) }),
+                rhs: Box::new(Node::Bin{
+                    op: mk_tok!(Type::Slash),
+                    lhs: Box::new(Node::Bin{
+                        op: mk_tok!(Type::Asteriks),
+                        lhs: Box::new(Node::Atom { raw: mk_tok!(Type::D("0.1415")) }),
+                        rhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("5")) }),
+                    }),
+                    rhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("27")) }),
+                })
             }]
         )
     }
