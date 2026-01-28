@@ -38,14 +38,14 @@ pub enum Const<'c> {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Id(u32);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct TypeId {
     id: Id,
     ty: Type,
 }
 
 #[derive(Debug, Clone)]
-pub enum Instr {
+pub enum Instr<'i> {
     Add {
         dst: TypeId,
         lhs: Id,
@@ -66,10 +66,15 @@ pub enum Instr {
         lhs: Id,
         rhs: Id,
     },
+    Eq {
+        dst: TypeId,
+        lhs: Id,
+        rhs: Id,
+    },
 
     LoadConst {
         dst: TypeId,
-        value: Const<'static>,
+        value: Const<'i>,
     },
 
     Call {
@@ -87,17 +92,17 @@ pub enum Terminator {
 }
 
 #[derive(Debug, Clone)]
-pub struct Block {
+pub struct Block<'b> {
     id: Id,
-    instructions: Vec<Instr>,
+    instructions: Vec<Instr<'b>>,
     params: Vec<TypeId>,
     term: Terminator,
 }
 
-#[derive(Debug, Clone)]
-pub struct Func {
+#[derive(Debug, Clone, Default)]
+pub struct Func<'f> {
     id: Id,
     entry: Id,
     ret: Option<Type>,
-    blocks: Vec<Block>,
+    blocks: Vec<Block<'f>>,
 }

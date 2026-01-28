@@ -8,7 +8,7 @@ impl Display for TypeId {
     }
 }
 
-impl Display for Func {
+impl Display for Func<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let entry_block = self
             .blocks
@@ -57,6 +57,9 @@ impl Display for Func {
                     }
                     Instr::Div { dst, lhs, rhs } => {
                         writeln!(f, "%v{} = div %v{}, %v{}", dst, lhs.0, rhs.0)?
+                    }
+                    Instr::Eq { dst, lhs, rhs } => {
+                        writeln!(f, "%v{} = eq %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
                     Instr::LoadConst { dst, value } => writeln!(f, "%v{} = {:?}", dst, value)?,
                     Instr::Call { dst, func, args } => {
@@ -137,15 +140,15 @@ mod ir {
 
         let block0 = Block {
             id: b0,
-            params: vec![v0, v1, v2],
+            params: vec![v0.clone(), v1.clone(), v2.clone()],
             instructions: vec![
                 Instr::Add {
-                    dst: v3,
+                    dst: v3.clone(),
                     lhs: v1.id,
                     rhs: v2.id,
                 },
                 Instr::Add {
-                    dst: v4,
+                    dst: v4.clone(),
                     lhs: v0.id,
                     rhs: v3.id,
                 },
