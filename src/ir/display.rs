@@ -12,8 +12,7 @@ impl Display for Func<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let entry_block = self
             .blocks
-            .iter()
-            .find(|b| b.id == self.entry)
+            .first()
             .expect("Func.entry does not reference a valid block");
 
         write!(f, "fn @f{}(", self.id.0)?;
@@ -159,7 +158,6 @@ mod ir {
         let func = Func {
             id: Id(0),
             ret: Some(Type::Int),
-            entry: block0.id,
             blocks: vec![block0],
         };
 

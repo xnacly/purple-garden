@@ -102,7 +102,6 @@ pub struct Block<'b> {
 #[derive(Debug, Clone, Default)]
 pub struct Func<'f> {
     id: Id,
-    entry: Id,
     ret: Option<Type>,
     blocks: Vec<Block<'f>>,
 }

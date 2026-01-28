@@ -2,6 +2,9 @@ use std::fmt::Display;
 
 use crate::lex::{Token, Type};
 
+// TODO: make both Node and TypeExpr allocate into an arena and use indices into said arena instead
+// of heap allocating most of the children
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Node<'inner> {
     /// String|Double|Integer|True|False
@@ -169,6 +172,9 @@ impl<'a> Node<'a> {
                     }
                 }
                 write!(f, ")")?;
+                if !args.is_empty() {
+                    writeln!(f, "")?;
+                }
                 for node in body {
                     node.fmt_sexpr(f, indent + 1)?;
                 }

@@ -1,4 +1,4 @@
-use crate::ir::Const;
+use crate::{ast::TypeExpr, ir::Const, lex};
 
 /// Compile time type system,
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -9,7 +9,7 @@ pub enum Type {
     Str,
     Option(Box<Type>),
     Array(Box<Type>),
-    Map(Box<Type>),
+    Map { key: Box<Type>, value: Box<Type> },
 }
 
 impl From<Const<'_>> for Type {
@@ -19,6 +19,32 @@ impl From<Const<'_>> for Type {
             Const::Int(_) => Self::Int,
             Const::Double(_) => Self::Double,
             Const::Str(_) => Self::Str,
+        }
+    }
+}
+
+impl From<lex::Type<'_>> for Type {
+    fn from(value: lex::Type) -> Self {
+        match value {
+            lex::Type::Int => Self::Int,
+            lex::Type::Double => Self::Double,
+            lex::Type::Str => Self::Str,
+            lex::Type::Bool => Self::Bool,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<&TypeExpr<'_>> for Type {
+    fn from(value: &TypeExpr<'_>) -> Self {
+        match value {
+            TypeExpr::Atom(token) => token.t.into(),
+            TypeExpr::Option(type_expr) => Type::Option(Box::new(type_expr.as_ref().into())),
+            TypeExpr::Array(type_expr) => Type::Array(Box::new(type_expr.as_ref().into())),
+            TypeExpr::Map { key, value } => Type::Map {
+                key: Box::new(key.as_ref().into()),
+                value: Box::new(value.as_ref().into()),
+            },
         }
     }
 }

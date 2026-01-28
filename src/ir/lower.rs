@@ -1,6 +1,11 @@
 use std::{collections::HashMap, num};
 
-use crate::{ast::Node, err::PgError, ir::*, lex::Type};
+use crate::{
+    ast::{Node, TypeExpr},
+    err::PgError,
+    ir::*,
+    lex::{Token, Type},
+};
 
 #[derive(Default)]
 struct IdStore {
@@ -36,6 +41,7 @@ pub struct Lower<'lower> {
     id_store: IdStore,
     /// maps ast variable names to ssa values
     env: HashMap<&'lower str, Id>,
+    func_name_to_id: HashMap<&'lower str, Id>,
 }
 
 impl<'lower> Lower<'lower> {
@@ -143,17 +149,60 @@ impl<'lower> Lower<'lower> {
                 args,
                 return_type,
                 body,
-            } => todo!(),
+            } => {
+                let id = self.id_store.new_functions();
+                let Type::Ident(ident_name) = name.t else {
+                    unreachable!()
+                };
+                self.func_name_to_id.insert(ident_name, id);
+
+                let func = Func {
+                    id,
+                    blocks: vec![
+                        // entry block
+                        Block {
+                            id: self.id_store.new_block(),
+                            instructions: vec![],
+                            params: args
+                                .into_iter()
+                                .map(|(token, token_type)| {
+                                    let id = self.id_store.new_value();
+                                    let Type::Ident(ident) = token.t else {
+                                        unreachable!();
+                                    };
+                                    self.env.insert(ident, id);
+                                    TypeId {
+                                        id,
+                                        ty: token_type.into(),
+                                    }
+                                })
+                                .collect(),
+                            term: Terminator::Return(None),
+                        },
+                    ],
+                    ret: if let TypeExpr::Atom(Token { t: Type::Void, .. }) = return_type {
+                        None
+                    } else {
+                        if let TypeExpr::Atom(Token { t, .. }) = return_type {
+                            Some((*t).into())
+                        } else {
+                            None
+                        }
+                    },
+                };
+                self.current_func = func;
+                self.functions.push(self.current_func.clone());
+                None
+            }
             _ => todo!("{:?}", node),
         })
     }
 
     /// Lower [ast] into a list of Func nodes, the entry point is always `__pg_entry`
-    pub fn ir_from(&mut self, ast: &'lower [Node]) -> Result<Vec<Func<'lower>>, PgError> {
+    pub fn ir_from(mut self, ast: &'lower [Node]) -> Result<Vec<Func<'lower>>, PgError> {
         // entry function
         let entry = Func {
             id: Id(0),
-            entry: Id(0),
             ret: None,
             blocks: vec![Block {
                 id: Id(0),
@@ -163,12 +212,11 @@ impl<'lower> Lower<'lower> {
             }],
         };
         self.current_func = entry;
-
         for node in ast {
             let _ = &self.lower_node(node)?;
         }
-        self.functions.push(self.current_func.clone());
-        Ok(self.functions.clone())
+
+        Ok(self.functions)
     }
 }
 
