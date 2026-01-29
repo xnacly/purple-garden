@@ -27,7 +27,7 @@ impl IdStore {
         Id(blk as u32)
     }
 
-    fn new_functions(&mut self) -> Id {
+    fn new_function(&mut self) -> Id {
         let fun = self.functions;
         self.functions += 1;
         Id(fun as u32)
@@ -47,6 +47,15 @@ pub struct Lower<'lower> {
 impl<'lower> Lower<'lower> {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn emit(&mut self, i: Instr<'lower>) {
+        self.current_func
+            .blocks
+            .last_mut()
+            .unwrap()
+            .instructions
+            .push(i);
     }
 
     fn lower_node(&mut self, node: &'lower Node) -> Result<Option<Id>, PgError> {
@@ -72,18 +81,13 @@ impl<'lower> Lower<'lower> {
                 };
 
                 let id = self.id_store.new_value();
-                self.current_func
-                    .blocks
-                    .get_mut(self.id_store.blocks)
-                    .unwrap()
-                    .instructions
-                    .push(Instr::LoadConst {
-                        dst: TypeId {
-                            id,
-                            ty: value.into(),
-                        },
-                        value,
-                    });
+                self.emit(Instr::LoadConst {
+                    dst: TypeId {
+                        id,
+                        ty: value.into(),
+                    },
+                    value,
+                });
 
                 Some(id)
             }
@@ -111,22 +115,18 @@ impl<'lower> Lower<'lower> {
                 let id = self.id_store.new_value();
                 let dst = TypeId {
                     id,
+                    // TODO: this has to be inferred via the typed ast pass
                     ty: ptype::Type::Int,
                 };
 
-                self.current_func
-                    .blocks
-                    .get_mut(self.id_store.blocks)
-                    .unwrap()
-                    .instructions
-                    .push(match op.t {
-                        Type::Plus => Instr::Add { dst, lhs, rhs },
-                        Type::Minus => Instr::Sub { dst, lhs, rhs },
-                        Type::Asteriks => Instr::Mul { dst, lhs, rhs },
-                        Type::Slash => Instr::Div { dst, lhs, rhs },
-                        Type::DoubleEqual => Instr::Eq { dst, lhs, rhs },
-                        _ => unreachable!(),
-                    });
+                self.emit(match op.t {
+                    Type::Plus => Instr::Add { dst, lhs, rhs },
+                    Type::Minus => Instr::Sub { dst, lhs, rhs },
+                    Type::Asteriks => Instr::Mul { dst, lhs, rhs },
+                    Type::Slash => Instr::Div { dst, lhs, rhs },
+                    Type::DoubleEqual => Instr::Eq { dst, lhs, rhs },
+                    _ => unreachable!(),
+                });
 
                 Some(id)
             }
@@ -150,7 +150,9 @@ impl<'lower> Lower<'lower> {
                 return_type,
                 body,
             } => {
-                let id = self.id_store.new_functions();
+                let old_func = std::mem::take(&mut self.current_func);
+                let old_env = std::mem::take(&mut self.env);
+                let id = self.id_store.new_function();
                 let Type::Ident(ident_name) = name.t else {
                     unreachable!()
                 };
@@ -164,7 +166,7 @@ impl<'lower> Lower<'lower> {
                             id: self.id_store.new_block(),
                             instructions: vec![],
                             params: args
-                                .into_iter()
+                                .iter()
                                 .map(|(token, token_type)| {
                                     let id = self.id_store.new_value();
                                     let Type::Ident(ident) = token.t else {
@@ -190,9 +192,49 @@ impl<'lower> Lower<'lower> {
                         }
                     },
                 };
+
                 self.current_func = func;
-                self.functions.push(self.current_func.clone());
+                let mut last_id = None;
+                for node in body {
+                    last_id = self.lower_node(node)?;
+                }
+                if last_id.is_some() {
+                    self.current_func.blocks.last_mut().unwrap().term = Terminator::Return(last_id);
+                }
+
+                self.functions.push(std::mem::take(&mut self.current_func));
+                self.env = old_env;
+                self.current_func = old_func;
                 None
+            }
+            Node::Call { name, args } => {
+                let Type::Ident(ident_name) = name.t else {
+                    unreachable!()
+                };
+
+                let Some(target_id) = self.func_name_to_id.get(ident_name).cloned() else {
+                    return Err(PgError::with_msg(
+                        format!("Undefined function `{ident_name}`"),
+                        name,
+                    ));
+                };
+
+                let mut a = vec![];
+                for arg in args {
+                    let Some(id) = self.lower_node(arg)? else {
+                        unreachable!();
+                    };
+                    a.push(id);
+                }
+
+                let dst = self.id_store.new_value();
+                self.emit(Instr::Call {
+                    dst: Some(dst),
+                    func: target_id,
+                    args: a,
+                });
+
+                Some(dst)
             }
             _ => todo!("{:?}", node),
         })
@@ -201,20 +243,21 @@ impl<'lower> Lower<'lower> {
     /// Lower [ast] into a list of Func nodes, the entry point is always `__pg_entry`
     pub fn ir_from(mut self, ast: &'lower [Node]) -> Result<Vec<Func<'lower>>, PgError> {
         // entry function
-        let entry = Func {
-            id: Id(0),
+        self.current_func = Func {
+            id: self.id_store.new_function(),
             ret: None,
             blocks: vec![Block {
-                id: Id(0),
+                id: self.id_store.new_block(),
                 instructions: vec![],
                 params: vec![],
                 term: Terminator::Return(None),
             }],
         };
-        self.current_func = entry;
+
         for node in ast {
             let _ = &self.lower_node(node)?;
         }
+        self.functions.push(self.current_func);
 
         Ok(self.functions)
     }

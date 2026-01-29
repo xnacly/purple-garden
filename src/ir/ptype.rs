@@ -1,3 +1,6 @@
+//! Purple garden type system
+use std::fmt::Display;
+
 use crate::{ast::TypeExpr, ir::Const, lex};
 
 /// Compile time type system,
@@ -10,6 +13,22 @@ pub enum Type {
     Option(Box<Type>),
     Array(Box<Type>),
     Map { key: Box<Type>, value: Box<Type> },
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Bool => write!(f, "Bool"),
+            Type::Int => write!(f, "Int"),
+            Type::Double => write!(f, "Double"),
+            Type::Str => write!(f, "Str"),
+            Type::Option(inner) => write!(f, "Option<{}>", inner),
+            Type::Array(inner) => write!(f, "Array<{}>", inner),
+            Type::Map { key, value } => {
+                write!(f, "Map<{}, {}>", key, value)
+            }
+        }
+    }
 }
 
 impl From<Const<'_>> for Type {

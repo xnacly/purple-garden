@@ -106,7 +106,7 @@ fn main() {
             .to_vec(),
     };
     let mut lexer = Lexer::new(&input);
-    let ast = match Parser::new(&mut lexer).map(|n| n.parse()).flatten() {
+    let ast = match Parser::new(&mut lexer).and_then(|n| n.parse()) {
         Ok(a) => a,
         Err(e) => {
             e.render();
@@ -124,7 +124,7 @@ fn main() {
         );
     }
 
-    let mut lower = ir::lower::Lower::new();
+    let lower = ir::lower::Lower::new();
     let ir = match lower.ir_from(&ast) {
         Ok(ir) => ir,
         Err(e) => {

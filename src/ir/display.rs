@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::ir::{Func, Instr, Terminator, TypeId};
+use crate::ir::{Const, Func, Instr, Terminator, TypeId};
 
 impl Display for TypeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -23,7 +23,14 @@ impl Display for Func<'_> {
                 write!(f, "%v{}, ", arg)?;
             }
         }
-        writeln!(f, ") -> {:?} {{", self.ret)?;
+        writeln!(
+            f,
+            ") -> {} {{",
+            self.ret
+                .as_ref()
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "void".to_string())
+        )?;
 
         for block in self.blocks.iter() {
             if block.params.is_empty() || block.id == entry_block.id {
@@ -60,7 +67,7 @@ impl Display for Func<'_> {
                     Instr::Eq { dst, lhs, rhs } => {
                         writeln!(f, "%v{} = eq %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
-                    Instr::LoadConst { dst, value } => writeln!(f, "%v{} = {:?}", dst, value)?,
+                    Instr::LoadConst { dst, value } => writeln!(f, "%v{} = {}", dst, value)?,
                     Instr::Call { dst, func, args } => {
                         if let Some(dst) = dst {
                             write!(f, "%v{} = ", dst.0)?;
@@ -162,5 +169,17 @@ mod ir {
         };
 
         println!("{}", func);
+    }
+}
+
+impl Display for Const<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Const::False => write!(f, "false"),
+            Const::True => write!(f, "true"),
+            Const::Int(int) => write!(f, "{int}"),
+            Const::Double(bits) => write!(f, "{}", f64::from_bits(*bits)),
+            Const::Str(str) => write!(f, "`{str}`"),
+        }
     }
 }

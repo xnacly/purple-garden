@@ -13,8 +13,8 @@ impl Cc<'_> {
             .ctx
             .functions
             .clone()
-            .into_iter()
-            .map(|(_, v)| (v.pc, v))
+            .into_values()
+            .map(|v| (v.pc, v))
             .collect();
 
         let reverse_global_lookup_table: HashMap<_, _> = self

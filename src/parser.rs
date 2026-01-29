@@ -162,18 +162,16 @@ impl<'p> Parser<'p> {
             _ => todo!("{:?}", self.cur().t),
         };
 
-        loop {
-            let op = match self.cur().t {
-                Type::Plus
-                | Type::Minus
-                | Type::Asteriks
-                | Type::Slash
-                | Type::Equal
-                | Type::DoubleEqual
-                | Type::LessThan
-                | Type::GreaterThan => self.cur().clone(),
-                Type::Eof | _ => break,
-            };
+        while let Type::Plus
+        | Type::Minus
+        | Type::Asteriks
+        | Type::Slash
+        | Type::Equal
+        | Type::DoubleEqual
+        | Type::LessThan
+        | Type::GreaterThan = self.cur().t
+        {
+            let op = self.cur().clone();
 
             if let Some((lbp, rbp)) = Parser::infix_binding_power(&op.t) {
                 if lbp < min_bp {
@@ -191,8 +189,6 @@ impl<'p> Parser<'p> {
 
                 continue;
             }
-
-            break;
         }
 
         Ok(lhs)

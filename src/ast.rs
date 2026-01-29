@@ -173,7 +173,7 @@ impl<'a> Node<'a> {
                 }
                 write!(f, ")")?;
                 if !args.is_empty() {
-                    writeln!(f, "")?;
+                    writeln!(f)?;
                 }
                 for node in body {
                     node.fmt_sexpr(f, indent + 1)?;

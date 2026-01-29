@@ -20,8 +20,8 @@
 
 mod display;
 pub mod lower;
-/// Purple garden type system
 pub mod ptype;
+pub mod typecheck;
 
 use crate::ir::ptype::Type;
 
