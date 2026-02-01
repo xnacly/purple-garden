@@ -30,7 +30,7 @@ impl Cc<'_> {
         for (i, b) in self.buf.iter().enumerate() {
             if let Some(func) = reverse_function_lookup_table.get(&i) {
                 println!(
-                    "__{}: \t\t\t; 0x{:04X} args={};size={}",
+                    "\n__{}: \t\t\t; 0x{:04X} args={};size={}",
                     func.name, func.pc, func.args, func.size
                 );
             }
@@ -62,7 +62,7 @@ impl Cc<'_> {
                             .name
                     ),
                     Op::Sys { .. } => "sys <syscall_name_here>".to_string(),
-                    Op::Ret => "ret".into(),
+                    Op::Ret => "ret\n".into(),
                     Op::Nop => "nop".into(),
                 }
             );

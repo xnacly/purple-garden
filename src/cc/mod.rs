@@ -86,7 +86,7 @@ impl<'cc> Cc<'cc> {
 
     fn cc(&mut self, ast: &Node<'cc>) -> Result<Option<Reg>, PgError> {
         Ok(match &ast {
-            Node::Atom { raw } => {
+            Node::Atom { raw, id } => {
                 let constant = match &raw.t {
                     Type::I(s) => {
                         let value = s.parse().map_err(|e: num::ParseIntError| {
@@ -123,7 +123,7 @@ impl<'cc> Cc<'cc> {
 
                 Some(self.load_const(constant).into())
             }
-            Node::Ident { name } => {
+            Node::Ident { name, id } => {
                 let Type::Ident(ident_name) = name.t else {
                     unreachable!("Node::Ident.name.t not Type::Ident, compiler bug");
                 };
@@ -135,7 +135,7 @@ impl<'cc> Cc<'cc> {
                     perm: true,
                 })
             }
-            Node::Bin { op, lhs, rhs } => {
+            Node::Bin { op, lhs, rhs, id } => {
                 let lhs_reg = self.cc(lhs.as_ref())?.unwrap();
                 let rhs_reg = self.cc(rhs.as_ref())?.unwrap();
 
@@ -161,7 +161,7 @@ impl<'cc> Cc<'cc> {
 
                 Some(dst.into())
             }
-            Node::Let { name, rhs } => {
+            Node::Let { name, rhs, id } => {
                 let src = self.cc(rhs)?;
                 let Type::Ident(let_name) = name.t else {
                     unreachable!("Node::Let.name.t not Type::Ident, compiler bug");
@@ -248,7 +248,7 @@ impl<'cc> Cc<'cc> {
                 self.ctx.locals = prev_locals;
                 None
             }
-            Node::Call { name, args } => {
+            Node::Call { name, args, id } => {
                 let Type::Ident(call_name) = name.t else {
                     unreachable!("InnerNode::Call's token can only be an ident");
                 };

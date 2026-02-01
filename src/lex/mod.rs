@@ -148,7 +148,7 @@ impl<'l> Lexer<'l> {
                         .map_err(|_| self.make_err("Invalid ut8 input", self.col))?,
                 ))
             }
-            c if c.is_ascii_alphabetic() => {
+            c if c.is_ascii_alphabetic() || c == b'_' => {
                 let start = self.pos;
                 self.advance();
                 while self

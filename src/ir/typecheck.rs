@@ -1,11 +1,8 @@
-use crate::{ast::Node, err::PgError, ir::ptype};
+use std::collections::HashMap;
 
-struct TypedNode<'n> {
-    node: &'n Node<'n>,
-    ty: ptype::Type,
-}
+use crate::{err::PgError, ir::ptype};
 
-/// walks the Ast, performs type checking and wraps each node with a TypedNode
-fn typecheck() -> Result<(), PgError> {
+/// walks the Ast, performs type checking and assigns each node a type by its id
+fn typecheck() -> Result<HashMap<usize, ptype::Type>, PgError> {
     todo!()
 }

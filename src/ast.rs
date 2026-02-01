@@ -6,43 +6,49 @@ use crate::lex::{Token, Type};
 // of heap allocating most of the children
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Node<'inner> {
+pub enum Node<'node> {
     /// String|Double|Integer|True|False
-    Atom { raw: Token<'inner> },
+    Atom { id: usize, raw: Token<'node> },
 
     /// <identifier>
-    Ident { name: Token<'inner> },
+    Ident { id: usize, name: Token<'node> },
 
     /// <lhs> <op> <rhs>
     Bin {
-        op: Token<'inner>,
-        lhs: Box<Node<'inner>>,
-        rhs: Box<Node<'inner>>,
+        id: usize,
+        op: Token<'node>,
+        lhs: Box<Node<'node>>,
+        rhs: Box<Node<'node>>,
     },
 
     /// [<member0> <member1>]
-    Array { members: Vec<Node<'inner>> },
+    Array {
+        id: usize,
+        members: Vec<Node<'node>>,
+    },
 
     /// { <key0>: <value0> <key1>: <value1> }
     Object {
-        pairs: Vec<(Node<'inner>, Node<'inner>)>,
+        id: usize,
+        pairs: Vec<(Node<'node>, Node<'node>)>,
     },
 
     /// let <name> = <rhs>
     Let {
-        name: Token<'inner>,
-        rhs: Box<Node<'inner>>,
+        id: usize,
+        name: Token<'node>,
+        rhs: Box<Node<'node>>,
     },
 
     /// fn <name>(<arg0:type0> <arg1:type1>) <return_type> {
     ///     <body>
     /// }
     Fn {
-        name: Token<'inner>,
+        name: Token<'node>,
         /// (<identifier>, <type>)
-        args: Vec<(Token<'inner>, TypeExpr<'inner>)>,
-        return_type: TypeExpr<'inner>,
-        body: Vec<Node<'inner>>,
+        args: Vec<(Token<'node>, TypeExpr<'node>)>,
+        return_type: TypeExpr<'node>,
+        body: Vec<Node<'node>>,
     },
 
     /// match {
@@ -52,35 +58,39 @@ pub enum Node<'inner> {
     ///    <default>
     /// }
     Match {
+        id: usize,
         /// [(condition, body)]
-        cases: Vec<(Node<'inner>, Node<'inner>)>,
-        default: Option<Box<Node<'inner>>>,
+        cases: Vec<(Node<'node>, Node<'node>)>,
+        default: Option<Box<Node<'node>>>,
     },
 
     /// <name>(<args>)
     Call {
-        name: Token<'inner>,
-        args: Vec<Node<'inner>>,
+        id: usize,
+        name: Token<'node>,
+        args: Vec<Node<'node>>,
     },
+    // <path0>::<path1>::<leaf>
+    // Path {
+    //     id: usize,
+    //     members: Vec<Token<'node>>,
+    //     leaf: Box<Node<'node>>,
+    // },
 
-    /// <path0>::<path1>::<leaf>
-    Path {
-        members: Vec<Token<'inner>>,
-        leaf: Box<Node<'inner>>,
-    },
+    // <target>[<index>]
+    // Idx {
+    //     id: usize,
+    //     target: Box<Node<'node>>,
+    //     index: Box<Node<'node>>,
+    // },
 
-    /// <target>[<index>]
-    Idx {
-        target: Box<Node<'inner>>,
-        index: Box<Node<'inner>>,
-    },
-
-    /// for <param> :: <target> { <body> }
-    For {
-        target: Box<Node<'inner>>,
-        param: Token<'inner>,
-        body: Vec<Node<'inner>>,
-    },
+    // for <param> :: <target> { <body> }
+    // For {
+    //     id: usize,
+    //     target: Box<Node<'node>>,
+    //     param: Token<'node>,
+    //     body: Vec<Node<'node>>,
+    // },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,28 +124,28 @@ impl<'a> Node<'a> {
         let pad = "  ".repeat(indent);
 
         match &self {
-            Node::Atom { raw } => writeln!(f, "{}{:?}", pad, raw.t),
-            Node::Ident { name } => {
+            Node::Atom { raw, .. } => writeln!(f, "{}{:?}", pad, raw.t),
+            Node::Ident { name, .. } => {
                 if let Type::Ident(name) = name.t {
                     writeln!(f, "{}{}", pad, name)
                 } else {
                     unreachable!()
                 }
             }
-            Node::Bin { op, lhs, rhs } => {
+            Node::Bin { op, lhs, rhs, .. } => {
                 writeln!(f, "{}({:?}", pad, op.t)?;
                 lhs.fmt_sexpr(f, indent + 1)?;
                 rhs.fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)
             }
-            Node::Array { members } => {
+            Node::Array { members, .. } => {
                 writeln!(f, "{}[", pad)?;
                 for member in members {
                     member.fmt_sexpr(f, indent + 1)?;
                 }
                 writeln!(f, "{}]", pad)
             }
-            Node::Object { pairs } => {
+            Node::Object { pairs, .. } => {
                 writeln!(f, "{}{{", pad)?;
                 for (k, v) in pairs {
                     k.fmt_sexpr(f, indent + 1)?;
@@ -143,7 +153,7 @@ impl<'a> Node<'a> {
                 }
                 writeln!(f, "{}}}", pad)
             }
-            Node::Let { name, rhs } => {
+            Node::Let { name, rhs, .. } => {
                 let Type::Ident(name) = name.t else {
                     unreachable!();
                 };
@@ -180,7 +190,7 @@ impl<'a> Node<'a> {
                 }
                 writeln!(f, "{})->{}", pad, return_type)
             }
-            Node::Call { name, args } => {
+            Node::Call { name, args, .. } => {
                 let Type::Ident(name) = name.t else {
                     unreachable!();
                 };

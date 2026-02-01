@@ -60,7 +60,7 @@ impl<'lower> Lower<'lower> {
 
     fn lower_node(&mut self, node: &'lower Node) -> Result<Option<Id>, PgError> {
         Ok(match node {
-            Node::Atom { raw } => {
+            Node::Atom { raw, id } => {
                 let value = match raw.t {
                     Type::S(str) => Const::Str(str),
                     Type::D(doub) => Const::Double(
@@ -91,7 +91,7 @@ impl<'lower> Lower<'lower> {
 
                 Some(id)
             }
-            Node::Ident { name } => {
+            Node::Ident { name, id } => {
                 let Type::Ident(i) = name.t else {
                     unreachable!()
                 };
@@ -104,7 +104,7 @@ impl<'lower> Lower<'lower> {
                     ));
                 }
             }
-            Node::Bin { op, lhs, rhs } => {
+            Node::Bin { op, lhs, rhs, id } => {
                 let Some(lhs) = self.lower_node(lhs)? else {
                     unreachable!()
                 };
@@ -130,7 +130,7 @@ impl<'lower> Lower<'lower> {
 
                 Some(id)
             }
-            Node::Let { name, rhs } => {
+            Node::Let { name, rhs, id } => {
                 let Type::Ident(i) = name.t else {
                     unreachable!()
                 };
@@ -207,7 +207,7 @@ impl<'lower> Lower<'lower> {
                 self.current_func = old_func;
                 None
             }
-            Node::Call { name, args } => {
+            Node::Call { name, args, id } => {
                 let Type::Ident(ident_name) = name.t else {
                     unreachable!()
                 };

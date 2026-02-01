@@ -8,13 +8,20 @@ use crate::{
 /// [ast.rs](./ast.rs) for documentation regarding each node and the way those should be parsed.
 pub struct Parser<'p> {
     lex: &'p mut Lexer<'p>,
+    id: usize,
     cur: Token<'p>,
 }
 
 impl<'p> Parser<'p> {
     pub fn new(lex: &'p mut Lexer<'p>) -> Result<Self, PgError> {
         let cur = lex.next()?;
-        Ok(Self { cur, lex })
+        Ok(Self { cur, lex, id: 0 })
+    }
+
+    fn next_id(&mut self) -> usize {
+        let id = self.id;
+        self.id += 1;
+        id
     }
 
     fn cur(&self) -> &Token<'p> {
@@ -80,6 +87,7 @@ impl<'p> Parser<'p> {
         self.expect(Type::Equal)?;
 
         Ok(Node::Let {
+            id: self.next_id(),
             name,
             rhs: Box::new(self.parse_prefix()?),
         })
@@ -129,7 +137,10 @@ impl<'p> Parser<'p> {
             Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => {
                 let raw = self.cur.clone();
                 self.next()?;
-                Node::Atom { raw }
+                Node::Atom {
+                    raw,
+                    id: self.next_id(),
+                }
             }
             Type::Ident(_) => {
                 let name = self.cur.clone();
@@ -142,9 +153,16 @@ impl<'p> Parser<'p> {
                         args.push(self.parse_prefix()?);
                     }
                     self.next()?;
-                    Node::Call { name, args }
+                    Node::Call {
+                        name,
+                        args,
+                        id: self.next_id(),
+                    }
                 } else {
-                    Node::Ident { name }
+                    Node::Ident {
+                        name,
+                        id: self.next_id(),
+                    }
                 }
             }
             Type::BraceLeft => {
@@ -182,6 +200,7 @@ impl<'p> Parser<'p> {
 
                 let rhs = self.parse_expr(rbp)?;
                 lhs = Node::Bin {
+                    id: self.next_id(),
                     op,
                     lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
@@ -376,8 +395,10 @@ mod tests {
             binding,
             "let variable_name = 5",
             vec![Node::Let {
+                id: 1,
                 name: mk_tok!(Type::Ident("variable_name")),
                 rhs: Box::new(Node::Atom {
+                    id: 0,
                     raw: mk_tok!(Type::I("5")),
                 })
             }]
@@ -396,16 +417,21 @@ mod tests {
             expression,
             "3+0.1415*5/27",
             vec![Node::Bin{
+                id: 0,
                 op: mk_tok!(Type::Plus),
-                lhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("3")) }),
+                lhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("3")),
+                    id: 0,
+                }),
                 rhs: Box::new(Node::Bin{
+                    id: 0,
                     op: mk_tok!(Type::Slash),
                     lhs: Box::new(Node::Bin{
+                        id: 0,
                         op: mk_tok!(Type::Asteriks),
-                        lhs: Box::new(Node::Atom { raw: mk_tok!(Type::D("0.1415")) }),
-                        rhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("5")) }),
+                        lhs: Box::new(Node::Atom { raw: mk_tok!(Type::D("0.1415")), id: 0,}),
+                        rhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("5")), id: 0 }),
                     }),
-                    rhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("27")) }),
+                    rhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("27")), id: 0 }),
                 })
             }]
         )
