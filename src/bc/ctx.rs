@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::cc::Const;
+use crate::bc::Const;
 
 /// Used to encode binding resolution, for instance:
 ///

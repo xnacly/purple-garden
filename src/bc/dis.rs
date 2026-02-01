@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    cc::{Cc, ctx::Func},
+    bc::{Cc, ctx::Func},
     ir::Const,
     op::Op,
     vm,

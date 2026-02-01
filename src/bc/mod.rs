@@ -6,7 +6,7 @@ mod reg;
 
 use crate::{
     ast::Node,
-    cc::{
+    bc::{
         ctx::{Context, Local},
         reg::RegisterAllocator,
     },
@@ -64,9 +64,6 @@ impl<'cc> Cc<'cc> {
             register: RegisterAllocator::new(),
         }
     }
-
-    pub const GLOBAL_FALSE: u32 = 0;
-    pub const GLOBAL_TRUE: u32 = 1;
 
     fn load_const(&mut self, c: Const<'cc>) -> u8 {
         let r = self.register.alloc();

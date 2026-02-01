@@ -12,7 +12,7 @@ macro_rules! trace {
 use crate::{err::PgError, lex::Lexer, parser::Parser, vm::Value};
 
 mod ast;
-mod cc;
+mod bc;
 /// pretty print errors
 mod err;
 /// simple mark and sweep garbage collector, will be replaced by a manchester style garbage
@@ -139,7 +139,7 @@ fn main() {
         }
     }
 
-    let mut cc = cc::Cc::new();
+    let mut cc = bc::Cc::new();
     if let Err(e) = cc.compile(&ast) {
         e.render();
         std::process::exit(1);
