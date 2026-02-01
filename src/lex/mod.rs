@@ -119,6 +119,10 @@ impl<'l> Lexer<'l> {
             b'=' => self.make_tok(Type::Equal),
             b'<' => self.make_tok(Type::LessThan),
             b'>' => self.make_tok(Type::GreaterThan),
+            b'!' if matches!(self.peek(), Some(b'=')) => {
+                self.advance();
+                self.make_tok(Type::NotEqual)
+            }
             b'!' => self.make_tok(Type::Exclaim),
             b'?' => self.make_tok(Type::Question),
             b':' if matches!(self.peek(), Some(b':')) => {
@@ -249,8 +253,11 @@ mod tests {
 
     #[test]
     fn double_char_tokens() {
-        let toks = lex(":: ==");
-        assert_eq!(toks, vec![Type::DoubleColon, Type::DoubleEqual]);
+        let toks = lex(":: == !=");
+        assert_eq!(
+            toks,
+            vec![Type::DoubleColon, Type::DoubleEqual, Type::NotEqual]
+        );
     }
 
     #[test]

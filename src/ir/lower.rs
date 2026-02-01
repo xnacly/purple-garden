@@ -42,6 +42,7 @@ pub struct Lower<'lower> {
     /// maps ast variable names to ssa values
     env: HashMap<&'lower str, Id>,
     func_name_to_id: HashMap<&'lower str, Id>,
+    types: HashMap<usize, ptype::Type>,
 }
 
 impl<'lower> Lower<'lower> {
@@ -112,11 +113,10 @@ impl<'lower> Lower<'lower> {
                     unreachable!()
                 };
 
-                let id = self.id_store.new_value();
+                let dst_id = self.id_store.new_value();
                 let dst = TypeId {
-                    id,
-                    // TODO: this has to be inferred via the typed ast pass
-                    ty: ptype::Type::Int,
+                    id: dst_id,
+                    ty: self.types.get(id).unwrap().clone(),
                 };
 
                 self.emit(match op.t {
@@ -128,7 +128,7 @@ impl<'lower> Lower<'lower> {
                     _ => unreachable!(),
                 });
 
-                Some(id)
+                Some(dst_id)
             }
             Node::Let { name, rhs, id } => {
                 let Type::Ident(i) = name.t else {
@@ -242,6 +242,13 @@ impl<'lower> Lower<'lower> {
 
     /// Lower [ast] into a list of Func nodes, the entry point is always `__pg_entry`
     pub fn ir_from(mut self, ast: &'lower [Node]) -> Result<Vec<Func<'lower>>, PgError> {
+        let mut typechecker = typecheck::Typechecker::new();
+        for node in ast {
+            typechecker.from_node(node)?;
+        }
+        trace!("{:#?}", typechecker);
+        self.types = typechecker.finalise();
+
         // entry function
         self.current_func = Func {
             id: self.id_store.new_function(),

@@ -15,6 +15,18 @@ pub enum Type {
     Map { key: Box<Type>, value: Box<Type> },
 }
 
+impl Type {
+    pub fn from_atom_token_type(t: &lex::Type) -> Self {
+        match t {
+            lex::Type::S(_) => Self::Str,
+            lex::Type::D(_) => Self::Double,
+            lex::Type::I(_) => Self::Int,
+            lex::Type::True | lex::Type::False => Self::Bool,
+            _ => unreachable!("{:?}", t),
+        }
+    }
+}
+
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

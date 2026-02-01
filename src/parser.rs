@@ -395,10 +395,10 @@ mod tests {
             binding,
             "let variable_name = 5",
             vec![Node::Let {
-                id: 1,
+                id: 0,
                 name: mk_tok!(Type::Ident("variable_name")),
                 rhs: Box::new(Node::Atom {
-                    id: 0,
+                    id: 1,
                     raw: mk_tok!(Type::I("5")),
                 })
             }]
@@ -416,24 +416,36 @@ mod tests {
         (
             expression,
             "3+0.1415*5/27",
-            vec![Node::Bin{
-                id: 0,
-                op: mk_tok!(Type::Plus),
-                lhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("3")),
-                    id: 0,
-                }),
-                rhs: Box::new(Node::Bin{
-                    id: 0,
-                    op: mk_tok!(Type::Slash),
-                    lhs: Box::new(Node::Bin{
+            vec![
+                Node::Bin {
+                    id: 6,
+                    op: mk_tok!(Type::Plus),
+                    lhs: Box::new(Node::Atom {
                         id: 0,
-                        op: mk_tok!(Type::Asteriks),
-                        lhs: Box::new(Node::Atom { raw: mk_tok!(Type::D("0.1415")), id: 0,}),
-                        rhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("5")), id: 0 }),
+                        raw: mk_tok!(Type::I("3")),
                     }),
-                    rhs: Box::new(Node::Atom { raw: mk_tok!(Type::I("27")), id: 0 }),
-                })
-            }]
+                    rhs: Box::new(Node::Bin {
+                        id: 5,
+                        op: mk_tok!(Type::Slash),
+                        lhs: Box::new(Node::Bin {
+                            id: 3,
+                            op: mk_tok!(Type::Asteriks),
+                            lhs: Box::new(Node::Atom {
+                                id: 1,
+                                raw: mk_tok!(Type::D("0.1415")),
+                            }),
+                            rhs: Box::new(Node::Atom {
+                                id: 2,
+                                raw: mk_tok!(Type::I("5")),
+                            }),
+                        }),
+                        rhs: Box::new(Node::Atom {
+                            id: 4,
+                            raw: mk_tok!(Type::I("27")),
+                        }),
+                    }),
+                }
+            ]
         )
     }
 }
