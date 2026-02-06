@@ -260,8 +260,8 @@ impl<'lower> Lower<'lower> {
         for node in ast {
             typechecker.node(node)?;
         }
-        trace!("{:#?}", typechecker);
         self.types = typechecker.finalise();
+        crate::trace!("Finished type checking");
 
         // entry function
         self.current_func = Func {

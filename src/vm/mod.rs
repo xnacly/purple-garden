@@ -70,7 +70,7 @@ impl<'vm> Vm<'vm> {
         while self.pc < self.bytecode.len() {
             let instruction = unsafe_get!(self.bytecode, self.pc);
 
-            trace!("[vm][{:04}] {:?}", self.pc, instruction);
+            crate::trace!("[vm][{:04}] {:?}", self.pc, instruction);
 
             match instruction {
                 Op::LoadImm { dst, value } => {

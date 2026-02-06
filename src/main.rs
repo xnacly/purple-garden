@@ -3,11 +3,51 @@
 
 use std::fs;
 
-macro_rules! trace {
-    ($fmt:literal, $($value:expr),*) => {
-        #[cfg(feature = "trace")]
-        println!($fmt, $($value),*);
-    };
+#[cfg(feature = "trace")]
+mod trace {
+    use super::*;
+    use std::sync::Once;
+    use std::time::Instant;
+
+    static START_ONCE: Once = Once::new();
+    static mut START: Option<Instant> = None;
+
+    pub fn start() -> Instant {
+        unsafe {
+            START_ONCE.call_once(|| {
+                START = Some(Instant::now());
+            });
+            START.unwrap()
+        }
+    }
+
+    #[macro_export]
+    macro_rules! trace {
+        // With values
+        ($fmt:literal, $($value:expr),*) => {
+            {
+                let elapsed = $crate::trace::start().elapsed();
+                println!("[{:?}] {}", elapsed, format!($fmt, $($value),*));
+            }
+        };
+        // Without values
+        ($fmt:literal) => {
+            {
+                let elapsed = $crate::trace::start().elapsed();
+                println!("[{:?}] {}", elapsed, $fmt);
+            }
+        };
+    }
+}
+
+#[cfg(not(feature = "trace"))]
+mod trace {
+
+    #[macro_export]
+    macro_rules! trace {
+        ($fmt:literal, $($value:expr),*) => {};
+        ($fmt:literal) => {};
+    }
 }
 
 use crate::{err::PgError, lex::Lexer, parser::Parser, vm::Value};
@@ -115,6 +155,8 @@ fn main() {
         }
     };
 
+    trace!("Tokenisation and Parsing done");
+
     if args.ast {
         print!(
             "{}",
@@ -134,6 +176,8 @@ fn main() {
         }
     };
 
+    trace!("Lowered AST to IR");
+
     if args.ir {
         for func in ir.iter() {
             println!("{func}");
@@ -145,6 +189,8 @@ fn main() {
         e.render();
         std::process::exit(1);
     }
+
+    trace!("Lowered IR to bytecode");
 
     if args.opt >= 1 {
         opt::bc(&mut cc.buf);
@@ -159,6 +205,8 @@ fn main() {
     if let Err(e) = vm.run() {
         Into::<PgError>::into(e).render();
     }
+
+    trace!("Executed bytecode");
 
     if args.registers {
         for i in 0..vm::REGISTER_COUNT {
