@@ -5,10 +5,11 @@ use crate::{
 
 #[derive(Debug)]
 pub struct PgError {
+    pub title: &'static str,
     pub msg: Option<String>,
     pub line: usize,
     pub start: usize,
-    pub end: usize,
+    pub len: usize,
 }
 
 impl From<&Token<'_>> for PgError {
@@ -23,10 +24,11 @@ impl From<&Token<'_>> for PgError {
             _ => 1,
         };
         PgError {
+            title: "temp",
             msg: None,
             line: value.line,
             start: value.col,
-            end: value.col + len,
+            len,
         }
     }
 }
@@ -36,29 +38,37 @@ impl From<Anomaly> for PgError {
         // TODO: do some prep in anomaly for finding out which ast node resulted in what bytecode
         // ranges
         PgError {
+            title: "Virtual Machine Anomaly",
             msg: Some(value.as_str().to_string()),
             line: 0,
             start: 0,
-            end: 0,
+            len: 0,
         }
     }
 }
 
 impl PgError {
-    // TODO: replace with writing to some kind of std::writer
-    pub fn render(self) {
-        println!(
-            "err: {} at l:{}:{}-{}",
-            self.msg.unwrap_or_default(),
-            self.line,
-            self.start,
-            self.end
-        );
+    pub fn render(self, lines: &[&str]) {
+        println!("-> err: {}", self.title);
+        println!("   {}\n", self.msg.unwrap_or_default());
+
+        let prev = self.line.saturating_sub(1);
+        if let Some(prev_line) = lines.get(prev)
+            && prev != self.line
+        {
+            println!("{:03} | {prev_line}", prev);
+        }
+
+        if let Some(line) = lines.get(self.line) {
+            println!("{:03} | {line}", self.line);
+            println!("{}~ here", " ".repeat(self.start + 7))
+        }
     }
 
-    pub fn with_msg(msg: impl Into<String>, from: impl Into<PgError>) -> Self {
+    pub fn with_msg(title: &'static str, msg: impl Into<String>, from: impl Into<PgError>) -> Self {
         let mut conv = from.into();
         conv.msg = Some(msg.into());
+        conv.title = title;
         conv
     }
 }

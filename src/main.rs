@@ -148,7 +148,11 @@ fn main() {
     let ast = match Parser::new(&mut lexer).and_then(|n| n.parse()) {
         Ok(a) => a,
         Err(e) => {
-            e.render();
+            let lines = str::from_utf8(&input)
+                .unwrap()
+                .lines()
+                .collect::<Vec<&str>>();
+            e.render(&lines);
             std::process::exit(1);
         }
     };
@@ -169,7 +173,11 @@ fn main() {
     let ir = match lower.ir_from(&ast) {
         Ok(ir) => ir,
         Err(e) => {
-            e.render();
+            let lines = str::from_utf8(&input)
+                .unwrap()
+                .lines()
+                .collect::<Vec<&str>>();
+            e.render(&lines);
             std::process::exit(1);
         }
     };
@@ -184,7 +192,11 @@ fn main() {
 
     let mut cc = bc::Cc::new();
     if let Err(e) = cc.compile(&ast) {
-        e.render();
+        let lines = str::from_utf8(&input)
+            .unwrap()
+            .lines()
+            .collect::<Vec<&str>>();
+        e.render(&lines);
         std::process::exit(1);
     }
 
@@ -201,7 +213,11 @@ fn main() {
     let mut vm = cc.finalize();
 
     if let Err(e) = vm.run() {
-        Into::<PgError>::into(e).render();
+        let lines = str::from_utf8(&input)
+            .unwrap()
+            .lines()
+            .collect::<Vec<&str>>();
+        Into::<PgError>::into(e).render(&lines);
     }
 
     trace!("Executed bytecode");

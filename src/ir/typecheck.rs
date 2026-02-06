@@ -53,6 +53,7 @@ impl<'t> Typechecker<'t> {
                     (Type::Double, Type::Double) => Type::Double,
                     (_, _) => {
                         return Err(PgError::with_msg(
+                            "Type error",
                             format!("Incompatible types {} and {} for {:?}", lhs, rhs, op.t),
                             op,
                         ));
@@ -66,6 +67,7 @@ impl<'t> Typechecker<'t> {
             | lex::Type::NotEqual => {
                 if lhs != rhs {
                     return Err(PgError::with_msg(
+                        "Type error",
                         format!("Incompatible types {} and {} for {:?}", lhs, rhs, op.t),
                         op,
                     ));
@@ -84,6 +86,7 @@ impl<'t> Typechecker<'t> {
             (Type::Double, Type::Int) => Type::Int,
             (_, _) => {
                 return Err(PgError::with_msg(
+                    "Cast type error",
                     format!("Can not cast {} to {}", i, o),
                     at,
                 ));
@@ -112,7 +115,11 @@ impl<'t> Typechecker<'t> {
                 };
 
                 let t = self.env.get(inner_name).ok_or_else(|| {
-                    PgError::with_msg(format!("Undefined variable `{inner_name}`"), name)
+                    PgError::with_msg(
+                        "Undefined Binding",
+                        format!("binding `{inner_name}` not found"),
+                        name,
+                    )
                 })?;
 
                 self.map.insert(*id, t.clone());
@@ -200,6 +207,7 @@ impl<'t> Typechecker<'t> {
 
                 let Some(fun) = self.functions.get(inner_name).cloned() else {
                     return Err(PgError::with_msg(
+                        "Undefined function",
                         format!("Call to undefined function `{}`", inner_name),
                         name,
                     ));
@@ -207,8 +215,9 @@ impl<'t> Typechecker<'t> {
 
                 if args.len() != fun.args.len() {
                     return Err(PgError::with_msg(
+                        "Function argument count mismatch",
                         format!(
-                            "Function `{}` wants {} arguments, got {}",
+                            "`{}` requires {} arguments, got {}",
                             inner_name,
                             fun.args.len(),
                             args.len()
@@ -225,9 +234,10 @@ impl<'t> Typechecker<'t> {
 
                     if expected_type != &provided_type {
                         return Err(PgError::with_msg(
+                            "Function argument type mismatch",
                             format!(
-                                "argument {} to function `{}` is of type {}, got {} instead",
-                                i, inner_name, expected_type, provided_type,
+                                "`{}` arg{} expected type {}, got {} instead",
+                                inner_name, i, expected_type, provided_type,
                             ),
                             name,
                         ));

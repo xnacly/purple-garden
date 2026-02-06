@@ -37,6 +37,7 @@ impl<'p> Parser<'p> {
             self.next()?;
         } else {
             return Err(PgError::with_msg(
+                "Unexpected Token",
                 format!("Expected `{:?}`, got {:?}", ty, self.cur.t),
                 &self.cur,
             ));
@@ -52,6 +53,7 @@ impl<'p> Parser<'p> {
             Ok(matched)
         } else {
             Err(PgError::with_msg(
+                "Unexpected Token",
                 format!("Expected an identifier, got {:?}", self.cur.t),
                 &self.cur,
             ))
@@ -283,6 +285,7 @@ impl<'p> Parser<'p> {
             }
             _ => {
                 return Err(PgError::with_msg(
+                    "Unexpected Malformed Type",
                     "Bad type, expected either type, ?type, [type] or type[type], where type is str, int, double, bool or void",
                     self.cur(),
                 ));

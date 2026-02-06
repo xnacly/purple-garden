@@ -86,7 +86,7 @@ impl<'cc> Cc<'cc> {
                 let constant = match &raw.t {
                     Type::I(s) => {
                         let value = s.parse().map_err(|e: num::ParseIntError| {
-                            PgError::with_msg(e.to_string(), raw)
+                            PgError::with_msg("Number parsing failure", e.to_string(), raw)
                         })?;
 
                         if value > i32::MAX as i64 {
@@ -105,7 +105,7 @@ impl<'cc> Cc<'cc> {
                     Type::D(s) => Const::Double(
                         s.parse::<f64>()
                             .map_err(|e: num::ParseFloatError| {
-                                PgError::with_msg(e.to_string(), raw)
+                                PgError::with_msg("Number parsing failure", e.to_string(), raw)
                             })?
                             .to_bits(),
                     ),
@@ -126,7 +126,11 @@ impl<'cc> Cc<'cc> {
 
                 Some(Reg {
                     id: self.ctx.locals.resolve(ident_name).ok_or_else(|| {
-                        PgError::with_msg(format!("Undefined variable `{ident_name}`"), name)
+                        PgError::with_msg(
+                            "Undefined binding",
+                            format!("Undefined variable `{ident_name}`"),
+                            name,
+                        )
                     })?,
                     perm: true,
                 })
@@ -167,7 +171,11 @@ impl<'cc> Cc<'cc> {
                     .locals
                     .bind(let_name, src.unwrap().into())
                     .ok_or_else(|| {
-                        PgError::with_msg(format!("binding `{let_name}` is already defined"), name)
+                        PgError::with_msg(
+                            "Already defined binding",
+                            format!("binding `{let_name}` is already defined"),
+                            name,
+                        )
                     })?;
                 None
             }
@@ -209,7 +217,11 @@ impl<'cc> Cc<'cc> {
                     let _ = self.register.alloc();
 
                     self.ctx.locals.bind(name, i as u8).ok_or_else(|| {
-                        PgError::with_msg(format!("binding `{name}` is already defined"), arg)
+                        PgError::with_msg(
+                            "Already defined binding",
+                            format!("argument `{name}` is already defined as binding"),
+                            arg,
+                        )
                     })?;
                 }
 
@@ -254,12 +266,17 @@ impl<'cc> Cc<'cc> {
                     .functions
                     .get_mut(call_name)
                     .ok_or_else(|| {
-                        PgError::with_msg(format!("function `{call_name}` is not defined"), name)
+                        PgError::with_msg(
+                            "Undefined function",
+                            format!("function `{call_name}` is not defined"),
+                            name,
+                        )
                     })?
                     .clone();
 
                 if resolved_func.args != args.len() as u8 {
                     return Err(PgError::with_msg(
+                        "Function argument count mismatch",
                         format!(
                             "function `{call_name}` requires {} arguments, got {}",
                             resolved_func.args,
