@@ -19,7 +19,7 @@ impl RegisterAllocator {
     }
 
     pub fn alloc(&mut self) -> u8 {
-        crate::trace!("RegisterAllocator::alloc(r{:?})", self.free.last().unwrap());
+        crate::trace!("[reg::alloc] r{:?}", self.free.last().unwrap());
         self.free.pop().unwrap_or_else(|| {
             panic!("RegisterAllocator: out of registers, do open a bug report please")
         })
@@ -43,17 +43,13 @@ impl RegisterAllocator {
             last_reg = self.free.pop().unwrap();
         }
 
-        crate::trace!(
-            "RegisterAllocator::alloc(r{}..r{})",
-            last_reg,
-            last_reg + 1 - n
-        );
+        crate::trace!("[reg::alloc] r{}..r{}", last_reg, last_reg + 1 - n);
 
         last_reg
     }
 
     pub fn free(&mut self, r: u8) {
-        crate::trace!("RegisterAllocator::free(r{})", r);
+        crate::trace!("[reg::free] r{}", r);
         self.free.push(r);
         assert!(
             self.free.len() <= vm::REGISTER_COUNT,

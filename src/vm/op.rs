@@ -28,6 +28,6 @@ mod op {
 
     #[test]
     fn op_size_8_byte() {
-        assert_eq!(std::mem::size_of::<crate::op::Op>(), 8);
+        assert_eq!(std::mem::size_of::<crate::vm::op::Op>(), 8);
     }
 }

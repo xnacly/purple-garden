@@ -7,7 +7,7 @@ pub use self_move::self_move;
 
 #[cfg(test)]
 mod bc {
-    use crate::op::Op;
+    use crate::vm::op::Op;
 
     #[test]
     fn self_move() {
@@ -61,9 +61,20 @@ mod bc {
         assert_eq!(
             bc,
             vec![
+                Op::LoadImm { dst: 0, value: 1 },
+                Op::LoadImm { dst: 1, value: 2 },
                 Op::LoadImm { dst: 0, value: 3 },
+                //
+                Op::LoadImm { dst: 0, value: 1 },
+                Op::LoadImm { dst: 1, value: 2 },
                 Op::LoadImm { dst: 0, value: -1 },
+                //
+                Op::LoadImm { dst: 0, value: 3 },
+                Op::LoadImm { dst: 1, value: 5 },
                 Op::LoadImm { dst: 0, value: 15 },
+                //
+                Op::LoadImm { dst: 0, value: 64 },
+                Op::LoadImm { dst: 1, value: 8 },
                 Op::LoadImm { dst: 0, value: 8 },
             ]
         )

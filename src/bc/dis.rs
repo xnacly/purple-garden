@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use crate::{
     bc::{Cc, ctx::Func},
     ir::Const,
-    op::Op,
-    vm,
+    vm::{self, op::Op},
 };
 
 impl Cc<'_> {

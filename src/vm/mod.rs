@@ -3,9 +3,10 @@ mod value;
 
 pub const REGISTER_COUNT: usize = 64;
 pub use crate::vm::anomaly::Anomaly;
+use crate::vm::op::Op;
 pub use crate::vm::value::Value;
-
-use crate::op::Op;
+/// purple garden bytecode virtual machine operations
+pub mod op;
 
 #[derive(Default, Debug)]
 pub struct CallFrame {
@@ -202,7 +203,7 @@ impl<'vm> Vm<'vm> {
 #[cfg(test)]
 mod ops {
     use crate::{
-        op::Op,
+        vm::op::Op,
         vm::{CallFrame, Value, Vm},
     };
 

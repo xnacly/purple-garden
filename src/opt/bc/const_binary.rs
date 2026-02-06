@@ -1,4 +1,4 @@
-use crate::op::Op;
+use crate::vm::op::Op;
 
 /// const_binary fuses
 ///
@@ -8,6 +8,8 @@ use crate::op::Op;
 ///
 /// into
 ///
+///     LoadImm{ dst: a, value: x },
+///     LoadImm{ dst: b, value: y },
 ///     LoadImm { dst, value: x bin y }
 ///
 /// where bin := Add | Sub | Mul | Div
@@ -29,9 +31,7 @@ pub fn const_binary(window: &mut [Op]) {
         _ => return,
     };
 
-    window[0] = Op::LoadImm { dst, value: result };
-    window[1] = Op::Nop;
-    window[2] = Op::Nop;
+    window[2] = Op::LoadImm { dst, value: result };
 
     opt_trace!("const_binary", "fused a constant binary op");
 }

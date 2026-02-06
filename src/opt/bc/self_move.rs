@@ -1,11 +1,14 @@
-use crate::op::Op;
+use crate::vm::{
+    self,
+    op::{self, Op},
+};
 
 /// self_move removes patterns conforming to
 ///
 ///     Mov { dst: x, src: x },
 ///
 /// where both dst == src
-pub fn self_move(window: &mut [crate::op::Op]) {
+pub fn self_move(window: &mut [Op]) {
     for op in window.iter_mut() {
         if let Op::Mov { dst, src } = op
             && dst == src

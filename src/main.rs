@@ -63,8 +63,6 @@ mod ir;
 /// baseline just in time compilation for x86 and aarch64
 mod jit;
 mod lex;
-/// purple garden bytecode virtual machine operations
-mod op;
 /// collection of ir and bytecode optimisation passes
 mod opt;
 mod parser;
@@ -214,7 +212,7 @@ fn main() {
             if let Value::UnDef = val {
                 continue;
             }
-            println!("r{i}={:?}", val);
+            println!("[r{i}]={:?}", val);
         }
     }
 }

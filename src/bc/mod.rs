@@ -13,8 +13,7 @@ use crate::{
     err::PgError,
     ir::Const,
     lex::Type,
-    op::Op,
-    vm::{CallFrame, Value, Vm},
+    vm::{CallFrame, Value, Vm, op::Op},
 };
 
 #[derive(Debug, PartialEq, Eq)]
