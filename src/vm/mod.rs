@@ -14,6 +14,7 @@ pub struct CallFrame {
 
 pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>, &[Value<'vm>]) -> Option<Value<'vm>>;
 
+#[repr(C)]
 #[derive(Debug)]
 pub struct Vm<'vm> {
     pub r: [Value<'vm>; REGISTER_COUNT],

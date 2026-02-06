@@ -42,7 +42,6 @@ mod trace {
 
 #[cfg(not(feature = "trace"))]
 mod trace {
-
     #[macro_export]
     macro_rules! trace {
         ($fmt:literal, $($value:expr),*) => {};
@@ -52,6 +51,7 @@ mod trace {
 
 use crate::{err::PgError, lex::Lexer, parser::Parser, vm::Value};
 
+mod asm;
 mod ast;
 mod bc;
 /// pretty print errors
@@ -60,7 +60,7 @@ mod err;
 /// collector in the future
 mod gc;
 mod ir;
-/// baseline just in time compilation for x86
+/// baseline just in time compilation for x86 and aarch64
 mod jit;
 mod lex;
 /// purple garden bytecode virtual machine operations
