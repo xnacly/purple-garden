@@ -3,8 +3,8 @@ mod value;
 
 pub const REGISTER_COUNT: usize = 64;
 pub use crate::vm::anomaly::Anomaly;
-use crate::vm::op::Op;
 pub use crate::vm::value::Value;
+use crate::{Args, vm::op::Op};
 /// purple garden bytecode virtual machine operations
 pub mod op;
 
@@ -25,6 +25,13 @@ pub struct Vm<'vm> {
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value<'vm>>,
+
+    /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
+    /// function the virtual machine currently executes in, this behaviour only occurs if
+    /// --backtrace was passed as an option to the interpreter
+    pub backtrace: Vec<usize>,
+
+    config: &'vm Args,
 }
 
 /// trap in the vm; return Err(<anomaly>) if expr == true
@@ -58,13 +65,15 @@ macro_rules! unsafe_get {
 }
 
 impl<'vm> Vm<'vm> {
-    pub fn new() -> Self {
+    pub fn new(config: &'vm Args) -> Self {
         Self {
             r: [const { Value::UnDef }; REGISTER_COUNT],
             frames: Vec::with_capacity(64),
             pc: 0,
-            bytecode: vec![],
-            globals: vec![],
+            bytecode: Vec::new(),
+            globals: Vec::new(),
+            backtrace: Vec::new(),
+            config,
         }
     }
 
@@ -178,11 +187,18 @@ impl<'vm> Vm<'vm> {
                     }
                 }
                 Op::Call { func } => {
+                    if self.config.backtrace {
+                        self.backtrace.push(*func as usize);
+                    }
+
                     self.frames.push(CallFrame { return_to: self.pc });
                     self.pc = *func as usize;
                     continue;
                 }
                 Op::Ret => {
+                    if self.config.backtrace {
+                        self.backtrace.pop();
+                    }
                     let Some(frame) = self.frames.pop() else {
                         unreachable!("Op::Ret had no frame to drop, this is a compiler bug");
                     };
@@ -204,13 +220,14 @@ impl<'vm> Vm<'vm> {
 #[cfg(test)]
 mod ops {
     use crate::{
-        vm::op::Op,
-        vm::{CallFrame, Value, Vm},
+        Args,
+        vm::{CallFrame, Value, Vm, op::Op},
     };
 
     #[test]
     fn load_global() {
-        let mut vm = Vm::new();
+        let c = &Args::default();
+        let mut vm = Vm::new(c);
         vm.globals = vec![Value::Double(3.1415)];
         vm.bytecode = vec![Op::LoadGlobal { dst: 0, idx: 0 }];
         if let Err(err) = vm.run() {
@@ -225,7 +242,8 @@ mod ops {
             $(
                 #[test]
                 fn $ident() {
-                    let mut vm = Vm::new();
+                    let c = &Args::default();
+                    let mut vm = Vm::new(c);
                     vm.bytecode = $bytecode;
                     vm.frames.push(CallFrame {
                         return_to: 0,

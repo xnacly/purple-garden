@@ -5,6 +5,7 @@ mod dis;
 mod reg;
 
 use crate::{
+    Args,
     ast::Node,
     bc::{
         ctx::{Context, Local},
@@ -306,8 +307,8 @@ impl<'cc> Cc<'cc> {
         })
     }
 
-    pub fn finalize(self) -> Vm<'cc> {
-        let mut v = Vm::new();
+    pub fn finalize(self, config: &'cc Args) -> Vm<'cc> {
+        let mut v = Vm::new(config);
         v.bytecode = self.buf;
         v.globals = self.ctx.globals_vec.into_iter().map(Value::from).collect();
         v.frames.push(CallFrame { return_to: 0 });

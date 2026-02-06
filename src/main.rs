@@ -1,7 +1,7 @@
 #![cfg_attr(feature = "nightly", feature(likely_unlikely))]
 #![allow(unused)]
 
-use std::fs;
+use std::{collections::HashMap, fs};
 
 #[cfg(feature = "trace")]
 mod trace {
@@ -69,9 +69,9 @@ mod parser;
 /// register based virtual machine
 mod vm;
 
-#[derive(clap::Parser)]
+#[derive(clap::Parser, Debug, Default)]
 #[command(about, version, long_about=None)]
-struct Args {
+pub struct Args {
     /// Set optimisation level. Higher levels increase compile time. All levels preserve language
     /// semantics.
     ///
@@ -139,8 +139,8 @@ struct Args {
 fn main() {
     let args = <Args as clap::Parser>::parse();
     let input = match args.run {
-        Some(i) => i.as_bytes().to_vec(),
-        None => fs::read(args.target.expect("No file or `-r` specified"))
+        Some(ref i) => i.as_bytes().to_vec(),
+        None => fs::read(args.target.clone().expect("No file or `-r` specified"))
             .expect("Failed to read from file")
             .to_vec(),
     };
@@ -210,7 +210,13 @@ fn main() {
         cc.dis();
     }
 
-    let mut vm = cc.finalize();
+    let mut function_table = if args.backtrace {
+        cc.function_table()
+    } else {
+        HashMap::new()
+    };
+
+    let mut vm = cc.finalize(&args);
 
     if let Err(e) = vm.run() {
         let lines = str::from_utf8(&input)
@@ -218,6 +224,17 @@ fn main() {
             .lines()
             .collect::<Vec<&str>>();
         Into::<PgError>::into(e).render(&lines);
+        if args.backtrace {
+            function_table.insert(0, "entry".into());
+            println!("at:");
+            vm.backtrace.insert(0, 0);
+            for (idx, trace_id) in vm.backtrace.iter().rev().enumerate() {
+                let Some(name) = function_table.get(&trace_id) else {
+                    panic!("Backtrace bug");
+                };
+                println!(" #{idx} {name}");
+            }
+        }
     }
 
     trace!("Executed bytecode");

@@ -7,8 +7,17 @@ use crate::{
 };
 
 impl Cc<'_> {
+    pub fn function_table(&self) -> HashMap<usize, String> {
+        self.ctx
+            .functions
+            .clone()
+            .into_values()
+            .map(|v| (v.pc, v.name.to_string()))
+            .collect()
+    }
+
     pub fn dis(&self) {
-        let reverse_function_lookup_table: HashMap<usize, Func> = self
+        let reverse_function_lookup_table: HashMap<usize, Func<'_>> = self
             .ctx
             .functions
             .clone()
