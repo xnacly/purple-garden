@@ -15,7 +15,7 @@ impl Display for Func<'_> {
             .first()
             .expect("Func.entry does not reference a valid block");
 
-        write!(f, "fn @f{}(", self.id.0)?;
+        write!(f, "fn f{}(", self.id.0)?;
         for (i, arg) in entry_block.params.iter().enumerate() {
             if i + 1 == entry_block.params.len() {
                 write!(f, "%v{}", arg)?;
@@ -72,7 +72,7 @@ impl Display for Func<'_> {
                         if let Some(dst) = dst {
                             write!(f, "%v{} = ", dst.0)?;
                         }
-                        write!(f, "@f{}(", func.0)?;
+                        write!(f, "f{}(", func.0)?;
                         for (i, arg) in args.iter().enumerate() {
                             if i + 1 == args.len() {
                                 write!(f, "%v{}", arg.0)?;
@@ -81,6 +81,10 @@ impl Display for Func<'_> {
                             }
                         }
                         writeln!(f, ")")?;
+                    }
+                    Instr::Cast { value, from } => {
+                        let t = value;
+                        writeln!(f, "%v{} = cast_to_{} %v{}", value, value.ty, from.0)?
                     }
                 }
             }

@@ -172,10 +172,15 @@ impl<'p> Parser<'p> {
                 e
             }
             Type::Plus | Type::Minus => {
+                let op = self.cur().clone();
                 let rbp = Parser::prefix_binding_power(&self.cur().t);
                 self.next()?;
-                let _ = self.parse_expr(rbp)?;
-                todo!("prefix operations")
+                let rhs = self.parse_expr(rbp)?;
+                Node::Unary {
+                    id: self.next_id(),
+                    op,
+                    rhs: Box::new(rhs),
+                }
             }
             _ => todo!("{:?}", self.cur().t),
         };
@@ -186,10 +191,23 @@ impl<'p> Parser<'p> {
         | Type::Slash
         | Type::Equal
         | Type::DoubleEqual
+        | Type::As
         | Type::LessThan
         | Type::GreaterThan = self.cur().t
         {
             let op = self.cur().clone();
+
+            if let Token { t: Type::As, .. } = op {
+                self.next()?;
+                let ty = self.parse_type()?;
+                lhs = Node::Cast {
+                    src: op,
+                    id: self.next_id(),
+                    lhs: Box::new(lhs),
+                    rhs: ty,
+                };
+                continue;
+            }
 
             if let Some((lbp, rbp)) = Parser::infix_binding_power(&op.t) {
                 if lbp < min_bp {

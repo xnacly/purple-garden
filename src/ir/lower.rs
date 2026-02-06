@@ -236,6 +236,20 @@ impl<'lower> Lower<'lower> {
 
                 Some(dst)
             }
+            Node::Cast { id, lhs, rhs, .. } => {
+                let Some(from) = self.lower_node(lhs)? else {
+                    unreachable!()
+                };
+
+                let dst = self.id_store.new_value();
+                let value = TypeId {
+                    id: dst,
+                    ty: rhs.into(),
+                };
+
+                self.emit(Instr::Cast { value, from });
+                Some(dst)
+            }
             _ => todo!("{:?}", node),
         })
     }
@@ -244,7 +258,7 @@ impl<'lower> Lower<'lower> {
     pub fn ir_from(mut self, ast: &'lower [Node]) -> Result<Vec<Func<'lower>>, PgError> {
         let mut typechecker = typecheck::Typechecker::new();
         for node in ast {
-            typechecker.from_node(node)?;
+            typechecker.node(node)?;
         }
         trace!("{:#?}", typechecker);
         self.types = typechecker.finalise();

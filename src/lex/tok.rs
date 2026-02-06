@@ -37,6 +37,7 @@ pub enum Type<'t> {
     Fn,
     Match,
     For,
+    As,
 
     // type keywords
     Str,

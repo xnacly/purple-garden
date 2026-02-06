@@ -21,6 +21,13 @@ pub enum Node<'node> {
         rhs: Box<Node<'node>>,
     },
 
+    /// <op> <rhs>
+    Unary {
+        id: usize,
+        op: Token<'node>,
+        rhs: Box<Node<'node>>,
+    },
+
     /// [<member0> <member1>]
     Array {
         id: usize,
@@ -69,6 +76,13 @@ pub enum Node<'node> {
         id: usize,
         name: Token<'node>,
         args: Vec<Node<'node>>,
+    },
+
+    Cast {
+        id: usize,
+        src: Token<'node>,
+        lhs: Box<Node<'node>>,
+        rhs: TypeExpr<'node>,
     },
     // <path0>::<path1>::<leaf>
     // Path {
@@ -124,10 +138,10 @@ impl<'a> Node<'a> {
         let pad = "  ".repeat(indent);
 
         match &self {
-            Node::Atom { raw, id } => writeln!(f, "{}{:?}@{}", pad, raw.t, id),
+            Node::Atom { raw, id } => writeln!(f, "{}{:?}", pad, raw.t),
             Node::Ident { name, id } => {
                 if let Type::Ident(name) = name.t {
-                    writeln!(f, "{}{}@{}", pad, name, id)
+                    writeln!(f, "{}{}", pad, name)
                 } else {
                     unreachable!()
                 }
@@ -136,14 +150,19 @@ impl<'a> Node<'a> {
                 writeln!(f, "{}({:?}", pad, op.t)?;
                 lhs.fmt_sexpr(f, indent + 1)?;
                 rhs.fmt_sexpr(f, indent + 1)?;
-                writeln!(f, "{})@{}", pad, id)
+                writeln!(f, "{})", pad)
+            }
+            Node::Unary { op, rhs, id } => {
+                writeln!(f, "{}({:?}", pad, op.t)?;
+                rhs.fmt_sexpr(f, indent + 1)?;
+                writeln!(f, "{})", pad)
             }
             Node::Array { members, id } => {
                 writeln!(f, "{}[", pad)?;
                 for member in members {
                     member.fmt_sexpr(f, indent + 1)?;
                 }
-                writeln!(f, "{}]@{}", pad, id)
+                writeln!(f, "{}]", pad)
             }
             Node::Object { pairs, id } => {
                 writeln!(f, "{}{{", pad)?;
@@ -151,7 +170,7 @@ impl<'a> Node<'a> {
                     k.fmt_sexpr(f, indent + 1)?;
                     v.fmt_sexpr(f, indent + 1)?;
                 }
-                writeln!(f, "{}}}@{}", pad, id)
+                writeln!(f, "{}}}", pad)
             }
             Node::Let { name, rhs, id } => {
                 let Type::Ident(name) = name.t else {
@@ -159,7 +178,7 @@ impl<'a> Node<'a> {
                 };
                 writeln!(f, "{}(let {}", pad, name)?;
                 rhs.fmt_sexpr(f, indent + 1)?;
-                writeln!(f, "{})@{}", pad, id)
+                writeln!(f, "{})", pad)
             }
             Node::Fn {
                 name,
@@ -201,7 +220,13 @@ impl<'a> Node<'a> {
                         arg.fmt_sexpr(f, indent + 1)?;
                     }
                 }
-                writeln!(f, "{})@{}", pad, id)
+                writeln!(f, "{})", pad)
+            }
+            Node::Cast { lhs, rhs, .. } => {
+                let t: crate::ir::ptype::Type = rhs.into();
+                writeln!(f, "{}(cast_to_{}", pad, t)?;
+                lhs.fmt_sexpr(f, indent + 1)?;
+                writeln!(f, "{})", pad)
             }
             _ => writeln!(f, "{}<todo {:?}>", pad, self),
         }

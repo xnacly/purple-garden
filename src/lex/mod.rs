@@ -22,6 +22,7 @@ impl<'l> Lexer<'l> {
         }
     }
 
+    #[inline]
     fn make_tok(&self, t: Type<'l>) -> Token<'l> {
         Token {
             line: self.line,
@@ -39,6 +40,7 @@ impl<'l> Lexer<'l> {
         }
     }
 
+    #[inline]
     fn advance(&mut self) {
         if let Some(b) = self.cur() {
             self.pos += 1;
@@ -51,20 +53,24 @@ impl<'l> Lexer<'l> {
         }
     }
 
+    #[inline]
     fn cur(&self) -> Option<u8> {
         self.input.get(self.pos).copied()
     }
 
+    #[inline]
     fn peek(&self) -> Option<u8> {
         self.input.get(self.pos + 1).copied()
     }
 
+    #[inline]
     fn at_end(&mut self) -> bool {
         self.pos >= self.input.len()
     }
 
     fn as_keyword(&self, inner: &'l str) -> Option<Token<'l>> {
         let as_type = Some(match inner {
+            "as" => Type::As,
             "true" => Type::True,
             "false" => Type::False,
             "let" => Type::Let,
@@ -82,21 +88,27 @@ impl<'l> Lexer<'l> {
         Some(self.make_tok(as_type))
     }
 
-    pub fn next(&mut self) -> Result<Token<'l>, PgError> {
-        if self.cur().is_some_and(|c| c == b'#') {
-            self.advance();
-            while !self.at_end() && self.cur().is_some_and(|c| c != b'\n') {
+    /// skip whitespace and comments
+    fn skip_whitespace(&mut self) {
+        loop {
+            while matches!(self.cur(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
                 self.advance();
             }
-            // skip newline
-            self.advance();
 
-            return self.next();
-        }
+            if self.cur() == Some(b'#') {
+                self.advance();
+                while !self.at_end() && self.cur() != Some(b'\n') {
+                    self.advance();
+                }
+                continue;
+            }
 
-        while matches!(self.cur(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
-            self.advance()
+            break;
         }
+    }
+
+    pub fn next(&mut self) -> Result<Token<'l>, PgError> {
+        self.skip_whitespace();
 
         if self.at_end() {
             return Ok(self.make_tok(Type::Eof));

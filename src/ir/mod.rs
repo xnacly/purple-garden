@@ -82,6 +82,11 @@ pub enum Instr<'i> {
         func: Id,
         args: Vec<Id>,
     },
+
+    Cast {
+        value: TypeId,
+        from: Id,
+    },
 }
 
 #[derive(Debug, Clone)]

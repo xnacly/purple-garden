@@ -7,52 +7,18 @@ fn id_from_node(node: &Node) -> Option<usize> {
         Node::Atom { id, .. }
         | Node::Ident { id, .. }
         | Node::Bin { id, .. }
+        | Node::Unary { id, .. }
         | Node::Array { id, .. }
         | Node::Object { id, .. }
         | Node::Let { id, .. }
         | Node::Match { id, .. }
-        | Node::Call { id, .. } => *id,
+        | Node::Call { id, .. }
+        | Node::Cast { id, .. } => *id,
         Node::Fn { .. } => return None,
     })
 }
 
-fn fuse(op: &lex::Token, lhs: &Type, rhs: &Type) -> Result<Type, PgError> {
-    Ok(match op.t {
-        // arithmetics
-        lex::Type::Plus | lex::Type::Minus | lex::Type::Asteriks | lex::Type::Slash => {
-            match (lhs, rhs) {
-                (Type::Double, Type::Int)
-                | (Type::Int, Type::Double)
-                | (Type::Double, Type::Double) => Type::Double,
-                (Type::Int, Type::Int) => Type::Int,
-                (_, _) => {
-                    return Err(PgError::with_msg(
-                        format!("Incompatible types {} and {} for {:?}", lhs, rhs, op.t),
-                        op,
-                    ));
-                }
-            }
-        }
-        // boolish operations
-        lex::Type::LessThan
-        | lex::Type::GreaterThan
-        | lex::Type::DoubleEqual
-        | lex::Type::NotEqual => {
-            if lhs != rhs {
-                return Err(PgError::with_msg(
-                    format!("Incompatible types {} and {} for {:?}", lhs, rhs, op.t),
-                    op,
-                ));
-            }
-            Type::Bool
-        }
-        // lex::Type::Exclaim => todo!(),
-        // lex::Type::Question => todo!(),
-        _ => unreachable!(),
-    })
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FunctionType {
     args: Vec<Type>,
     ret: Type,
@@ -77,7 +43,55 @@ impl<'t> Typechecker<'t> {
     fn already_checked(&'t self, node: &Node) -> Option<&'t Type> {
         self.map.get(&id_from_node(node)?)
     }
-    pub fn from_node(&mut self, node: &'t Node) -> Result<Type, PgError> {
+
+    fn fuse(op: &lex::Token, lhs: &Type, rhs: &Type) -> Result<Type, PgError> {
+        Ok(match op.t {
+            // arithmetics
+            lex::Type::Plus | lex::Type::Minus | lex::Type::Asteriks | lex::Type::Slash => {
+                match (lhs, rhs) {
+                    (Type::Int, Type::Int) => Type::Int,
+                    (Type::Double, Type::Double) => Type::Double,
+                    (_, _) => {
+                        return Err(PgError::with_msg(
+                            format!("Incompatible types {} and {} for {:?}", lhs, rhs, op.t),
+                            op,
+                        ));
+                    }
+                }
+            }
+            // boolish operations
+            lex::Type::LessThan
+            | lex::Type::GreaterThan
+            | lex::Type::DoubleEqual
+            | lex::Type::NotEqual => {
+                if lhs != rhs {
+                    return Err(PgError::with_msg(
+                        format!("Incompatible types {} and {} for {:?}", lhs, rhs, op.t),
+                        op,
+                    ));
+                }
+                Type::Bool
+            }
+            // lex::Type::Exclaim => todo!(),
+            // lex::Type::Question => todo!(),
+            _ => unreachable!(),
+        })
+    }
+
+    fn cast(at: &lex::Token, i: &Type, o: &Type) -> Result<Type, PgError> {
+        Ok(match (i, o) {
+            (Type::Int, Type::Double) => Type::Double,
+            (Type::Double, Type::Int) => Type::Int,
+            (_, _) => {
+                return Err(PgError::with_msg(
+                    format!("Can not cast {} to {}", i, o),
+                    at,
+                ));
+            }
+        })
+    }
+
+    pub fn node(&mut self, node: &'t Node) -> Result<Type, PgError> {
         if let Some(t) = self.already_checked(node) {
             return Ok(t.clone());
         }
@@ -105,14 +119,17 @@ impl<'t> Typechecker<'t> {
                 t.clone()
             }
             Node::Bin { id, op, lhs, rhs } => {
-                let lhs = self.from_node(lhs)?;
-                let rhs = self.from_node(rhs)?;
-                let res = fuse(op, &lhs, &rhs)?;
+                let lhs = self.node(lhs)?;
+                let rhs = self.node(rhs)?;
+                let res = Self::fuse(op, &lhs, &rhs)?;
                 self.map.insert(*id, res.clone());
                 res
             }
+            Node::Unary { id, op, rhs } => {
+                todo!("{:?}", node);
+            }
             Node::Let { id, name, rhs } => {
-                let inner = self.from_node(rhs)?;
+                let inner = self.node(rhs)?;
                 self.map.insert(*id, inner.clone());
                 let lex::Token {
                     t: lex::Type::Ident(inner_name),
@@ -155,7 +172,7 @@ impl<'t> Typechecker<'t> {
                 };
 
                 for node in body {
-                    self.from_node(node)?;
+                    self.node(node)?;
                 }
 
                 // TODO: verify this
@@ -171,6 +188,7 @@ impl<'t> Typechecker<'t> {
                 self.env = prev_env;
                 ret
             }
+            Node::Cast { id, lhs, rhs, src } => Self::cast(src, &self.node(lhs)?, &rhs.into())?,
             Node::Call { id, name, args } => {
                 let lex::Token {
                     t: lex::Type::Ident(inner_name),
@@ -180,7 +198,7 @@ impl<'t> Typechecker<'t> {
                     unreachable!()
                 };
 
-                let Some(fun) = self.functions.get(inner_name).clone() else {
+                let Some(fun) = self.functions.get(inner_name).cloned() else {
                     return Err(PgError::with_msg(
                         format!("Call to undefined function `{}`", inner_name),
                         name,
@@ -201,12 +219,22 @@ impl<'t> Typechecker<'t> {
 
                 self.map.insert(*id, fun.ret.clone());
 
-                // TODO: check expected and provided types
-                // for (i, provided_node) in args.iter().enumerate() {
-                //     let provided = self.from_node(provided_node);
-                // }
+                for (i, provided_node) in args.iter().enumerate() {
+                    let provided_type = self.node(provided_node)?;
+                    let expected_type = &fun.args[i];
 
-                fun.ret.clone()
+                    if expected_type != &provided_type {
+                        return Err(PgError::with_msg(
+                            format!(
+                                "argument {} to function `{}` is of type {}, got {} instead",
+                                i, inner_name, expected_type, provided_type,
+                            ),
+                            name,
+                        ));
+                    }
+                }
+
+                fun.ret
             }
             _ => todo!("{:?}", node),
         })
