@@ -75,6 +75,7 @@ impl<'vm> Vm<'vm> {
             crate::trace!("[vm][{:04}] {:?}", self.pc, instruction);
 
             match instruction {
+                Op::Nop => {}
                 Op::LoadImm { dst, value } => {
                     *unsafe_get_mut!(self.r, *dst) = Value::Int(*value as i64)
                 }
