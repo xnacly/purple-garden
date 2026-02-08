@@ -15,7 +15,7 @@ impl Display for Func<'_> {
             .first()
             .expect("Func.entry does not reference a valid block");
 
-        write!(f, "fn f{}(", self.id.0)?;
+        write!(f, "// {}\nfn f{}(", self.name, self.id.0)?;
         for (i, arg) in entry_block.params.iter().enumerate() {
             if i + 1 == entry_block.params.len() {
                 write!(f, "%v{}", arg)?;
