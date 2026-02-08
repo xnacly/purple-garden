@@ -6,6 +6,7 @@ use crate::{ast::TypeExpr, ir::Const, lex};
 /// Compile time type system,
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
+    Void,
     Bool,
     Int,
     Double,
@@ -30,6 +31,7 @@ impl Type {
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Type::Void => write!(f, "Void"),
             Type::Bool => write!(f, "Bool"),
             Type::Int => write!(f, "Int"),
             Type::Double => write!(f, "Double"),
@@ -61,6 +63,7 @@ impl From<lex::Type<'_>> for Type {
             lex::Type::Double => Self::Double,
             lex::Type::Str => Self::Str,
             lex::Type::Bool => Self::Bool,
+            lex::Type::Void => Self::Void,
             _ => unreachable!(),
         }
     }

@@ -127,7 +127,41 @@ impl<'p> Parser<'p> {
     }
 
     fn parse_match(&mut self) -> Result<Node<'p>, PgError> {
-        todo!("Parser::parse_match");
+        self.next()?;
+        let mut cases = vec![];
+        let mut default = None;
+
+        self.expect(Type::CurlyLeft)?;
+        while self.cur().t != Type::CurlyRight {
+            /// default case
+            if self.cur().t == Type::CurlyLeft {
+                let default_token = self.cur().clone();
+                self.expect(Type::CurlyLeft);
+                let mut default_body = vec![];
+                while self.cur().t != Type::CurlyRight {
+                    default_body.push(self.parse_prefix()?);
+                }
+                self.expect(Type::CurlyRight);
+                default = Some((default_token, default_body));
+            } else {
+                let condition_token = self.cur().clone();
+                let condition = self.parse_expr(0)?;
+                self.expect(Type::CurlyLeft);
+                let mut body = vec![];
+                while self.cur().t != Type::CurlyRight {
+                    body.push(self.parse_prefix()?);
+                }
+                self.expect(Type::CurlyRight);
+                cases.push(((condition_token, condition), body));
+            }
+        }
+        self.expect(Type::CurlyRight)?;
+
+        Ok(Node::Match {
+            id: self.next_id(),
+            cases,
+            default,
+        })
     }
 
     fn parse_for(&mut self) -> Result<Node<'p>, PgError> {
@@ -246,6 +280,7 @@ impl<'p> Parser<'p> {
         Some(match op {
             Type::Plus | Type::Minus => (1, 2),
             Type::Asteriks | Type::Slash => (3, 4),
+            Type::DoubleEqual => (0, 1),
             _ => return None,
         })
     }

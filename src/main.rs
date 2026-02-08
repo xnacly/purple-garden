@@ -198,7 +198,7 @@ fn main() {
             .collect::<Vec<&str>>();
         e.render(&lines);
         std::process::exit(1);
-    }
+    };
 
     trace!("Lowered IR to bytecode");
 

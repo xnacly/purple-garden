@@ -66,9 +66,9 @@ pub enum Node<'node> {
     /// }
     Match {
         id: usize,
-        /// [(condition, body)]
-        cases: Vec<(Node<'node>, Node<'node>)>,
-        default: Option<Box<Node<'node>>>,
+        /// [((condition_token, condition), body)]
+        cases: Vec<((Token<'node>, Node<'node>), Vec<Node<'node>>)>,
+        default: Option<(Token<'node>, Vec<Node<'node>>)>,
     },
 
     /// <name>(<args>)
@@ -226,6 +226,25 @@ impl<'a> Node<'a> {
                 let t: crate::ir::ptype::Type = rhs.into();
                 writeln!(f, "{}(cast_to_{}", pad, t)?;
                 lhs.fmt_sexpr(f, indent + 1)?;
+                writeln!(f, "{})", pad)
+            }
+            Node::Match { cases, default, .. } => {
+                writeln!(f, "{}(match ", pad);
+                for ((_, condition), body) in cases {
+                    writeln!(f, "{} (", pad);
+                    condition.fmt_sexpr(f, indent + 1)?;
+                    for body_member in body {
+                        body_member.fmt_sexpr(f, indent + 1)?;
+                    }
+                    writeln!(f, "{} )", pad);
+                }
+                if let Some((_, default)) = default {
+                    writeln!(f, "{} (", pad);
+                    for default_member in default {
+                        default_member.fmt_sexpr(f, indent + 1)?;
+                    }
+                    writeln!(f, "{} )", pad);
+                }
                 writeln!(f, "{})", pad)
             }
             _ => writeln!(f, "{}<todo {:?}>", pad, self),

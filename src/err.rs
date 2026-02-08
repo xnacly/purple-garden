@@ -1,4 +1,5 @@
 use crate::{
+    ast::TypeExpr,
     lex::{Token, Type},
     vm::Anomaly,
 };
@@ -29,6 +30,16 @@ impl From<&Token<'_>> for PgError {
             line: value.line,
             start: value.col,
             len,
+        }
+    }
+}
+
+impl From<&TypeExpr<'_>> for PgError {
+    fn from(value: &TypeExpr<'_>) -> Self {
+        match value {
+            TypeExpr::Atom(tok) => tok.into(),
+            TypeExpr::Option(inner) | TypeExpr::Array(inner) => inner.as_ref().into(),
+            TypeExpr::Map { key, .. } => key.as_ref().into(),
         }
     }
 }

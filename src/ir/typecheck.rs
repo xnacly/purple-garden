@@ -1,6 +1,11 @@
 use std::collections::HashMap;
 
-use crate::{ast::Node, err::PgError, ir::ptype::Type, lex};
+use crate::{
+    ast::Node,
+    err::PgError,
+    ir::ptype::Type,
+    lex::{self, Token},
+};
 
 fn id_from_node(node: &Node) -> Option<usize> {
     Some(match node {
@@ -94,6 +99,14 @@ impl<'t> Typechecker<'t> {
         })
     }
 
+    fn block_type(&mut self, nodes: &'t [Node]) -> Result<Type, PgError> {
+        let mut last_type = Type::Void;
+        for node in nodes {
+            last_type = self.node(node)?;
+        }
+        Ok(last_type)
+    }
+
     pub fn node(&mut self, node: &'t Node) -> Result<Type, PgError> {
         if let Some(t) = self.already_checked(node) {
             return Ok(t.clone());
@@ -178,12 +191,18 @@ impl<'t> Typechecker<'t> {
                     unreachable!()
                 };
 
-                for node in body {
-                    self.node(node)?;
-                }
-
-                // TODO: verify this
                 let ret: Type = return_type.into();
+                let computed_ret = self.block_type(body)?;
+                if ret != computed_ret {
+                    return Err(PgError::with_msg(
+                        "Function return type mismatch",
+                        format!(
+                            "`{}` annotated with return type {}, but returns {}",
+                            inner_name, ret, computed_ret
+                        ),
+                        return_type,
+                    ));
+                }
 
                 self.functions.insert(
                     inner_name,
@@ -246,6 +265,66 @@ impl<'t> Typechecker<'t> {
 
                 fun.ret
             }
+            Node::Match { id, cases, default } => {
+                // short circuit for empty matches
+                if cases.is_empty() && default.is_none() {
+                    return Ok(Type::Void);
+                }
+
+                let case_count = if default.is_some() {
+                    cases.len() + 1
+                } else {
+                    cases.len()
+                };
+
+                // all branches MUST resolve to the same type :)
+                let mut branch_types: Vec<Option<(&Token, Type)>> =
+                    vec![const { None }; case_count];
+
+                for (i, ((condition_token, condition), body)) in cases.iter().enumerate() {
+                    let condition_type: Type = self.node(condition)?;
+
+                    if condition_type != Type::Bool {
+                        return Err(PgError::with_msg(
+                            "Non bool match condition",
+                            format!(
+                                "Match conditions must be Bool, got {} instead",
+                                condition_type
+                            ),
+                            condition_token,
+                        ));
+                    }
+
+                    let branch_return_type = self.block_type(body)?;
+                    branch_types[i] = Some((condition_token, branch_return_type));
+                }
+
+                if let Some((token, body)) = default {
+                    branch_types[cases.len()] = Some((token, self.block_type(body)?));
+                }
+
+                let Some((_, first_type)) = &branch_types[0] else {
+                    unreachable!();
+                };
+
+                for cur in &branch_types[1..] {
+                    let Some((tok, ty)) = cur else { unreachable!() };
+
+                    if ty != first_type {
+                        return Err(PgError::with_msg(
+                            "Incompatible match case return type",
+                            format!(
+                                "Match cases must resolve to the same type, but got {} and {}",
+                                first_type, ty
+                            ),
+                            *tok,
+                        ));
+                    };
+                }
+
+                first_type.clone()
+            }
+
             _ => todo!("{:?}", node),
         })
     }

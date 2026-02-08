@@ -90,27 +90,29 @@ impl Display for Func<'_> {
             }
 
             write!(f, "\t")?;
-            match &block.term {
-                Terminator::Return(Some(id)) => writeln!(f, "ret %v{}", id.0)?,
-                Terminator::Return(None) => writeln!(f, "ret")?,
-                Terminator::Jump { id, params } => {
-                    if params.is_empty() {
-                        writeln!(f, "jmp b{}", id.0)?
-                    } else {
-                        writeln!(
-                            f,
-                            "jmp b{}({})",
-                            id.0,
-                            params
-                                .iter()
-                                .map(|p| format!("%v{}", p.0))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )?
+            if let Some(term) = &block.term {
+                match &term {
+                    Terminator::Return(Some(id)) => writeln!(f, "ret %v{}", id.0)?,
+                    Terminator::Return(None) => writeln!(f, "ret")?,
+                    Terminator::Jump { id, params } => {
+                        if params.is_empty() {
+                            writeln!(f, "jmp b{}", id.0)?
+                        } else {
+                            writeln!(
+                                f,
+                                "jmp b{}({})",
+                                id.0,
+                                params
+                                    .iter()
+                                    .map(|p| format!("%v{}", p.0))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )?
+                        }
                     }
-                }
-                Terminator::Branch { cond, yes, no } => {
-                    writeln!(f, "br %v{}, b{}, b{}", cond.0, yes.0, no.0)?
+                    Terminator::Branch { cond, yes, no } => {
+                        writeln!(f, "br %v{}, b{}, b{}", cond.0, yes.0, no.0)?
+                    }
                 }
             }
         }
@@ -163,11 +165,12 @@ mod ir {
                     rhs: v3.id,
                 },
             ],
-            term: Terminator::Return(Some(v4.id)),
+            term: Some(Terminator::Return(Some(v4.id))),
         };
 
         let func = Func {
             id: Id(0),
+            name: "test",
             ret: Some(Type::Int),
             blocks: vec![block0],
         };

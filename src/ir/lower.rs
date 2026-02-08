@@ -11,7 +11,6 @@ use crate::{
 struct IdStore {
     values: usize,
     blocks: usize,
-    functions: usize,
 }
 
 impl IdStore {
@@ -25,12 +24,6 @@ impl IdStore {
         let blk = self.blocks;
         self.blocks += 1;
         Id(blk as u32)
-    }
-
-    fn new_function(&mut self) -> Id {
-        let fun = self.functions;
-        self.functions += 1;
-        Id(fun as u32)
     }
 }
 
@@ -57,6 +50,14 @@ impl<'lower> Lower<'lower> {
             .unwrap()
             .instructions
             .push(i);
+    }
+
+    fn emit_block(&mut self, block: Block<'lower>) {
+        self.current_func.blocks.push(block)
+    }
+
+    fn emit_term(&mut self, term: Terminator) {
+        self.current_func.blocks.last_mut().unwrap().term = Some(term);
     }
 
     fn lower_node(&mut self, node: &'lower Node) -> Result<Option<Id>, PgError> {
@@ -152,7 +153,8 @@ impl<'lower> Lower<'lower> {
             } => {
                 let old_func = std::mem::take(&mut self.current_func);
                 let old_env = std::mem::take(&mut self.env);
-                let id = self.id_store.new_function();
+                let old_store = std::mem::take(&mut self.id_store);
+                let id = Id(self.functions.len() as u32);
                 let Type::Ident(ident_name) = name.t else {
                     unreachable!()
                 };
@@ -180,7 +182,7 @@ impl<'lower> Lower<'lower> {
                                     }
                                 })
                                 .collect(),
-                            term: Terminator::Return(None),
+                            term: None,
                         },
                     ],
                     ret: if let TypeExpr::Atom(Token { t: Type::Void, .. }) = return_type {
@@ -199,13 +201,17 @@ impl<'lower> Lower<'lower> {
                 for node in body {
                     last_id = self.lower_node(node)?;
                 }
-                if last_id.is_some() {
-                    self.current_func.blocks.last_mut().unwrap().term = Terminator::Return(last_id);
-                }
+
+                self.current_func.blocks.last_mut().unwrap().term = if last_id.is_some() {
+                    Some(Terminator::Return(last_id))
+                } else {
+                    Some(Terminator::Return(None))
+                };
 
                 self.functions.push(std::mem::take(&mut self.current_func));
                 self.env = old_env;
                 self.current_func = old_func;
+                self.id_store = old_store;
                 None
             }
             Node::Call { name, args, id } => {
@@ -252,11 +258,59 @@ impl<'lower> Lower<'lower> {
                 self.emit(Instr::Cast { value, from });
                 Some(dst)
             }
+            Node::Match { cases, default, .. } => {
+                // short circuit for empty matches
+                if cases.is_empty() && default.is_none() {
+                    return Ok(None);
+                }
+
+                // current test example:
+                // fn to_bool(x:int) bool {
+                //     match {
+                //         x == 0 { false }
+                //         x == 1 { true }
+                //         { 0/0 }
+                //     }
+                // }
+
+                // TODO: keep a list of created blocks, backpatch the jumps after all blocks have
+                // been created
+                //
+                // let backpatch_list = vec![const { None }; cases.len()];
+
+                for (((_, condition), body)) in cases {
+                    let Some(cond) = self.lower_node(condition)? else {
+                        unreachable!()
+                    };
+
+                    let body_block_id = self.id_store.new_block();
+                    self.emit_term(Terminator::Branch {
+                        cond,
+                        yes: body_block_id,
+                        no: Id(u32::MAX),
+                    });
+
+                    self.emit_block(Block {
+                        id: body_block_id,
+                        instructions: Vec::new(),
+                        params: Vec::new(),
+                        term: None,
+                    });
+                }
+
+                if let Some((tok, body)) = default {
+                    todo!("default match case")
+                }
+
+                todo!("match case");
+
+                None
+            }
             _ => todo!("{:?}", node),
         })
     }
 
-    /// Lower [ast] into a list of Func nodes, the entry point is always `__pg_entry`
+    /// Lower [ast] into a list of Func nodes, the entry point is always `__entry`
     pub fn ir_from(mut self, ast: &'lower [Node]) -> Result<Vec<Func<'lower>>, PgError> {
         let mut typechecker = typecheck::Typechecker::new();
         for node in ast {
@@ -267,14 +321,14 @@ impl<'lower> Lower<'lower> {
 
         // entry function
         self.current_func = Func {
-            id: self.id_store.new_function(),
+            id: Id(0),
             name: "entry",
             ret: None,
             blocks: vec![Block {
                 id: self.id_store.new_block(),
                 instructions: vec![],
                 params: vec![],
-                term: Terminator::Return(None),
+                term: None,
             }],
         };
 

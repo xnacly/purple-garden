@@ -36,7 +36,7 @@ pub enum Const<'c> {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Id(u32);
+pub struct Id(pub u32);
 
 #[derive(Debug, Clone)]
 pub struct TypeId {
@@ -101,7 +101,9 @@ pub struct Block<'b> {
     pub id: Id,
     pub instructions: Vec<Instr<'b>>,
     pub params: Vec<TypeId>,
-    pub term: Terminator,
+    /// each block has a term, but a block starts without one in the lowering process, thus this
+    /// field has to be optional
+    pub term: Option<Terminator>,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -33,11 +33,9 @@ impl Cc<'_> {
             .map(|(k, v)| (v, k))
             .collect();
 
-        println!("__entry: ");
-
         for (i, b) in self.buf.iter().enumerate() {
             if let Some(func) = reverse_function_lookup_table.get(&i) {
-                println!("\n__{}: \t\t\t; 0x{:04X}", func.name, func.pc);
+                println!("__{}: \t\t\t; 0x{:04X}", func.name, func.pc);
             }
 
             println!(
@@ -67,7 +65,7 @@ impl Cc<'_> {
                             .name
                     ),
                     Op::Sys { .. } => "sys <syscall_name_here>".to_string(),
-                    Op::Ret => "ret\n".into(),
+                    Op::Ret => "ret".into(),
                     Op::Nop => "nop".into(),
                 }
             );

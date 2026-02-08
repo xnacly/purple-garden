@@ -1,6 +1,6 @@
 use crate::vm;
 
-/// A block local register allocator working in combination with the ssa block param based ir
+/// A function local register allocator working in combination with the ssa block param based ir
 ///
 /// Works by keeping a list of currently free registers, pushing is equivalent to freeing a
 /// register, while popping is an allocation. Loosely based on [Poletto, Massimiliano, and Vivek
