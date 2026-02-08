@@ -3,18 +3,18 @@
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum Op {
     // TODO: rename all to I* for integers, introduce secondary operator for D* (double)
-    Add { dst: u8, lhs: u8, rhs: u8 },
-    Sub { dst: u8, lhs: u8, rhs: u8 },
-    Mul { dst: u8, lhs: u8, rhs: u8 },
-    Div { dst: u8, lhs: u8, rhs: u8 },
+    IAdd { dst: u8, lhs: u8, rhs: u8 },
+    ISub { dst: u8, lhs: u8, rhs: u8 },
+    IMul { dst: u8, lhs: u8, rhs: u8 },
+    IDiv { dst: u8, lhs: u8, rhs: u8 },
     Eq { dst: u8, lhs: u8, rhs: u8 },
     Lt { dst: u8, lhs: u8, rhs: u8 },
     Gt { dst: u8, lhs: u8, rhs: u8 },
-    Not { dst: u8, src: u8 },
+    BNot { dst: u8, src: u8 },
     Mov { dst: u8, src: u8 },
 
-    LoadImm { dst: u8, value: i32 },
-    LoadGlobal { dst: u8, idx: u32 },
+    LoadI { dst: u8, value: i32 },
+    LoadG { dst: u8, idx: u32 },
     Jmp { target: u16 },
     JmpF { cond: u8, target: u16 },
     Call { func: u32 },

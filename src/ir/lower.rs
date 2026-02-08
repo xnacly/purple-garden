@@ -159,6 +159,7 @@ impl<'lower> Lower<'lower> {
                 self.func_name_to_id.insert(ident_name, id);
 
                 let func = Func {
+                    name: ident_name,
                     id,
                     blocks: vec![
                         // entry block
@@ -267,6 +268,7 @@ impl<'lower> Lower<'lower> {
         // entry function
         self.current_func = Func {
             id: self.id_store.new_function(),
+            name: "entry",
             ret: None,
             blocks: vec![Block {
                 id: self.id_store.new_block(),

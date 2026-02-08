@@ -35,13 +35,13 @@ pub enum Const<'c> {
     Str(&'c str),
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Id(u32);
 
 #[derive(Debug, Clone)]
 pub struct TypeId {
-    id: Id,
-    ty: Type,
+    pub id: Id,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone)]
@@ -98,15 +98,16 @@ pub enum Terminator {
 
 #[derive(Debug, Clone)]
 pub struct Block<'b> {
-    id: Id,
-    instructions: Vec<Instr<'b>>,
-    params: Vec<TypeId>,
-    term: Terminator,
+    pub id: Id,
+    pub instructions: Vec<Instr<'b>>,
+    pub params: Vec<TypeId>,
+    pub term: Terminator,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Func<'f> {
-    id: Id,
-    ret: Option<Type>,
-    blocks: Vec<Block<'f>>,
+    pub name: &'f str,
+    pub id: Id,
+    pub ret: Option<Type>,
+    pub blocks: Vec<Block<'f>>,
 }

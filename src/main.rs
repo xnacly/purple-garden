@@ -191,7 +191,7 @@ fn main() {
     }
 
     let mut cc = bc::Cc::new();
-    if let Err(e) = cc.compile(&ast) {
+    if let Err(e) = cc.compile(&ir) {
         let lines = str::from_utf8(&input)
             .unwrap()
             .lines()

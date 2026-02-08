@@ -23,30 +23,30 @@ mod bc {
     #[test]
     fn const_binary() {
         let mut bc = vec![
-            Op::LoadImm { dst: 0, value: 1 },
-            Op::LoadImm { dst: 1, value: 2 },
-            Op::Add {
+            Op::LoadI { dst: 0, value: 1 },
+            Op::LoadI { dst: 1, value: 2 },
+            Op::IAdd {
                 dst: 0,
                 lhs: 0,
                 rhs: 1,
             },
-            Op::LoadImm { dst: 0, value: 1 },
-            Op::LoadImm { dst: 1, value: 2 },
-            Op::Sub {
+            Op::LoadI { dst: 0, value: 1 },
+            Op::LoadI { dst: 1, value: 2 },
+            Op::ISub {
                 dst: 0,
                 lhs: 0,
                 rhs: 1,
             },
-            Op::LoadImm { dst: 0, value: 3 },
-            Op::LoadImm { dst: 1, value: 5 },
-            Op::Mul {
+            Op::LoadI { dst: 0, value: 3 },
+            Op::LoadI { dst: 1, value: 5 },
+            Op::IMul {
                 dst: 0,
                 lhs: 0,
                 rhs: 1,
             },
-            Op::LoadImm { dst: 0, value: 64 },
-            Op::LoadImm { dst: 1, value: 8 },
-            Op::Div {
+            Op::LoadI { dst: 0, value: 64 },
+            Op::LoadI { dst: 1, value: 8 },
+            Op::IDiv {
                 dst: 0,
                 lhs: 0,
                 rhs: 1,
@@ -61,21 +61,21 @@ mod bc {
         assert_eq!(
             bc,
             vec![
-                Op::LoadImm { dst: 0, value: 1 },
-                Op::LoadImm { dst: 1, value: 2 },
-                Op::LoadImm { dst: 0, value: 3 },
+                Op::LoadI { dst: 0, value: 1 },
+                Op::LoadI { dst: 1, value: 2 },
+                Op::LoadI { dst: 0, value: 3 },
                 //
-                Op::LoadImm { dst: 0, value: 1 },
-                Op::LoadImm { dst: 1, value: 2 },
-                Op::LoadImm { dst: 0, value: -1 },
+                Op::LoadI { dst: 0, value: 1 },
+                Op::LoadI { dst: 1, value: 2 },
+                Op::LoadI { dst: 0, value: -1 },
                 //
-                Op::LoadImm { dst: 0, value: 3 },
-                Op::LoadImm { dst: 1, value: 5 },
-                Op::LoadImm { dst: 0, value: 15 },
+                Op::LoadI { dst: 0, value: 3 },
+                Op::LoadI { dst: 1, value: 5 },
+                Op::LoadI { dst: 0, value: 15 },
                 //
-                Op::LoadImm { dst: 0, value: 64 },
-                Op::LoadImm { dst: 1, value: 8 },
-                Op::LoadImm { dst: 0, value: 8 },
+                Op::LoadI { dst: 0, value: 64 },
+                Op::LoadI { dst: 1, value: 8 },
+                Op::LoadI { dst: 0, value: 8 },
             ]
         )
     }

@@ -17,7 +17,7 @@ impl Cc<'_> {
     }
 
     pub fn dis(&self) {
-        let reverse_function_lookup_table: HashMap<usize, Func<'_>> = self
+        let reverse_function_lookup_table: HashMap<usize, Func> = self
             .ctx
             .functions
             .clone()
@@ -37,26 +37,23 @@ impl Cc<'_> {
 
         for (i, b) in self.buf.iter().enumerate() {
             if let Some(func) = reverse_function_lookup_table.get(&i) {
-                println!(
-                    "\n__{}: \t\t\t; 0x{:04X} args={};size={}",
-                    func.name, func.pc, func.args, func.size
-                );
+                println!("\n__{}: \t\t\t; 0x{:04X}", func.name, func.pc);
             }
 
             println!(
                 "\t{}",
                 match b {
-                    Op::Add { dst, lhs, rhs } => format!("add r{dst}, r{lhs}, r{rhs}"),
-                    Op::Sub { dst, lhs, rhs } => format!("sub r{dst}, r{lhs}, r{rhs}"),
-                    Op::Mul { dst, lhs, rhs } => format!("mul r{dst}, r{lhs}, r{rhs}"),
-                    Op::Div { dst, lhs, rhs } => format!("div r{dst}, r{lhs}, r{rhs}"),
+                    Op::IAdd { dst, lhs, rhs } => format!("add r{dst}, r{lhs}, r{rhs}"),
+                    Op::ISub { dst, lhs, rhs } => format!("sub r{dst}, r{lhs}, r{rhs}"),
+                    Op::IMul { dst, lhs, rhs } => format!("mul r{dst}, r{lhs}, r{rhs}"),
+                    Op::IDiv { dst, lhs, rhs } => format!("div r{dst}, r{lhs}, r{rhs}"),
                     Op::Eq { dst, lhs, rhs } => format!("eq r{dst}, r{lhs}, r{rhs}"),
                     Op::Lt { dst, lhs, rhs } => format!("lt r{dst}, r{lhs}, r{rhs}"),
                     Op::Gt { dst, lhs, rhs } => format!("gt r{dst}, r{lhs}, r{rhs}"),
-                    Op::Not { dst, src } => format!("not r{dst}, r{src}"),
+                    Op::BNot { dst, src } => format!("not r{dst}, r{src}"),
                     Op::Mov { dst, src } => format!("mov r{dst}, r{src}"),
-                    Op::LoadImm { dst, value } => format!("load_imm r{dst}, #{value}"),
-                    Op::LoadGlobal { dst, idx } => format!("load_global r{dst}, {idx} \t; {:?}", {
+                    Op::LoadI { dst, value } => format!("load_imm r{dst}, #{value}"),
+                    Op::LoadG { dst, idx } => format!("load_global r{dst}, {idx} \t; {:?}", {
                         let raw_global = reverse_global_lookup_table.get(&(*idx as usize));
                         <Const<'_> as Into<vm::Value>>::into(*raw_global.unwrap())
                     }),

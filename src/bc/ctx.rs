@@ -1,36 +1,10 @@
 use std::collections::HashMap;
 
-use crate::bc::Const;
-
-/// Used to encode binding resolution, for instance:
-///
-///     let x = 5
-///
-/// [x] is assigned a free registers and this register is used for the dst for its [rhs]
-#[derive(Debug, Default)]
-pub struct Local<'cc> {
-    bindings: HashMap<&'cc str, u8>,
-}
-
-impl<'cc> Local<'cc> {
-    pub fn bind(&mut self, name: &'cc str, r: u8) -> Option<u8> {
-        if self.bindings.contains_key(name) {
-            return None;
-        }
-        self.bindings.insert(name, r);
-        Some(r)
-    }
-
-    pub fn resolve(&self, name: &'cc str) -> Option<u8> {
-        self.bindings.get(name).copied()
-    }
-}
+use crate::{bc::Const, ir::Id};
 
 #[derive(Debug, Clone)]
-pub struct Func<'cc> {
-    pub name: &'cc str,
-    pub args: u8,
-    pub size: usize,
+pub struct Func<'fun> {
+    pub name: &'fun str,
     pub pc: usize,
 }
 
@@ -38,8 +12,7 @@ pub struct Func<'cc> {
 pub struct Context<'ctx> {
     pub globals: HashMap<Const<'ctx>, usize>,
     pub globals_vec: Vec<Const<'ctx>>,
-    pub functions: HashMap<&'ctx str, Func<'ctx>>,
-    pub locals: Local<'ctx>,
+    pub functions: HashMap<Id, Func<'ctx>>,
 }
 
 impl<'ctx> Context<'ctx> {

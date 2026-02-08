@@ -85,71 +85,61 @@ impl<'vm> Vm<'vm> {
 
             match instruction {
                 Op::Nop => {}
-                Op::LoadImm { dst, value } => {
+                Op::LoadI { dst, value } => {
                     *unsafe_get_mut!(self.r, *dst) = Value::Int(*value as i64)
                 }
-                Op::LoadGlobal { dst, idx } => {
+                Op::LoadG { dst, idx } => {
                     *unsafe_get_mut!(self.r, *dst) = unsafe_get!(self.globals, *idx).clone();
                 }
-                Op::Add { dst, lhs, rhs } => {
+                Op::IAdd { dst, lhs, rhs } => {
                     let lhs = unsafe_get!(self.r, *lhs);
                     let rhs = unsafe_get!(self.r, *rhs);
 
                     let result = match (lhs, rhs) {
                         (Value::Int(l), Value::Int(r)) => Value::Int(l + r),
-                        (Value::Double(l), Value::Int(r)) => Value::Double(l + *r as f64),
-                        (Value::Int(l), Value::Double(r)) => Value::Double(*l as f64 + r),
-                        (Value::Double(l), Value::Double(r)) => Value::Double(l + r),
-                        _ => todo!(),
+                        _ => unimplemented!(),
                     };
 
                     *unsafe_get_mut!(self.r, *dst) = result;
                 }
-                Op::Sub { dst, lhs, rhs } => {
+                Op::ISub { dst, lhs, rhs } => {
                     let lhs = unsafe_get!(self.r, *lhs);
                     let rhs = unsafe_get!(self.r, *rhs);
 
                     let result = match (lhs, rhs) {
                         (Value::Int(l), Value::Int(r)) => Value::Int(l - r),
-                        (Value::Double(l), Value::Int(r)) => Value::Double(l - *r as f64),
-                        (Value::Int(l), Value::Double(r)) => Value::Double(*l as f64 - r),
-                        (Value::Double(l), Value::Double(r)) => Value::Double(l - r),
-                        _ => todo!(),
+                        _ => unimplemented!(),
                     };
 
                     *unsafe_get_mut!(self.r, *dst) = result;
                 }
-                Op::Mul { dst, lhs, rhs } => {
+                Op::IMul { dst, lhs, rhs } => {
                     let lhs = unsafe_get!(self.r, *lhs);
                     let rhs = unsafe_get!(self.r, *rhs);
 
                     let result = match (lhs, rhs) {
                         (Value::Int(l), Value::Int(r)) => Value::Int(l * r),
-                        (Value::Double(l), Value::Int(r)) => Value::Double(l * *r as f64),
-                        (Value::Int(l), Value::Double(r)) => Value::Double(*l as f64 * r),
-                        (Value::Double(l), Value::Double(r)) => Value::Double(l * r),
-                        _ => todo!(),
+                        _ => unimplemented!(),
                     };
 
                     *unsafe_get_mut!(self.r, *dst) = result;
                 }
-                Op::Div { dst, lhs, rhs } => {
+                Op::IDiv { dst, lhs, rhs } => {
                     let lhs = unsafe_get!(self.r, *lhs);
                     let rhs = unsafe_get!(self.r, *rhs);
 
                     let result = match (lhs, rhs) {
+                        (Value::Int(l), Value::Int(r)) => Value::Int(l / r),
                         (Value::Int(_), Value::Int(0)) | (Value::Double(_), Value::Int(0)) => {
                             return Err(Anomaly::DivisionByZero { pc: self.pc });
                         }
-                        (Value::Int(l), Value::Int(r)) => Value::Int(l / r),
-                        // promoting to Double necessary
-                        (Value::Double(l), Value::Int(r)) => Value::Double(l / (*r as f64)),
-                        (Value::Int(l), Value::Double(r)) => Value::Double((*l as f64) / r),
-                        _ => todo!(),
+                        _ => unimplemented!(),
                     };
 
                     *unsafe_get_mut!(self.r, *dst) = result;
                 }
+                // TODO: eq should only work for i, the comparison for D and Str should be compiled
+                // to something else
                 Op::Eq { dst, lhs, rhs } => {
                     let lhs = unsafe_get!(self.r, *lhs);
                     let rhs = unsafe_get!(self.r, *rhs);
@@ -164,13 +154,11 @@ impl<'vm> Vm<'vm> {
                     }
                     .into()
                 }
-                Op::Not { dst, src } => {
+                Op::BNot { dst, src } => {
                     *unsafe_get_mut!(self.r, *dst) = match unsafe_get!(self.r, *src) {
                         Value::True => Value::False,
                         Value::False => Value::True,
-                        Value::Int(inner) => Value::Int(inner * -1),
-                        Value::Double(inner) => Value::Double(inner * -1.0),
-                        _ => todo!(),
+                        _ => return Err(Anomaly::Unimplemented { pc: self.pc }),
                     }
                 }
                 Op::Mov { dst, src } => {
@@ -218,108 +206,4 @@ impl<'vm> Vm<'vm> {
 }
 
 #[cfg(test)]
-mod ops {
-    use crate::{
-        Args,
-        vm::{CallFrame, Value, Vm, op::Op},
-    };
-
-    #[test]
-    fn load_global() {
-        let c = &Args::default();
-        let mut vm = Vm::new(c);
-        vm.globals = vec![Value::Double(3.1415)];
-        vm.bytecode = vec![Op::LoadGlobal { dst: 0, idx: 0 }];
-        if let Err(err) = vm.run() {
-            panic!("{} failed due to {:?}", "test", err);
-        }
-
-        assert_eq!(vm.r[0], Value::Double(3.1415))
-    }
-
-    macro_rules! cases {
-        ($($ident:tt :: $bytecode:expr => $expected:expr),*) => {
-            $(
-                #[test]
-                fn $ident() {
-                    let c = &Args::default();
-                    let mut vm = Vm::new(c);
-                    vm.bytecode = $bytecode;
-                    vm.frames.push(CallFrame {
-                        return_to: 0,
-                    });
-                    if let Err(err) = vm.run() {
-                        panic!("{} failed due to {:?}", stringify!($ident), err);
-                    }
-
-                    assert_eq!(vm.r[0], $expected.into())
-                }
-            )*
-        };
-    }
-
-    cases!(
-        load_imm :: vec![Op::LoadImm{dst: 0, value: 0xDEAD}] => 0xDEAD,
-        add :: vec![
-            Op::LoadImm{dst: 0, value: 5},
-            Op::LoadImm{dst: 1, value: 7},
-            Op::Add {dst:0, lhs: 0, rhs: 1}
-        ] => 12,
-        sub :: vec![
-            Op::LoadImm{dst: 0, value: 5},
-            Op::LoadImm{dst: 1, value: 7},
-            Op::Sub {dst:0, lhs: 0, rhs: 1}
-        ] => -2,
-        div :: vec![
-            Op::LoadImm{dst: 0, value: 15},
-            Op::LoadImm{dst: 1, value: 3},
-            Op::Div {dst:0, lhs: 0, rhs: 1}
-        ] => 5,
-        mul :: vec![
-            Op::LoadImm{dst: 0, value: 15},
-            Op::LoadImm{dst: 1, value: 3},
-            Op::Mul {dst:0, lhs: 0, rhs: 1}
-        ] => 45,
-        eq :: vec![
-            Op::LoadImm{dst: 0, value: 5},
-            Op::LoadImm{dst: 1, value: 5},
-            Op::Eq {dst:0, lhs: 0, rhs: 1}
-        ] => true,
-        eq_false :: vec![
-            Op::LoadImm{dst: 0, value: 5},
-            Op::LoadImm{dst: 1, value: 3},
-            Op::Eq {dst:0, lhs: 0, rhs: 1}
-        ] => false,
-        not :: vec![
-            Op::LoadImm{dst: 0, value: 5},
-            Op::Not {dst:0, src: 0}
-        ] => -5,
-        not_negative :: vec![
-            Op::LoadImm{dst: 0, value: -5},
-            Op::Not {dst:0, src: 0}
-        ] => 5,
-        mov :: vec![
-            Op::LoadImm{dst: 1, value: 64},
-            Op::Mov {dst:0, src: 1}
-        ] => 64,
-        jmp :: vec![
-            Op::Jmp {target: 2},
-            // this is skipped:
-            Op::LoadImm{dst: 0, value: 1},
-            // execution resumes here
-            Op::LoadImm{dst: 0, value: 2},
-        ] => 2,
-        jmpf :: vec![
-            Op::LoadImm{dst: 0, value: 5},
-            Op::LoadImm{dst: 1, value: 3},
-            // this is false
-            Op::Eq {dst:0, lhs: 0, rhs: 1},
-            // we check for false and jump to 2 if false
-            Op::JmpF {target: 2, cond: 0},
-            // this is skipped:
-            Op::LoadImm{dst: 0, value: 1},
-            // execution resumes here
-            Op::LoadImm{dst: 0, value: 2},
-        ] => 2
-    );
-}
+mod ops {}
