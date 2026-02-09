@@ -289,13 +289,6 @@ impl<'lower> Lower<'lower> {
                         yes: body_block_id,
                         no: Id(u32::MAX),
                     });
-
-                    self.emit_block(Block {
-                        id: body_block_id,
-                        instructions: Vec::new(),
-                        params: Vec::new(),
-                        term: None,
-                    });
                 }
 
                 if let Some((tok, body)) = default {

@@ -67,11 +67,11 @@ impl PgError {
         if let Some(prev_line) = lines.get(prev)
             && prev != self.line
         {
-            println!("{:03} | {prev_line}", prev);
+            println!("{:03} | {prev_line}", prev + 1);
         }
 
         if let Some(line) = lines.get(self.line) {
-            println!("{:03} | {line}", self.line);
+            println!("{:03} | {line}", self.line + 1);
             println!("{}~ here", " ".repeat(self.start + 7))
         }
     }

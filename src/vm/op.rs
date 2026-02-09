@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[allow(unpredictable_function_pointer_comparisons)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum Op {

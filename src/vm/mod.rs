@@ -2,6 +2,8 @@ mod anomaly;
 mod value;
 
 pub const REGISTER_COUNT: usize = 64;
+use std::hint::unreachable_unchecked;
+
 pub use crate::vm::anomaly::Anomaly;
 pub use crate::vm::value::Value;
 use crate::{Args, vm::op::Op};
@@ -56,14 +58,6 @@ macro_rules! trap_if {
     };
 }
 
-macro_rules! unsafe_get_mut {
-    ($arr:expr, $idx:expr) => {{ unsafe { $arr.get_unchecked_mut($idx as usize) } }};
-}
-
-macro_rules! unsafe_get {
-    ($arr:expr, $idx:expr) => {{ unsafe { $arr.get_unchecked($idx as usize) } }};
-}
-
 impl<'vm> Vm<'vm> {
     pub fn new(config: &'vm Args) -> Self {
         Self {
@@ -78,109 +72,86 @@ impl<'vm> Vm<'vm> {
     }
 
     pub fn run(&mut self) -> Result<(), Anomaly> {
+        let regs = unsafe { self.r.as_mut_ptr() };
         while self.pc < self.bytecode.len() {
-            let instruction = unsafe_get!(self.bytecode, self.pc);
+            let instruction = unsafe { *self.bytecode.as_mut_ptr().add(self.pc) };
 
             crate::trace!("[vm][{:04}] {:?}", self.pc, instruction);
 
             match instruction {
                 Op::Nop => {}
-                Op::LoadI { dst, value } => {
-                    *unsafe_get_mut!(self.r, *dst) = Value::Int(*value as i64)
-                }
-                Op::LoadG { dst, idx } => {
-                    *unsafe_get_mut!(self.r, *dst) = unsafe_get!(self.globals, *idx).clone();
-                }
-                Op::IAdd { dst, lhs, rhs } => {
-                    let lhs = unsafe_get!(self.r, *lhs);
-                    let rhs = unsafe_get!(self.r, *rhs);
-
-                    let result = match (lhs, rhs) {
-                        (Value::Int(l), Value::Int(r)) => Value::Int(l + r),
-                        _ => unimplemented!(),
-                    };
-
-                    *unsafe_get_mut!(self.r, *dst) = result;
-                }
-                Op::ISub { dst, lhs, rhs } => {
-                    let lhs = unsafe_get!(self.r, *lhs);
-                    let rhs = unsafe_get!(self.r, *rhs);
-
-                    let result = match (lhs, rhs) {
-                        (Value::Int(l), Value::Int(r)) => Value::Int(l - r),
-                        _ => unimplemented!(),
-                    };
-
-                    *unsafe_get_mut!(self.r, *dst) = result;
-                }
-                Op::IMul { dst, lhs, rhs } => {
-                    let lhs = unsafe_get!(self.r, *lhs);
-                    let rhs = unsafe_get!(self.r, *rhs);
-
-                    let result = match (lhs, rhs) {
-                        (Value::Int(l), Value::Int(r)) => Value::Int(l * r),
-                        _ => unimplemented!(),
-                    };
-
-                    *unsafe_get_mut!(self.r, *dst) = result;
-                }
-                Op::IDiv { dst, lhs, rhs } => {
-                    let lhs = unsafe_get!(self.r, *lhs);
-                    let rhs = unsafe_get!(self.r, *rhs);
-
-                    let result = match (lhs, rhs) {
-                        (Value::Int(l), Value::Int(r)) => Value::Int(l / r),
-                        (Value::Int(_), Value::Int(0)) | (Value::Double(_), Value::Int(0)) => {
-                            return Err(Anomaly::DivisionByZero { pc: self.pc });
-                        }
-                        _ => unimplemented!(),
-                    };
-
-                    *unsafe_get_mut!(self.r, *dst) = result;
-                }
+                Op::LoadI { dst, value } => unsafe {
+                    *regs.add(dst as usize) = Value::Int(value as i64);
+                },
+                Op::LoadG { dst, idx } => unsafe {
+                    *regs.add(dst as usize) =
+                        (*self.globals.as_mut_ptr().add(idx as usize)).clone();
+                },
+                Op::IAdd { dst, lhs, rhs } => unsafe {
+                    let l = (*regs.add(lhs as usize)).as_int();
+                    let r = (*regs.add(rhs as usize)).as_int();
+                    *regs.add(dst as usize) = Value::Int(l + r);
+                },
+                Op::ISub { dst, lhs, rhs } => unsafe {
+                    let l = (*regs.add(lhs as usize)).as_int();
+                    let r = (*regs.add(rhs as usize)).as_int();
+                    *regs.add(dst as usize) = Value::Int(l - r);
+                },
+                Op::IMul { dst, lhs, rhs } => unsafe {
+                    let l = (*regs.add(lhs as usize)).as_int();
+                    let r = (*regs.add(rhs as usize)).as_int();
+                    *regs.add(dst as usize) = Value::Int(l * r);
+                },
+                Op::IDiv { dst, lhs, rhs } => unsafe {
+                    let l = (*regs.add(lhs as usize)).as_int();
+                    let r = (*regs.add(rhs as usize)).as_int();
+                    trap_if!(r == 0, Anomaly::DivisionByZero { pc: self.pc });
+                    *regs.add(dst as usize) = Value::Int(l / r);
+                },
                 // TODO: eq should only work for i, the comparison for D and Str should be compiled
                 // to something else
-                Op::Eq { dst, lhs, rhs } => {
-                    let lhs = unsafe_get!(self.r, *lhs);
-                    let rhs = unsafe_get!(self.r, *rhs);
+                Op::Eq { dst, lhs, rhs } => unsafe {
+                    let l = &(*regs.add(lhs as usize));
+                    let r = &(*regs.add(rhs as usize));
 
-                    *unsafe_get_mut!(self.r, *dst) = match (lhs, rhs) {
+                    *regs.add(dst as usize) = match (l, r) {
                         (Value::True, Value::True) | (Value::False, Value::False) => true,
-                        (Value::Double(lhs), Value::Double(rhs)) => (lhs - rhs) < f64::EPSILON,
-                        (Value::Int(lhs), Value::Int(rhs)) => lhs == rhs,
-                        (Value::Str(lhs), Value::Str(rhs)) => lhs == rhs,
-                        (Value::String(lhs), Value::Str(rhs)) => lhs == rhs,
+                        (Value::Double(l), Value::Double(r)) => (l - r) < f64::EPSILON,
+                        (Value::Int(l), Value::Int(r)) => l == r,
+                        (Value::Str(l), Value::Str(r)) => l == r,
+                        (Value::String(l), Value::Str(r)) => l == r,
                         _ => false,
                     }
                     .into()
-                }
-                Op::BNot { dst, src } => {
-                    *unsafe_get_mut!(self.r, *dst) = match unsafe_get!(self.r, *src) {
-                        Value::True => Value::False,
-                        Value::False => Value::True,
-                        _ => return Err(Anomaly::Unimplemented { pc: self.pc }),
-                    }
-                }
-                Op::Mov { dst, src } => {
-                    *unsafe_get_mut!(self.r, *dst) = unsafe_get!(self.r, *src).clone();
-                }
+                },
+                Op::BNot { dst, src } => unsafe {
+                    *regs.add(dst as usize) = Value::from(!(*regs.add(src as usize)).as_bool())
+                },
+                Op::Mov { dst, src } => unsafe {
+                    // TODO: decide if mov dst,src should be a real mov or a copy
+                    //
+                    // *regs.add(dst as usize) = (*regs.add(src as usize)).clone();
+
+                    let r_src = &mut (*regs.add(src as usize));
+                    *regs.add(dst as usize) = std::mem::take(r_src);
+                },
                 Op::Jmp { target } => {
-                    self.pc = *target as usize;
+                    self.pc = target as usize;
                     continue;
                 }
-                Op::JmpF { target, cond } => {
-                    if let Value::True = unsafe_get!(self.r, *cond) {
-                        self.pc = *target as usize;
+                Op::JmpF { target, cond } => unsafe {
+                    if (*regs.add(cond as usize)).as_bool() {
+                        self.pc = target as usize;
                         continue;
                     }
-                }
+                },
                 Op::Call { func } => {
                     if self.config.backtrace {
-                        self.backtrace.push(*func as usize);
+                        self.backtrace.push(func as usize);
                     }
 
                     self.frames.push(CallFrame { return_to: self.pc });
-                    self.pc = *func as usize;
+                    self.pc = func as usize;
                     continue;
                 }
                 Op::Ret => {

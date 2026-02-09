@@ -69,6 +69,7 @@ impl<'l> Lexer<'l> {
         self.pos >= self.input.len()
     }
 
+    #[inline]
     fn as_keyword(&self, inner: &'l str) -> Option<Token<'l>> {
         let as_type = Some(match inner {
             "as" => Type::As,

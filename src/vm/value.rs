@@ -1,8 +1,9 @@
 use crate::ir::Const;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub enum Value<'v> {
     /// An invalid value, not exposed to the user, no way for the user to create this
+    #[default]
     UnDef,
     True,
     False,
@@ -15,6 +16,29 @@ pub enum Value<'v> {
     String(String),
     // Arr(Gc<[Value<'v>]>),
     // Obj(Gc<Todo>),
+}
+
+impl Value<'_> {
+    #[inline(always)]
+    pub fn as_int(&self) -> i64 {
+        unsafe {
+            match self {
+                Value::Int(v) => *v,
+                _ => std::hint::unreachable_unchecked(),
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn as_bool(&self) -> bool {
+        unsafe {
+            match self {
+                Value::True => true,
+                Value::False => false,
+                _ => std::hint::unreachable_unchecked(),
+            }
+        }
+    }
 }
 
 impl<'c> From<Const<'c>> for Value<'c> {
