@@ -154,7 +154,7 @@ impl<'lower> Lower<'lower> {
                 let old_func = std::mem::take(&mut self.current_func);
                 let old_env = std::mem::take(&mut self.env);
                 let old_store = std::mem::take(&mut self.id_store);
-                let id = Id(self.functions.len() as u32);
+                let id = Id(self.functions.len() as u32 + 1);
                 let Type::Ident(ident_name) = name.t else {
                     unreachable!()
                 };

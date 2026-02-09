@@ -15,18 +15,18 @@ pub struct CallFrame {
     pub return_to: usize,
 }
 
-pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>, &[Value<'vm>]) -> Option<Value<'vm>>;
+pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>, &[Value]) -> Option<Value>;
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct Vm<'vm> {
-    pub r: [Value<'vm>; REGISTER_COUNT],
+    pub r: [Value; REGISTER_COUNT],
     pub pc: usize,
 
     pub frames: Vec<CallFrame>,
 
     pub bytecode: Vec<Op>,
-    pub globals: Vec<Value<'vm>>,
+    pub globals: Vec<Value>,
 
     /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
     /// function the virtual machine currently executes in, this behaviour only occurs if
@@ -61,7 +61,7 @@ macro_rules! trap_if {
 impl<'vm> Vm<'vm> {
     pub fn new(config: &'vm Args) -> Self {
         Self {
-            r: [const { Value::UnDef }; REGISTER_COUNT],
+            r: [const { Value::undef() }; REGISTER_COUNT],
             frames: Vec::with_capacity(64),
             pc: 0,
             bytecode: Vec::new(),
@@ -73,7 +73,11 @@ impl<'vm> Vm<'vm> {
 
     pub fn run(&mut self) -> Result<(), Anomaly> {
         let regs = unsafe { self.r.as_mut_ptr() };
-        while self.pc < self.bytecode.len() {
+        loop {
+            if self.pc >= self.bytecode.len() {
+                break;
+            }
+
             let instruction = unsafe { *self.bytecode.as_mut_ptr().add(self.pc) };
 
             crate::trace!("[vm][{:04}] {:?}", self.pc, instruction);
@@ -81,59 +85,42 @@ impl<'vm> Vm<'vm> {
             match instruction {
                 Op::Nop => {}
                 Op::LoadI { dst, value } => unsafe {
-                    *regs.add(dst as usize) = Value::Int(value as i64);
+                    *regs.add(dst as usize) = (value as i64).into();
                 },
                 Op::LoadG { dst, idx } => unsafe {
-                    *regs.add(dst as usize) =
-                        (*self.globals.as_mut_ptr().add(idx as usize)).clone();
+                    *regs.add(dst as usize) = *self.globals.as_mut_ptr().add(idx as usize);
                 },
                 Op::IAdd { dst, lhs, rhs } => unsafe {
                     let l = (*regs.add(lhs as usize)).as_int();
                     let r = (*regs.add(rhs as usize)).as_int();
-                    *regs.add(dst as usize) = Value::Int(l + r);
+                    *regs.add(dst as usize) = (l + r).into();
                 },
                 Op::ISub { dst, lhs, rhs } => unsafe {
                     let l = (*regs.add(lhs as usize)).as_int();
                     let r = (*regs.add(rhs as usize)).as_int();
-                    *regs.add(dst as usize) = Value::Int(l - r);
+                    *regs.add(dst as usize) = (l - r).into();
                 },
                 Op::IMul { dst, lhs, rhs } => unsafe {
                     let l = (*regs.add(lhs as usize)).as_int();
                     let r = (*regs.add(rhs as usize)).as_int();
-                    *regs.add(dst as usize) = Value::Int(l * r);
+                    *regs.add(dst as usize) = (l * r).into();
                 },
                 Op::IDiv { dst, lhs, rhs } => unsafe {
                     let l = (*regs.add(lhs as usize)).as_int();
                     let r = (*regs.add(rhs as usize)).as_int();
                     trap_if!(r == 0, Anomaly::DivisionByZero { pc: self.pc });
-                    *regs.add(dst as usize) = Value::Int(l / r);
+                    *regs.add(dst as usize) = (l / r).into();
                 },
-                // TODO: eq should only work for i, the comparison for D and Str should be compiled
-                // to something else
                 Op::Eq { dst, lhs, rhs } => unsafe {
                     let l = &(*regs.add(lhs as usize));
                     let r = &(*regs.add(rhs as usize));
-
-                    *regs.add(dst as usize) = match (l, r) {
-                        (Value::True, Value::True) | (Value::False, Value::False) => true,
-                        (Value::Double(l), Value::Double(r)) => (l - r) < f64::EPSILON,
-                        (Value::Int(l), Value::Int(r)) => l == r,
-                        (Value::Str(l), Value::Str(r)) => l == r,
-                        (Value::String(l), Value::Str(r)) => l == r,
-                        _ => false,
-                    }
-                    .into()
+                    *regs.add(dst as usize) = l.compare(r).into()
                 },
                 Op::BNot { dst, src } => unsafe {
                     *regs.add(dst as usize) = Value::from(!(*regs.add(src as usize)).as_bool())
                 },
                 Op::Mov { dst, src } => unsafe {
-                    // TODO: decide if mov dst,src should be a real mov or a copy
-                    //
-                    // *regs.add(dst as usize) = (*regs.add(src as usize)).clone();
-
-                    let r_src = &mut (*regs.add(src as usize));
-                    *regs.add(dst as usize) = std::mem::take(r_src);
+                    *regs.add(dst as usize) = (*regs.add(src as usize));
                 },
                 Op::Jmp { target } => {
                     self.pc = target as usize;

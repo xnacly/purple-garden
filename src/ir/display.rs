@@ -89,8 +89,8 @@ impl Display for Func<'_> {
                 }
             }
 
-            write!(f, "\t")?;
             if let Some(term) = &block.term {
+                write!(f, "\t")?;
                 match &term {
                     Terminator::Return(Some(id)) => writeln!(f, "ret %v{}", id.0)?,
                     Terminator::Return(None) => writeln!(f, "ret")?,

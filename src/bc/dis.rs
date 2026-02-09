@@ -35,7 +35,7 @@ impl Cc<'_> {
 
         for (i, b) in self.buf.iter().enumerate() {
             if let Some(func) = reverse_function_lookup_table.get(&i) {
-                println!("__{}: \t\t\t; 0x{:04X}", func.name, func.pc);
+                println!("{}:", func.name);
             }
 
             println!(
@@ -51,7 +51,7 @@ impl Cc<'_> {
                     Op::BNot { dst, src } => format!("not r{dst}, r{src}"),
                     Op::Mov { dst, src } => format!("mov r{dst}, r{src}"),
                     Op::LoadI { dst, value } => format!("load_imm r{dst}, #{value}"),
-                    Op::LoadG { dst, idx } => format!("load_global r{dst}, {idx} \t; {:?}", {
+                    Op::LoadG { dst, idx } => format!("load_global r{dst}, {idx} \t; {}", {
                         let raw_global = reverse_global_lookup_table.get(&(*idx as usize));
                         <Const<'_> as Into<vm::Value>>::into(*raw_global.unwrap())
                     }),

@@ -242,10 +242,10 @@ fn main() {
     if args.registers {
         for i in 0..vm::REGISTER_COUNT {
             let val = &vm.r[i];
-            if let Value::UnDef = val {
+            if val.tag() == Value::UNDEF {
                 continue;
             }
-            println!("[r{i}]={:?}", val);
+            println!("[r{i}]={}", val);
         }
     }
 }
