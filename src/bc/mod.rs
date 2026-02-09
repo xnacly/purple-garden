@@ -8,7 +8,7 @@ use crate::{
     Args,
     bc::{ctx::Context, reg::RegisterAllocator},
     err::PgError,
-    ir::{self, Const, Func},
+    ir::{self, Const, Func, TypeId},
     vm::{CallFrame, Value, Vm, op::Op},
 };
 
@@ -151,10 +151,43 @@ impl<'cc> Cc<'cc> {
                     func: def_size_pc.pc as u32,
                 });
             }
-            // ir::Instr::Add { dst, rhs, lhs } => {}
-            // ir::Instr::Sub { dst, rhs, lhs } => {}
-            // ir::Instr::Mul { dst, rhs, lhs } => {}
-            // ir::Instr::Div { dst, rhs, lhs } => {}
+            ir::Instr::Add { dst, rhs, lhs }
+            | ir::Instr::Sub { dst, rhs, lhs }
+            | ir::Instr::Mul { dst, rhs, lhs }
+            | ir::Instr::Div { dst, rhs, lhs }
+            | ir::Instr::Eq { dst, rhs, lhs } => {
+                let (
+                    TypeId {
+                        id: ir::Id(dst), ..
+                    },
+                    ir::Id(lhs),
+                    ir::Id(rhs),
+                ) = (dst, lhs, rhs);
+
+                // rust really is bad at converting enums with shared payloads to other enums, what
+                // even is this cluster fuck? I prob couldve done this better but i cant think of a
+                // way :/
+                macro_rules! emit_bin {
+                    ($name:ident, $dst:expr, $lhs:expr, $rhs:expr) => {
+                        Op::$name {
+                            dst: (*$dst) as u8,
+                            lhs: (*$lhs) as u8,
+                            rhs: (*$rhs) as u8,
+                        }
+                    };
+                }
+
+                let op = match i {
+                    ir::Instr::Add { .. } => emit_bin!(IAdd, dst, lhs, rhs),
+                    ir::Instr::Sub { .. } => emit_bin!(ISub, dst, lhs, rhs),
+                    ir::Instr::Mul { .. } => emit_bin!(IMul, dst, lhs, rhs),
+                    ir::Instr::Div { .. } => emit_bin!(IDiv, dst, lhs, rhs),
+                    ir::Instr::Eq { .. } => emit_bin!(Eq, dst, lhs, rhs),
+                    _ => unreachable!(),
+                };
+
+                self.emit(op);
+            }
             _ => todo!("{:?}", i),
         }
     }

@@ -264,15 +264,6 @@ impl<'lower> Lower<'lower> {
                     return Ok(None);
                 }
 
-                // current test example:
-                // fn to_bool(x:int) bool {
-                //     match {
-                //         x == 0 { false }
-                //         x == 1 { true }
-                //         { 0/0 }
-                //     }
-                // }
-
                 // TODO: keep a list of created blocks, backpatch the jumps after all blocks have
                 // been created
                 //
@@ -282,20 +273,13 @@ impl<'lower> Lower<'lower> {
                     let Some(cond) = self.lower_node(condition)? else {
                         unreachable!()
                     };
-
-                    let body_block_id = self.id_store.new_block();
-                    self.emit_term(Terminator::Branch {
-                        cond,
-                        yes: body_block_id,
-                        no: Id(u32::MAX),
-                    });
                 }
 
                 if let Some((tok, body)) = default {
                     todo!("default match case")
                 }
 
-                todo!("match case");
+                todo!("Lower::lower_node(Node::Match)");
 
                 None
             }

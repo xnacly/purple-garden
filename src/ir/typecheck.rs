@@ -247,6 +247,17 @@ impl<'t> Typechecker<'t> {
 
                 self.map.insert(*id, fun.ret.clone());
 
+                // TODO: add match case exhaustiveness check, for instance the following should
+                // fail:
+                //
+                //    fn to_bool(x:int) bool {
+                //        match {
+                //            x == 0 { false }
+                //            x == 1 { 5 }
+                //        }
+                //    }
+                //    to_bool(5)
+
                 for (i, provided_node) in args.iter().enumerate() {
                     let provided_type = self.node(provided_node)?;
                     let expected_type = &fun.args[i];
