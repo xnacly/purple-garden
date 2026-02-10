@@ -223,11 +223,17 @@ fn main() {
             .lines()
             .collect::<Vec<&str>>();
         Into::<PgError>::into(e).render(&lines);
+
         if args.backtrace {
-            function_table.insert(0, "entry".into());
+            let entry_point_pc = function_table
+                .iter()
+                .find(|(pc, name)| name.as_str() == "entry")
+                .map(|(pc, _)| *pc)
+                .unwrap_or_default();
+            vm.backtrace.insert(0, entry_point_pc);
+
             println!("at:");
-            vm.backtrace.insert(0, 0);
-            for (idx, trace_id) in vm.backtrace.iter().rev().enumerate() {
+            for (idx, trace_id) in vm.backtrace.iter().enumerate() {
                 let Some(name) = function_table.get(&trace_id) else {
                     panic!("Backtrace bug");
                 };
