@@ -106,7 +106,15 @@ impl<'cc> Cc<'cc> {
             if let Some(term) = &block.term {
                 match term {
                     ir::Terminator::Return(id) => {
-                        // TODO: deal with return value, MUST be in r0
+                        // only insert a return value mov if the return value is not in r0
+                        if let Some(ir::Id(src)) = id
+                            && src != &0
+                        {
+                            self.emit(Op::Mov {
+                                dst: 0,
+                                src: *src as u8,
+                            });
+                        }
                         self.emit(Op::Ret);
                     }
                     _ => todo!("{:?}", &block.term),
@@ -126,17 +134,23 @@ impl<'cc> Cc<'cc> {
     fn from_ir_instruction(&mut self, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::LoadConst { dst, value } => {
-                let r_dst = self.register.alloc();
+                let TypeId {
+                    id: ir::Id(dst), ..
+                } = dst;
+
                 if let Const::Int(i) = value
                     && *i < i32::MAX as i64
                 {
                     self.emit(Op::LoadI {
-                        dst: r_dst,
+                        dst: *dst as u8,
                         value: *i as i32,
                     });
                 } else {
                     let idx = self.ctx.intern(value.clone());
-                    self.emit(Op::LoadG { dst: r_dst, idx });
+                    self.emit(Op::LoadG {
+                        dst: *dst as u8,
+                        idx,
+                    });
                 }
             }
             ir::Instr::Call { dst, func, args } => {
@@ -202,7 +216,6 @@ impl<'cc> Cc<'cc> {
             .unwrap_or_default();
         v.bytecode = self.buf;
         v.globals = self.ctx.globals_vec.into_iter().map(Value::from).collect();
-        v.frames.push(CallFrame { return_to: 0 });
         v
     }
 }

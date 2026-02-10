@@ -27,7 +27,7 @@ mod trace {
         ($fmt:literal, $($value:expr),*) => {
             {
                 let elapsed = $crate::trace::start().elapsed();
-                println!("[{:?}] {}", elapsed, format!($fmt, $($value),*));
+                println!("[{:?}] {}", elapsed, format_args!($fmt, $($value),*));
             }
         };
         // Without values
@@ -132,7 +132,6 @@ pub struct Args {
     /// run a single string passed via this flag instead of a file
     #[arg(short)]
     run: Option<String>,
-
     target: Option<String>,
 }
 
