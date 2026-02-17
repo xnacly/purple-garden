@@ -1,12 +1,11 @@
-use std::num;
+use std::{collections::HashMap, num};
 
 mod ctx;
-mod dis;
-mod reg;
+pub mod dis;
 
 use crate::{
     Args,
-    bc::{ctx::Context, reg::RegisterAllocator},
+    bc::ctx::Context,
     err::PgError,
     ir::{self, Const, Func, TypeId},
     vm::{CallFrame, Value, Vm, op::Op},
@@ -42,8 +41,9 @@ impl From<&Reg> for u8 {
 #[derive(Debug)]
 pub struct Cc<'cc> {
     pub buf: Vec<Op>,
-    ctx: Context<'cc>,
-    register: RegisterAllocator,
+    pub ctx: Context<'cc>,
+    /// binding a block id to its pc
+    block_map: HashMap<ir::Id, u16>,
 }
 
 impl<'cc> Cc<'cc> {
@@ -56,7 +56,7 @@ impl<'cc> Cc<'cc> {
                 ctx.intern(Const::True);
                 ctx
             },
-            register: RegisterAllocator::new(),
+            block_map: HashMap::new(),
         }
     }
 
@@ -68,13 +68,6 @@ impl<'cc> Cc<'cc> {
 
     fn replace(&mut self, idx: usize, op: Op) {
         self.buf[idx] = op
-    }
-
-    fn load_const(&mut self, c: Const<'cc>) -> u8 {
-        let dst = self.register.alloc();
-        let idx = self.ctx.intern(c);
-        self.emit(Op::LoadG { dst, idx });
-        dst
     }
 
     /// Compile a list of ir functions to bytecode instructions
@@ -97,28 +90,13 @@ impl<'cc> Cc<'cc> {
         self.ctx.functions.insert(fun.id, f);
 
         for block in &fun.blocks {
+            self.block_map.insert(block.id, self.buf.len() as u16);
+
             for instruction in &block.instructions {
-                self.from_ir_instruction(&instruction);
+                self.from_instr(&instruction);
             }
 
-            // we dont want a termination for the entry point
-            if let Some(term) = &block.term {
-                match term {
-                    ir::Terminator::Return(id) => {
-                        // only insert a return value mov if the return value is not in r0
-                        if let Some(ir::Id(src)) = id
-                            && src != &0
-                        {
-                            self.emit(Op::Mov {
-                                dst: 0,
-                                src: *src as u8,
-                            });
-                        }
-                        self.emit(Op::Ret);
-                    }
-                    _ => todo!("{:?}", &block.term),
-                }
-            }
+            self.from_term(block.term.as_ref())
         }
 
         crate::trace!(
@@ -130,7 +108,45 @@ impl<'cc> Cc<'cc> {
         Ok(None)
     }
 
-    fn from_ir_instruction(&mut self, i: &ir::Instr<'cc>) {
+    fn from_term(&mut self, t: Option<&ir::Terminator>) {
+        let Some(term) = t else {
+            return;
+        };
+
+        match term {
+            ir::Terminator::Return(id) => {
+                // only insert a return value mov if the return value is not in r0
+                if let Some(ir::Id(src)) = id
+                    && src != &0
+                {
+                    self.emit(Op::Mov {
+                        dst: 0,
+                        src: *src as u8,
+                    });
+                }
+
+                self.emit(Op::Ret);
+            }
+            ir::Terminator::Jump { id: ir::Id(id), .. } => {
+                self.emit(Op::Jmp { target: *id as u16 });
+            }
+            ir::Terminator::Branch {
+                cond,
+                yes: ir::Id(yes),
+                no: ir::Id(no),
+            } => {
+                let ir::Id(cond) = cond;
+                self.emit(Op::JmpF {
+                    cond: *cond as u8,
+                    target: *yes as u16,
+                });
+                self.emit(Op::Jmp { target: *no as u16 });
+            }
+            _ => todo!("{:?}", &t),
+        }
+    }
+
+    fn from_instr(&mut self, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::LoadConst { dst, value } => {
                 let TypeId {
@@ -205,7 +221,7 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    pub fn finalize(self, config: &'cc Args) -> Vm<'cc> {
+    pub fn finalize(mut self, config: &'cc Args) -> Vm<'cc> {
         let mut v = Vm::new(config);
         v.pc = self
             .ctx
@@ -213,8 +229,34 @@ impl<'cc> Cc<'cc> {
             .get(&ir::Id(0))
             .map(|n| n.pc)
             .unwrap_or_default();
+
+        // second bytecode pass to resolve jumps from block Ids to bytecode positions
+        for i in 0..self.buf.len() {
+            let instr = self.buf[i];
+            if let Some(new) = match instr {
+                Op::JmpF { target, cond } => Some(Op::JmpF {
+                    cond,
+                    target: *self.block_map.get(&ir::Id(target as u32)).unwrap(),
+                }),
+                Op::Jmp { target } => Some(Op::Jmp {
+                    target: *self.block_map.get(&ir::Id(target as u32)).unwrap(),
+                }),
+                _ => None,
+            } {
+                self.buf[i] = new
+            }
+        }
+
         v.bytecode = self.buf;
         v.globals = self.ctx.globals_vec.into_iter().map(Value::from).collect();
         v
+    }
+
+    pub fn function_table(&self) -> HashMap<usize, String> {
+        self.ctx
+            .functions
+            .iter()
+            .map(|(_, f)| (f.pc, f.name.to_string()))
+            .collect()
     }
 }

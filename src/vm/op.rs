@@ -10,7 +10,6 @@ pub enum Op {
     Eq { dst: u8, lhs: u8, rhs: u8 },
     Lt { dst: u8, lhs: u8, rhs: u8 },
     Gt { dst: u8, lhs: u8, rhs: u8 },
-    BNot { dst: u8, src: u8 },
     Mov { dst: u8, src: u8 },
 
     LoadI { dst: u8, value: i32 },

@@ -8,7 +8,7 @@ pub struct Func<'fun> {
     pub pc: usize,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Context<'ctx> {
     pub globals: HashMap<Const<'ctx>, usize>,
     pub globals_vec: Vec<Const<'ctx>>,

@@ -205,17 +205,22 @@ fn main() {
         opt::bc(&mut cc.buf);
     }
 
-    if args.disassemble {
-        cc.dis();
-    }
-
     let mut function_table = if args.backtrace {
         cc.function_table()
     } else {
         HashMap::new()
     };
 
+    let ctx = if args.disassemble {
+        Some(cc.ctx.clone())
+    } else {
+        None
+    };
     let mut vm = cc.finalize(&args);
+
+    if args.disassemble {
+        bc::dis::Disassembler::new(&vm.bytecode, ctx.unwrap()).disassemble();
+    }
 
     if let Err(e) = vm.run() {
         let lines = str::from_utf8(&input)

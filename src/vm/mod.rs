@@ -116,9 +116,6 @@ impl<'vm> Vm<'vm> {
                     let r = &(*regs.add(rhs as usize));
                     *regs.add(dst as usize) = l.compare(r).into()
                 },
-                Op::BNot { dst, src } => unsafe {
-                    *regs.add(dst as usize) = Value::from(!(*regs.add(src as usize)).as_bool())
-                },
                 Op::Mov { dst, src } => unsafe {
                     *regs.add(dst as usize) = (*regs.add(src as usize));
                 },
