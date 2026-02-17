@@ -169,19 +169,20 @@ impl<'cc> Cc<'cc> {
                     id: ir::Id(dst), ..
                 } = dst;
 
-                if let Const::Int(i) = value
-                    && *i < i32::MAX as i64
-                {
-                    self.emit(Op::LoadI {
-                        dst: *dst as u8,
-                        value: *i as i32,
-                    });
-                } else {
-                    let idx = self.ctx.intern(value.clone());
-                    self.emit(Op::LoadG {
-                        dst: *dst as u8,
-                        idx,
-                    });
+                match value {
+                    Const::Int(i) if *i < i32::MAX as i64 => {
+                        self.emit(Op::LoadI {
+                            dst: *dst as u8,
+                            value: *i as i32,
+                        });
+                    }
+                    _ => {
+                        let idx = self.ctx.intern(value.clone());
+                        self.emit(Op::LoadG {
+                            dst: *dst as u8,
+                            idx,
+                        });
+                    }
                 }
             }
             ir::Instr::Call { dst, func, args } => {

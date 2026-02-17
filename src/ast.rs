@@ -68,7 +68,7 @@ pub enum Node<'node> {
         id: usize,
         /// [((condition_token, condition), body)]
         cases: Vec<((Token<'node>, Node<'node>), Vec<Node<'node>>)>,
-        default: Option<(Token<'node>, Vec<Node<'node>>)>,
+        default: (Token<'node>, Vec<Node<'node>>),
     },
 
     /// <name>(<args>)
@@ -238,13 +238,12 @@ impl<'a> Node<'a> {
                     }
                     writeln!(f, "{} )", pad);
                 }
-                if let Some((_, default)) = default {
-                    writeln!(f, "{} (", pad);
-                    for default_member in default {
-                        default_member.fmt_sexpr(f, indent + 1)?;
-                    }
-                    writeln!(f, "{} )", pad);
+                let (_, default) = default;
+                writeln!(f, "{} (", pad);
+                for default_member in default {
+                    default_member.fmt_sexpr(f, indent + 1)?;
                 }
+                writeln!(f, "{} )", pad);
                 writeln!(f, "{})", pad)
             }
             _ => writeln!(f, "{}<todo {:?}>", pad, self),

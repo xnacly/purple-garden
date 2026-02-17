@@ -267,15 +267,11 @@ impl<'t> Typechecker<'t> {
             }
             Node::Match { id, cases, default } => {
                 // short circuit for empty matches
-                if cases.is_empty() && default.is_none() {
+                if cases.is_empty() {
                     return Ok(Type::Void);
                 }
 
-                let case_count = if default.is_some() {
-                    cases.len() + 1
-                } else {
-                    cases.len()
-                };
+                let case_count = cases.len();
 
                 // all branches MUST resolve to the same type :)
                 let mut branch_types: Vec<Option<(&Token, Type)>> =
@@ -299,29 +295,14 @@ impl<'t> Typechecker<'t> {
                     branch_types[i] = Some((condition_token, branch_return_type));
                 }
 
-                if let Some((token, body)) = default {
-                    branch_types[cases.len()] = Some((token, self.block_type(body)?));
-                }
+                // we simply use the default branches type as the canonical type of the match, its
+                // the easiest way to deal with this
+                let first_type = self.block_type(&default.1)?;
 
-                let Some((_, first_type)) = &branch_types[0] else {
-                    unreachable!();
-                };
-
-                // TODO: add match case exhaustiveness check, for instance the following should
-                // fail:
-                //
-                //    fn to_bool(x:int) bool {
-                //        match {
-                //            x == 0 { false }
-                //            x == 1 { 5 }
-                //        }
-                //    }
-                //    to_bool(5)
-
-                for cur in &branch_types[1..] {
+                for cur in &branch_types {
                     let Some((tok, ty)) = cur else { unreachable!() };
 
-                    if ty != first_type {
+                    if ty != &first_type {
                         return Err(PgError::with_msg(
                             "Incompatible match case return type",
                             format!(
@@ -334,7 +315,7 @@ impl<'t> Typechecker<'t> {
                 }
 
                 self.map.insert(*id, first_type.clone());
-                first_type.clone()
+                first_type
             }
 
             _ => todo!("{:?}", node),

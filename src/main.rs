@@ -72,8 +72,7 @@ mod vm;
 #[derive(clap::Parser, Debug, Default)]
 #[command(about, version, long_about=None)]
 pub struct Args {
-    /// Set optimisation level. Higher levels increase compile time. All levels preserve language
-    /// semantics.
+    /// Set optimisation level. Higher levels increase compile time.
     ///
     /// 0: Baseline lowering with no optimisation passes.
     ///
@@ -82,14 +81,12 @@ pub struct Args {
     ///    peephole bytecode cleanup, redundant load elimination.
     ///
     /// 2: Global IR optimisations:
-    ///    SSA construction, control-flow aware dead code elimination,
+    ///    control-flow aware dead code elimination,
     ///    register lifetime minimisation, copy propagation.
-    ///    Includes all -O1 optimisations.
     ///
     /// 3: Aggressive compile-time optimisations:
     ///    function inlining, guarded operator specialisation,
     ///    constant hoisting, aggressive register reuse.
-    ///    Includes all -O2 optimisations.
     #[arg(short = 'O', default_value_t = 0)]
     opt: usize,
 
@@ -106,9 +103,6 @@ pub struct Args {
     /// Readable immediate representation
     #[arg(short = 'I', long)]
     ir: bool,
-    /// Readable used register print
-    #[arg(short = 'R', long)]
-    registers: bool,
     /// Generate backtraces for function calls
     ///
     /// Technically a brain child of my interview at apple in which we talked about ways of implementing
@@ -248,14 +242,4 @@ fn main() {
     }
 
     trace!("Executed bytecode");
-
-    if args.registers {
-        for i in 0..vm::REGISTER_COUNT {
-            let val = &vm.r[i];
-            if val.tag() == Value::UNDEF {
-                continue;
-            }
-            println!("[r{i}]={}", val);
-        }
-    }
 }

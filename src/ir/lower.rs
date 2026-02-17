@@ -183,6 +183,7 @@ impl<'lower> Lower<'lower> {
                 };
 
                 let entry = self.new_block();
+                self.switch_to_block(entry);
                 self.block_mut(entry).params = args
                     .iter()
                     .map(|(token, token_type)| {
@@ -197,7 +198,6 @@ impl<'lower> Lower<'lower> {
                         }
                     })
                     .collect();
-                self.switch_to_block(entry);
 
                 self.func = func;
                 let mut last_id = None;
@@ -262,9 +262,13 @@ impl<'lower> Lower<'lower> {
                 Some(dst)
             }
             Node::Match { cases, default, id } => {
-                // short circuit for empty matches
-                if cases.is_empty() && default.is_none() {
-                    return Ok(None);
+                // short circuit for matches with just a default case by simply compling it
+                if cases.is_empty() {
+                    let mut last = None;
+                    for node in default.1.iter() {
+                        last = self.lower_node(&node)?;
+                    }
+                    return Ok(last);
                 }
 
                 let mut check_blocks = Vec::with_capacity(cases.len());
@@ -275,6 +279,9 @@ impl<'lower> Lower<'lower> {
                     check_blocks.push(self.new_block());
                     body_blocks.push(self.new_block());
                 }
+
+                // the default block
+                let default_block = self.new_block();
 
                 // the single join block, merging all value results into a single branch
                 let join = self.new_block();
@@ -299,9 +306,7 @@ impl<'lower> Lower<'lower> {
                     let no_target = if i + 1 < cases.len() {
                         check_blocks[i + 1]
                     } else {
-                        // TODO: jmp to default; non exhaustive cases will be handled at the type
-                        // checker level
-                        join
+                        default_block
                     };
 
                     self.block_mut(check_blocks[i]).term = Some(Terminator::Branch {
@@ -322,9 +327,17 @@ impl<'lower> Lower<'lower> {
                     });
                 }
 
-                if let Some((tok, body)) = default {
-                    todo!("Default match case")
+                // the typechecker checked we have a default case, so this is safe
+                let (_, body) = default;
+                self.switch_to_block(default_block);
+                let mut last = None;
+                for node in body.iter() {
+                    last = self.lower_node(&node)?;
                 }
+                self.block_mut(default_block).term = Some(Terminator::Jump {
+                    id: join,
+                    params: vec![last.expect("match default must produce value")],
+                });
 
                 self.switch_to_block(join);
                 let Some(join_block_params) = self

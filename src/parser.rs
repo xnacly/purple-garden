@@ -130,6 +130,7 @@ impl<'p> Parser<'p> {
         self.next()?;
         let mut cases = vec![];
         let mut default = None;
+        let tok = self.cur().clone();
 
         self.expect(Type::CurlyLeft)?;
         while self.cur().t != Type::CurlyRight {
@@ -156,6 +157,14 @@ impl<'p> Parser<'p> {
             }
         }
         self.expect(Type::CurlyRight)?;
+
+        let Some(default) = default else {
+            return Err(PgError::with_msg(
+                "Missing match default branch",
+                "A match statement requires a default branch",
+                &tok,
+            ));
+        };
 
         Ok(Node::Match {
             id: self.next_id(),
