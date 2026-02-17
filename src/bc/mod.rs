@@ -44,6 +44,8 @@ pub struct Cc<'cc> {
     pub ctx: Context<'cc>,
     /// binding a block id to its pc
     block_map: HashMap<ir::Id, u16>,
+    /// prefilled block id to block
+    blocks: HashMap<ir::Id, &'cc ir::Block<'cc>>,
 }
 
 impl<'cc> Cc<'cc> {
@@ -57,6 +59,7 @@ impl<'cc> Cc<'cc> {
                 ctx
             },
             block_map: HashMap::new(),
+            blocks: HashMap::new(),
         }
     }
 
@@ -78,7 +81,7 @@ impl<'cc> Cc<'cc> {
         Ok(())
     }
 
-    fn cc(&mut self, fun: &Func<'cc>) -> Result<Option<Reg>, PgError> {
+    fn cc(&mut self, fun: &'cc Func<'cc>) -> Result<Option<Reg>, PgError> {
         // since we have a ssa based ir, we use our register allocator in a function local way and
         // spill any register usage >= 64 on the vm stack, this should be very fast for the general
         // usage and extensible enough for extreme niche usecases requiring more than 64 alive
@@ -89,6 +92,7 @@ impl<'cc> Cc<'cc> {
         // binding the id of a function to its context
         self.ctx.functions.insert(fun.id, f);
 
+        self.blocks = fun.blocks.iter().map(|b| (b.id, b)).collect();
         for block in &fun.blocks {
             self.block_map.insert(block.id, self.buf.len() as u16);
 
@@ -127,7 +131,19 @@ impl<'cc> Cc<'cc> {
 
                 self.emit(Op::Ret);
             }
-            ir::Terminator::Jump { id: ir::Id(id), .. } => {
+            ir::Terminator::Jump { id, params } => {
+                let target = *self.blocks.get(id).unwrap();
+                for (i, param) in params.iter().enumerate() {
+                    let ir::Id(src) = param;
+                    let ir::Id(dst) = target.params[i].id;
+
+                    self.emit(Op::Mov {
+                        dst: dst as u8,
+                        src: *src as u8,
+                    });
+                }
+
+                let ir::Id(id) = id;
                 self.emit(Op::Jmp { target: *id as u16 });
             }
             ir::Terminator::Branch {
