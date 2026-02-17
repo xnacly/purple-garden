@@ -20,6 +20,9 @@ const WINDOW_SIZE: usize = 3;
 
 /// Peephole optimisations
 ///
+/// Performed in-place, leaving NOP behind if instructions were replaced / removed to
+/// keep JMP targets stable and enabling a single pass
+///
 /// See:
 /// - [Peephole optimization - wikipedia](https://en.wikipedia.org/wiki/Peephole_optimization)
 /// - [W. M. McKeeman "Peephole Optimization"](https://dl.acm.org/doi/epdf/10.1145/364995.365000)

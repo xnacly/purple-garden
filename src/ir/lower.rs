@@ -10,7 +10,6 @@ use crate::{
 #[derive(Default)]
 struct IdStore {
     values: usize,
-    blocks: usize,
 }
 
 impl IdStore {
@@ -19,18 +18,15 @@ impl IdStore {
         self.values += 1;
         Id(val as u32)
     }
-
-    fn new_block(&mut self) -> Id {
-        let blk = self.blocks;
-        self.blocks += 1;
-        Id(blk as u32)
-    }
 }
 
 #[derive(Default)]
 pub struct Lower<'lower> {
     functions: Vec<Func<'lower>>,
-    current_func: Func<'lower>,
+    /// current function
+    func: Func<'lower>,
+    /// current block
+    block: Id,
     id_store: IdStore,
     /// maps ast variable names to ssa values
     env: HashMap<&'lower str, Id>,
@@ -44,20 +40,31 @@ impl<'lower> Lower<'lower> {
     }
 
     fn emit(&mut self, i: Instr<'lower>) {
-        self.current_func
+        self.func
             .blocks
-            .last_mut()
+            .get_mut(self.block.0 as usize)
             .unwrap()
             .instructions
             .push(i);
     }
 
-    fn emit_block(&mut self, block: Block<'lower>) {
-        self.current_func.blocks.push(block)
+    fn new_block(&mut self) -> Id {
+        let id = Id(self.func.blocks.len() as u32);
+        self.func.blocks.push(Block {
+            id,
+            instructions: vec![],
+            params: vec![],
+            term: None,
+        });
+        id
     }
 
-    fn emit_term(&mut self, term: Terminator) {
-        self.current_func.blocks.last_mut().unwrap().term = Some(term);
+    fn block_mut(&mut self, id: Id) -> &mut Block<'lower> {
+        self.func.blocks.iter_mut().find(|b| b.id == id).unwrap()
+    }
+
+    fn switch_to_block(&mut self, id: Id) {
+        self.block = id
     }
 
     fn lower_node(&mut self, node: &'lower Node) -> Result<Option<Id>, PgError> {
@@ -151,7 +158,7 @@ impl<'lower> Lower<'lower> {
                 return_type,
                 body,
             } => {
-                let old_func = std::mem::take(&mut self.current_func);
+                let old_func = std::mem::take(&mut self.func);
                 let old_env = std::mem::take(&mut self.env);
                 let old_store = std::mem::take(&mut self.id_store);
                 let id = Id(self.functions.len() as u32 + 1);
@@ -163,28 +170,7 @@ impl<'lower> Lower<'lower> {
                 let func = Func {
                     name: ident_name,
                     id,
-                    blocks: vec![
-                        // entry block
-                        Block {
-                            id: self.id_store.new_block(),
-                            instructions: vec![],
-                            params: args
-                                .iter()
-                                .map(|(token, token_type)| {
-                                    let id = self.id_store.new_value();
-                                    let Type::Ident(ident) = token.t else {
-                                        unreachable!();
-                                    };
-                                    self.env.insert(ident, id);
-                                    TypeId {
-                                        id,
-                                        ty: token_type.into(),
-                                    }
-                                })
-                                .collect(),
-                            term: None,
-                        },
-                    ],
+                    blocks: vec![],
                     ret: if let TypeExpr::Atom(Token { t: Type::Void, .. }) = return_type {
                         None
                     } else {
@@ -196,21 +182,38 @@ impl<'lower> Lower<'lower> {
                     },
                 };
 
-                self.current_func = func;
+                let entry = self.new_block();
+                self.block_mut(entry).params = args
+                    .iter()
+                    .map(|(token, token_type)| {
+                        let id = self.id_store.new_value();
+                        let Type::Ident(ident) = token.t else {
+                            unreachable!();
+                        };
+                        self.env.insert(ident, id);
+                        TypeId {
+                            id,
+                            ty: token_type.into(),
+                        }
+                    })
+                    .collect();
+                self.switch_to_block(entry);
+
+                self.func = func;
                 let mut last_id = None;
                 for node in body {
                     last_id = self.lower_node(node)?;
                 }
 
-                self.current_func.blocks.last_mut().unwrap().term = if last_id.is_some() {
+                self.func.blocks.last_mut().unwrap().term = if last_id.is_some() {
                     Some(Terminator::Return(last_id))
                 } else {
                     Some(Terminator::Return(None))
                 };
 
-                self.functions.push(std::mem::take(&mut self.current_func));
+                self.functions.push(std::mem::take(&mut self.func));
                 self.env = old_env;
-                self.current_func = old_func;
+                self.func = old_func;
                 self.id_store = old_store;
                 None
             }
@@ -258,36 +261,95 @@ impl<'lower> Lower<'lower> {
                 self.emit(Instr::Cast { value, from });
                 Some(dst)
             }
-            Node::Match { cases, default, .. } => {
+            Node::Match { cases, default, id } => {
                 // short circuit for empty matches
                 if cases.is_empty() && default.is_none() {
                     return Ok(None);
                 }
 
-                // TODO: keep a list of created blocks, backpatch the jumps after all blocks have
-                // been created
-                //
-                // let backpatch_list = vec![const { None }; cases.len()];
+                let mut check_blocks = Vec::with_capacity(cases.len());
+                let mut body_blocks = Vec::with_capacity(cases.len());
 
-                for (((_, condition), body)) in cases {
+                // pre"allocating" ebbs
+                for _ in cases {
+                    check_blocks.push(self.new_block());
+                    body_blocks.push(self.new_block());
+                }
+
+                // the single join block, merging all value results into a single branch
+                let join = self.new_block();
+
+                self.block_mut(join).params = vec![TypeId {
+                    // since we know our match only allows for a singluar return value, this is
+                    // safe
+                    id: self.id_store.new_value(),
+                    // we get the return type resolved by the type checker beforehand, so this is
+                    // safe
+                    ty: self.types.get(id).unwrap().clone(),
+                }];
+
+                for (i, ((_, condition), body)) in cases.iter().enumerate() {
+                    self.switch_to_block(check_blocks[i]);
                     let Some(cond) = self.lower_node(condition)? else {
-                        unreachable!()
+                        unreachable!(
+                            "Compiler bug, match cases MUST have a condition returning a value"
+                        );
                     };
+
+                    let no_target = if i + 1 < cases.len() {
+                        check_blocks[i + 1]
+                    } else {
+                        // TODO: jmp to default; non exhaustive cases will be handled at the type
+                        // checker level
+                        join
+                    };
+
+                    self.block_mut(check_blocks[i]).term = Some(Terminator::Branch {
+                        cond,
+                        yes: body_blocks[i],
+                        no: no_target,
+                    });
+
+                    self.switch_to_block(body_blocks[i]);
+                    let mut last = None;
+                    for node in body {
+                        last = self.lower_node(node)?;
+                    }
+                    let value = last.expect("match body must produce value");
+                    self.block_mut(body_blocks[i]).term = Some(Terminator::Jump {
+                        id: join,
+                        params: vec![value],
+                    });
                 }
 
                 if let Some((tok, body)) = default {
-                    todo!("default match case")
+                    todo!("Default match case")
                 }
 
-                todo!("Lower::lower_node(Node::Match)");
+                self.switch_to_block(join);
+                let Some(join_block_params) = self
+                    .func
+                    .blocks
+                    .iter_mut()
+                    .find(|b| b.id == join)
+                    .map(|b| &b.params)
+                else {
+                    unreachable!();
+                };
 
-                None
+                if join_block_params.len() != 1 {
+                    panic!(
+                        "The join block has a single param and should have a single return value"
+                    )
+                }
+
+                Some(join_block_params[0].id)
             }
             _ => todo!("{:?}", node),
         })
     }
 
-    /// Lower [ast] into a list of Func nodes, the entry point is always `__entry`
+    /// Lower [ast] into a list of Func nodes, the entry point is always `entry`
     pub fn ir_from(mut self, ast: &'lower [Node]) -> Result<Vec<Func<'lower>>, PgError> {
         let mut typechecker = typecheck::Typechecker::new();
         for node in ast {
@@ -296,44 +358,21 @@ impl<'lower> Lower<'lower> {
         self.types = typechecker.finalise();
         crate::trace!("Finished type checking");
 
-        // entry function
-        self.current_func = Func {
+        self.func = Func {
             id: Id(0),
             name: "entry",
             ret: None,
-            blocks: vec![Block {
-                id: self.id_store.new_block(),
-                instructions: vec![],
-                params: vec![],
-                term: None,
-            }],
+            blocks: vec![],
         };
+        let entry = self.new_block();
+        self.switch_to_block(entry);
 
         for node in ast {
             let _ = &self.lower_node(node)?;
+            // reset to the main entry point block to keep emitting nodes into the correct conext
+            self.switch_to_block(entry);
         }
-        self.functions.push(self.current_func);
-
+        self.functions.push(self.func);
         Ok(self.functions)
     }
-}
-
-#[cfg(test)]
-mod lower {
-    #[test]
-    fn atom() {}
-    #[test]
-    fn ident() {}
-    #[test]
-    fn bin() {}
-    #[test]
-    fn r#let() {}
-    #[test]
-    fn r#fn() {}
-    #[test]
-    fn r#call() {}
-    #[test]
-    fn r#match() {}
-    #[test]
-    fn path() {}
 }

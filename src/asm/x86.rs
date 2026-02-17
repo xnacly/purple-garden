@@ -1,3 +1,4 @@
+//! abstractions around x86-64 registers, instructions and calling conventions
 use crate::jit;
 
 #[derive(Debug, Clone, Copy)]

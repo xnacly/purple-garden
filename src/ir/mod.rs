@@ -11,6 +11,7 @@
 //! optimisations, like:
 //!
 //! - constant folding/propagation
+//! - common subexpression elimination
 //! - copy propagations
 //! - dead code elimination
 //! - algebraic simplification

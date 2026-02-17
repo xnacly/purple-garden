@@ -14,7 +14,8 @@ greeting(std::env::get("USER")) # hello world to: $USER
 ## Features / Design Goals
 
 - Extremely fast execution with a register-based VM and aggressive compile-time
-  optimisations (both IR and peephole)
+  optimisations (both IR and peephole), see the [ir](./src/ir/) and
+  [opt](./src/opt) modules
 - JIT compilation for runtime hotspots
 - Embeddable with minimal friction for Rust interop
 - Memory efficient, with an optional garbage collector and a minimal standard

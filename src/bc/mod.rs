@@ -96,7 +96,6 @@ impl<'cc> Cc<'cc> {
         // binding the id of a function to its context
         self.ctx.functions.insert(fun.id, f);
 
-        // TODO: deal with registers still alive after a block transition, how? IDK :0
         for block in &fun.blocks {
             for instruction in &block.instructions {
                 self.from_ir_instruction(&instruction);
