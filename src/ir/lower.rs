@@ -161,6 +161,8 @@ impl<'lower> Lower<'lower> {
                 let old_func = std::mem::take(&mut self.func);
                 let old_env = std::mem::take(&mut self.env);
                 let old_store = std::mem::take(&mut self.id_store);
+                let old_block = std::mem::take(&mut self.block);
+
                 let id = Id(self.functions.len() as u32 + 1);
                 let Type::Ident(ident_name) = name.t else {
                     unreachable!()
@@ -182,6 +184,7 @@ impl<'lower> Lower<'lower> {
                     },
                 };
 
+                self.func = func;
                 let entry = self.new_block();
                 self.switch_to_block(entry);
                 self.block_mut(entry).params = args
@@ -199,10 +202,10 @@ impl<'lower> Lower<'lower> {
                     })
                     .collect();
 
-                self.func = func;
                 let mut last_id = None;
                 for node in body {
                     last_id = self.lower_node(node)?;
+                    self.switch_to_block(entry);
                 }
 
                 self.func.blocks.last_mut().unwrap().term = if last_id.is_some() {
@@ -215,6 +218,7 @@ impl<'lower> Lower<'lower> {
                 self.env = old_env;
                 self.func = old_func;
                 self.id_store = old_store;
+                self.block = old_block;
                 None
             }
             Node::Call { name, args, id } => {
@@ -385,6 +389,7 @@ impl<'lower> Lower<'lower> {
             // reset to the main entry point block to keep emitting nodes into the correct conext
             self.switch_to_block(entry);
         }
+
         self.functions.push(self.func);
         Ok(self.functions)
     }
