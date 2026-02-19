@@ -18,6 +18,8 @@ pub enum Op {
     JmpF { cond: u8, target: u16 },
     Call { func: u32 },
     Sys { idx: u8 },
+    Push { src: u8 },
+    Pop { dst: u8 },
     Ret,
     Nop,
 }

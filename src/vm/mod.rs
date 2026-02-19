@@ -24,6 +24,8 @@ pub struct Vm<'vm> {
     pub pc: usize,
 
     pub frames: Vec<CallFrame>,
+    /// a stack to keep values alive across recursive function invocations
+    pub spilled: Vec<Value>,
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
@@ -67,6 +69,7 @@ impl<'vm> Vm<'vm> {
             bytecode: Vec::new(),
             globals: Vec::new(),
             backtrace: Vec::new(),
+            spilled: Vec::with_capacity(REGISTER_COUNT),
             config,
         }
     }
@@ -147,6 +150,12 @@ impl<'vm> Vm<'vm> {
                     };
                     self.pc = frame.return_to;
                 }
+                Op::Push { src } => unsafe {
+                    self.spilled.push(*regs.add(src as usize));
+                },
+                Op::Pop { dst } => unsafe {
+                    *regs.add(dst as usize) = self.spilled.pop().unwrap();
+                },
                 _ => {
                     dbg!(instruction);
                     return Err(Anomaly::Unimplemented { pc: self.pc });

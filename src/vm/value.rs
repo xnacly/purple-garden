@@ -1,4 +1,7 @@
-use std::{fmt::Display, hint::unreachable_unchecked};
+use std::{
+    fmt::{self, Debug, Display},
+    hint::unreachable_unchecked,
+};
 
 use crate::ir::Const;
 
