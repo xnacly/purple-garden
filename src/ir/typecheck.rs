@@ -192,6 +192,15 @@ impl<'t> Typechecker<'t> {
                 };
 
                 let ret: Type = return_type.into();
+
+                self.functions.insert(
+                    inner_name,
+                    FunctionType {
+                        args: typed_arguments,
+                        ret: ret.clone(),
+                    },
+                );
+
                 let computed_ret = self.block_type(body)?;
                 if ret != computed_ret {
                     return Err(PgError::with_msg(
@@ -203,14 +212,6 @@ impl<'t> Typechecker<'t> {
                         return_type,
                     ));
                 }
-
-                self.functions.insert(
-                    inner_name,
-                    FunctionType {
-                        args: typed_arguments,
-                        ret: ret.clone(),
-                    },
-                );
                 self.env = prev_env;
                 ret
             }
