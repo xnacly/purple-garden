@@ -72,7 +72,7 @@ impl<'dis> Disassembler<'dis> {
             Op::Call { func } => format!("call {}", funcs_by_pc.get(func).unwrap().name),
             Op::Sys { .. } => "sys <syscall_name_here>".to_string(),
             Op::Push { src } => format!("push {src}"),
-            Op::Pop { dst } => format!("push {dst}"),
+            Op::Pop { dst } => format!("pop {dst}"),
             Op::Ret => "ret".into(),
             Op::Nop => "nop".into(),
         }

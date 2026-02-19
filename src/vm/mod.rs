@@ -119,6 +119,16 @@ impl<'vm> Vm<'vm> {
                     let r = &(*regs.add(rhs as usize));
                     *regs.add(dst as usize) = l.compare(r).into()
                 },
+                Op::Gt { dst, lhs, rhs } => unsafe {
+                    let l = &(*regs.add(lhs as usize)).as_int();
+                    let r = &(*regs.add(rhs as usize)).as_int();
+                    *regs.add(dst as usize) = (l > r).into()
+                },
+                Op::Lt { dst, lhs, rhs } => unsafe {
+                    let l = &(*regs.add(lhs as usize)).as_int();
+                    let r = &(*regs.add(rhs as usize)).as_int();
+                    *regs.add(dst as usize) = (l < r).into()
+                },
                 Op::Mov { dst, src } => unsafe {
                     *regs.add(dst as usize) = (*regs.add(src as usize));
                 },

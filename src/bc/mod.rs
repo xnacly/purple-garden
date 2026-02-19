@@ -163,6 +163,7 @@ impl<'cc> Cc<'cc> {
                 let Some(func) = self.ctx.functions.get(func) else {
                     unreachable!();
                 };
+
                 let pc = func.pc;
                 for (i, &ir::Id(arg)) in args.iter().enumerate() {
                     let (dst, src) = (i as u8, arg as u8);
@@ -171,19 +172,23 @@ impl<'cc> Cc<'cc> {
                     }
                 }
 
+                // TODO: we need a live set building pass to only restore values that are used
+                // after the call and were defined before the call
+
+                let ir::Id(dst) = dst;
                 self.emit(Op::Call { func: pc as u32 });
-                if let Some(ir::Id(dst)) = dst {
-                    self.emit(Op::Mov {
-                        dst: *dst as u8,
-                        src: 0,
-                    });
-                };
+                self.emit(Op::Mov {
+                    dst: *dst as u8,
+                    src: 0,
+                });
             }
             ir::Instr::Add { dst, rhs, lhs }
             | ir::Instr::Sub { dst, rhs, lhs }
             | ir::Instr::Mul { dst, rhs, lhs }
             | ir::Instr::Div { dst, rhs, lhs }
-            | ir::Instr::Eq { dst, rhs, lhs } => {
+            | ir::Instr::Eq { dst, rhs, lhs }
+            | ir::Instr::Lt { dst, rhs, lhs }
+            | ir::Instr::Gt { dst, rhs, lhs } => {
                 let (
                     TypeId {
                         id: ir::Id(dst), ..
@@ -211,6 +216,8 @@ impl<'cc> Cc<'cc> {
                     ir::Instr::Mul { .. } => emit_bin!(IMul, dst, lhs, rhs),
                     ir::Instr::Div { .. } => emit_bin!(IDiv, dst, lhs, rhs),
                     ir::Instr::Eq { .. } => emit_bin!(Eq, dst, lhs, rhs),
+                    ir::Instr::Lt { .. } => emit_bin!(Lt, dst, lhs, rhs),
+                    ir::Instr::Gt { .. } => emit_bin!(Gt, dst, lhs, rhs),
                     _ => unreachable!(),
                 };
 

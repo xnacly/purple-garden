@@ -277,7 +277,7 @@ impl<'p> Parser<'p> {
     }
 
     fn prefix_binding_power(op: &Type) -> u8 {
-        // add !<expr>,?<expr>, the latter being the try operator
+        // TODO: add !<expr>,?<expr>, the latter being the try operator
         match op {
             Type::Plus | Type::Minus => 5,
             _ => unreachable!(),
@@ -285,11 +285,10 @@ impl<'p> Parser<'p> {
     }
 
     fn infix_binding_power(op: &Type) -> Option<(u8, u8)> {
-        // TODO: add !=,==,?,>,<,<=,>=
         Some(match op {
             Type::Plus | Type::Minus => (1, 2),
             Type::Asteriks | Type::Slash => (3, 4),
-            Type::DoubleEqual => (0, 1),
+            Type::DoubleEqual | Type::NotEqual | Type::GreaterThan | Type::LessThan => (0, 1),
             _ => return None,
         })
     }

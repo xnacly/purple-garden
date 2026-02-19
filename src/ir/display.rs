@@ -67,11 +67,15 @@ impl Display for Func<'_> {
                     Instr::Eq { dst, lhs, rhs } => {
                         writeln!(f, "%v{} = eq %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
+                    Instr::Lt { dst, lhs, rhs } => {
+                        writeln!(f, "%v{} = lt %v{}, %v{}", dst, lhs.0, rhs.0)?
+                    }
+                    Instr::Gt { dst, lhs, rhs } => {
+                        writeln!(f, "%v{} = gt %v{}, %v{}", dst, lhs.0, rhs.0)?
+                    }
                     Instr::LoadConst { dst, value } => writeln!(f, "%v{} = {}", dst, value)?,
                     Instr::Call { dst, func, args } => {
-                        if let Some(dst) = dst {
-                            write!(f, "%v{} = ", dst.0)?;
-                        }
+                        write!(f, "%v{} = ", dst.0)?;
                         write!(f, "f{}(", func.0)?;
                         for (i, arg) in args.iter().enumerate() {
                             if i + 1 == args.len() {

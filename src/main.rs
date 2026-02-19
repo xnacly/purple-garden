@@ -137,6 +137,7 @@ fn main() {
             .expect("Failed to read from file")
             .to_vec(),
     };
+
     let mut lexer = Lexer::new(&input);
     let ast = match Parser::new(&mut lexer).and_then(|n| n.parse()) {
         Ok(a) => a,
@@ -241,5 +242,6 @@ fn main() {
         }
     }
 
+    dbg!(vm.r[0]);
     trace!("Executed bytecode");
 }

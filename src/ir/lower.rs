@@ -132,6 +132,8 @@ impl<'lower> Lower<'lower> {
                     Type::Asteriks => Instr::Mul { dst, lhs, rhs },
                     Type::Slash => Instr::Div { dst, lhs, rhs },
                     Type::DoubleEqual => Instr::Eq { dst, lhs, rhs },
+                    Type::LessThan => Instr::Lt { dst, lhs, rhs },
+                    Type::GreaterThan => Instr::Gt { dst, lhs, rhs },
                     _ => unreachable!(),
                 });
 
@@ -244,7 +246,7 @@ impl<'lower> Lower<'lower> {
 
                 let dst = self.id_store.new_value();
                 self.emit(Instr::Call {
-                    dst: Some(dst),
+                    dst: dst,
                     func: target_id,
                     args: a,
                 });
