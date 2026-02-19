@@ -5,10 +5,8 @@ focus on aggressive compile-time optimisations, JIT compilation, fine-grained
 memory control, and optional garbage collection.
 
 ```python
-fn greeting(greetee: str) {
-    std::println("hello world to:" greetee)
-} 
-greeting(std::env::get("USER")) # hello world to: $USER
+import "io"
+io::println("Hello World")
 ```
 
 ## Features / Design Goals

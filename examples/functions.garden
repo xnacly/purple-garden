@@ -1,19 +1,24 @@
 # vim: filetype=python
-fn add3(arg1:int arg2:int arg3:int) int {
-    arg1+arg2+arg3
-}
-std::println(add3(3.1415 3.1415 3.1415))
 
-fn greeting(greetee:str) void {
-    std::println("hello world to:" greetee)
-} 
-greeting(std::env::get("USER")) # hello world to: $USER
-
-# technically this would be required to be `fn zero_args() void`, but the
-# parser notices this and inserts it on its own
-fn zero_args {
-    std::println("zero_args")
+# compute n! with acumulator a
+# see https://en.wikipedia.org/wiki/Factorial
+fn factorial(n:int a:int) int {
+    match {
+        n == 0 { a }
+        { factorial(n-1 n*a) }
+    }
 }
+factorial(16 1)
+
+fn fib(n:int) int {
+    match {
+        n < 2 { 1 }
+        { fib(n - 1) + fib(n - 2) }
+    }
+}
+# since pg nums are i48 due to the tagging model,
+# this is the most sensful max
+fib(35)
 
 # tail calls 
 fn inc(x:int) int {x + 1}
@@ -22,63 +27,4 @@ fn call2(x:int) int {call1(x)}
 fn call3(x:int) int {call2(x)}
 fn call4(x:int) int {call3(x)}
 fn call5(x:int) int {call4(x)}
-std::println(call5(0))
-
-fn tuplify(v:str) [int str] {
-    [len(v) v]
-} 
-std::println(tuplify("hello world")) # [11, "hello world"]
-
-fn f1(a:int) ?int {
-    match {
-        a<100000 {
-            std::Some(f1(a+1))
-        }
-        { std::None }
-    }
-}
-f1(0)
-
-# compute n! with acumulator a
-fn factorial(n:int a:int) int {
-    match {
-        n == 0 { a }
-        { factorial(n-1 n*a) }
-    }
-}
-
-let n = 18
-std::println(factorial(n 1))
-
-fn bin_step(n:int k:int i:int r:int) ?int {
-    match {
-        i = k { std::Some(r) }
-        {
-            bin_step(n k i+1 r * (n-i)/(i+1))
-        }
-    }
-}
-
-fn bin(n:int k:int) ?int {
-    match {
-        k < 0 { std::None() }
-        k == 0 { std::Some(1) }
-        k == n { std::Some(1) }
-        {
-            # Apply symmetry: k = min(k, n-k)
-            let kk = match {
-                n - k < k { n - k }
-                { k }
-            }
-            bin_step(n kk 0 1)
-        }
-    }
-}
-
-std::assert(bin(1 1) == 1)
-std::assert(bin(1 0) == 1)
-std::assert(bin(6 3) == 20)
-std::assert(bin(6 5) == 6)
-std::assert(bin(10 5) == 252)
-std::assert(bin(20 15) == 15504)
-std::assert(bin(49 6) == 13983816)
+call5(0)

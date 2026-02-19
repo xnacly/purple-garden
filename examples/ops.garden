@@ -1,6 +1,0 @@
-# vim: filetype=nix
-# arithmetics
-std::assert(3 == 1+2)
-std::assert(1 == 2-1)
-std::assert(9 == 3*3)
-std::assert(3.1415 < 3.1515)

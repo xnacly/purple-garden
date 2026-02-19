@@ -1,21 +1,23 @@
-# vim: filetype=nix
-let combination = std::str::append("Hello" " " "World")
-std::println(combination)
-# manual gc run to check if reachability is correct
-std::runtime::gc::cycle()
-# second gc run, just to stress everything
-std::runtime::gc::cycle()
+# vim: filetype=python
+import ("io" "runtime/gc" "str")
 
-let combination = std::str::append(combination "|" combination "|" combination)
-std::println(combination)
-std::runtime::gc::cycle()
+let combination = str::append("Hello" " " "World")
+io::println(combination)
+# manual gc run to check if reachability is correct
+gc::cycle()
+# second gc run, just to stress everything
+gc::cycle()
+
+let combination = str::append(combination "|" combination "|" combination)
+io::println(combination)
+gc::cycle()
 
 # new allocation
-let combination = std::str::append(combination combination)
+let combination = str::append(combination combination)
 fn child_scope {
     # in this scope the gc needs to be able to mark the parent scope
-    std::runtime::gc::cycle()
+    gc::cycle()
 }
 child_scope()
 
-std::println(combination)
+io::println(combination)

@@ -1,82 +1,91 @@
 # vim: filetype=python
 
+import (
+    "cli"
+    "io"
+    "fs"
+    "test"
+    "runtime/gc"
+    "opt"
+    "str"
+    "arr"
+    "obj"
+    "encoding/csv"
+    "encoding/json"
+    "encoding/html"
+)
+
 # std is a immutable module collection containing helpers and commonly used abstractions
 
 # cli holds interactions for the command line, such as
-std::cli::args()# the list of arguments of the script invocation
-std::cli::flags()# holds all options passed to the runtime as a key value store `pg script.garden -- -t=5 --month=april->{ t=5 month="april" }
-std::cli::rest()# holds all non option arguments as an array
+cli::args()# the list of arguments of the script invocation
+cli::flags()# holds all options passed to the runtime as a key value store `pg script.garden -- -t=5 --month=april->{ t=5 month="april" }
+cli::rest()# holds all non option arguments as an array
 
 # filesystem interaction
 let path = "hola.txt"
 let content = "I HAVE WRITTEN!"
-std::fs::write_file(path content)
-std::assert(std::opt::unwrap(std::fs::read_file(path)) = content)
+fs::write_file(path content)
+test::assert(opt::unwrap(fs::read_file(path)) = content)
 
 # fmt allows for pretty printing values and to do structured formatting into
 # strings
 let user = "teo"
-std::fmt::printf("hello world: {}[{}]" user len(user)) # print to stdout
-std::fmt::sprintf("hello world: {}[{}]" user len(user)) # return as string
+io::printf("hello world: {}[{}]" user len(user)) # print to stdout
+io::sprintf("hello world: {}[{}]" user len(user)) # return as string
 
 # runtime allows for programatic virtual machine interactions
-std::runtime::gc::clean() # clean triggers a garbage collection cycle normaly only being triggered by the allocator inside of the vm
-std::runtime::gc::stop() # stop stops the gc from running again in the current execution
-std::runtime::gc::stats() # returns memory statistics: {current: int, allocated: int}
+gc::clean() # clean triggers a garbage collection cycle normaly only being triggered by the allocator inside of the vm
+gc::stop() # stop stops the gc from running again in the current execution
+gc::stats() # returns memory statistics: {current: int, allocated: int}
 
 # optionals
-let opt_none = std::None()
-let opt_some = std::Some([])
-std::opt::or(opt_none "anything else") # -> "anything else"
-std::opt::unwrap(opt_some) # -> []
-std::opt::expect(opt_some "would panic with this message") # -> []
-std::opt::is_some(opt_some) # -> true 
-std::opt::is_none(opt_none) # -> true 
+let opt_none = opt::none()
+let opt_some = opt::some([])
+opt::or(opt_none "anything else") # -> "anything else"
+opt::unwrap(opt_some) # -> []
+opt::expect(opt_some "would panic with this message") # -> []
+opt::is_some(opt_some) # -> true 
+opt::is_none(opt_none) # -> true 
 
 # array utilities
 let arr = [1 2 3 4 5]
-std::arr::new(25) # 25 elements reserved, but none set
-std::arr::range(1 5) # 1 2 3 4 5
-std::arr::join(arr ", ") # 1, 2, 3, 4, 5
-std::arr::sum(arr) # 15
-std::arr::map(arr fn _ :: x {
-    x*2
-}) # [2 4 6 8 10]
-std::arr::filter(arr fn _ :: x {
-    x % 2 = 0
-}) # [2 4]
+arr::new(25) # 25 elements reserved, but none set
+arr::range(1 5) # 1 2 3 4 5
+arr::join(arr ", ") # 1, 2, 3, 4, 5
+arr::sum(arr) # 15
 
 # object contains helper functions for working with objects
-let obj :: { 
-      key1 None()
-      key2 None() 
-    }
-std::object::keys(obj) # -> ["key1", "key2"]
-std::object::values(obj) # -> [Option::None, Option::None]
-std::object::entries(obj) # -> [["key1", Option::None], ["key2", Option::None]]
+let obj = { 
+  key1 None()
+  key2 None() 
+}
+obj::keys(obj) # -> ["key1", "key2"]
+obj::values(obj) # -> [Option::None, Option::None]
+obj::entries(obj) # -> [["key1", Option::None], ["key2", Option::None]]
 
 # str helps with efficient str interaction
-let hello_hash = std::str::hash("Hello")
-std::str::contains("Hello" "elo") # true
-std::str::contains_char("Hello" "e") # true
-std::str::idx("Hello" "elo") # 1
-std::str::slice("Hello" 0 2) # hel
-std::str::slice("Hello" 1 2) # el
-std::str::lines("hello\nworld") # [hello world]
-std::str::repeat("hello" 5) # hellohellohellohellohello
-std::str::replace("hello" "lo" "per") # helper
-std::str::split("name,group,age" ",") # [name group age]
-std::str::lower("IAMLOWER") # iamlower
-std::str::upper("iamupper") # IAMUPPER
-std::str::trim("H\n\t    ello\n\t    ") # "Hello"
+let hello_hash = str::hash("Hello")
+str::contains("Hello" "elo") # true
+str::contains_char("Hello" "e") # true
+str::idx("Hello" "elo") # 1
+str::slice("Hello" 0 2) # hel
+str::slice("Hello" 1 2) # el
+str::lines("hello\nworld") # [hello world]
+str::repeat("hello" 5) # hellohellohellohellohello
+str::replace("hello" "lo" "per") # helper
+str::split("name,group,age" ",") # [name group age]
+str::lower("IAMLOWER") # iamlower
+str::upper("iamupper") # IAMUPPER
+str::trim("H\n\t    ello\n\t    ") # "Hello"
 
 # encoding and decoding allows for serializing and deserializing purple garden
 # values from and into different formats, like json, csv, html, etc.
-std::encoding::json({ key "value" }) # { "key": "value" }
-std::encoding::json([1 2 3 "some string" None()]) # [ 1, 2, 3, "some string", null ]
-std::decoding::json("{ key \"value\" }") # { key "value" }
+json::encode({ key "value" }) # { "key": "value" }
+json::encode([1 2 3 "some string" None()]) # [ 1, 2, 3, "some string", null ]
+json::encode("{ key \"value\" }") # { key "value" }
 
-std::encoding::csv(
+csv::encode(
   [{ name "user1" age 25 } 
    { name "user2" age 14 }
    { name "user3" age 18 role "admin" }
@@ -89,7 +98,7 @@ std::encoding::csv(
   # user3,18,admin
   # user4,,
 
-std::decoding::ini("\
+ini::decode("\
     ; last modified 1 April 2001 by John Doe\
     [owner]\
     name = John Doe\
@@ -102,7 +111,7 @@ std::decoding::ini("\
     #     }
     # }
 
-std::encoding::ini({
+ini::encode({
     owner {
         name "John Doe"
         organization "Acme Widgets Inc."
@@ -111,7 +120,7 @@ std::encoding::ini({
     # name = John Doe
     # organization = Acme Widgets Inc.
 
-std::encoding::html(
+html::encode(
     {
         div {
           p {
