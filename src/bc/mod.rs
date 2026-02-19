@@ -9,7 +9,7 @@ use crate::{
     bc::ctx::Context,
     err::PgError,
     ir::{self, Const, Func, TypeId},
-    vm::{CallFrame, Value, Vm, op::Op},
+    vm::{CallFrame, REGISTER_COUNT, Value, Vm, op::Op},
 };
 
 #[derive(Debug)]
@@ -55,7 +55,7 @@ impl<'cc> Cc<'cc> {
         Ok(())
     }
 
-    fn cc(&mut self, fun: &'cc Func<'cc>) -> Result<Option<Reg>, PgError> {
+    fn cc(&mut self, fun: &'cc Func<'cc>) -> Result<Option<reg::Reg>, PgError> {
         // since we have a ssa based ir, we use our register allocator in a function local way and
         // spill any register usage >= 64 on the vm stack, this should be very fast for the general
         // usage and extensible enough for extreme niche usecases requiring more than 64 alive
@@ -160,16 +160,24 @@ impl<'cc> Cc<'cc> {
                 }
             }
             ir::Instr::Call { dst, func, args } => {
-                let Some(def_size_pc) = self.ctx.functions.get(func) else {
+                let Some(func) = self.ctx.functions.get(func) else {
                     unreachable!();
                 };
+                let pc = func.pc;
+                for (i, &ir::Id(arg)) in args.iter().enumerate() {
+                    let (dst, src) = (i as u8, arg as u8);
+                    if dst != src {
+                        self.emit(Op::Mov { dst, src });
+                    }
+                }
 
-                // TODO: do some kind of ssa to register mapping so the function call has the
-                // registers in r0..rN, also emit Op::Push{src:u8} for each alive register
-
-                self.emit(Op::Call {
-                    func: def_size_pc.pc as u32,
-                });
+                self.emit(Op::Call { func: pc as u32 });
+                if let Some(ir::Id(dst)) = dst {
+                    self.emit(Op::Mov {
+                        dst: *dst as u8,
+                        src: 0,
+                    });
+                };
             }
             ir::Instr::Add { dst, rhs, lhs }
             | ir::Instr::Sub { dst, rhs, lhs }
