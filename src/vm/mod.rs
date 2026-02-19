@@ -10,12 +10,12 @@ use crate::{Args, vm::op::Op};
 /// purple garden bytecode virtual machine operations
 pub mod op;
 
+pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>, &[Value]) -> Option<Value>;
+
 #[derive(Default, Debug)]
 pub struct CallFrame {
     pub return_to: usize,
 }
-
-pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>, &[Value]) -> Option<Value>;
 
 #[repr(C)]
 #[derive(Debug)]

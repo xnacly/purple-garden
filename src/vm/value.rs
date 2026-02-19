@@ -52,7 +52,7 @@ impl Str {
 /// | Object     | 0x7FFE              | GC object               |
 /// | Double     | normal f64 bits     | full 64 bits            |
 /// ```
-#[derive(Debug, PartialEq, Clone, Default, Copy)]
+#[derive(PartialEq, Clone, Default, Copy)]
 pub struct Value(u64);
 
 impl Value {
@@ -190,6 +190,20 @@ impl Display for Value {
                 // Value::ARRAY => write!(f, "{}", self.as_()),
                 // Value::OBJECT => write!(f, "{}", self.as_()),
                 _ => write!(f, "{}", self.as_f64()),
+            }
+        }
+    }
+}
+
+impl Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        unsafe {
+            match self.tag() {
+                Value::INT => f.debug_tuple("Value").field(&self.as_int()).finish(),
+                Value::BOOL => f.debug_tuple("Value").field(&self.as_bool()).finish(),
+                Value::UNDEF => f.debug_tuple("Value").field(&"undefined").finish(),
+                Value::STR | Value::STRING => f.debug_tuple("Value").field(&self.as_str()).finish(),
+                _ => f.debug_tuple("Value").field(&self.as_f64()).finish(),
             }
         }
     }
