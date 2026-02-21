@@ -16,7 +16,7 @@ pub fn ir(ir: ()) {
     todo!("opt::ir")
 }
 
-const WINDOW_SIZE: usize = 3;
+const WINDOW_SIZE: usize = 2;
 
 /// Peephole optimisations
 ///
@@ -33,7 +33,7 @@ pub fn bc(bc: &mut Vec<Op>) {
 
     for i in 0..=bc.len().saturating_sub(WINDOW_SIZE) {
         let window = &mut bc[i..i + WINDOW_SIZE];
-        bc::const_binary(window);
         bc::self_move(window);
+        bc::mov_merge(window);
     }
 }

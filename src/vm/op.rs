@@ -1,6 +1,4 @@
-#[derive(Debug, Clone, Copy)]
-#[allow(unpredictable_function_pointer_comparisons)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     // TODO: rename all to I* for integers, introduce secondary operator for D* (double)
     IAdd { dst: u8, lhs: u8, rhs: u8 },
