@@ -65,7 +65,7 @@ mod bc {
     #[test]
     fn mov_merge() {
         let mut bc = vec![Op::Mov { dst: 8, src: 0 }, Op::Mov { dst: 2, src: 8 }];
-        crate::opt::bc::self_move(&mut bc);
+        crate::opt::bc::mov_merge(&mut bc);
         assert_eq!(bc, vec![Op::Nop, Op::Mov { dst: 2, src: 0 }])
     }
 }
