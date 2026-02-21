@@ -49,7 +49,12 @@ mod trace {
     }
 }
 
-use crate::{err::PgError, lex::Lexer, parser::Parser, vm::Value};
+use crate::{
+    err::PgError,
+    lex::Lexer,
+    parser::Parser,
+    vm::{Value, op::Op},
+};
 
 mod asm;
 mod ast;
@@ -93,6 +98,10 @@ pub struct Args {
     /// Compile the target into native machine code and execute said code
     #[arg(short = 'N', long)]
     native: bool,
+
+    /// Execute the whole pipeline but stop before executing either in the vm or in the native code
+    #[arg(short = 'd', long)]
+    dry: bool,
 
     /// Readable bytecode or machine code, depending on execution strategy
     #[arg(short = 'D', long)]
@@ -198,6 +207,7 @@ fn main() {
 
     if args.opt >= 1 {
         opt::bc(&mut cc.buf);
+        cc.buf.retain(|c| *c != Op::Nop)
     }
 
     let mut function_table = if args.backtrace {
@@ -215,6 +225,10 @@ fn main() {
 
     if args.disassemble {
         bc::dis::Disassembler::new(&vm.bytecode, ctx.unwrap()).disassemble();
+    }
+
+    if args.dry {
+        return;
     }
 
     if let Err(e) = vm.run() {
