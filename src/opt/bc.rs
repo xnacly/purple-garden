@@ -40,8 +40,12 @@ pub fn mov_merge(window: &mut [Op]) {
     else {
         return;
     };
+    if m0dst != m1src {
+        return;
+    }
 
     let (dst, src) = (*m1dst, *m0src);
+
     window[0] = Op::Nop;
     window[1] = Op::Mov { dst, src };
     opt_trace!("mov_merge", "merged two movs");
@@ -67,5 +71,15 @@ mod bc {
         let mut bc = vec![Op::Mov { dst: 8, src: 0 }, Op::Mov { dst: 2, src: 8 }];
         crate::opt::bc::mov_merge(&mut bc);
         assert_eq!(bc, vec![Op::Nop, Op::Mov { dst: 2, src: 0 }])
+    }
+
+    #[test]
+    fn mov_merge_non_mergable() {
+        let mut bc = vec![Op::Mov { dst: 7, src: 0 }, Op::Mov { dst: 2, src: 8 }];
+        crate::opt::bc::mov_merge(&mut bc);
+        assert_eq!(
+            bc,
+            vec![Op::Mov { dst: 7, src: 0 }, Op::Mov { dst: 2, src: 8 }]
+        )
     }
 }
