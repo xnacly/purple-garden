@@ -33,24 +33,20 @@ impl Display for Func<'_> {
         )?;
 
         for block in self.blocks.iter() {
-            if block.params.is_empty() || block.id == entry_block.id {
-                writeln!(f, "b{}:", block.id.0)?;
-            } else {
-                writeln!(
-                    f,
-                    "b{}({}):",
-                    block.id.0,
-                    block
-                        .params
-                        .iter()
-                        .map(|p| format!("%v{}", p))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )?;
-            }
+            writeln!(
+                f,
+                "b{}({}):",
+                block.id.0,
+                block
+                    .params
+                    .iter()
+                    .map(|p| format!("%v{}", p))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )?;
 
             if block.tombstone {
-                writeln!(f, "<tombstone>")?;
+                writeln!(f, "\t<tombstone>")?;
                 continue;
             }
 

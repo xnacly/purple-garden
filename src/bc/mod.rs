@@ -8,7 +8,7 @@ use crate::{
     Args,
     bc::ctx::Context,
     err::PgError,
-    ir::{self, Const, Func, TypeId},
+    ir::{self, Const, Func, TypeId, ptype},
     vm::{CallFrame, REGISTER_COUNT, Value, Vm, op::Op},
 };
 
@@ -78,7 +78,7 @@ impl<'cc> Cc<'cc> {
                 self.instr(instruction);
             }
 
-            self.term(block.term.as_ref())
+            self.term(block.term.as_ref());
         }
 
         crate::trace!(
@@ -142,6 +142,26 @@ impl<'cc> Cc<'cc> {
 
     fn instr(&mut self, i: &ir::Instr<'cc>) {
         match i {
+            ir::Instr::Cast {
+                value:
+                    TypeId {
+                        id: ir::Id(dst),
+                        ty,
+                    },
+                from: ir::Id(src),
+            } => {
+                let dst = *dst as u8;
+                let src = *src as u8;
+
+                let op = match ty {
+                    ptype::Type::Bool => Op::CastToBool { dst, src },
+                    ptype::Type::Int => Op::CastToInt { dst, src },
+                    ptype::Type::Double => Op::CastToDouble { dst, src },
+                    _ => unreachable!("Not a valid cast, see typecheck::Typechecker::cast"),
+                };
+
+                self.emit(op);
+            }
             ir::Instr::LoadConst { dst, value } => {
                 let TypeId {
                     id: ir::Id(dst), ..
@@ -229,7 +249,7 @@ impl<'cc> Cc<'cc> {
             }
             ir::Instr::Noop => {}
             _ => todo!("{:?}", i),
-        }
+        };
     }
 
     pub fn finalize(mut self, config: &'cc Args) -> Vm<'cc> {
