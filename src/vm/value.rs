@@ -60,7 +60,7 @@ impl Value {
     pub const BOOL: u64 = 0x7FF9 << 48;
     pub const UNDEF: u64 = 0x7FFA << 48;
     pub const STR: u64 = 0x7FFB << 48;
-    pub const STRING: u64 = 0x7FFC << 48;
+    pub const HEAPSTRING: u64 = 0x7FFC << 48;
     pub const ARRAY: u64 = 0x7FFD << 48;
     pub const OBJECT: u64 = 0x7FFE << 48;
 
@@ -96,7 +96,7 @@ impl Value {
 
     pub unsafe fn as_str<'t>(&self) -> &'t str {
         unsafe {
-            debug_assert!(self.tag() == Self::STR || self.tag() == Self::STRING);
+            debug_assert!(self.tag() == Self::STR || self.tag() == Self::HEAPSTRING);
             let wrapper = self.as_ptr::<Str>();
             (*wrapper).as_str()
         }
@@ -106,7 +106,7 @@ impl Value {
     pub unsafe fn as_ptr<T>(&self) -> *mut T {
         debug_assert!(matches!(
             self.tag(),
-            Self::STR | Self::STRING | Self::ARRAY | Self::OBJECT
+            Self::STR | Self::HEAPSTRING | Self::ARRAY | Self::OBJECT
         ));
         (self.0 & 0x0000_FFFF_FFFF_FFFF) as *mut T
     }
@@ -124,7 +124,7 @@ impl Value {
                 match lt {
                     Self::INT => self.as_int() == other.as_int(),
                     Self::BOOL => self.as_bool() == other.as_bool(),
-                    Self::STR | Self::STRING => self.as_str() == other.as_str(),
+                    Self::STR | Self::HEAPSTRING => self.as_str() == other.as_str(),
                     _ => unreachable_unchecked(),
                 }
             } else {
@@ -186,7 +186,7 @@ impl Display for Value {
                 Value::INT => write!(f, "{}", self.as_int()),
                 Value::BOOL => write!(f, "{}", self.as_bool()),
                 Value::UNDEF => write!(f, "undefined"),
-                Value::STR | Value::STRING => write!(f, "\"{}\"", self.as_str()),
+                Value::STR | Value::HEAPSTRING => write!(f, "\"{}\"", self.as_str()),
                 // Value::ARRAY => write!(f, "{}", self.as_()),
                 // Value::OBJECT => write!(f, "{}", self.as_()),
                 _ => write!(f, "{}", self.as_f64()),
@@ -197,13 +197,28 @@ impl Display for Value {
 
 impl Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut start = f.debug_struct("Value");
+        start.field(
+            "type",
+            &match self.tag() {
+                Value::INT => "int",
+                Value::BOOL => "bool",
+                Value::UNDEF => "undef",
+                Value::STR => "str",
+                Value::HEAPSTRING => "heapstring",
+                Value::ARRAY => "arr",
+                Value::OBJECT => "obj",
+                _ => "double",
+            },
+        );
+        start.field("raw", &format!("0x{:0x}", self.tag()));
         unsafe {
             match self.tag() {
-                Value::INT => f.debug_tuple("Value").field(&self.as_int()).finish(),
-                Value::BOOL => f.debug_tuple("Value").field(&self.as_bool()).finish(),
-                Value::UNDEF => f.debug_tuple("Value").field(&"undefined").finish(),
-                Value::STR | Value::STRING => f.debug_tuple("Value").field(&self.as_str()).finish(),
-                _ => f.debug_tuple("Value").field(&self.as_f64()).finish(),
+                Value::INT => start.field("val", &self.as_int()).finish(),
+                Value::BOOL => start.field("val", &self.as_bool()).finish(),
+                Value::UNDEF => start.field("val", &"undefined").finish(),
+                Value::STR | Value::HEAPSTRING => start.field("val", &self.as_str()).finish(),
+                _ => start.field("val", &self.as_f64()).finish(),
             }
         }
     }
