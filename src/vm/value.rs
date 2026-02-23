@@ -59,8 +59,11 @@ impl Value {
     pub const INT: u64 = 0x7FF8 << 48;
     pub const BOOL: u64 = 0x7FF9 << 48;
     pub const UNDEF: u64 = 0x7FFA << 48;
+    /// compile time known string, are stored on a heap the vm does not know about
     pub const STR: u64 = 0x7FFB << 48;
+    /// runtime strings created by concat or any other string returning procedure
     pub const HEAPSTRING: u64 = 0x7FFC << 48;
+    /// list of elements, must be of the same type
     pub const ARRAY: u64 = 0x7FFD << 48;
     pub const OBJECT: u64 = 0x7FFE << 48;
 
@@ -140,33 +143,32 @@ impl Value {
 
     #[inline(always)]
     pub unsafe fn to_bool(&self) -> Self {
+        debug_assert!(self.tag() == Self::INT);
         unsafe {
             // we can do as_int, because our typechecker validates only integers to be castable to
             // booleans
             let i = self.as_int();
-            if i == 0 || i < 0 {
-                false.into()
-            } else {
-                true.into()
-            }
+            Value::from(i != 0)
         }
     }
 
     #[inline(always)]
     pub unsafe fn to_double(&self) -> Self {
+        debug_assert!(self.tag() == Self::INT);
         unsafe {
             // we can do as_int, because our typechecker validates only ints to be castable to
             // doubles
-            (self.as_int() as f64).into()
+            Value::from(self.as_int() as f64)
         }
     }
 
     #[inline(always)]
     pub unsafe fn to_int(&self) -> Self {
+        debug_assert!(self.tag() <= 0x7FF7 << 48);
         unsafe {
             // we can do as_f64, because our typechecker validates only doubles to be castable to
             // ints
-            (self.as_f64() as i64).into()
+            Value::from(self.as_f64() as i64)
         }
     }
 }
