@@ -143,7 +143,12 @@ impl Value {
         unsafe {
             // we can do as_int, because our typechecker validates only integers to be castable to
             // booleans
-            (self.as_int() == 1).into()
+            let i = self.as_int();
+            if i == 0 || i < 0 {
+                false.into()
+            } else {
+                true.into()
+            }
         }
     }
 
