@@ -34,6 +34,13 @@ impl<'dis> Disassembler<'dis> {
             .map(|(c, idx)| (*idx as u32, c))
             .collect();
 
+        if !self.ctx.globals.is_empty() {
+            println!("globals:");
+            for g in &self.ctx.globals {
+                println!("  {:04}:    {}", g.1, g.0)
+            }
+        }
+
         let mut cur_func = self.ctx.functions.get(&Id(0)).unwrap();
         for (pc, instr) in self.bc.iter().enumerate() {
             if let Some(func) = funcs_by_pc.get(&(pc as u32)) {
@@ -57,7 +64,7 @@ impl<'dis> Disassembler<'dis> {
                     Op::LoadG { dst, idx } => {
                         let val_str = globals_by_idx
                             .get(idx)
-                            .map(|v| format!("{:?}", v))
+                            .map(|v| format!("{}", v))
                             .unwrap_or("<unknown>".to_string());
                         format!("load_global r{dst}, {idx} \t; {}", val_str)
                     }
