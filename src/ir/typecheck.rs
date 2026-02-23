@@ -89,6 +89,7 @@ impl<'t> Typechecker<'t> {
         Ok(match (i, o) {
             (Type::Int, Type::Double) => Type::Double,
             (Type::Double, Type::Int) => Type::Int,
+            (Type::Int, Type::Bool) => Type::Bool,
             (_, _) => {
                 return Err(PgError::with_msg(
                     "Cast type error",
