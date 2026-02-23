@@ -166,6 +166,15 @@ impl<'vm> Vm<'vm> {
                 Op::Pop { dst } => unsafe {
                     *regs.add(dst as usize) = self.spilled.pop().unwrap();
                 },
+                Op::CastToDouble { dst, src } => unsafe {
+                    *regs.add(dst as usize) = (*regs.add(src as usize)).to_double();
+                },
+                Op::CastToInt { dst, src } => unsafe {
+                    *regs.add(dst as usize) = (*regs.add(src as usize)).to_int();
+                },
+                Op::CastToBool { dst, src } => unsafe {
+                    *regs.add(dst as usize) = (*regs.add(src as usize)).to_bool();
+                },
                 _ => {
                     dbg!(instruction);
                     return Err(Anomaly::Unimplemented { pc: self.pc });

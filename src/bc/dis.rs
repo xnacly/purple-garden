@@ -79,6 +79,15 @@ impl<'dis> Disassembler<'dis> {
                     Op::Push { src } => format!("push {src}"),
                     Op::Pop { dst } => format!("pop {dst}"),
                     Op::Ret => "ret".into(),
+                    Op::CastToBool { dst, src } => {
+                        format!("cast_to_bool {dst}, {src}")
+                    }
+                    Op::CastToInt { dst, src } => {
+                        format!("cast_to_int {dst}, {src}")
+                    }
+                    Op::CastToDouble { dst, src } => {
+                        format!("cast_to_double {dst}, {src}")
+                    }
                     Op::Nop => "nop".into(),
                 }
             );

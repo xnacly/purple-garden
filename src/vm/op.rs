@@ -18,6 +18,9 @@ pub enum Op {
     Sys { idx: u8 },
     Push { src: u8 },
     Pop { dst: u8 },
+    CastToInt { dst: u8, src: u8 },
+    CastToDouble { dst: u8, src: u8 },
+    CastToBool { dst: u8, src: u8 },
     Ret,
     Nop,
 }

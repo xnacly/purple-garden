@@ -137,6 +137,33 @@ impl Value {
             }
         }
     }
+
+    #[inline(always)]
+    pub unsafe fn to_bool(&self) -> Self {
+        unsafe {
+            // we can do as_int, because our typechecker validates only integers to be castable to
+            // booleans
+            (self.as_int() == 1).into()
+        }
+    }
+
+    #[inline(always)]
+    pub unsafe fn to_double(&self) -> Self {
+        unsafe {
+            // we can do as_int, because our typechecker validates only ints to be castable to
+            // doubles
+            (self.as_int() as f64).into()
+        }
+    }
+
+    #[inline(always)]
+    pub unsafe fn to_int(&self) -> Self {
+        unsafe {
+            // we can do as_f64, because our typechecker validates only doubles to be castable to
+            // ints
+            (self.as_f64() as i64).into()
+        }
+    }
 }
 
 impl<'c> From<Const<'c>> for Value {
