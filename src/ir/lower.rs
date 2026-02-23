@@ -52,6 +52,7 @@ impl<'lower> Lower<'lower> {
         let id = Id(self.func.blocks.len() as u32);
         self.func.blocks.push(Block {
             id,
+            tombstone: false,
             instructions: vec![],
             params: vec![],
             term: None,
@@ -246,7 +247,7 @@ impl<'lower> Lower<'lower> {
 
                 let dst = self.id_store.new_value();
                 self.emit(Instr::Call {
-                    dst: dst,
+                    dst,
                     func: target_id,
                     args: a,
                 });
@@ -272,7 +273,7 @@ impl<'lower> Lower<'lower> {
                 if cases.is_empty() {
                     let mut last = None;
                     for node in default.1.iter() {
-                        last = self.lower_node(&node)?;
+                        last = self.lower_node(node)?;
                     }
                     return Ok(last);
                 }
@@ -338,7 +339,7 @@ impl<'lower> Lower<'lower> {
                 self.switch_to_block(default_block);
                 let mut last = None;
                 for node in body.iter() {
-                    last = self.lower_node(&node)?;
+                    last = self.lower_node(node)?;
                 }
                 self.block_mut(default_block).term = Some(Terminator::Jump {
                     id: join,

@@ -49,9 +49,15 @@ impl Display for Func<'_> {
                 )?;
             }
 
+            if block.tombstone {
+                writeln!(f, "<tombstone>")?;
+                continue;
+            }
+
             for ins in &block.instructions {
                 write!(f, "\t")?;
                 match ins {
+                    Instr::Noop => writeln!(f, "nop")?,
                     Instr::Add { dst, lhs, rhs } => {
                         writeln!(f, "%v{} = add %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
@@ -156,6 +162,7 @@ mod ir {
 
         let block0 = Block {
             id: b0,
+            tombstone: false,
             params: vec![v0.clone(), v1.clone(), v2.clone()],
             instructions: vec![
                 Instr::Add {

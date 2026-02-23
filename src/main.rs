@@ -173,7 +173,7 @@ fn main() {
     }
 
     let lower = ir::lower::Lower::new();
-    let ir = match lower.ir_from(&ast) {
+    let mut ir = match lower.ir_from(&ast) {
         Ok(ir) => ir,
         Err(e) => {
             let lines = str::from_utf8(&input)
@@ -186,6 +186,10 @@ fn main() {
     };
 
     trace!("Lowered AST to IR");
+
+    if args.opt >= 1 {
+        opt::ir(&mut ir);
+    }
 
     if args.ir {
         for func in ir.iter() {
@@ -207,7 +211,6 @@ fn main() {
 
     if args.opt >= 1 {
         opt::bc(&mut cc.buf);
-        cc.buf.retain(|c| *c != Op::Nop)
     }
 
     let mut function_table = if args.backtrace {
@@ -248,7 +251,7 @@ fn main() {
 
             println!("at:");
             for (idx, trace_id) in vm.backtrace.iter().enumerate() {
-                let Some(name) = function_table.get(&trace_id) else {
+                let Some(name) = function_table.get(trace_id) else {
                     panic!("Backtrace bug");
                 };
                 println!(" #{idx} {name}");

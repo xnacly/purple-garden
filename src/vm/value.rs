@@ -142,7 +142,7 @@ impl Value {
 impl<'c> From<Const<'c>> for Value {
     fn from(value: Const<'c>) -> Self {
         Self(match value {
-            Const::False => Self::BOOL | 0,
+            Const::False => Self::BOOL,
             Const::True => Self::BOOL | 1,
             Const::Int(i) => Self::INT | ((i as u64) & 0x0000_FFFF_FFFF_FFFF),
             Const::Double(bits) => bits,

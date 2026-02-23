@@ -57,17 +57,21 @@ pub enum Instr<'i> {
     LoadConst { dst: TypeId, value: Const<'i> },
     Call { dst: Id, func: Id, args: Vec<Id> },
     Cast { value: TypeId, from: Id },
+    Noop,
 }
 
 #[derive(Debug, Clone)]
 pub enum Terminator {
     Return(Option<Id>),
     Jump { id: Id, params: Vec<Id> },
+    // TODO: this needs params
     Branch { cond: Id, yes: Id, no: Id },
 }
 
 #[derive(Debug, Clone)]
 pub struct Block<'b> {
+    /// block is dead as a result of optimisation passes
+    pub tombstone: bool,
     pub id: Id,
     pub instructions: Vec<Instr<'b>>,
     pub params: Vec<TypeId>,

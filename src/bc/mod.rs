@@ -68,13 +68,17 @@ impl<'cc> Cc<'cc> {
 
         self.blocks = fun.blocks.iter().map(|b| (b.id, b)).collect();
         for block in &fun.blocks {
+            if block.tombstone {
+                continue;
+            }
+
             self.block_map.insert(block.id, self.buf.len() as u16);
 
             for instruction in &block.instructions {
-                self.from_instr(&instruction);
+                self.instr(instruction);
             }
 
-            self.from_term(block.term.as_ref())
+            self.term(block.term.as_ref())
         }
 
         crate::trace!(
@@ -86,7 +90,7 @@ impl<'cc> Cc<'cc> {
         Ok(None)
     }
 
-    fn from_term(&mut self, t: Option<&ir::Terminator>) {
+    fn term(&mut self, t: Option<&ir::Terminator>) {
         let Some(term) = t else {
             return;
         };
@@ -136,7 +140,7 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn from_instr(&mut self, i: &ir::Instr<'cc>) {
+    fn instr(&mut self, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::LoadConst { dst, value } => {
                 let TypeId {
@@ -151,7 +155,7 @@ impl<'cc> Cc<'cc> {
                         });
                     }
                     _ => {
-                        let idx = self.ctx.intern(value.clone());
+                        let idx = self.ctx.intern(*value);
                         self.emit(Op::LoadG {
                             dst: *dst as u8,
                             idx,
@@ -223,6 +227,7 @@ impl<'cc> Cc<'cc> {
 
                 self.emit(op);
             }
+            ir::Instr::Noop => {}
             _ => todo!("{:?}", i),
         }
     }
@@ -236,7 +241,9 @@ impl<'cc> Cc<'cc> {
             .map(|n| n.pc)
             .unwrap_or_default();
 
-        // second bytecode pass to resolve jumps from block Ids to bytecode positions
+        // second bytecode pass to resolve jumps from block Ids to bytecode positions, this enables
+        // us to do resizing optimisations beforehand, due to our offset based jumps holding their
+        // block ids before this pass
         for i in 0..self.buf.len() {
             let instr = self.buf[i];
             if let Some(new) = match instr {
@@ -261,8 +268,8 @@ impl<'cc> Cc<'cc> {
     pub fn function_table(&self) -> HashMap<usize, String> {
         self.ctx
             .functions
-            .iter()
-            .map(|(_, f)| (f.pc, f.name.to_string()))
+            .values()
+            .map(|f| (f.pc, f.name.to_string()))
             .collect()
     }
 }
