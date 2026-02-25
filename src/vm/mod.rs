@@ -83,7 +83,7 @@ impl<'vm> Vm<'vm> {
 
             let instruction = unsafe { *self.bytecode.as_mut_ptr().add(self.pc) };
 
-            crate::trace!("[vm][{:04}] {:?}", self.pc, instruction);
+            // crate::trace!("[vm][{:04}] {:?}", self.pc, instruction);
 
             match instruction {
                 Op::Nop => {}

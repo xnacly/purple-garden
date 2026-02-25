@@ -63,9 +63,15 @@ pub enum Instr<'i> {
 #[derive(Debug, Clone)]
 pub enum Terminator {
     Return(Option<Id>),
-    Jump { id: Id, params: Vec<Id> },
-    // TODO: this needs params
-    Branch { cond: Id, yes: Id, no: Id },
+    Jump {
+        id: Id,
+        params: Vec<Id>,
+    },
+    Branch {
+        cond: Id,
+        yes: (Id, Vec<Id>),
+        no: (Id, Vec<Id>),
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -74,7 +80,7 @@ pub struct Block<'b> {
     pub tombstone: bool,
     pub id: Id,
     pub instructions: Vec<Instr<'b>>,
-    pub params: Vec<TypeId>,
+    pub params: Vec<Id>,
     /// each block has a term, but a block starts without one in the lowering process, thus this
     /// field has to be optional
     pub term: Option<Terminator>,

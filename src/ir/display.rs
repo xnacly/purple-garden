@@ -1,10 +1,16 @@
 use std::fmt::Display;
 
-use crate::ir::{Const, Func, Instr, Terminator, TypeId};
+use crate::ir::{Const, Func, Id, Instr, Terminator, TypeId};
 
 impl Display for TypeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{:?}", self.id.0, self.ty)
+    }
+}
+
+impl Display for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -116,9 +122,22 @@ impl Display for Func<'_> {
                             )?
                         }
                     }
-                    Terminator::Branch { cond, yes, no } => {
-                        writeln!(f, "br %v{}, b{}, b{}", cond.0, yes.0, no.0)?
-                    }
+                    Terminator::Branch { cond, yes, no } => writeln!(
+                        f,
+                        "br %v{}, b{}({}), b{}({})",
+                        cond.0,
+                        yes.0,
+                        yes.1
+                            .iter()
+                            .map(|p| format!("%v{}", p.0))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        no.0,
+                        no.1.iter()
+                            .map(|p| format!("%v{}", p.0))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    )?,
                 }
             }
         }
@@ -159,7 +178,7 @@ mod ir {
         let block0 = Block {
             id: b0,
             tombstone: false,
-            params: vec![v0.clone(), v1.clone(), v2.clone()],
+            params: vec![v0.id, v1.id, v2.id],
             instructions: vec![
                 Instr::Add {
                     dst: v3.clone(),

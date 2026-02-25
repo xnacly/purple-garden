@@ -3,8 +3,9 @@ use std::{collections::HashMap, num};
 use crate::{
     ast::{Node, TypeExpr},
     err::PgError,
-    ir::*,
+    ir::{self, *},
     lex::{Token, Type},
+    vm::op::Op,
 };
 
 #[derive(Default)]
@@ -46,6 +47,11 @@ impl<'lower> Lower<'lower> {
             .unwrap()
             .instructions
             .push(i);
+    }
+
+    fn cur(&self) -> &Block<'lower> {
+        let ir::Id(idx) = self.block;
+        self.func.blocks.get(idx as usize).unwrap()
     }
 
     fn new_block(&mut self) -> Id {
@@ -189,7 +195,6 @@ impl<'lower> Lower<'lower> {
 
                 self.func = func;
                 let entry = self.new_block();
-                self.switch_to_block(entry);
                 self.block_mut(entry).params = args
                     .iter()
                     .map(|(token, token_type)| {
@@ -198,24 +203,21 @@ impl<'lower> Lower<'lower> {
                             unreachable!();
                         };
                         self.env.insert(ident, id);
-                        TypeId {
-                            id,
-                            ty: token_type.into(),
-                        }
+                        id
                     })
                     .collect();
 
-                let mut last_id = None;
+                let mut last = None;
                 for node in body {
-                    last_id = self.lower_node(node)?;
                     self.switch_to_block(entry);
+                    last = self.lower_node(node)?;
                 }
 
-                self.func.blocks.last_mut().unwrap().term = if last_id.is_some() {
-                    Some(Terminator::Return(last_id))
+                if self.func.ret.is_some() {
+                    self.block_mut(self.block).term = Some(Terminator::Return(last));
                 } else {
-                    Some(Terminator::Return(None))
-                };
+                    self.block_mut(self.block).term = Some(Terminator::Return(None));
+                }
 
                 self.functions.push(std::mem::take(&mut self.func));
                 self.env = old_env;
@@ -269,15 +271,6 @@ impl<'lower> Lower<'lower> {
                 Some(dst)
             }
             Node::Match { cases, default, id } => {
-                // short circuit for matches with just a default case by simply compling it
-                if cases.is_empty() {
-                    let mut last = None;
-                    for node in default.1.iter() {
-                        last = self.lower_node(node)?;
-                    }
-                    return Ok(last);
-                }
-
                 let mut check_blocks = Vec::with_capacity(cases.len());
                 let mut body_blocks = Vec::with_capacity(cases.len());
 
@@ -287,20 +280,23 @@ impl<'lower> Lower<'lower> {
                     body_blocks.push(self.new_block());
                 }
 
+                let params = self.cur().params.clone();
+
+                // INFO:
+                // this is only for correctness to jump into the match statements first check, we
+                // will just leave the block empty and add no terminator, meaning it will be
+                // skipped fully
+                //
+                // self.block_mut(self.block).term = Some(Terminator::Jump {
+                //     id: *check_blocks.first().unwrap(),
+                //     params: params.clone(),
+                // });
+
                 // the default block
                 let default_block = self.new_block();
 
                 // the single join block, merging all value results into a single branch
                 let join = self.new_block();
-
-                self.block_mut(join).params = vec![TypeId {
-                    // since we know our match only allows for a singluar return value, this is
-                    // safe
-                    id: self.id_store.new_value(),
-                    // we get the return type resolved by the type checker beforehand, so this is
-                    // safe
-                    ty: self.types.get(id).unwrap().clone(),
-                }];
 
                 for (i, ((_, condition), body)) in cases.iter().enumerate() {
                     self.switch_to_block(check_blocks[i]);
@@ -316,18 +312,22 @@ impl<'lower> Lower<'lower> {
                         default_block
                     };
 
-                    self.block_mut(check_blocks[i]).term = Some(Terminator::Branch {
+                    let check_block_mut = self.block_mut(check_blocks[i]);
+                    check_block_mut.term = Some(Terminator::Branch {
                         cond,
-                        yes: body_blocks[i],
-                        no: no_target,
+                        yes: (body_blocks[i], params.clone()),
+                        no: (no_target, params.clone()),
                     });
+                    check_block_mut.params = params.clone();
 
                     self.switch_to_block(body_blocks[i]);
+                    self.block_mut(body_blocks[i]).params = params.clone();
                     let mut last = None;
                     for node in body {
                         last = self.lower_node(node)?;
                     }
                     let value = last.expect("match body must produce value");
+
                     self.block_mut(body_blocks[i]).term = Some(Terminator::Jump {
                         id: join,
                         params: vec![value],
@@ -341,29 +341,17 @@ impl<'lower> Lower<'lower> {
                 for node in body.iter() {
                     last = self.lower_node(node)?;
                 }
-                self.block_mut(default_block).term = Some(Terminator::Jump {
+                let mut default_block = self.block_mut(default_block);
+                default_block.params = params;
+                let last = last.expect("match default must produce value");
+                default_block.term = Some(Terminator::Jump {
                     id: join,
-                    params: vec![last.expect("match default must produce value")],
+                    params: vec![last],
                 });
 
                 self.switch_to_block(join);
-                let Some(join_block_params) = self
-                    .func
-                    .blocks
-                    .iter_mut()
-                    .find(|b| b.id == join)
-                    .map(|b| &b.params)
-                else {
-                    unreachable!();
-                };
-
-                if join_block_params.len() != 1 {
-                    panic!(
-                        "The join block has a single param and should have a single return value"
-                    )
-                }
-
-                Some(join_block_params[0].id)
+                self.block_mut(join).params = vec![last];
+                Some(last)
             }
             _ => todo!("{:?}", node),
         })

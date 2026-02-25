@@ -113,7 +113,11 @@ impl<'cc> Cc<'cc> {
                 let target = *self.blocks.get(id).unwrap();
                 for (i, param) in params.iter().enumerate() {
                     let ir::Id(src) = param;
-                    let ir::Id(dst) = target.params[i].id;
+                    let ir::Id(dst) = target.params[i];
+
+                    if *src == dst {
+                        continue;
+                    }
 
                     self.emit(Op::Mov {
                         dst: dst as u8,
@@ -126,15 +130,49 @@ impl<'cc> Cc<'cc> {
             }
             ir::Terminator::Branch {
                 cond,
-                yes: ir::Id(yes),
-                no: ir::Id(no),
+                yes: (yes, yes_params),
+                no: (no, no_params),
+                ..
             } => {
+                let target = *self.blocks.get(yes).unwrap();
+                for (i, param) in yes_params.iter().enumerate() {
+                    let ir::Id(src) = param;
+                    let ir::Id(dst) = target.params[i];
+
+                    if *src == dst {
+                        continue;
+                    }
+
+                    self.emit(Op::Mov {
+                        dst: dst as u8,
+                        src: *src as u8,
+                    });
+                }
+
                 let ir::Id(cond) = cond;
                 self.emit(Op::JmpF {
                     cond: *cond as u8,
-                    target: *yes as u16,
+                    target: yes.0 as u16,
                 });
-                self.emit(Op::Jmp { target: *no as u16 });
+
+                let target = self.blocks[no];
+                for (i, param) in no_params.iter().enumerate() {
+                    let ir::Id(src) = param;
+                    let ir::Id(dst) = target.params[i];
+
+                    if *src == dst {
+                        continue;
+                    }
+
+                    self.emit(Op::Mov {
+                        dst: dst as u8,
+                        src: *src as u8,
+                    });
+                }
+
+                self.emit(Op::Jmp {
+                    target: no.0 as u16,
+                });
             }
             _ => todo!("{:?}", &t),
         }
