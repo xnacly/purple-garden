@@ -5,8 +5,8 @@ focus on aggressive compile-time optimisations, JIT compilation, fine-grained
 memory control, and optional garbage collection.
 
 ```python
-import "io"
-io::println("Hello World")
+import ("io")
+io.println("Hello World")
 ```
 
 ## Features / Design Goals

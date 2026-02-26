@@ -74,6 +74,13 @@ impl PgError {
             println!("{:03} | {line}", self.line + 1);
             println!("{}~ here", " ".repeat(self.start + 7))
         }
+
+        let next = self.line + 1;
+        if let Some(next_line) = lines.get(next)
+            && next != self.line
+        {
+            println!("{:03} | {next_line}", next + 1);
+        }
     }
 
     pub fn with_msg(title: &'static str, msg: impl Into<String>, from: impl Into<PgError>) -> Self {

@@ -361,10 +361,11 @@ impl<'lower> Lower<'lower> {
     pub fn ir_from(mut self, ast: &'lower [Node]) -> Result<Vec<Func<'lower>>, PgError> {
         let mut typechecker = typecheck::Typechecker::new();
         for node in ast {
-            typechecker.node(node)?;
+            let t = typechecker.node(node)?;
+            crate::trace!("{} resolved to {:?}", &node, t);
         }
-        self.types = typechecker.finalise();
         crate::trace!("Finished type checking");
+        self.types = typechecker.finalise();
 
         self.func = Func {
             id: Id(0),
