@@ -15,6 +15,7 @@ mod bc;
 pub fn ir(ir: &mut [crate::ir::Func]) {
     for fun in ir {
         ir::indirect_jump(fun);
+        ir::tailcall(fun);
     }
 }
 

@@ -54,11 +54,13 @@ pub fn indirect_jump(fun: &mut ir::Func) {
         };
 
         #[cfg(feature = "trace")]
-        if yes_edge.is_some() || no_edge.is_some() {
-            opt_trace!(
-                "ir::indirect_jump",
-                "replaced a noop block with a direct jump"
-            );
+        if yes_edge.is_some() {
+            opt_trace!("ir::indirect_jump", format!("b{yes} is now a tombstone"));
+        }
+
+        #[cfg(feature = "trace")]
+        if no_edge.is_some() {
+            opt_trace!("ir::indirect_jump", format!("b{no} is now a tombstone"));
         }
 
         fun.blocks[i].term = Some(ir::Terminator::Branch {
@@ -68,3 +70,5 @@ pub fn indirect_jump(fun: &mut ir::Func) {
         });
     }
 }
+
+pub fn tailcall(fun: &mut ir::Func) {}

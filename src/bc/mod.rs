@@ -286,7 +286,7 @@ impl<'cc> Cc<'cc> {
                 self.emit(op);
             }
             ir::Instr::Noop => {}
-            _ => todo!("{:?}", i),
+            ir::Instr::Tail { dst, func, args } => todo!(),
         };
     }
 

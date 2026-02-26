@@ -94,6 +94,18 @@ impl Display for Func<'_> {
                         }
                         writeln!(f, ")")?;
                     }
+                    Instr::Tail { dst, func, args } => {
+                        write!(f, "%v{} = ", dst.0)?;
+                        write!(f, "f_tail{}(", func.0)?;
+                        for (i, arg) in args.iter().enumerate() {
+                            if i + 1 == args.len() {
+                                write!(f, "%v{}", arg.0)?;
+                            } else {
+                                write!(f, "%v{}, ", arg.0)?;
+                            }
+                        }
+                        writeln!(f, ")")?;
+                    }
                     Instr::Cast { value, from } => {
                         let t = value;
                         writeln!(f, "%v{} = cast_to_{} %v{}", value, value.ty, from.0)?

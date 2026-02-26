@@ -56,6 +56,7 @@ pub enum Instr<'i> {
     Gt { dst: TypeId, lhs: Id, rhs: Id },
     LoadConst { dst: TypeId, value: Const<'i> },
     Call { dst: Id, func: Id, args: Vec<Id> },
+    Tail { dst: Id, func: Id, args: Vec<Id> },
     Cast { value: TypeId, from: Id },
     Noop,
 }
