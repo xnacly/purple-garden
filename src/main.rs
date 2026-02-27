@@ -259,7 +259,5 @@ fn main() {
         }
     }
 
-    dbg!(vm.r[0]);
-
     trace!("Executed bytecode");
 }
