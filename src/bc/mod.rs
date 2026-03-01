@@ -253,7 +253,8 @@ impl<'cc> Cc<'cc> {
             | ir::Instr::Gt { dst, rhs, lhs } => {
                 let (
                     TypeId {
-                        id: ir::Id(dst), ..
+                        id: ir::Id(dst),
+                        ty,
                     },
                     ir::Id(lhs),
                     ir::Id(rhs),
@@ -272,18 +273,39 @@ impl<'cc> Cc<'cc> {
                     };
                 }
 
-                let op = match i {
-                    ir::Instr::Add { .. } => emit_bin!(IAdd, dst, lhs, rhs),
-                    ir::Instr::Sub { .. } => emit_bin!(ISub, dst, lhs, rhs),
-                    ir::Instr::Mul { .. } => emit_bin!(IMul, dst, lhs, rhs),
-                    ir::Instr::Div { .. } => emit_bin!(IDiv, dst, lhs, rhs),
-                    ir::Instr::Eq { .. } => emit_bin!(Eq, dst, lhs, rhs),
-                    ir::Instr::Lt { .. } => emit_bin!(Lt, dst, lhs, rhs),
-                    ir::Instr::Gt { .. } => emit_bin!(Gt, dst, lhs, rhs),
-                    _ => unreachable!(),
-                };
-
-                self.emit(op);
+                // TODO: instruction should not be choosen based on output type, but rather on
+                // input type, since <B|I|D>Eq always results in boolean and thus the instruction
+                // should be set based on input types, which must always be the same
+                //
+                //
+                // let op = match ty {
+                //     ptype::Type::Bool => match i {
+                //         ir::Instr::Eq { .. } => emit_bin!(BEq, dst, lhs, rhs),
+                //         _ => unreachable!(),
+                //     },
+                //     ptype::Type::Int => match i {
+                //         ir::Instr::Add { .. } => emit_bin!(IAdd, dst, lhs, rhs),
+                //         ir::Instr::Sub { .. } => emit_bin!(ISub, dst, lhs, rhs),
+                //         ir::Instr::Mul { .. } => emit_bin!(IMul, dst, lhs, rhs),
+                //         ir::Instr::Div { .. } => emit_bin!(IDiv, dst, lhs, rhs),
+                //         ir::Instr::Eq { .. } => emit_bin!(IEq, dst, lhs, rhs),
+                //         ir::Instr::Lt { .. } => emit_bin!(ILt, dst, lhs, rhs),
+                //         ir::Instr::Gt { .. } => emit_bin!(IGt, dst, lhs, rhs),
+                //         _ => unreachable!(),
+                //     },
+                //     ptype::Type::Double => match i {
+                //         ir::Instr::Add { .. } => emit_bin!(DAdd, dst, lhs, rhs),
+                //         ir::Instr::Sub { .. } => emit_bin!(DSub, dst, lhs, rhs),
+                //         ir::Instr::Mul { .. } => emit_bin!(DMul, dst, lhs, rhs),
+                //         ir::Instr::Div { .. } => emit_bin!(DDiv, dst, lhs, rhs),
+                //         ir::Instr::Lt { .. } => emit_bin!(DLt, dst, lhs, rhs),
+                //         ir::Instr::Gt { .. } => emit_bin!(DGt, dst, lhs, rhs),
+                //         _ => unreachable!(),
+                //     },
+                //     _ => unreachable!(),
+                // };
+                // self.emit(op);
+                todo!();
             }
             ir::Instr::Noop => {}
             ir::Instr::Tail { dst, func, args } => todo!(),

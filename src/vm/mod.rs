@@ -83,7 +83,7 @@ impl<'vm> Vm<'vm> {
 
             let instruction = unsafe { *self.bytecode.as_mut_ptr().add(self.pc) };
 
-            // crate::trace!("[vm][{:04}] {:?}", self.pc, instruction);
+            crate::trace!("[vm][{:04}] {:?}", self.pc, instruction);
 
             match instruction {
                 Op::Nop => {}
@@ -114,20 +114,56 @@ impl<'vm> Vm<'vm> {
                     trap_if!(r == 0, Anomaly::DivisionByZero { pc: self.pc });
                     *regs.add(dst as usize) = (l / r).into();
                 },
-                Op::Eq { dst, lhs, rhs } => unsafe {
-                    let l = &(*regs.add(lhs as usize));
-                    let r = &(*regs.add(rhs as usize));
-                    *regs.add(dst as usize) = l.compare(r).into()
+                Op::IEq { dst, lhs, rhs } => unsafe {
+                    let l = &(*regs.add(lhs as usize)).as_int();
+                    let r = &(*regs.add(rhs as usize)).as_int();
+                    *regs.add(dst as usize) = Value::from(l == r)
                 },
-                Op::Gt { dst, lhs, rhs } => unsafe {
+                Op::IGt { dst, lhs, rhs } => unsafe {
                     let l = &(*regs.add(lhs as usize)).as_int();
                     let r = &(*regs.add(rhs as usize)).as_int();
                     *regs.add(dst as usize) = (l > r).into()
                 },
-                Op::Lt { dst, lhs, rhs } => unsafe {
+                Op::ILt { dst, lhs, rhs } => unsafe {
                     let l = &(*regs.add(lhs as usize)).as_int();
                     let r = &(*regs.add(rhs as usize)).as_int();
                     *regs.add(dst as usize) = (l < r).into()
+                },
+                Op::DAdd { dst, lhs, rhs } => unsafe {
+                    let l = (*regs.add(lhs as usize)).as_f64();
+                    let r = (*regs.add(rhs as usize)).as_f64();
+                    *regs.add(dst as usize) = (l + r).into();
+                },
+                Op::DSub { dst, lhs, rhs } => unsafe {
+                    let l = (*regs.add(lhs as usize)).as_f64();
+                    let r = (*regs.add(rhs as usize)).as_f64();
+                    *regs.add(dst as usize) = (l - r).into();
+                },
+                Op::DMul { dst, lhs, rhs } => unsafe {
+                    let l = (*regs.add(lhs as usize)).as_f64();
+                    let r = (*regs.add(rhs as usize)).as_f64();
+                    *regs.add(dst as usize) = (l * r).into();
+                },
+                Op::DDiv { dst, lhs, rhs } => unsafe {
+                    let l = (*regs.add(lhs as usize)).as_f64();
+                    let r = (*regs.add(rhs as usize)).as_f64();
+                    trap_if!(r == 0 as f64, Anomaly::DivisionByZero { pc: self.pc });
+                    *regs.add(dst as usize) = (l / r).into();
+                },
+                Op::DGt { dst, lhs, rhs } => unsafe {
+                    let l = &(*regs.add(lhs as usize)).as_f64();
+                    let r = &(*regs.add(rhs as usize)).as_f64();
+                    *regs.add(dst as usize) = (l > r).into()
+                },
+                Op::DLt { dst, lhs, rhs } => unsafe {
+                    let l = &(*regs.add(lhs as usize)).as_f64();
+                    let r = &(*regs.add(rhs as usize)).as_f64();
+                    *regs.add(dst as usize) = (l < r).into()
+                },
+                Op::BEq { dst, lhs, rhs } => unsafe {
+                    let l = &(*regs.add(lhs as usize)).as_bool();
+                    let r = &(*regs.add(rhs as usize)).as_bool();
+                    *regs.add(dst as usize) = Value::from(l == r)
                 },
                 Op::Mov { dst, src } => unsafe {
                     *regs.add(dst as usize) = (*regs.add(src as usize));

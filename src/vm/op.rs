@@ -1,13 +1,20 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
-    // TODO: rename all to I* for integers, introduce secondary operator for D* (double)
     IAdd { dst: u8, lhs: u8, rhs: u8 },
     ISub { dst: u8, lhs: u8, rhs: u8 },
     IMul { dst: u8, lhs: u8, rhs: u8 },
     IDiv { dst: u8, lhs: u8, rhs: u8 },
-    Eq { dst: u8, lhs: u8, rhs: u8 },
-    Lt { dst: u8, lhs: u8, rhs: u8 },
-    Gt { dst: u8, lhs: u8, rhs: u8 },
+    DAdd { dst: u8, lhs: u8, rhs: u8 },
+    DSub { dst: u8, lhs: u8, rhs: u8 },
+    DMul { dst: u8, lhs: u8, rhs: u8 },
+    DDiv { dst: u8, lhs: u8, rhs: u8 },
+    ILt { dst: u8, lhs: u8, rhs: u8 },
+    IGt { dst: u8, lhs: u8, rhs: u8 },
+    DLt { dst: u8, lhs: u8, rhs: u8 },
+    DGt { dst: u8, lhs: u8, rhs: u8 },
+
+    IEq { dst: u8, lhs: u8, rhs: u8 },
+    BEq { dst: u8, lhs: u8, rhs: u8 },
     Mov { dst: u8, src: u8 },
 
     LoadI { dst: u8, value: i32 },
