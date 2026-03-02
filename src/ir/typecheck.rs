@@ -7,7 +7,7 @@ use crate::{
     lex::{self, Token},
 };
 
-fn id_from_node(node: &Node) -> Option<usize> {
+pub fn id_from_node(node: &Node) -> Option<usize> {
     Some(match node {
         Node::Atom { id, .. }
         | Node::Ident { id, .. }
@@ -59,26 +59,59 @@ impl<'t> Typechecker<'t> {
                     (_, _) => {
                         return Err(PgError::with_msg(
                             "Type error",
-                            format!("Incompatible types {} and {} for {:?}", lhs, rhs, op.t),
+                            format!(
+                                "Incompatible types {} and {} for {:?}",
+                                lhs,
+                                rhs,
+                                op.t.as_str()
+                            ),
                             op,
                         ));
                     }
                 }
             }
-            // boolish operations
+            // comparing ints
             lex::Type::LessThan
             | lex::Type::GreaterThan
             | lex::Type::DoubleEqual
             | lex::Type::NotEqual => {
-                if lhs != rhs {
-                    return Err(PgError::with_msg(
-                        "Type error",
-                        format!("Incompatible types {} and {} for {:?}", lhs, rhs, op.t),
-                        op,
-                    ));
-                }
+                match (lhs, rhs) {
+                    (Type::Int, Type::Int) => {}
+                    (_, _) => {
+                        return Err(PgError::with_msg(
+                            "Type error",
+                            format!(
+                                "Incompatible types {} and {} for {:?}, wanted Int for both",
+                                lhs,
+                                rhs,
+                                op.t.as_str()
+                            ),
+                            op,
+                        ));
+                    }
+                };
                 Type::Bool
             }
+            // comparing doubles
+            lex::Type::LessThan | lex::Type::GreaterThan => {
+                match (lhs, rhs) {
+                    (Type::Double, Type::Double) => {}
+                    (_, _) => {
+                        return Err(PgError::with_msg(
+                            "Type error",
+                            format!(
+                                "Incompatible types {} and {} for {:?}, wanted Double for both",
+                                lhs,
+                                rhs,
+                                op.t.as_str()
+                            ),
+                            op,
+                        ));
+                    }
+                };
+                Type::Bool
+            }
+
             // lex::Type::Exclaim => todo!(),
             // lex::Type::Question => todo!(),
             _ => unreachable!(),
@@ -216,7 +249,11 @@ impl<'t> Typechecker<'t> {
                 self.env = prev_env;
                 ret
             }
-            Node::Cast { id, lhs, rhs, src } => Self::cast(src, &self.node(lhs)?, &rhs.into())?,
+            Node::Cast { id, lhs, rhs, src } => {
+                let cast = Self::cast(src, &self.node(lhs)?, &rhs.into())?;
+                self.map.insert(*id, cast.clone());
+                cast
+            }
             Node::Call { id, name, args } => {
                 let lex::Token {
                     t: lex::Type::Ident(inner_name),
