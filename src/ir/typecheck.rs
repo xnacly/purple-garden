@@ -56,6 +56,17 @@ impl<'t> Typechecker<'t> {
                 match (lhs, rhs) {
                     (Type::Int, Type::Int) => Type::Int,
                     (Type::Double, Type::Double) => Type::Double,
+                    (_, _) if lhs == rhs => {
+                        return Err(PgError::with_msg(
+                            "Type error",
+                            format!(
+                                "Unsupported type {} for {:?}, want Int or Double",
+                                lhs,
+                                op.t.as_str()
+                            ),
+                            op,
+                        ));
+                    }
                     (_, _) => {
                         return Err(PgError::with_msg(
                             "Type error",
@@ -71,17 +82,25 @@ impl<'t> Typechecker<'t> {
                 }
             }
             // comparing ints
-            lex::Type::LessThan
-            | lex::Type::GreaterThan
-            | lex::Type::DoubleEqual
-            | lex::Type::NotEqual => {
+            lex::Type::DoubleEqual | lex::Type::NotEqual => {
                 match (lhs, rhs) {
                     (Type::Int, Type::Int) => {}
+                    (_, _) if lhs == rhs => {
+                        return Err(PgError::with_msg(
+                            "Type error",
+                            format!(
+                                "Unsupported type {} for {:?}, want Int or Double",
+                                lhs,
+                                op.t.as_str()
+                            ),
+                            op,
+                        ));
+                    }
                     (_, _) => {
                         return Err(PgError::with_msg(
                             "Type error",
                             format!(
-                                "Incompatible types {} and {} for {:?}, wanted Int for both",
+                                "Incompatible types {} and {} for {:?}, want Int",
                                 lhs,
                                 rhs,
                                 op.t.as_str()
@@ -96,11 +115,23 @@ impl<'t> Typechecker<'t> {
             lex::Type::LessThan | lex::Type::GreaterThan => {
                 match (lhs, rhs) {
                     (Type::Double, Type::Double) => {}
+                    (Type::Int, Type::Int) => {}
+                    (_, _) if lhs == rhs => {
+                        return Err(PgError::with_msg(
+                            "Type error",
+                            format!(
+                                "Unsupported type {} for {:?}, want Int or Double for both sides",
+                                lhs,
+                                op.t.as_str()
+                            ),
+                            op,
+                        ));
+                    }
                     (_, _) => {
                         return Err(PgError::with_msg(
                             "Type error",
                             format!(
-                                "Incompatible types {} and {} for {:?}, wanted Double for both",
+                                "Incompatible types {} and {} for {:?}",
                                 lhs,
                                 rhs,
                                 op.t.as_str()
