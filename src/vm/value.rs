@@ -3,29 +3,10 @@ use std::{
     hint::unreachable_unchecked,
 };
 
-use crate::ir::{Const, ptype};
-
-/// Immutable string representation used in the purple garden NaN boxing value representation
-#[repr(C)]
-pub struct Str {
-    pub ptr: *const u8,
-    pub len: usize,
-}
-
-impl Str {
-    #[inline(always)]
-    pub fn as_str<'t>(&self) -> &'t str {
-        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.ptr, self.len)) }
-    }
-
-    #[inline(always)]
-    pub fn from_str(s: &str) -> Self {
-        Str {
-            ptr: s.as_ptr(),
-            len: s.len(),
-        }
-    }
-}
+use crate::{
+    ir::{Const, ptype},
+    vm,
+};
 
 #[derive(PartialEq, Clone, Default, Copy, Debug)]
 #[repr(transparent)]
@@ -49,9 +30,8 @@ impl Value {
     }
 
     #[inline(always)]
-    pub fn as_str<'t>(&self) -> &'t str {
-        let wrapper = self.as_ptr::<Str>();
-        unsafe { (*wrapper).as_str() }
+    pub fn as_str<'t>(&self, pool: &'t [&'t str]) -> &'t str {
+        pool[self.0 as usize]
     }
 
     #[inline(always)]
@@ -79,13 +59,13 @@ impl Value {
         Value::from(self.as_f64() as i64)
     }
 
-    pub fn dbg(&self, in_form_of: ptype::Type) -> String {
+    pub fn dbg(&self, vm: &vm::Vm, in_form_of: ptype::Type) -> String {
         match in_form_of {
             ptype::Type::Void => String::new(),
             ptype::Type::Bool => format!("{}", self.as_bool()),
             ptype::Type::Int => format!("{}", self.as_int()),
             ptype::Type::Double => format!("{}", self.as_f64()),
-            ptype::Type::Str => format!("{:?}", self.as_str()),
+            ptype::Type::Str => format!("{:?}", self.as_str(&vm.strings)),
             _ => todo!(),
         }
     }
@@ -98,10 +78,8 @@ impl<'c> From<Const<'c>> for Value {
             Const::True => 1u64,
             Const::Int(i) => i as u64,
             Const::Double(bits) => bits,
-            Const::Str(str) => {
-                let as_pg_str = &Str::from_str(str);
-                return Value::from_ptr(as_pg_str as *const _ as *mut u8);
-            }
+            // my favorite placeholder
+            _ => return Value(0xDEADAFFE),
         })
     }
 }
@@ -121,12 +99,5 @@ impl From<i64> for Value {
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Self(value.to_bits())
-    }
-}
-
-impl<'s> From<&'s str> for Value {
-    fn from(value: &'s str) -> Self {
-        let as_pg_str = &Str::from_str(value);
-        Value::from_ptr(as_pg_str as *const _ as *mut u8)
     }
 }

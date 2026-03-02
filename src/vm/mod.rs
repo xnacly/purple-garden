@@ -29,6 +29,7 @@ pub struct Vm<'vm> {
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
+    pub strings: Vec<&'vm str>,
 
     /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
     /// function the virtual machine currently executes in, this behaviour only occurs if
@@ -68,6 +69,7 @@ impl<'vm> Vm<'vm> {
             pc: 0,
             bytecode: Vec::new(),
             globals: Vec::new(),
+            strings: Vec::new(),
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(REGISTER_COUNT),
             config,
@@ -76,16 +78,17 @@ impl<'vm> Vm<'vm> {
 
     pub fn run(&mut self) -> Result<(), Anomaly> {
         let regs = unsafe { self.r.as_mut_ptr() };
+        let instructions = unsafe { self.bytecode.as_mut_ptr() };
+        let instructions_len = self.bytecode.len();
+
         loop {
-            if self.pc >= self.bytecode.len() {
+            if self.pc >= instructions_len {
                 break;
             }
 
-            let instruction = unsafe { *self.bytecode.as_mut_ptr().add(self.pc) };
+            crate::trace!("[vm][{:04}] {:?}", self.pc, self.bytecode[self.pc]);
 
-            crate::trace!("[vm][{:04}] {:?}", self.pc, instruction);
-
-            match instruction {
+            match unsafe { *instructions.add(self.pc) } {
                 Op::Nop => {}
                 Op::LoadI { dst, value } => unsafe {
                     *regs.add(dst as usize) = (value as i64).into();
@@ -211,8 +214,8 @@ impl<'vm> Vm<'vm> {
                 Op::CastToBool { dst, src } => unsafe {
                     *regs.add(dst as usize) = (*regs.add(src as usize)).int_to_bool();
                 },
-                _ => {
-                    dbg!(instruction);
+                i => {
+                    dbg!(i);
                     return Err(Anomaly::Unimplemented { pc: self.pc });
                 }
             }

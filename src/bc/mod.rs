@@ -26,12 +26,7 @@ impl<'cc> Cc<'cc> {
     pub fn new() -> Self {
         Self {
             buf: Vec::with_capacity(256),
-            ctx: {
-                let mut ctx = Context::default();
-                ctx.intern(Const::False);
-                ctx.intern(Const::True);
-                ctx
-            },
+            ctx: Context::default(),
             block_map: HashMap::new(),
             blocks: HashMap::new(),
         }
@@ -371,6 +366,7 @@ impl<'cc> Cc<'cc> {
 
         v.bytecode = self.buf;
         v.globals = self.ctx.globals_vec.into_iter().map(Value::from).collect();
+        v.strings = self.ctx.strings_vec;
         v
     }
 
