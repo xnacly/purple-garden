@@ -120,6 +120,13 @@ impl<'lower> Lower<'lower> {
                 }
             }
             Node::Bin { op, lhs, rhs, id } => {
+                // I dont know if i like this behaviour, but it works and its good enough :)
+
+                // we need to attach the input type to the instruction (i), thus we take the lhs
+                // and query for its id and thus its type the typechecker computed in its pass
+                let node_id = typecheck::id_from_node(lhs).unwrap();
+                let node_type = self.types.get(&node_id).unwrap().clone();
+
                 let Some(lhs) = self.lower_node(lhs)? else {
                     unreachable!()
                 };
@@ -133,14 +140,50 @@ impl<'lower> Lower<'lower> {
                     ty: self.types.get(id).unwrap().clone(),
                 };
 
+                let i = node_type;
                 self.emit(match op.t {
-                    Type::Plus => Instr::Add { dst, lhs, rhs },
-                    Type::Minus => Instr::Sub { dst, lhs, rhs },
-                    Type::Asteriks => Instr::Mul { dst, lhs, rhs },
-                    Type::Slash => Instr::Div { dst, lhs, rhs },
-                    Type::DoubleEqual => Instr::Eq { dst, lhs, rhs },
-                    Type::LessThan => Instr::Lt { dst, lhs, rhs },
-                    Type::GreaterThan => Instr::Gt { dst, lhs, rhs },
+                    Type::Plus => Instr::Add {
+                        input_type: i,
+                        dst,
+                        lhs,
+                        rhs,
+                    },
+                    Type::Minus => Instr::Sub {
+                        input_type: i,
+                        dst,
+                        lhs,
+                        rhs,
+                    },
+                    Type::Asteriks => Instr::Mul {
+                        input_type: i,
+                        dst,
+                        lhs,
+                        rhs,
+                    },
+                    Type::Slash => Instr::Div {
+                        input_type: i,
+                        dst,
+                        lhs,
+                        rhs,
+                    },
+                    Type::DoubleEqual => Instr::Eq {
+                        input_type: i,
+                        dst,
+                        lhs,
+                        rhs,
+                    },
+                    Type::LessThan => Instr::Lt {
+                        input_type: i,
+                        dst,
+                        lhs,
+                        rhs,
+                    },
+                    Type::GreaterThan => Instr::Gt {
+                        input_type: i,
+                        dst,
+                        lhs,
+                        rhs,
+                    },
                     _ => unreachable!(),
                 });
 

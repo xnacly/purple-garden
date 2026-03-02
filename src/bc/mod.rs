@@ -244,17 +244,51 @@ impl<'cc> Cc<'cc> {
                     src: 0,
                 });
             }
-            ir::Instr::Add { dst, rhs, lhs }
-            | ir::Instr::Sub { dst, rhs, lhs }
-            | ir::Instr::Mul { dst, rhs, lhs }
-            | ir::Instr::Div { dst, rhs, lhs }
-            | ir::Instr::Eq { dst, rhs, lhs }
-            | ir::Instr::Lt { dst, rhs, lhs }
-            | ir::Instr::Gt { dst, rhs, lhs } => {
+            ir::Instr::Add {
+                input_type,
+                dst,
+                rhs,
+                lhs,
+            }
+            | ir::Instr::Sub {
+                input_type,
+                dst,
+                rhs,
+                lhs,
+            }
+            | ir::Instr::Mul {
+                input_type,
+                dst,
+                rhs,
+                lhs,
+            }
+            | ir::Instr::Div {
+                input_type,
+                dst,
+                rhs,
+                lhs,
+            }
+            | ir::Instr::Eq {
+                input_type,
+                dst,
+                rhs,
+                lhs,
+            }
+            | ir::Instr::Lt {
+                input_type,
+                dst,
+                rhs,
+                lhs,
+            }
+            | ir::Instr::Gt {
+                input_type,
+                dst,
+                rhs,
+                lhs,
+            } => {
                 let (
                     TypeId {
-                        id: ir::Id(dst),
-                        ty,
+                        id: ir::Id(dst), ..
                     },
                     ir::Id(lhs),
                     ir::Id(rhs),
@@ -264,48 +298,43 @@ impl<'cc> Cc<'cc> {
                 // even is this cluster fuck? I prob couldve done this better but i cant think of a
                 // way :/
                 macro_rules! emit_bin {
-                    ($name:ident, $dst:expr, $lhs:expr, $rhs:expr) => {
+                    ($name:ident) => {
                         Op::$name {
-                            dst: (*$dst) as u8,
-                            lhs: (*$lhs) as u8,
-                            rhs: (*$rhs) as u8,
+                            dst: (*dst) as u8,
+                            lhs: (*lhs) as u8,
+                            rhs: (*rhs) as u8,
                         }
                     };
                 }
 
-                // TODO: instruction should not be choosen based on output type, but rather on
-                // input type, since <B|I|D>Eq always results in boolean and thus the instruction
-                // should be set based on input types, which must always be the same
-                //
-                //
-                // let op = match ty {
-                //     ptype::Type::Bool => match i {
-                //         ir::Instr::Eq { .. } => emit_bin!(BEq, dst, lhs, rhs),
-                //         _ => unreachable!(),
-                //     },
-                //     ptype::Type::Int => match i {
-                //         ir::Instr::Add { .. } => emit_bin!(IAdd, dst, lhs, rhs),
-                //         ir::Instr::Sub { .. } => emit_bin!(ISub, dst, lhs, rhs),
-                //         ir::Instr::Mul { .. } => emit_bin!(IMul, dst, lhs, rhs),
-                //         ir::Instr::Div { .. } => emit_bin!(IDiv, dst, lhs, rhs),
-                //         ir::Instr::Eq { .. } => emit_bin!(IEq, dst, lhs, rhs),
-                //         ir::Instr::Lt { .. } => emit_bin!(ILt, dst, lhs, rhs),
-                //         ir::Instr::Gt { .. } => emit_bin!(IGt, dst, lhs, rhs),
-                //         _ => unreachable!(),
-                //     },
-                //     ptype::Type::Double => match i {
-                //         ir::Instr::Add { .. } => emit_bin!(DAdd, dst, lhs, rhs),
-                //         ir::Instr::Sub { .. } => emit_bin!(DSub, dst, lhs, rhs),
-                //         ir::Instr::Mul { .. } => emit_bin!(DMul, dst, lhs, rhs),
-                //         ir::Instr::Div { .. } => emit_bin!(DDiv, dst, lhs, rhs),
-                //         ir::Instr::Lt { .. } => emit_bin!(DLt, dst, lhs, rhs),
-                //         ir::Instr::Gt { .. } => emit_bin!(DGt, dst, lhs, rhs),
-                //         _ => unreachable!(),
-                //     },
-                //     _ => unreachable!(),
-                // };
-                // self.emit(op);
-                todo!();
+                let op = match input_type {
+                    ptype::Type::Bool => match i {
+                        ir::Instr::Eq { .. } => emit_bin!(BEq),
+                        _ => unreachable!(),
+                    },
+                    ptype::Type::Int => match i {
+                        ir::Instr::Add { .. } => emit_bin!(IAdd),
+                        ir::Instr::Sub { .. } => emit_bin!(ISub),
+                        ir::Instr::Mul { .. } => emit_bin!(IMul),
+                        ir::Instr::Div { .. } => emit_bin!(IDiv),
+                        ir::Instr::Lt { .. } => emit_bin!(ILt),
+                        ir::Instr::Gt { .. } => emit_bin!(IGt),
+                        ir::Instr::Eq { .. } => emit_bin!(IEq),
+                        _ => unreachable!(),
+                    },
+                    ptype::Type::Double => match i {
+                        ir::Instr::Add { .. } => emit_bin!(DAdd),
+                        ir::Instr::Sub { .. } => emit_bin!(DSub),
+                        ir::Instr::Mul { .. } => emit_bin!(DMul),
+                        ir::Instr::Div { .. } => emit_bin!(DDiv),
+                        ir::Instr::Lt { .. } => emit_bin!(DLt),
+                        ir::Instr::Gt { .. } => emit_bin!(DGt),
+                        _ => unreachable!(),
+                    },
+                    _ => unreachable!(),
+                };
+
+                self.emit(op);
             }
             ir::Instr::Noop => {}
             ir::Instr::Tail { dst, func, args } => todo!(),

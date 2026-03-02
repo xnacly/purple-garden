@@ -38,7 +38,12 @@ impl<'p> Parser<'p> {
         } else {
             return Err(PgError::with_msg(
                 "Unexpected Token",
-                format!("Expected `{:?}`, got {:?}", ty, self.cur.t),
+                format!(
+                    "Expected `{:?}`, got {}({:?})",
+                    ty,
+                    self.cur.t.as_str(),
+                    self.cur.t
+                ),
                 &self.cur,
             ));
         }

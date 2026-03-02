@@ -125,7 +125,7 @@ pub enum TypeExpr<'te> {
 impl Display for TypeExpr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TypeExpr::Atom(token) => write!(f, "{:?}", token.t),
+            TypeExpr::Atom(token) => write!(f, "{}", token.t.as_str()),
             TypeExpr::Option(type_expr) => write!(f, "?{}", type_expr),
             TypeExpr::Array(type_expr) => write!(f, "[{}]", type_expr),
             TypeExpr::Map { key, value } => write!(f, "{}[{}]", key, value),
@@ -138,7 +138,7 @@ impl<'a> Node<'a> {
         let pad = "  ".repeat(indent);
 
         match &self {
-            Node::Atom { raw, id } => writeln!(f, "{}{:?}", pad, raw.t),
+            Node::Atom { raw, id } => writeln!(f, "{}{}", pad, raw.t.as_str()),
             Node::Ident { name, id } => {
                 if let Type::Ident(name) = name.t {
                     writeln!(f, "{}{}", pad, name)
@@ -147,13 +147,13 @@ impl<'a> Node<'a> {
                 }
             }
             Node::Bin { op, lhs, rhs, id } => {
-                writeln!(f, "{}({:?}", pad, op.t)?;
+                writeln!(f, "{}({}", pad, op.t.as_str())?;
                 lhs.fmt_sexpr(f, indent + 1)?;
                 rhs.fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)
             }
             Node::Unary { op, rhs, id } => {
-                writeln!(f, "{}({:?}", pad, op.t)?;
+                writeln!(f, "{}({}", pad, op.t.as_str())?;
                 rhs.fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)
             }
@@ -173,10 +173,7 @@ impl<'a> Node<'a> {
                 writeln!(f, "{}}}", pad)
             }
             Node::Let { name, rhs, id } => {
-                let Type::Ident(name) = name.t else {
-                    unreachable!();
-                };
-                writeln!(f, "{}(let {}", pad, name)?;
+                writeln!(f, "{}(let {}", pad, name.t.as_str())?;
                 rhs.fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)
             }
@@ -186,10 +183,7 @@ impl<'a> Node<'a> {
                 body,
                 return_type,
             } => {
-                let Type::Ident(name) = name.t else {
-                    unreachable!();
-                };
-                write!(f, "{}(fn {} (", pad, name)?;
+                write!(f, "{}(fn {} (", pad, name.t.as_str())?;
                 for (i, arg) in args.iter().enumerate() {
                     let (Type::Ident(arg_name), type_name) = (&arg.0.t, &arg.1) else {
                         unreachable!();
@@ -210,10 +204,7 @@ impl<'a> Node<'a> {
                 writeln!(f, "{})->{}", pad, return_type)
             }
             Node::Call { name, args, id } => {
-                let Type::Ident(name) = name.t else {
-                    unreachable!();
-                };
-                write!(f, "{}({}", pad, name)?;
+                write!(f, "{}({}", pad, name.t.as_str())?;
                 if !args.is_empty() {
                     writeln!(f)?;
                     for arg in args {

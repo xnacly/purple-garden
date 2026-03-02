@@ -47,17 +47,66 @@ pub struct TypeId {
 
 #[derive(Debug, Clone)]
 pub enum Instr<'i> {
-    Add { dst: TypeId, lhs: Id, rhs: Id },
-    Sub { dst: TypeId, lhs: Id, rhs: Id },
-    Mul { dst: TypeId, lhs: Id, rhs: Id },
-    Div { dst: TypeId, lhs: Id, rhs: Id },
-    Eq { dst: TypeId, lhs: Id, rhs: Id },
-    Lt { dst: TypeId, lhs: Id, rhs: Id },
-    Gt { dst: TypeId, lhs: Id, rhs: Id },
-    LoadConst { dst: TypeId, value: Const<'i> },
-    Call { dst: Id, func: Id, args: Vec<Id> },
-    Tail { dst: Id, func: Id, args: Vec<Id> },
-    Cast { value: TypeId, from: Id },
+    Add {
+        input_type: Type,
+        dst: TypeId,
+        lhs: Id,
+        rhs: Id,
+    },
+    Sub {
+        input_type: Type,
+        dst: TypeId,
+        lhs: Id,
+        rhs: Id,
+    },
+    Mul {
+        input_type: Type,
+        dst: TypeId,
+        lhs: Id,
+        rhs: Id,
+    },
+    Div {
+        input_type: Type,
+        dst: TypeId,
+        lhs: Id,
+        rhs: Id,
+    },
+    Eq {
+        input_type: Type,
+        dst: TypeId,
+        lhs: Id,
+        rhs: Id,
+    },
+    Lt {
+        input_type: Type,
+        dst: TypeId,
+        lhs: Id,
+        rhs: Id,
+    },
+    Gt {
+        input_type: Type,
+        dst: TypeId,
+        lhs: Id,
+        rhs: Id,
+    },
+    LoadConst {
+        dst: TypeId,
+        value: Const<'i>,
+    },
+    Call {
+        dst: Id,
+        func: Id,
+        args: Vec<Id>,
+    },
+    Tail {
+        dst: Id,
+        func: Id,
+        args: Vec<Id>,
+    },
+    Cast {
+        value: TypeId,
+        from: Id,
+    },
     Noop,
 }
 

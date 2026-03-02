@@ -60,25 +60,25 @@ impl Display for Func<'_> {
                 write!(f, "\t")?;
                 match ins {
                     Instr::Noop => writeln!(f, "nop")?,
-                    Instr::Add { dst, lhs, rhs } => {
+                    Instr::Add { dst, lhs, rhs, .. } => {
                         writeln!(f, "%v{} = add %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
-                    Instr::Sub { dst, lhs, rhs } => {
+                    Instr::Sub { dst, lhs, rhs, .. } => {
                         writeln!(f, "%v{} = sub %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
-                    Instr::Mul { dst, lhs, rhs } => {
+                    Instr::Mul { dst, lhs, rhs, .. } => {
                         writeln!(f, "%v{} = mul %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
-                    Instr::Div { dst, lhs, rhs } => {
+                    Instr::Div { dst, lhs, rhs, .. } => {
                         writeln!(f, "%v{} = div %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
-                    Instr::Eq { dst, lhs, rhs } => {
+                    Instr::Eq { dst, lhs, rhs, .. } => {
                         writeln!(f, "%v{} = eq %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
-                    Instr::Lt { dst, lhs, rhs } => {
+                    Instr::Lt { dst, lhs, rhs, .. } => {
                         writeln!(f, "%v{} = lt %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
-                    Instr::Gt { dst, lhs, rhs } => {
+                    Instr::Gt { dst, lhs, rhs, .. } => {
                         writeln!(f, "%v{} = gt %v{}, %v{}", dst, lhs.0, rhs.0)?
                     }
                     Instr::LoadConst { dst, value } => writeln!(f, "%v{} = {}", dst, value)?,
@@ -155,65 +155,6 @@ impl Display for Func<'_> {
         }
 
         writeln!(f, "}}")
-    }
-}
-
-#[cfg(test)]
-mod ir {
-    #[test]
-    fn print_ir_example() {
-        use crate::ir::*;
-
-        let v0 = TypeId {
-            ty: Type::Int,
-            id: Id(0),
-        };
-        let v1 = TypeId {
-            ty: Type::Int,
-            id: Id(1),
-        };
-        let v2 = TypeId {
-            ty: Type::Int,
-            id: Id(2),
-        };
-        let v3 = TypeId {
-            ty: Type::Int,
-            id: Id(3),
-        };
-        let v4 = TypeId {
-            ty: Type::Int,
-            id: Id(4),
-        };
-
-        let b0 = Id(0);
-
-        let block0 = Block {
-            id: b0,
-            tombstone: false,
-            params: vec![v0.id, v1.id, v2.id],
-            instructions: vec![
-                Instr::Add {
-                    dst: v3.clone(),
-                    lhs: v1.id,
-                    rhs: v2.id,
-                },
-                Instr::Add {
-                    dst: v4.clone(),
-                    lhs: v0.id,
-                    rhs: v3.id,
-                },
-            ],
-            term: Some(Terminator::Return(Some(v4.id))),
-        };
-
-        let func = Func {
-            id: Id(0),
-            name: "test",
-            ret: Some(Type::Int),
-            blocks: vec![block0],
-        };
-
-        println!("{}", func);
     }
 }
 
