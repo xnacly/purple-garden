@@ -63,7 +63,7 @@ macro_rules! trap_if {
 impl<'vm> Vm<'vm> {
     pub fn new(config: &'vm Args) -> Self {
         Self {
-            r: [const { Value::undef() }; REGISTER_COUNT],
+            r: [const { Value(0) }; REGISTER_COUNT],
             frames: Vec::with_capacity(64),
             pc: 0,
             bytecode: Vec::new(),
@@ -203,13 +203,13 @@ impl<'vm> Vm<'vm> {
                     *regs.add(dst as usize) = self.spilled.pop().unwrap();
                 },
                 Op::CastToDouble { dst, src } => unsafe {
-                    *regs.add(dst as usize) = (*regs.add(src as usize)).to_double();
+                    *regs.add(dst as usize) = (*regs.add(src as usize)).int_to_f64();
                 },
                 Op::CastToInt { dst, src } => unsafe {
-                    *regs.add(dst as usize) = (*regs.add(src as usize)).to_int();
+                    *regs.add(dst as usize) = (*regs.add(src as usize)).f64_to_int();
                 },
                 Op::CastToBool { dst, src } => unsafe {
-                    *regs.add(dst as usize) = (*regs.add(src as usize)).to_bool();
+                    *regs.add(dst as usize) = (*regs.add(src as usize)).int_to_bool();
                 },
                 _ => {
                     dbg!(instruction);

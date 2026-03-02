@@ -3,7 +3,7 @@ use std::{
     hint::unreachable_unchecked,
 };
 
-use crate::ir::Const;
+use crate::ir::{Const, ptype};
 
 /// Immutable string representation used in the purple garden NaN boxing value representation
 #[repr(C)]
@@ -27,148 +27,66 @@ impl Str {
     }
 }
 
-/// NaN boxed purple garden virtual machine value representation
-///
-/// ```text
-/// | Bits  | Usage                               |
-/// | ----- | ----------------------------------- |
-/// | 63:52 | Exponent of double / NaN tag        |
-/// | 51:48 | Type tag for NaN-boxed values       |
-/// |  47:0 | Payload (int, pointer, small flags) |
-/// ```
-///
-/// Specifically the bit tag (upper 16B):
-///
-/// ```text
-/// | Type       | Tag (upper 16 bits) | Payload (lower 48 bits) |
-/// | ---------- | ------------------- | ----------------------- |
-/// | Int        | 0x7FF8              | signed 48-bit int       |
-/// | Bool True  | 0x7FF9              | 1                       |
-/// | Bool False | 0x7FF9              | 0                       |
-/// | UnDef      | 0x7FFA              | 0                       |
-/// | Str(&'v)   | 0x7FFB              | &str                    |
-/// | String     | 0x7FFC              | String                  |
-/// | Array      | 0x7FFD              | GC object               |
-/// | Object     | 0x7FFE              | GC object               |
-/// | Double     | normal f64 bits     | full 64 bits            |
-/// ```
-#[derive(PartialEq, Clone, Default, Copy)]
-pub struct Value(u64);
+#[derive(PartialEq, Clone, Default, Copy, Debug)]
+#[repr(transparent)]
+pub struct Value(pub u64);
 
 impl Value {
-    pub const INT: u64 = 0x7FF8 << 48;
-    pub const BOOL: u64 = 0x7FF9 << 48;
-    pub const UNDEF: u64 = 0x7FFA << 48;
-    /// compile time known string, are stored on a heap the vm does not know about
-    pub const STR: u64 = 0x7FFB << 48;
-    /// runtime strings created by concat or any other string returning procedure
-    pub const HEAPSTRING: u64 = 0x7FFC << 48;
-    /// list of elements, must be of the same type
-    pub const ARRAY: u64 = 0x7FFD << 48;
-    pub const OBJECT: u64 = 0x7FFE << 48;
-
     #[inline(always)]
-    pub fn tag(&self) -> u64 {
-        self.0 & 0xFFFF_0000_0000_0000
+    pub fn as_int(&self) -> i64 {
+        debug_assert!(self.0 < i64::MAX as u64);
+        self.0 as i64
     }
 
     #[inline(always)]
-    pub const fn undef() -> Self {
-        Self(Self::UNDEF)
+    pub fn as_bool(&self) -> bool {
+        self.0 != 0
     }
 
     #[inline(always)]
-    pub unsafe fn as_int(&self) -> i64 {
-        debug_assert!(self.tag() == Self::INT);
-        // sign extend 48-bit payload
-        let payload = self.0 & 0x0000_FFFF_FFFF_FFFF;
-        ((payload as i64) << 16) >> 16
-    }
-
-    #[inline(always)]
-    /// True=1, False=0 in TAG
-    pub unsafe fn as_bool(&self) -> bool {
-        self.0 & 1 != 0
-    }
-
-    #[inline(always)]
-    pub unsafe fn as_f64(&self) -> f64 {
-        debug_assert!(self.tag() <= 0x7FF7 << 48);
+    pub fn as_f64(&self) -> f64 {
         f64::from_bits(self.0)
     }
 
-    pub unsafe fn as_str<'t>(&self) -> &'t str {
-        unsafe {
-            debug_assert!(self.tag() == Self::STR || self.tag() == Self::HEAPSTRING);
-            let wrapper = self.as_ptr::<Str>();
-            (*wrapper).as_str()
-        }
+    #[inline(always)]
+    pub fn as_str<'t>(&self) -> &'t str {
+        let wrapper = self.as_ptr::<Str>();
+        unsafe { (*wrapper).as_str() }
     }
 
     #[inline(always)]
-    pub unsafe fn as_ptr<T>(&self) -> *mut T {
-        debug_assert!(matches!(
-            self.tag(),
-            Self::STR | Self::HEAPSTRING | Self::ARRAY | Self::OBJECT
-        ));
-        (self.0 & 0x0000_FFFF_FFFF_FFFF) as *mut T
+    pub fn as_ptr<T>(&self) -> *mut T {
+        { self.0 as *mut T }
     }
 
     #[inline(always)]
-    pub fn from_ptr<T>(ptr: *mut T, tag: u64) -> Self {
-        Self(tag | ((ptr as u64) & 0x0000_FFFF_FFFF_FFFF))
-    }
-
-    pub fn compare(&self, other: &Self) -> bool {
-        let (lt, rt) = (self.tag(), other.tag());
-
-        unsafe {
-            if lt == rt {
-                match lt {
-                    Self::INT => self.as_int() == other.as_int(),
-                    Self::BOOL => self.as_bool() == other.as_bool(),
-                    Self::STR | Self::HEAPSTRING => self.as_str() == other.as_str(),
-                    _ => unreachable_unchecked(),
-                }
-            } else {
-                // If tags differ, it could be f64
-                if lt == 0 && rt == 0 {
-                    self.as_f64() == other.as_f64()
-                } else {
-                    false
-                }
-            }
-        }
+    pub fn from_ptr<T>(ptr: *mut T) -> Self {
+        Self(ptr as u64)
     }
 
     #[inline(always)]
-    pub unsafe fn to_bool(&self) -> Self {
-        debug_assert!(self.tag() == Self::INT);
-        unsafe {
-            // we can do as_int, because our typechecker validates only integers to be castable to
-            // booleans
-            let i = self.as_int();
-            Value::from(i != 0)
-        }
+    pub fn int_to_bool(&self) -> Self {
+        Value::from(self.0 != 0)
     }
 
     #[inline(always)]
-    pub unsafe fn to_double(&self) -> Self {
-        debug_assert!(self.tag() == Self::INT);
-        unsafe {
-            // we can do as_int, because our typechecker validates only ints to be castable to
-            // doubles
-            Value::from(self.as_int() as f64)
-        }
+    pub fn int_to_f64(&self) -> Self {
+        Value::from(self.as_int() as f64)
     }
 
     #[inline(always)]
-    pub unsafe fn to_int(&self) -> Self {
-        debug_assert!(self.tag() <= 0x7FF7 << 48);
-        unsafe {
-            // we can do as_f64, because our typechecker validates only doubles to be castable to
-            // ints
-            Value::from(self.as_f64() as i64)
+    pub fn f64_to_int(&self) -> Self {
+        Value::from(self.as_f64() as i64)
+    }
+
+    pub fn dbg(&self, in_form_of: ptype::Type) -> String {
+        match in_form_of {
+            ptype::Type::Void => String::new(),
+            ptype::Type::Bool => format!("{}", self.as_bool()),
+            ptype::Type::Int => format!("{}", self.as_int()),
+            ptype::Type::Double => format!("{}", self.as_f64()),
+            ptype::Type::Str => format!("{:?}", self.as_str()),
+            _ => todo!(),
         }
     }
 }
@@ -176,13 +94,13 @@ impl Value {
 impl<'c> From<Const<'c>> for Value {
     fn from(value: Const<'c>) -> Self {
         Self(match value {
-            Const::False => Self::BOOL,
-            Const::True => Self::BOOL | 1,
-            Const::Int(i) => Self::INT | ((i as u64) & 0x0000_FFFF_FFFF_FFFF),
+            Const::False => 0u64,
+            Const::True => 1u64,
+            Const::Int(i) => i as u64,
             Const::Double(bits) => bits,
             Const::Str(str) => {
                 let as_pg_str = &Str::from_str(str);
-                return Value::from_ptr(as_pg_str as *const _ as *mut u8, Self::STR);
+                return Value::from_ptr(as_pg_str as *const _ as *mut u8);
             }
         })
     }
@@ -190,13 +108,13 @@ impl<'c> From<Const<'c>> for Value {
 
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
-        Self(Self::BOOL | if value { 1 } else { 0 })
+        Self(if value { 1 } else { 0 })
     }
 }
 
 impl From<i64> for Value {
     fn from(value: i64) -> Self {
-        Self(Self::INT | ((value as u64) & 0x0000_FFFF_FFFF_FFFF))
+        Self(value as u64)
     }
 }
 
@@ -209,51 +127,6 @@ impl From<f64> for Value {
 impl<'s> From<&'s str> for Value {
     fn from(value: &'s str) -> Self {
         let as_pg_str = &Str::from_str(value);
-        Value::from_ptr(as_pg_str as *const _ as *mut u8, Self::STR)
-    }
-}
-
-impl Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        unsafe {
-            match self.tag() {
-                Value::INT => write!(f, "{}", self.as_int()),
-                Value::BOOL => write!(f, "{}", self.as_bool()),
-                Value::UNDEF => write!(f, "undefined"),
-                Value::STR | Value::HEAPSTRING => write!(f, "\"{}\"", self.as_str()),
-                // Value::ARRAY => write!(f, "{}", self.as_()),
-                // Value::OBJECT => write!(f, "{}", self.as_()),
-                _ => write!(f, "{}", self.as_f64()),
-            }
-        }
-    }
-}
-
-impl Debug for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut start = f.debug_struct("Value");
-        start.field(
-            "type",
-            &match self.tag() {
-                Value::INT => "int",
-                Value::BOOL => "bool",
-                Value::UNDEF => "undef",
-                Value::STR => "str",
-                Value::HEAPSTRING => "heapstring",
-                Value::ARRAY => "arr",
-                Value::OBJECT => "obj",
-                _ => "double",
-            },
-        );
-        start.field("raw", &format!("0x{:0x}", self.tag()));
-        unsafe {
-            match self.tag() {
-                Value::INT => start.field("val", &self.as_int()).finish(),
-                Value::BOOL => start.field("val", &self.as_bool()).finish(),
-                Value::UNDEF => start.field("val", &"undefined").finish(),
-                Value::STR | Value::HEAPSTRING => start.field("val", &self.as_str()).finish(),
-                _ => start.field("val", &self.as_f64()).finish(),
-            }
-        }
+        Value::from_ptr(as_pg_str as *const _ as *mut u8)
     }
 }
