@@ -77,9 +77,22 @@ impl<'vm> Vm<'vm> {
     }
 
     pub fn run(&mut self) -> Result<(), Anomaly> {
-        let regs = self.r.as_mut_ptr();
+        let regs = &mut self.r;
         let instructions = self.bytecode.as_mut_ptr();
         let instructions_len = self.bytecode.len();
+        let globals = self.globals.as_mut_ptr();
+
+        macro_rules! r {
+            ($n:tt) => {
+                regs.get_unchecked($n as usize)
+            };
+        }
+
+        macro_rules! r_mut {
+            ($n:tt) => {
+                *regs.get_unchecked_mut($n as usize)
+            };
+        }
 
         loop {
             if self.pc >= instructions_len {
@@ -91,92 +104,90 @@ impl<'vm> Vm<'vm> {
             match unsafe { *instructions.add(self.pc) } {
                 Op::Nop => {}
                 Op::LoadI { dst, value } => unsafe {
-                    *regs.add(dst as usize) = (value as i64).into();
+                    r_mut!(dst) = Value::from(value as i64);
                 },
-                Op::LoadG { dst, idx } => unsafe {
-                    *regs.add(dst as usize) = *self.globals.as_mut_ptr().add(idx as usize);
-                },
+                Op::LoadG { dst, idx } => unsafe { r_mut!(dst) = *globals.add(idx as usize) },
                 Op::IAdd { dst, lhs, rhs } => unsafe {
-                    let l = (*regs.add(lhs as usize)).as_int();
-                    let r = (*regs.add(rhs as usize)).as_int();
-                    *regs.add(dst as usize) = (l + r).into();
+                    let l = r!(lhs).as_int();
+                    let r = r!(rhs).as_int();
+                    r_mut!(dst) = Value::from(l + r);
                 },
                 Op::ISub { dst, lhs, rhs } => unsafe {
-                    let l = (*regs.add(lhs as usize)).as_int();
-                    let r = (*regs.add(rhs as usize)).as_int();
-                    *regs.add(dst as usize) = (l - r).into();
+                    let l = r!(lhs).as_int();
+                    let r = r!(rhs).as_int();
+                    r_mut!(dst) = Value::from(l - r);
                 },
                 Op::IMul { dst, lhs, rhs } => unsafe {
-                    let l = (*regs.add(lhs as usize)).as_int();
-                    let r = (*regs.add(rhs as usize)).as_int();
-                    *regs.add(dst as usize) = (l * r).into();
+                    let l = r!(lhs).as_int();
+                    let r = r!(rhs).as_int();
+                    r_mut!(dst) = Value::from(l * r);
                 },
                 Op::IDiv { dst, lhs, rhs } => unsafe {
-                    let l = (*regs.add(lhs as usize)).as_int();
-                    let r = (*regs.add(rhs as usize)).as_int();
+                    let l = r!(lhs).as_int();
+                    let r = r!(rhs).as_int();
                     trap_if!(r == 0, Anomaly::DivisionByZero { pc: self.pc });
-                    *regs.add(dst as usize) = (l / r).into();
+                    r_mut!(dst) = Value::from(l / r);
                 },
                 Op::IEq { dst, lhs, rhs } => unsafe {
-                    let l = &(*regs.add(lhs as usize)).as_int();
-                    let r = &(*regs.add(rhs as usize)).as_int();
-                    *regs.add(dst as usize) = Value::from(l == r)
+                    let l = r!(lhs).as_int();
+                    let r = r!(rhs).as_int();
+                    r_mut!(dst) = Value::from(l == r)
                 },
                 Op::IGt { dst, lhs, rhs } => unsafe {
-                    let l = &(*regs.add(lhs as usize)).as_int();
-                    let r = &(*regs.add(rhs as usize)).as_int();
-                    *regs.add(dst as usize) = (l > r).into()
+                    let l = r!(lhs).as_int();
+                    let r = r!(rhs).as_int();
+                    r_mut!(dst) = Value::from(l > r)
                 },
                 Op::ILt { dst, lhs, rhs } => unsafe {
-                    let l = &(*regs.add(lhs as usize)).as_int();
-                    let r = &(*regs.add(rhs as usize)).as_int();
-                    *regs.add(dst as usize) = (l < r).into()
+                    let l = r!(lhs).as_int();
+                    let r = r!(rhs).as_int();
+                    r_mut!(dst) = Value::from(l < r)
                 },
                 Op::DAdd { dst, lhs, rhs } => unsafe {
-                    let l = (*regs.add(lhs as usize)).as_f64();
-                    let r = (*regs.add(rhs as usize)).as_f64();
-                    *regs.add(dst as usize) = (l + r).into();
+                    let l = r!(lhs).as_f64();
+                    let r = r!(rhs).as_f64();
+                    r_mut!(dst) = Value::from(l + r);
                 },
                 Op::DSub { dst, lhs, rhs } => unsafe {
-                    let l = (*regs.add(lhs as usize)).as_f64();
-                    let r = (*regs.add(rhs as usize)).as_f64();
-                    *regs.add(dst as usize) = (l - r).into();
+                    let l = r!(lhs).as_f64();
+                    let r = r!(rhs).as_f64();
+                    r_mut!(dst) = Value::from(l - r);
                 },
                 Op::DMul { dst, lhs, rhs } => unsafe {
-                    let l = (*regs.add(lhs as usize)).as_f64();
-                    let r = (*regs.add(rhs as usize)).as_f64();
-                    *regs.add(dst as usize) = (l * r).into();
+                    let l = r!(lhs).as_f64();
+                    let r = r!(rhs).as_f64();
+                    r_mut!(dst) = Value::from(l * r);
                 },
                 Op::DDiv { dst, lhs, rhs } => unsafe {
-                    let l = (*regs.add(lhs as usize)).as_f64();
-                    let r = (*regs.add(rhs as usize)).as_f64();
+                    let l = r!(lhs).as_f64();
+                    let r = r!(rhs).as_f64();
                     trap_if!(r == 0 as f64, Anomaly::DivisionByZero { pc: self.pc });
-                    *regs.add(dst as usize) = (l / r).into();
+                    r_mut!(dst) = Value::from(l / r);
                 },
                 Op::DGt { dst, lhs, rhs } => unsafe {
-                    let l = &(*regs.add(lhs as usize)).as_f64();
-                    let r = &(*regs.add(rhs as usize)).as_f64();
-                    *regs.add(dst as usize) = (l > r).into()
+                    let l = r!(lhs).as_f64();
+                    let r = r!(rhs).as_f64();
+                    r_mut!(dst) = Value::from(l > r);
                 },
                 Op::DLt { dst, lhs, rhs } => unsafe {
-                    let l = &(*regs.add(lhs as usize)).as_f64();
-                    let r = &(*regs.add(rhs as usize)).as_f64();
-                    *regs.add(dst as usize) = (l < r).into()
+                    let l = r!(lhs).as_f64();
+                    let r = r!(rhs).as_f64();
+                    r_mut!(dst) = Value::from(l < r);
                 },
                 Op::BEq { dst, lhs, rhs } => unsafe {
-                    let l = &(*regs.add(lhs as usize)).as_bool();
-                    let r = &(*regs.add(rhs as usize)).as_bool();
-                    *regs.add(dst as usize) = Value::from(l == r)
+                    let l = r!(lhs).as_bool();
+                    let r = r!(rhs).as_bool();
+                    r_mut!(dst) = Value::from(l == r);
                 },
                 Op::Mov { dst, src } => unsafe {
-                    *regs.add(dst as usize) = *regs.add(src as usize);
+                    r_mut!(dst) = *r!(src);
                 },
                 Op::Jmp { target } => {
                     self.pc = target as usize;
                     continue;
                 }
                 Op::JmpF { target, cond } => unsafe {
-                    if (*regs.add(cond as usize)).as_bool() {
+                    if (r!(cond).as_bool()) {
                         self.pc = target as usize;
                         continue;
                     }
@@ -200,19 +211,19 @@ impl<'vm> Vm<'vm> {
                     self.pc = frame.return_to;
                 }
                 Op::Push { src } => unsafe {
-                    self.spilled.push(*regs.add(src as usize));
+                    self.spilled.push(*r!(src));
                 },
                 Op::Pop { dst } => unsafe {
-                    *regs.add(dst as usize) = self.spilled.pop().unwrap();
+                    r_mut!(dst) = self.spilled.pop().unwrap();
                 },
                 Op::CastToDouble { dst, src } => unsafe {
-                    *regs.add(dst as usize) = (*regs.add(src as usize)).int_to_f64();
+                    r_mut!(dst) = r!(src).int_to_f64();
                 },
                 Op::CastToInt { dst, src } => unsafe {
-                    *regs.add(dst as usize) = (*regs.add(src as usize)).f64_to_int();
+                    r_mut!(dst) = r!(src).f64_to_int();
                 },
                 Op::CastToBool { dst, src } => unsafe {
-                    *regs.add(dst as usize) = (*regs.add(src as usize)).int_to_bool();
+                    r_mut!(dst) = r!(src).int_to_bool();
                 },
                 i => {
                     dbg!(i);

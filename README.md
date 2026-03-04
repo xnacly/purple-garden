@@ -44,71 +44,10 @@ git clone git@github.com:xnacly/purple-garden.git
 cargo +nightly run -- --help
 ```
 
-## Architecture
+### Benchmarks
 
-```text
-.
-+- Tokenizer
-|
-]: Token(2) Token(+) Token(3)
-]: Token(*)
-]: Token(4) Token(-) Token(1)
-|
- \
-  +- Parsing (Tokens -> Abstract Syntax Tree)
-  |
-  ]: (Asteriks
-  ]:   (Plus
-  ]:     Integer("2")
-  ]:     Integer("3")
-  ]:   )
-  ]:   (Minus
-  ]:     Integer("4")
-  ]:     Integer("1")
-  ]:   )
-  ]: )
-  |
-  |
-<planned section start>
-  \
-   +- Planned IR and Optimisation Boundary
-   |
-  / \
-  |  +- JIT Compiler (IR -> x86/ARM)
-  |                           ^
-  |                            \
-  |                             \
-  |                              \ 
-  |                               \ 
-  |                                \ 
-<planned section end>               |Calls 
-  |                                 |JIT'ed    
-  \                                 |functions 
-   +- Compiler (AST/IR -> bytecode) |
-   |                                / 
-   ]:  __entry:                    /
-   ]:          load_imm r0, #2    |
-   ]:          load_imm r1, #3    |
-   ]:          add r2, r0, r1     |
-   ]:          load_imm r1, #4    |
-   ]:          load_imm r0, #1    |
-   ]:          sub r3, r1, r0     |
-   ]:          mul r0, r2, r3     |
-   |                              |
-   \                              |
-    +- Peephole Optimiser         |
-    |                             |
-    ]:  __entry:                  |
-    ]:          load_imm r2, #5   |
-    ]:          load_imm r3, #3   |
-    ]:          mul r0, r2, r3    |
-    |                            /
-    \                           /
-     +- Baseline interpreter --+
-     |
-     ]: [vm][0000] LoadImm { dst: 2, value: 5 }
-     ]: [vm][0001] LoadImm { dst: 3, value: 3 }
-     ]: [vm][0002] Mul { dst: 0, lhs: 2, rhs: 3 }
-     |
-     '
+> These may take a while
+
+```bash
+cargo bench --features nightly
 ```
