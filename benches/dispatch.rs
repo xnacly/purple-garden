@@ -45,11 +45,6 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
             lhs: 0,
             rhs: 0,
         },
-        Op::IDiv {
-            dst: 0,
-            lhs: 0,
-            rhs: 0,
-        },
         Op::DAdd {
             dst: 0,
             lhs: 0,
@@ -61,11 +56,6 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
             rhs: 0,
         },
         Op::DMul {
-            dst: 0,
-            lhs: 0,
-            rhs: 0,
-        },
-        Op::DDiv {
             dst: 0,
             lhs: 0,
             rhs: 0,
@@ -115,7 +105,7 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
                 let mut rng = StdRng::seed_from_u64(0);
                 for _ in 0..OP_CODE_SIZE {
                     let idx = rng.random_range(0..RANDOM_OPS.len());
-                    bc.push(RANDOM_OPS[idx].clone());
+                    bc.push(RANDOM_OPS[idx]);
                 }
                 let mut v = Vm::new(&CONFIG);
                 v.bytecode = bc;
