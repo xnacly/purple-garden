@@ -139,25 +139,25 @@ impl<'p> Parser<'p> {
 
         self.expect(Type::CurlyLeft)?;
         while self.cur().t != Type::CurlyRight {
-            /// default case
+            // default case
             if self.cur().t == Type::CurlyLeft {
                 let default_token = self.cur().clone();
-                self.expect(Type::CurlyLeft);
+                self.expect(Type::CurlyLeft)?;
                 let mut default_body = vec![];
                 while self.cur().t != Type::CurlyRight {
                     default_body.push(self.parse_prefix()?);
                 }
-                self.expect(Type::CurlyRight);
+                self.expect(Type::CurlyRight)?;
                 default = Some((default_token, default_body));
             } else {
                 let condition_token = self.cur().clone();
                 let condition = self.parse_expr(0)?;
-                self.expect(Type::CurlyLeft);
+                self.expect(Type::CurlyLeft)?;
                 let mut body = vec![];
                 while self.cur().t != Type::CurlyRight {
                     body.push(self.parse_prefix()?);
                 }
-                self.expect(Type::CurlyRight);
+                self.expect(Type::CurlyRight)?;
                 cases.push(((condition_token, condition), body));
             }
         }

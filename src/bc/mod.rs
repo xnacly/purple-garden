@@ -1,15 +1,15 @@
-use std::{collections::HashMap, num};
+use std::collections::HashMap;
 
 mod ctx;
 pub mod dis;
 mod reg;
 
 use crate::{
-    Args,
     bc::ctx::Context,
+    config::Config,
     err::PgError,
     ir::{self, Const, Func, TypeId, ptype},
-    vm::{CallFrame, REGISTER_COUNT, Value, Vm, op::Op},
+    vm::{Value, Vm, op::Op},
 };
 
 #[derive(Debug)]
@@ -36,10 +36,6 @@ impl<'cc> Cc<'cc> {
         let pc = self.buf.len();
         self.buf.push(op);
         pc
-    }
-
-    fn replace(&mut self, idx: usize, op: Op) {
-        self.buf[idx] = op
     }
 
     /// Compile a list of ir functions to bytecode instructions
@@ -169,7 +165,6 @@ impl<'cc> Cc<'cc> {
                     target: no.0 as u16,
                 });
             }
-            _ => todo!("{:?}", &t),
         }
     }
 
@@ -332,11 +327,11 @@ impl<'cc> Cc<'cc> {
                 self.emit(op);
             }
             ir::Instr::Noop => {}
-            ir::Instr::Tail { dst, func, args } => todo!(),
+            ir::Instr::Tail { .. } => todo!(),
         };
     }
 
-    pub fn finalize(mut self, config: &'cc Args) -> Vm<'cc> {
+    pub fn finalize(mut self, config: &'cc Config) -> Vm<'cc> {
         let mut v = Vm::new(config);
         v.pc = self
             .ctx

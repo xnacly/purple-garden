@@ -5,7 +5,6 @@ use crate::{
     err::PgError,
     ir::{self, *},
     lex::{Token, Type},
-    vm::op::Op,
 };
 
 #[derive(Default)]
@@ -76,7 +75,7 @@ impl<'lower> Lower<'lower> {
 
     fn lower_node(&mut self, node: &'lower Node) -> Result<Option<Id>, PgError> {
         Ok(match node {
-            Node::Atom { raw, id } => {
+            Node::Atom { raw, .. } => {
                 let value = match raw.t {
                     Type::S(str) => Const::Str(str),
                     Type::D(doub) => Const::Double(
@@ -105,7 +104,7 @@ impl<'lower> Lower<'lower> {
 
                 Some(id)
             }
-            Node::Ident { name, id } => {
+            Node::Ident { name, .. } => {
                 let Type::Ident(i) = name.t else {
                     unreachable!()
                 };
@@ -189,7 +188,7 @@ impl<'lower> Lower<'lower> {
 
                 Some(dst_id)
             }
-            Node::Let { name, rhs, id } => {
+            Node::Let { name, rhs, .. } => {
                 let Type::Ident(i) = name.t else {
                     unreachable!()
                 };
@@ -240,7 +239,7 @@ impl<'lower> Lower<'lower> {
                 let entry = self.new_block();
                 self.block_mut(entry).params = args
                     .iter()
-                    .map(|(token, token_type)| {
+                    .map(|(token, _)| {
                         let id = self.id_store.new_value();
                         let Type::Ident(ident) = token.t else {
                             unreachable!();
@@ -269,7 +268,7 @@ impl<'lower> Lower<'lower> {
                 self.block = old_block;
                 None
             }
-            Node::Call { name, args, id } => {
+            Node::Call { name, args, .. } => {
                 let Type::Ident(ident_name) = name.t else {
                     unreachable!()
                 };
@@ -299,7 +298,7 @@ impl<'lower> Lower<'lower> {
 
                 Some(dst)
             }
-            Node::Cast { id, lhs, rhs, .. } => {
+            Node::Cast { lhs, rhs, .. } => {
                 let Some(from) = self.lower_node(lhs)? else {
                     unreachable!()
                 };
@@ -313,7 +312,7 @@ impl<'lower> Lower<'lower> {
                 self.emit(Instr::Cast { value, from });
                 Some(dst)
             }
-            Node::Match { cases, default, id } => {
+            Node::Match { cases, default, .. } => {
                 let mut check_blocks = Vec::with_capacity(cases.len());
                 let mut body_blocks = Vec::with_capacity(cases.len());
 
@@ -384,7 +383,8 @@ impl<'lower> Lower<'lower> {
                 for node in body.iter() {
                     last = self.lower_node(node)?;
                 }
-                let mut default_block = self.block_mut(default_block);
+
+                let default_block = self.block_mut(default_block);
                 default_block.params = params;
                 let last = last.expect("match default must produce value");
                 default_block.term = Some(Terminator::Jump {
@@ -404,7 +404,7 @@ impl<'lower> Lower<'lower> {
     pub fn ir_from(mut self, ast: &'lower [Node]) -> Result<Vec<Func<'lower>>, PgError> {
         let mut typechecker = typecheck::Typechecker::new();
         for node in ast {
-            let t = typechecker.node(node)?;
+            let _t = typechecker.node(node)?;
             crate::trace!("{} resolved to {:?}", &node, t);
         }
         crate::trace!("Finished type checking");

@@ -1,14 +1,14 @@
-mod anomaly;
-mod value;
-
-pub const REGISTER_COUNT: usize = 64;
-use std::hint::unreachable_unchecked;
-
-pub use crate::vm::anomaly::Anomaly;
-pub use crate::vm::value::Value;
-use crate::{Args, vm::op::Op};
+pub mod anomaly;
 /// purple garden bytecode virtual machine operations
 pub mod op;
+pub mod value;
+
+pub const REGISTER_COUNT: usize = 64;
+
+use crate::config::Config;
+pub use crate::vm::anomaly::Anomaly;
+pub use crate::vm::value::Value;
+use op::Op;
 
 pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>, &[Value]) -> Option<Value>;
 
@@ -36,7 +36,7 @@ pub struct Vm<'vm> {
     /// --backtrace was passed as an option to the interpreter
     pub backtrace: Vec<usize>,
 
-    config: &'vm Args,
+    config: &'vm Config,
 }
 
 /// trap in the vm; return Err(<anomaly>) if expr == true
@@ -62,7 +62,7 @@ macro_rules! trap_if {
 }
 
 impl<'vm> Vm<'vm> {
-    pub fn new(config: &'vm Args) -> Self {
+    pub fn new(config: &'vm Config) -> Self {
         Self {
             r: [const { Value(0) }; REGISTER_COUNT],
             frames: Vec::with_capacity(64),
@@ -77,8 +77,8 @@ impl<'vm> Vm<'vm> {
     }
 
     pub fn run(&mut self) -> Result<(), Anomaly> {
-        let regs = unsafe { self.r.as_mut_ptr() };
-        let instructions = unsafe { self.bytecode.as_mut_ptr() };
+        let regs = self.r.as_mut_ptr();
+        let instructions = self.bytecode.as_mut_ptr();
         let instructions_len = self.bytecode.len();
 
         loop {
@@ -169,7 +169,7 @@ impl<'vm> Vm<'vm> {
                     *regs.add(dst as usize) = Value::from(l == r)
                 },
                 Op::Mov { dst, src } => unsafe {
-                    *regs.add(dst as usize) = (*regs.add(src as usize));
+                    *regs.add(dst as usize) = *regs.add(src as usize);
                 },
                 Op::Jmp { target } => {
                     self.pc = target as usize;

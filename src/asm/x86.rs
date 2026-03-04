@@ -88,7 +88,7 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    pub fn encode(self, jit: &mut jit::Bjit) {
+    pub fn encode(self, _jit: &mut jit::Bjit) {
         todo!()
     }
 }

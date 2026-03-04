@@ -3,6 +3,7 @@ use crate::{
     vm,
 };
 
+#[allow(unused)]
 /// Preludes for 0-5 amount of arguments passed to any given JIT function
 /// Rbx points to the start of `Vm::r`
 pub const FUNCTION_PRELUDES_X86: [&[x86::Instruction]; 6] = [
@@ -98,7 +99,7 @@ pub const FUNCTION_PRELUDES_X86: [&[x86::Instruction]; 6] = [
     ],
 ];
 
-// TODO: FUNCTION_PRELUDE_AARCH64
+#[allow(unused)]
 pub const FUNCTION_PRELUDE_AARCH64: [&[aarch64::Instruction]; 6] = [
     // 0 args
     &[],

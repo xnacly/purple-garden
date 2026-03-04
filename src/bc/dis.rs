@@ -1,12 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    bc::{
-        Cc,
-        ctx::{self, Func},
-    },
-    ir::{self, Const, Id},
-    vm::{self, op::Op},
+    bc::ctx::{self, Func},
+    ir::{Const, Id},
+    vm::op::Op,
 };
 
 pub struct Disassembler<'dis> {

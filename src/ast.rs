@@ -138,33 +138,33 @@ impl<'a> Node<'a> {
         let pad = "  ".repeat(indent);
 
         match &self {
-            Node::Atom { raw, id } => writeln!(f, "{}{}", pad, raw.t.as_str()),
-            Node::Ident { name, id } => {
+            Node::Atom { raw, .. } => writeln!(f, "{}{}", pad, raw.t.as_str()),
+            Node::Ident { name, .. } => {
                 if let Type::Ident(name) = name.t {
                     writeln!(f, "{}{}", pad, name)
                 } else {
                     unreachable!()
                 }
             }
-            Node::Bin { op, lhs, rhs, id } => {
+            Node::Bin { op, lhs, rhs, .. } => {
                 writeln!(f, "{}({}", pad, op.t.as_str())?;
                 lhs.fmt_sexpr(f, indent + 1)?;
                 rhs.fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)
             }
-            Node::Unary { op, rhs, id } => {
+            Node::Unary { op, rhs, .. } => {
                 writeln!(f, "{}({}", pad, op.t.as_str())?;
                 rhs.fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)
             }
-            Node::Array { members, id } => {
+            Node::Array { members, .. } => {
                 writeln!(f, "{}[", pad)?;
                 for member in members {
                     member.fmt_sexpr(f, indent + 1)?;
                 }
                 writeln!(f, "{}]", pad)
             }
-            Node::Object { pairs, id } => {
+            Node::Object { pairs, .. } => {
                 writeln!(f, "{}{{", pad)?;
                 for (k, v) in pairs {
                     k.fmt_sexpr(f, indent + 1)?;
@@ -172,7 +172,7 @@ impl<'a> Node<'a> {
                 }
                 writeln!(f, "{}}}", pad)
             }
-            Node::Let { name, rhs, id } => {
+            Node::Let { name, rhs, .. } => {
                 writeln!(f, "{}(let {}", pad, name.t.as_str())?;
                 rhs.fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)
@@ -203,7 +203,7 @@ impl<'a> Node<'a> {
                 }
                 writeln!(f, "{})->{}", pad, return_type)
             }
-            Node::Call { name, args, id } => {
+            Node::Call { name, args, .. } => {
                 write!(f, "{}({}", pad, name.t.as_str())?;
                 if !args.is_empty() {
                     writeln!(f)?;
@@ -220,24 +220,23 @@ impl<'a> Node<'a> {
                 writeln!(f, "{})", pad)
             }
             Node::Match { cases, default, .. } => {
-                writeln!(f, "{}(match ", pad);
+                writeln!(f, "{}(match ", pad)?;
                 for ((_, condition), body) in cases {
-                    writeln!(f, "{} (", pad);
+                    writeln!(f, "{} (", pad)?;
                     condition.fmt_sexpr(f, indent + 1)?;
                     for body_member in body {
                         body_member.fmt_sexpr(f, indent + 1)?;
                     }
-                    writeln!(f, "{} )", pad);
+                    writeln!(f, "{} )", pad)?;
                 }
                 let (_, default) = default;
-                writeln!(f, "{} (", pad);
+                writeln!(f, "{} (", pad)?;
                 for default_member in default {
                     default_member.fmt_sexpr(f, indent + 1)?;
                 }
-                writeln!(f, "{} )", pad);
+                writeln!(f, "{} )", pad)?;
                 writeln!(f, "{})", pad)
             }
-            _ => writeln!(f, "{}<todo {:?}>", pad, self),
         }
     }
 }

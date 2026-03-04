@@ -1,7 +1,4 @@
-use std::{
-    fmt::{self, Debug, Display},
-    hint::unreachable_unchecked,
-};
+use std::fmt::Debug;
 
 use crate::{
     ir::{Const, ptype},
@@ -36,7 +33,7 @@ impl Value {
 
     #[inline(always)]
     pub fn as_ptr<T>(&self) -> *mut T {
-        { self.0 as *mut T }
+        self.0 as *mut T
     }
 
     #[inline(always)]

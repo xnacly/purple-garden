@@ -210,7 +210,7 @@ impl<'t> Typechecker<'t> {
                 self.map.insert(*id, res.clone());
                 res
             }
-            Node::Unary { id, op, rhs } => {
+            Node::Unary { .. } => {
                 todo!("{:?}", node);
             }
             Node::Let { id, name, rhs } => {

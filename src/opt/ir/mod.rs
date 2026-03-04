@@ -71,4 +71,4 @@ pub fn indirect_jump(fun: &mut ir::Func) {
     }
 }
 
-pub fn tailcall(fun: &mut ir::Func) {}
+pub fn tailcall(_fun: &mut ir::Func) {}

@@ -1,19 +1,13 @@
-use crate::{
-    asm::{aarch64, x86},
-    ir, vm,
-};
+use crate::ir;
 
-mod buf;
 mod consts;
 
 /// The baseline just in time compiler targetting x86_64 (SysV) and aarch64 (macos/linux arm64).
-pub struct Bjit<'jit> {
-    pub buf: &'jit mut buf::ExecBuffer,
-}
+pub struct Bjit {}
 
-impl<'jit> Bjit<'jit> {
-    pub fn new(buf: &'jit mut buf::ExecBuffer) -> Self {
-        Bjit { buf }
+impl Bjit {
+    pub fn new() -> Self {
+        Bjit {}
     }
 
     pub fn from(ir: &[ir::Func]) {
@@ -29,7 +23,7 @@ impl<'jit> Bjit<'jit> {
     }
 
     /// https://c9x.me/x86/
-    pub fn to_x86(ir: &[ir::Func]) {
+    pub fn to_x86(_ir: &[ir::Func]) {
         // TODO: lower ir to x86 instructions:
         //
         // - register allocator according to SysV ABI
@@ -38,7 +32,7 @@ impl<'jit> Bjit<'jit> {
     }
 
     /// https://www.cs.swarthmore.edu/~kwebb/cs31/resources/ARM64_Cheat_Sheet.pdf
-    pub fn to_aarch64(ir: &[ir::Func]) {
+    pub fn to_aarch64(_ir: &[ir::Func]) {
         // TODO: lower ir to aarch64 instructions (i dont know anything about em, they do seem to
         // differ a lot from armv7):
         //

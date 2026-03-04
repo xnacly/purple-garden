@@ -107,7 +107,6 @@ impl Display for Func<'_> {
                         writeln!(f, ")")?;
                     }
                     Instr::Cast { value, from } => {
-                        let t = value;
                         writeln!(f, "%v{} = cast_to_{} %v{}", value, value.ty, from.0)?
                     }
                 }
