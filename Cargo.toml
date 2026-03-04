@@ -11,8 +11,16 @@ nightly = []
 [dependencies]
 clap = { version = "4.5.54", features = ["derive"] }
 
+[dev-dependencies]
+criterion = "0.5"
+rand = "0.10.0"
+
 [profile.release]
 lto = "fat"
 codegen-units = 1
 opt-level = 3
 panic = "abort"
+
+[[bench]]
+name = "dispatch"
+harness = false
