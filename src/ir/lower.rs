@@ -3,7 +3,7 @@ use std::{collections::HashMap, num};
 use crate::{
     ast::{Node, TypeExpr},
     err::PgError,
-    ir::{self, *},
+    ir::{self, typecheck::id_from_node, *},
     lex::{Token, Type},
 };
 
@@ -119,12 +119,11 @@ impl<'lower> Lower<'lower> {
                 }
             }
             Node::Bin { op, lhs, rhs, id } => {
-                // I dont know if i like this behaviour, but it works and its good enough :)
-
-                // we need to attach the input type to the instruction (i), thus we take the lhs
-                // and query for its id and thus its type the typechecker computed in its pass
-                let node_id = typecheck::id_from_node(lhs).unwrap();
-                let node_type = self.types.get(&node_id).unwrap().clone();
+                let src_type = self
+                    .types
+                    .get(&id_from_node(lhs).unwrap())
+                    .cloned()
+                    .unwrap();
 
                 let Some(lhs) = self.lower_node(lhs)? else {
                     unreachable!()
@@ -139,52 +138,35 @@ impl<'lower> Lower<'lower> {
                     ty: self.types.get(id).unwrap().clone(),
                 };
 
-                let i = node_type;
-                self.emit(match op.t {
-                    Type::Plus => Instr::Add {
-                        input_type: i,
-                        dst,
-                        lhs,
-                        rhs,
+                use BinOp::*;
+                let op = match src_type {
+                    ptype::Type::Bool => match op.t {
+                        Type::DoubleEqual => BEq,
+                        _ => unreachable!(),
                     },
-                    Type::Minus => Instr::Sub {
-                        input_type: i,
-                        dst,
-                        lhs,
-                        rhs,
+                    ptype::Type::Int => match op.t {
+                        Type::Plus => IAdd,
+                        Type::Minus => ISub,
+                        Type::Asteriks => IMul,
+                        Type::Slash => IDiv,
+                        Type::DoubleEqual => IEq,
+                        Type::LessThan => ILt,
+                        Type::GreaterThan => IGt,
+                        _ => unreachable!(),
                     },
-                    Type::Asteriks => Instr::Mul {
-                        input_type: i,
-                        dst,
-                        lhs,
-                        rhs,
+                    ptype::Type::Double => match op.t {
+                        Type::Plus => DAdd,
+                        Type::Minus => DSub,
+                        Type::Asteriks => DMul,
+                        Type::Slash => DDiv,
+                        Type::LessThan => DLt,
+                        Type::GreaterThan => DGt,
+                        _ => unreachable!(),
                     },
-                    Type::Slash => Instr::Div {
-                        input_type: i,
-                        dst,
-                        lhs,
-                        rhs,
-                    },
-                    Type::DoubleEqual => Instr::Eq {
-                        input_type: i,
-                        dst,
-                        lhs,
-                        rhs,
-                    },
-                    Type::LessThan => Instr::Lt {
-                        input_type: i,
-                        dst,
-                        lhs,
-                        rhs,
-                    },
-                    Type::GreaterThan => Instr::Gt {
-                        input_type: i,
-                        dst,
-                        lhs,
-                        rhs,
-                    },
-                    _ => unreachable!(),
-                });
+                    _ => todo!("{:#?}", src_type),
+                };
+
+                self.emit(Instr::Bin { op, dst, lhs, rhs });
 
                 Some(dst_id)
             }
@@ -289,14 +271,18 @@ impl<'lower> Lower<'lower> {
                     a.push(id);
                 }
 
-                let dst = self.id_store.new_value();
+                let dst_id = self.id_store.new_value();
+                let dst = TypeId {
+                    ty: self.types.get(&(target_id.0 as usize)).unwrap().clone(),
+                    id: dst_id,
+                };
                 self.emit(Instr::Call {
                     dst,
                     func: target_id,
                     args: a,
                 });
 
-                Some(dst)
+                Some(dst_id)
             }
             Node::Cast { lhs, rhs, .. } => {
                 let Some(from) = self.lower_node(lhs)? else {
@@ -309,7 +295,7 @@ impl<'lower> Lower<'lower> {
                     ty: rhs.into(),
                 };
 
-                self.emit(Instr::Cast { value, from });
+                self.emit(Instr::Cast { dst: value, from });
                 Some(dst)
             }
             Node::Match { cases, default, .. } => {
@@ -405,7 +391,7 @@ impl<'lower> Lower<'lower> {
         let mut typechecker = typecheck::Typechecker::new();
         for node in ast {
             let _t = typechecker.node(node)?;
-            crate::trace!("{} resolved to {:?}", &node, t);
+            crate::trace!("{} resolved to {:?}", &node, _t);
         }
         crate::trace!("Finished type checking");
         self.types = typechecker.finalise();

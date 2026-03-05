@@ -14,7 +14,7 @@ pub struct Parser<'p> {
 
 impl<'p> Parser<'p> {
     pub fn new(lex: &'p mut Lexer<'p>) -> Result<Self, PgError> {
-        let cur = lex.next()?;
+        let cur = lex.one()?;
         Ok(Self { cur, lex, id: 0 })
     }
 
@@ -66,7 +66,7 @@ impl<'p> Parser<'p> {
     }
 
     fn next(&mut self) -> Result<(), PgError> {
-        self.cur = self.lex.next()?;
+        self.cur = self.lex.one()?;
         Ok(())
     }
 

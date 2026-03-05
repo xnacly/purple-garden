@@ -15,7 +15,7 @@ pub mod parser;
 pub mod vm;
 
 #[cfg(feature = "trace")]
-mod trace {
+pub mod trace {
     use super::*;
     use std::sync::Once;
     use std::time::Instant;
@@ -52,7 +52,7 @@ mod trace {
 }
 
 #[cfg(not(feature = "trace"))]
-mod trace {
+pub mod trace {
     #[macro_export]
     macro_rules! trace {
         ($fmt:literal, $($value:expr),*) => {};

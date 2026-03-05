@@ -1,6 +1,3 @@
-#![cfg_attr(feature = "nightly", feature(likely_unlikely))]
-#![allow(unused)]
-
 use purple_garden::{bc, config, err::PgError, ir, lex::Lexer, opt, parser::Parser, trace};
 use std::{collections::HashMap, fs};
 
@@ -63,7 +60,7 @@ fn main() {
         }
     }
 
-    let mut cc = bc::Cc::new();
+    let mut cc = bc::Cc::default();
     if let Err(e) = cc.compile(&ir) {
         let lines = str::from_utf8(&input)
             .unwrap()
@@ -79,7 +76,7 @@ fn main() {
         opt::bc(&mut cc.buf);
     }
 
-    let mut function_table = if args.backtrace {
+    let function_table = if args.backtrace {
         cc.function_table()
     } else {
         HashMap::new()
@@ -110,7 +107,7 @@ fn main() {
         if args.backtrace {
             let entry_point_pc = function_table
                 .iter()
-                .find(|(pc, name)| name.as_str() == "entry")
+                .find(|(_, name)| name.as_str() == "entry")
                 .map(|(pc, _)| *pc)
                 .unwrap_or_default();
             vm.backtrace.insert(0, entry_point_pc);

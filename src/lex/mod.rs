@@ -109,7 +109,7 @@ impl<'l> Lexer<'l> {
         }
     }
 
-    pub fn next(&mut self) -> Result<Token<'l>, PgError> {
+    pub fn one(&mut self) -> Result<Token<'l>, PgError> {
         self.skip_whitespace();
 
         if self.at_end() {
@@ -215,7 +215,7 @@ impl<'l> Lexer<'l> {
     pub fn all(&mut self) -> Result<Vec<Token<'l>>, PgError> {
         let mut raindrain = Vec::with_capacity(1024);
         loop {
-            let t = self.next()?;
+            let t = self.one()?;
             if t.t == Type::Eof {
                 break;
             } else {
@@ -334,7 +334,7 @@ mod tests {
     #[should_panic]
     fn unknown_character_errors() {
         let mut l = Lexer::new(b"$");
-        l.next().unwrap();
+        l.one().unwrap();
     }
 
     #[test]
@@ -373,7 +373,7 @@ mod tests {
     #[should_panic]
     fn unterminated_string() {
         let mut l = Lexer::new(b"\"hello");
-        l.next().unwrap();
+        l.one().unwrap();
     }
 
     #[test]
@@ -397,8 +397,8 @@ mod tests {
     #[test]
     fn repeated_eof_calls() {
         let mut l = Lexer::new(b"");
-        let t1 = l.next().unwrap();
-        let t2 = l.next().unwrap();
+        let t1 = l.one().unwrap();
+        let t2 = l.one().unwrap();
         assert_eq!(t1.t, Type::Eof);
         assert_eq!(t2.t, Type::Eof);
     }

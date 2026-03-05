@@ -3,13 +3,10 @@ use crate::ir;
 mod consts;
 
 /// The baseline just in time compiler targetting x86_64 (SysV) and aarch64 (macos/linux arm64).
+#[derive(Default)]
 pub struct Bjit {}
 
 impl Bjit {
-    pub fn new() -> Self {
-        Bjit {}
-    }
-
     pub fn from(ir: &[ir::Func]) {
         #[cfg(target_arch = "x86_64")]
         {

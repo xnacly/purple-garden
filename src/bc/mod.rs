@@ -12,7 +12,7 @@ use crate::{
     vm::{Value, Vm, op::Op},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Cc<'cc> {
     pub buf: Vec<Op>,
     pub ctx: Context<'cc>,
@@ -23,15 +23,6 @@ pub struct Cc<'cc> {
 }
 
 impl<'cc> Cc<'cc> {
-    pub fn new() -> Self {
-        Self {
-            buf: Vec::with_capacity(256),
-            ctx: Context::default(),
-            block_map: HashMap::new(),
-            blocks: HashMap::new(),
-        }
-    }
-
     fn emit(&mut self, op: Op) -> usize {
         let pc = self.buf.len();
         self.buf.push(op);
@@ -171,7 +162,7 @@ impl<'cc> Cc<'cc> {
     fn instr(&mut self, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::Cast {
-                value:
+                dst:
                     TypeId {
                         id: ir::Id(dst),
                         ty,
@@ -227,55 +218,18 @@ impl<'cc> Cc<'cc> {
                 // TODO: we need a live set building pass to only restore values that are used
                 // after the call and were defined before the call
 
-                let ir::Id(dst) = dst;
+                let TypeId {
+                    id: ir::Id(dst), ..
+                } = dst;
                 self.emit(Op::Call { func: pc as u32 });
                 self.emit(Op::Mov {
                     dst: *dst as u8,
                     src: 0,
                 });
             }
-            ir::Instr::Add {
-                input_type,
-                dst,
-                rhs,
-                lhs,
-            }
-            | ir::Instr::Sub {
-                input_type,
-                dst,
-                rhs,
-                lhs,
-            }
-            | ir::Instr::Mul {
-                input_type,
-                dst,
-                rhs,
-                lhs,
-            }
-            | ir::Instr::Div {
-                input_type,
-                dst,
-                rhs,
-                lhs,
-            }
-            | ir::Instr::Eq {
-                input_type,
-                dst,
-                rhs,
-                lhs,
-            }
-            | ir::Instr::Lt {
-                input_type,
-                dst,
-                rhs,
-                lhs,
-            }
-            | ir::Instr::Gt {
-                input_type,
-                dst,
-                rhs,
-                lhs,
-            } => {
+            ir::Instr::Noop {} => {}
+            ir::Instr::Tail { .. } => todo!(),
+            ir::Instr::Bin { op, dst, lhs, rhs } => {
                 let (
                     TypeId {
                         id: ir::Id(dst), ..
@@ -283,51 +237,28 @@ impl<'cc> Cc<'cc> {
                     ir::Id(lhs),
                     ir::Id(rhs),
                 ) = (dst, lhs, rhs);
-
-                // rust really is bad at converting enums with shared payloads to other enums, what
-                // even is this cluster fuck? I prob couldve done this better but i cant think of a
-                // way :/
-                macro_rules! emit_bin {
-                    ($name:ident) => {
-                        Op::$name {
-                            dst: (*dst) as u8,
-                            lhs: (*lhs) as u8,
-                            rhs: (*rhs) as u8,
+                macro_rules! emit_bins {
+                    ($($name:ident),*) => {
+                        match op {
+                            $(
+                                ir::BinOp::$name => {
+                                    Op::$name {
+                                        dst: (*dst) as u8,
+                                        lhs: (*lhs) as u8,
+                                        rhs: (*rhs) as u8,
+                                    }
+                                },
+                            )*
                         }
                     };
                 }
 
-                let op = match input_type {
-                    ptype::Type::Bool => match i {
-                        ir::Instr::Eq { .. } => emit_bin!(BEq),
-                        _ => unreachable!(),
-                    },
-                    ptype::Type::Int => match i {
-                        ir::Instr::Add { .. } => emit_bin!(IAdd),
-                        ir::Instr::Sub { .. } => emit_bin!(ISub),
-                        ir::Instr::Mul { .. } => emit_bin!(IMul),
-                        ir::Instr::Div { .. } => emit_bin!(IDiv),
-                        ir::Instr::Lt { .. } => emit_bin!(ILt),
-                        ir::Instr::Gt { .. } => emit_bin!(IGt),
-                        ir::Instr::Eq { .. } => emit_bin!(IEq),
-                        _ => unreachable!(),
-                    },
-                    ptype::Type::Double => match i {
-                        ir::Instr::Add { .. } => emit_bin!(DAdd),
-                        ir::Instr::Sub { .. } => emit_bin!(DSub),
-                        ir::Instr::Mul { .. } => emit_bin!(DMul),
-                        ir::Instr::Div { .. } => emit_bin!(DDiv),
-                        ir::Instr::Lt { .. } => emit_bin!(DLt),
-                        ir::Instr::Gt { .. } => emit_bin!(DGt),
-                        _ => unreachable!(),
-                    },
-                    _ => unreachable!(),
-                };
-
-                self.emit(op);
+                self.emit(emit_bins! {
+                    IAdd, ISub, IMul, IDiv, ILt, IGt, IEq,
+                    DAdd, DSub, DMul, DDiv, DLt, DGt,
+                    BEq
+                });
             }
-            ir::Instr::Noop => {}
-            ir::Instr::Tail { .. } => todo!(),
         };
     }
 

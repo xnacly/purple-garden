@@ -46,45 +46,27 @@ pub struct TypeId {
 }
 
 #[derive(Debug, Clone)]
+pub enum BinOp {
+    IAdd,
+    ISub,
+    IMul,
+    IDiv,
+    ILt,
+    IGt,
+    IEq,
+    DAdd,
+    DSub,
+    DMul,
+    DDiv,
+    DLt,
+    DGt,
+    BEq,
+}
+
+#[derive(Debug, Clone)]
 pub enum Instr<'i> {
-    Add {
-        input_type: Type,
-        dst: TypeId,
-        lhs: Id,
-        rhs: Id,
-    },
-    Sub {
-        input_type: Type,
-        dst: TypeId,
-        lhs: Id,
-        rhs: Id,
-    },
-    Mul {
-        input_type: Type,
-        dst: TypeId,
-        lhs: Id,
-        rhs: Id,
-    },
-    Div {
-        input_type: Type,
-        dst: TypeId,
-        lhs: Id,
-        rhs: Id,
-    },
-    Eq {
-        input_type: Type,
-        dst: TypeId,
-        lhs: Id,
-        rhs: Id,
-    },
-    Lt {
-        input_type: Type,
-        dst: TypeId,
-        lhs: Id,
-        rhs: Id,
-    },
-    Gt {
-        input_type: Type,
+    Bin {
+        op: BinOp,
         dst: TypeId,
         lhs: Id,
         rhs: Id,
@@ -94,17 +76,17 @@ pub enum Instr<'i> {
         value: Const<'i>,
     },
     Call {
-        dst: Id,
+        dst: TypeId,
         func: Id,
         args: Vec<Id>,
     },
     Tail {
-        dst: Id,
+        dst: TypeId,
         func: Id,
         args: Vec<Id>,
     },
     Cast {
-        value: TypeId,
+        dst: TypeId,
         from: Id,
     },
     Noop,

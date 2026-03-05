@@ -59,31 +59,13 @@ impl Display for Func<'_> {
             for ins in &block.instructions {
                 write!(f, "\t")?;
                 match ins {
-                    Instr::Noop => writeln!(f, "nop")?,
-                    Instr::Add { dst, lhs, rhs, .. } => {
-                        writeln!(f, "%v{} = add %v{}, %v{}", dst, lhs.0, rhs.0)?
-                    }
-                    Instr::Sub { dst, lhs, rhs, .. } => {
-                        writeln!(f, "%v{} = sub %v{}, %v{}", dst, lhs.0, rhs.0)?
-                    }
-                    Instr::Mul { dst, lhs, rhs, .. } => {
-                        writeln!(f, "%v{} = mul %v{}, %v{}", dst, lhs.0, rhs.0)?
-                    }
-                    Instr::Div { dst, lhs, rhs, .. } => {
-                        writeln!(f, "%v{} = div %v{}, %v{}", dst, lhs.0, rhs.0)?
-                    }
-                    Instr::Eq { dst, lhs, rhs, .. } => {
-                        writeln!(f, "%v{} = eq %v{}, %v{}", dst, lhs.0, rhs.0)?
-                    }
-                    Instr::Lt { dst, lhs, rhs, .. } => {
-                        writeln!(f, "%v{} = lt %v{}, %v{}", dst, lhs.0, rhs.0)?
-                    }
-                    Instr::Gt { dst, lhs, rhs, .. } => {
-                        writeln!(f, "%v{} = gt %v{}, %v{}", dst, lhs.0, rhs.0)?
+                    Instr::Bin { op, dst, lhs, rhs } => {
+                        writeln!(f, "%v{} = {:?} %v{}, %v{}", dst, op, lhs.0, rhs.0)?
                     }
                     Instr::LoadConst { dst, value } => writeln!(f, "%v{} = {}", dst, value)?,
+                    Instr::Noop => writeln!(f, "nop")?,
                     Instr::Call { dst, func, args } => {
-                        write!(f, "%v{} = ", dst.0)?;
+                        write!(f, "%v{} = ", dst)?;
                         write!(f, "f{}(", func.0)?;
                         for (i, arg) in args.iter().enumerate() {
                             if i + 1 == args.len() {
@@ -95,7 +77,7 @@ impl Display for Func<'_> {
                         writeln!(f, ")")?;
                     }
                     Instr::Tail { dst, func, args } => {
-                        write!(f, "%v{} = ", dst.0)?;
+                        write!(f, "%v{} = ", dst)?;
                         write!(f, "f_tail{}(", func.0)?;
                         for (i, arg) in args.iter().enumerate() {
                             if i + 1 == args.len() {
@@ -106,7 +88,7 @@ impl Display for Func<'_> {
                         }
                         writeln!(f, ")")?;
                     }
-                    Instr::Cast { value, from } => {
+                    Instr::Cast { dst: value, from } => {
                         writeln!(f, "%v{} = cast_to_{} %v{}", value, value.ty, from.0)?
                     }
                 }
