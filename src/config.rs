@@ -16,7 +16,7 @@ pub struct Config {
     /// pub 3: Aggressive compile-time optimisations:
     ///    function inlining, guarded operator specialisation,
     ///    constant hoisting, aggressive register reuse.
-    #[arg(short = 'O', default_value_t = 0)]
+    #[arg(short = 'O', default_value_t = 1)]
     pub opt: usize,
 
     /// Compile the target into native machine code and execute said code
