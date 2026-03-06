@@ -23,6 +23,13 @@ pub struct Cc<'cc> {
 }
 
 impl<'cc> Cc<'cc> {
+    pub fn new() -> Self {
+        Self {
+            buf: Vec::with_capacity(64),
+            ..Default::default()
+        }
+    }
+
     fn emit(&mut self, op: Op) -> usize {
         let pc = self.buf.len();
         self.buf.push(op);
