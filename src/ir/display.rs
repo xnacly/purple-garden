@@ -14,6 +14,88 @@ impl Display for Id {
     }
 }
 
+impl Display for Instr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Instr::Bin { op, dst, lhs, rhs } => {
+                write!(f, "%v{} = {:?} %v{}, %v{}", dst, op, lhs.0, rhs.0)?
+            }
+            Instr::LoadConst { dst, value } => write!(f, "%v{} = {}", dst, value)?,
+            Instr::Noop => write!(f, "nop")?,
+            Instr::Call { dst, func, args } => {
+                write!(f, "%v{} = ", dst)?;
+                write!(f, "call f{}(", func.0)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i + 1 == args.len() {
+                        write!(f, "%v{}", arg.0)?;
+                    } else {
+                        write!(f, "%v{}, ", arg.0)?;
+                    }
+                }
+                write!(f, ")")?;
+            }
+            Instr::Tail { dst, func, args } => {
+                write!(f, "%v{} = ", dst)?;
+                write!(f, "tailcall f{}(", func.0)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i + 1 == args.len() {
+                        write!(f, "%v{}", arg.0)?;
+                    } else {
+                        write!(f, "%v{}, ", arg.0)?;
+                    }
+                }
+                write!(f, ")")?;
+            }
+            Instr::Cast { dst: value, from } => {
+                write!(f, "%v{} = cast_to_{} %v{}", value, value.ty, from.0)?
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Display for Terminator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Terminator::Return(Some(id)) => write!(f, "ret %v{}", id.0)?,
+            Terminator::Return(None) => write!(f, "ret")?,
+            Terminator::Jump { id, params } => {
+                if params.is_empty() {
+                    write!(f, "jmp b{}", id.0)?
+                } else {
+                    write!(
+                        f,
+                        "jmp b{}({})",
+                        id.0,
+                        params
+                            .iter()
+                            .map(|p| format!("%v{}", p.0))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )?
+                }
+            }
+            Terminator::Branch { cond, yes, no } => write!(
+                f,
+                "br %v{}, b{}({}), b{}({})",
+                cond.0,
+                yes.0,
+                yes.1
+                    .iter()
+                    .map(|p| format!("%v{}", p.0))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                no.0,
+                no.1.iter()
+                    .map(|p| format!("%v{}", p.0))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )?,
+        }
+        Ok(())
+    }
+}
+
 impl Display for Func<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let entry_block = self
@@ -29,6 +111,7 @@ impl Display for Func<'_> {
                 write!(f, "%v{}, ", arg)?;
             }
         }
+
         writeln!(
             f,
             ") -> {} {{",
@@ -57,81 +140,11 @@ impl Display for Func<'_> {
             }
 
             for ins in &block.instructions {
-                write!(f, "\t")?;
-                match ins {
-                    Instr::Bin { op, dst, lhs, rhs } => {
-                        writeln!(f, "%v{} = {:?} %v{}, %v{}", dst, op, lhs.0, rhs.0)?
-                    }
-                    Instr::LoadConst { dst, value } => writeln!(f, "%v{} = {}", dst, value)?,
-                    Instr::Noop => writeln!(f, "nop")?,
-                    Instr::Call { dst, func, args } => {
-                        write!(f, "%v{} = ", dst)?;
-                        write!(f, "f{}(", func.0)?;
-                        for (i, arg) in args.iter().enumerate() {
-                            if i + 1 == args.len() {
-                                write!(f, "%v{}", arg.0)?;
-                            } else {
-                                write!(f, "%v{}, ", arg.0)?;
-                            }
-                        }
-                        writeln!(f, ")")?;
-                    }
-                    Instr::Tail { dst, func, args } => {
-                        write!(f, "%v{} = ", dst)?;
-                        write!(f, "f_tail{}(", func.0)?;
-                        for (i, arg) in args.iter().enumerate() {
-                            if i + 1 == args.len() {
-                                write!(f, "%v{}", arg.0)?;
-                            } else {
-                                write!(f, "%v{}, ", arg.0)?;
-                            }
-                        }
-                        writeln!(f, ")")?;
-                    }
-                    Instr::Cast { dst: value, from } => {
-                        writeln!(f, "%v{} = cast_to_{} %v{}", value, value.ty, from.0)?
-                    }
-                }
+                writeln!(f, "\t{ins}")?;
             }
 
             if let Some(term) = &block.term {
-                write!(f, "\t")?;
-                match &term {
-                    Terminator::Return(Some(id)) => writeln!(f, "ret %v{}", id.0)?,
-                    Terminator::Return(None) => writeln!(f, "ret")?,
-                    Terminator::Jump { id, params } => {
-                        if params.is_empty() {
-                            writeln!(f, "jmp b{}", id.0)?
-                        } else {
-                            writeln!(
-                                f,
-                                "jmp b{}({})",
-                                id.0,
-                                params
-                                    .iter()
-                                    .map(|p| format!("%v{}", p.0))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            )?
-                        }
-                    }
-                    Terminator::Branch { cond, yes, no } => writeln!(
-                        f,
-                        "br %v{}, b{}({}), b{}({})",
-                        cond.0,
-                        yes.0,
-                        yes.1
-                            .iter()
-                            .map(|p| format!("%v{}", p.0))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        no.0,
-                        no.1.iter()
-                            .map(|p| format!("%v{}", p.0))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                    )?,
-                }
+                writeln!(f, "\t{term}")?;
             }
         }
 
