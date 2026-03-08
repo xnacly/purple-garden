@@ -24,3 +24,7 @@ panic = "abort"
 [[bench]]
 name = "dispatch"
 harness = false
+
+[[bench]]
+name = "factorial"
+harness = false
