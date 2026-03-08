@@ -77,20 +77,20 @@ impl<'vm> Vm<'vm> {
     }
 
     pub fn run(&mut self) -> Result<(), Anomaly> {
-        let regs = &mut self.r;
+        let regs = self.r.as_mut_ptr();
         let instructions = self.bytecode.as_mut_ptr();
         let instructions_len = self.bytecode.len();
         let globals = self.globals.as_mut_ptr();
 
         macro_rules! r {
             ($n:tt) => {
-                regs.get_unchecked($n as usize)
+                (&*regs.add($n as usize))
             };
         }
 
         macro_rules! r_mut {
             ($n:tt) => {
-                *regs.get_unchecked_mut($n as usize)
+                *regs.add($n as usize)
             };
         }
 
