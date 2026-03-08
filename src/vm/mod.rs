@@ -186,6 +186,10 @@ impl<'vm> Vm<'vm> {
                     self.pc = target as usize;
                     continue;
                 }
+                Op::Tail { func } => {
+                    self.pc = func as usize;
+                    continue;
+                }
                 Op::JmpF { target, cond } => unsafe {
                     if (r!(cond).as_bool()) {
                         self.pc = target as usize;

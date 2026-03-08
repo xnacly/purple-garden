@@ -22,6 +22,7 @@ pub enum Op {
 
     Jmp { target: u16 },
     JmpF { cond: u8, target: u16 },
+    Tail { func: u32 },
 
     Call { func: u32 },
     Sys { idx: u8 },

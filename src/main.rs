@@ -10,8 +10,8 @@ fn main() {
             .to_vec(),
     };
 
-    let mut lexer = Lexer::new(&input);
-    let ast = match Parser::new(&mut lexer).and_then(|n| n.parse()) {
+    let lexer = Lexer::new(&input);
+    let ast = match Parser::new(lexer).and_then(|n| n.parse()) {
         Ok(a) => a,
         Err(e) => {
             let lines = str::from_utf8(&input)

@@ -13,7 +13,14 @@ mod ir;
 mod bc;
 
 pub fn ir(ir: &mut [crate::ir::Func]) {
+    // TODO: think about making all ir optimisations block local, or is the current function local
+    // optimisation scope the better idea?
     for fun in ir {
+        // so all other blocks.last() are valid
+        if fun.blocks.is_empty() {
+            continue;
+        }
+
         ir::indirect_jump(fun);
         ir::tailcall(fun);
     }

@@ -18,8 +18,6 @@ pub struct Cc<'cc> {
     pub ctx: Context<'cc>,
     /// binding a block id to its pc
     block_map: HashMap<ir::Id, u16>,
-    /// prefilled block id to block
-    blocks: HashMap<ir::Id, &'cc ir::Block<'cc>>,
 }
 
 impl<'cc> Cc<'cc> {
@@ -37,25 +35,24 @@ impl<'cc> Cc<'cc> {
     }
 
     /// Compile a list of ir functions to bytecode instructions
-    pub fn compile(&mut self, ir: &'cc [Func<'cc>]) -> Result<(), PgError> {
+    pub fn compile(&mut self, ir: &[Func<'cc>]) -> Result<(), PgError> {
         for func in ir {
             let _ = self.cc(func)?;
         }
         Ok(())
     }
 
-    fn cc(&mut self, fun: &'cc Func<'cc>) -> Result<Option<reg::Reg>, PgError> {
+    fn cc(&mut self, fun: &Func<'cc>) -> Result<Option<reg::Reg>, PgError> {
         // since we have a ssa based ir, we use our register allocator in a function local way and
         // spill any register usage >= 64 on the vm stack, this should be very fast for the general
         // usage and extensible enough for extreme niche usecases requiring more than 64 alive
         // values at the same time
 
         let pc = self.buf.len();
-        let f = ctx::Func { pc, name: fun.name };
+        let f: ctx::Func<'cc> = ctx::Func { pc, name: fun.name };
         // binding the id of a function to its context
         self.ctx.functions.insert(fun.id, f);
 
-        self.blocks = fun.blocks.iter().map(|b| (b.id, b)).collect();
         for block in &fun.blocks {
             if block.tombstone {
                 continue;
@@ -64,10 +61,10 @@ impl<'cc> Cc<'cc> {
             self.block_map.insert(block.id, self.buf.len() as u16);
 
             for instruction in &block.instructions {
-                self.instr(instruction);
+                self.instr(fun, instruction);
             }
 
-            self.term(block.term.as_ref());
+            self.term(fun, block.term.as_ref());
         }
 
         crate::trace!(
@@ -79,7 +76,7 @@ impl<'cc> Cc<'cc> {
         Ok(None)
     }
 
-    fn term(&mut self, t: Option<&ir::Terminator>) {
+    fn term(&mut self, fun: &Func<'cc>, t: Option<&ir::Terminator>) {
         let Some(term) = t else {
             return;
         };
@@ -99,7 +96,7 @@ impl<'cc> Cc<'cc> {
                 self.emit(Op::Ret);
             }
             ir::Terminator::Jump { id, params } => {
-                let target = *self.blocks.get(id).unwrap();
+                let target = &fun.blocks.get(id.0 as usize).unwrap();
                 for (i, param) in params.iter().enumerate() {
                     let ir::Id(src) = param;
                     let ir::Id(dst) = target.params[i];
@@ -123,7 +120,7 @@ impl<'cc> Cc<'cc> {
                 no: (no, no_params),
                 ..
             } => {
-                let target = *self.blocks.get(yes).unwrap();
+                let target = &fun.blocks.get(yes.0 as usize).unwrap();
                 for (i, param) in yes_params.iter().enumerate() {
                     let ir::Id(src) = param;
                     let ir::Id(dst) = target.params[i];
@@ -144,7 +141,7 @@ impl<'cc> Cc<'cc> {
                     target: yes.0 as u16,
                 });
 
-                let target = self.blocks[no];
+                let target = &fun.blocks.get(no.0 as usize).unwrap();
                 for (i, param) in no_params.iter().enumerate() {
                     let ir::Id(src) = param;
                     let ir::Id(dst) = target.params[i];
@@ -166,7 +163,7 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn instr(&mut self, i: &ir::Instr<'cc>) {
+    fn instr(&mut self, fun: &Func<'cc>, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::Cast {
                 dst:
@@ -222,8 +219,8 @@ impl<'cc> Cc<'cc> {
                     }
                 }
 
-                // TODO: we need a live set building pass to only restore values that are used
-                // after the call and were defined before the call
+                // TODO: we need a live set building pass to save values that are used
+                // after the call and were defined before the Call with Push, Pop
 
                 let TypeId {
                     id: ir::Id(dst), ..
@@ -234,8 +231,22 @@ impl<'cc> Cc<'cc> {
                     src: 0,
                 });
             }
+            ir::Instr::Tail { dst, func, args } => {
+                let Some(func) = self.ctx.functions.get(func) else {
+                    unreachable!();
+                };
+
+                let pc = func.pc;
+                for (i, &ir::Id(arg)) in args.iter().enumerate() {
+                    let (dst, src) = (i as u8, arg as u8);
+                    if dst != src {
+                        self.emit(Op::Mov { dst, src });
+                    }
+                }
+
+                self.emit(Op::Tail { func: pc as u32 });
+            }
             ir::Instr::Noop {} => {}
-            ir::Instr::Tail { .. } => todo!(),
             ir::Instr::Bin { op, dst, lhs, rhs } => {
                 let (
                     TypeId {
@@ -278,9 +289,6 @@ impl<'cc> Cc<'cc> {
             .map(|n| n.pc)
             .unwrap_or_default();
 
-        // second bytecode pass to resolve jumps from block Ids to bytecode positions, this enables
-        // us to do resizing optimisations beforehand, due to our offset based jumps holding their
-        // block ids before this pass
         for i in 0..self.buf.len() {
             let instr = self.buf[i];
             if let Some(new) = match instr {

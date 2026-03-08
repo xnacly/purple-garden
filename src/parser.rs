@@ -7,13 +7,13 @@ use crate::{
 /// Parsing the token stream one token at a time into the abstract syntax tree, see
 /// [ast.rs](./ast.rs) for documentation regarding each node and the way those should be parsed.
 pub struct Parser<'p> {
-    lex: &'p mut Lexer<'p>,
+    lex: Lexer<'p>,
     id: usize,
     cur: Token<'p>,
 }
 
 impl<'p> Parser<'p> {
-    pub fn new(lex: &'p mut Lexer<'p>) -> Result<Self, PgError> {
+    pub fn new(mut lex: Lexer<'p>) -> Result<Self, PgError> {
         let cur = lex.one()?;
         Ok(Self { cur, lex, id: 0 })
     }
@@ -369,7 +369,7 @@ mod tests {
                     #[test]
                     fn $name() {
                         let mut l = Lexer::new($input.as_bytes());
-                        let mut p = Parser::new(&mut l).unwrap();
+                        let mut p = Parser::new(l).unwrap();
                         let tt = p.parse_type().unwrap();
                         assert_eq!(tt, $expected);
                     }
@@ -449,7 +449,7 @@ mod tests {
                     #[test]
                     fn $name() {
                         let mut l = Lexer::new($input.as_bytes());
-                        let p = Parser::new(&mut l).unwrap();
+                        let p = Parser::new(l).unwrap();
                         let tt = p.parse().unwrap();
                         assert_eq!(tt, $expected);
                     }

@@ -73,7 +73,7 @@ impl<'lower> Lower<'lower> {
         self.block = id
     }
 
-    fn lower_node(&mut self, node: &'lower Node) -> Result<Option<Id>, PgError> {
+    fn lower_node(&mut self, node: &Node<'lower>) -> Result<Option<Id>, PgError> {
         Ok(match node {
             Node::Atom { raw, .. } => {
                 let value = match raw.t {
@@ -387,7 +387,7 @@ impl<'lower> Lower<'lower> {
     }
 
     /// Lower [ast] into a list of Func nodes, the entry point is always `entry`
-    pub fn ir_from(mut self, ast: &'lower [Node]) -> Result<Vec<Func<'lower>>, PgError> {
+    pub fn ir_from(mut self, ast: &[Node<'lower>]) -> Result<Vec<Func<'lower>>, PgError> {
         let mut typechecker = typecheck::Typechecker::new();
         for node in ast {
             let _t = typechecker.node(node)?;

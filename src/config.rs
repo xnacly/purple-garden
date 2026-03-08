@@ -1,4 +1,4 @@
-#[derive(clap::Parser, Debug, Default)]
+#[derive(clap::Parser, Debug)]
 #[command(about, version, long_about=None)]
 pub struct Config {
     /// Set optimisation level. Higher levels increase compile time.
