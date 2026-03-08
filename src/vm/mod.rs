@@ -94,14 +94,13 @@ impl<'vm> Vm<'vm> {
             };
         }
 
-        loop {
-            if self.pc >= instructions_len {
-                break;
-            }
+        let mut pc = self.pc;
 
-            crate::trace!("[vm][{:04}] {:?}", self.pc, self.bytecode[self.pc]);
+        while pc < instructions_len {
+            let op = unsafe { *instructions.add(pc) };
+            crate::trace!("[vm][{:04}] {:?}", pc, op);
 
-            match unsafe { *instructions.add(self.pc) } {
+            match op {
                 Op::Nop => {}
                 Op::LoadI { dst, value } => unsafe {
                     r_mut!(dst) = Value::from(value as i64);
@@ -125,7 +124,7 @@ impl<'vm> Vm<'vm> {
                 Op::IDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
-                    trap_if!(r == 0, Anomaly::DivisionByZero { pc: self.pc });
+                    trap_if!(r == 0, Anomaly::DivisionByZero { pc: pc });
                     r_mut!(dst) = Value::from(l / r);
                 },
                 Op::IEq { dst, lhs, rhs } => unsafe {
@@ -161,7 +160,7 @@ impl<'vm> Vm<'vm> {
                 Op::DDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
-                    trap_if!(r == 0 as f64, Anomaly::DivisionByZero { pc: self.pc });
+                    trap_if!(r == 0 as f64, Anomaly::DivisionByZero { pc: pc });
                     r_mut!(dst) = Value::from(l / r);
                 },
                 Op::DGt { dst, lhs, rhs } => unsafe {
@@ -183,16 +182,16 @@ impl<'vm> Vm<'vm> {
                     r_mut!(dst) = *r!(src);
                 },
                 Op::Jmp { target } => {
-                    self.pc = target as usize;
+                    pc = target as usize;
                     continue;
                 }
                 Op::Tail { func } => {
-                    self.pc = func as usize;
+                    pc = func as usize;
                     continue;
                 }
                 Op::JmpF { target, cond } => unsafe {
                     if (r!(cond).as_bool()) {
-                        self.pc = target as usize;
+                        pc = target as usize;
                         continue;
                     }
                 },
@@ -201,8 +200,8 @@ impl<'vm> Vm<'vm> {
                         self.backtrace.push(func as usize);
                     }
 
-                    self.frames.push(CallFrame { return_to: self.pc });
-                    self.pc = func as usize;
+                    self.frames.push(CallFrame { return_to: pc });
+                    pc = func as usize;
                     continue;
                 }
                 Op::Ret => {
@@ -212,7 +211,7 @@ impl<'vm> Vm<'vm> {
                     let Some(frame) = self.frames.pop() else {
                         unreachable!("Op::Ret had no frame to drop, this is a compiler bug");
                     };
-                    self.pc = frame.return_to;
+                    pc = frame.return_to;
                 }
                 Op::Push { src } => unsafe {
                     self.spilled.push(*r!(src));
@@ -231,12 +230,14 @@ impl<'vm> Vm<'vm> {
                 },
                 i => {
                     dbg!(i);
-                    return Err(Anomaly::Unimplemented { pc: self.pc });
+                    return Err(Anomaly::Unimplemented { pc });
                 }
             }
 
-            self.pc += 1;
+            pc += 1;
         }
+
+        self.pc = pc;
 
         Ok(())
     }
