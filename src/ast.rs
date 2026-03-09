@@ -78,32 +78,19 @@ pub enum Node<'node> {
         args: Vec<Node<'node>>,
     },
 
+    /// <lhs> as <rhs>
     Cast {
         id: usize,
         src: Token<'node>,
         lhs: Box<Node<'node>>,
         rhs: TypeExpr<'node>,
     },
-    // <path0>::<path1>::<leaf>
-    // Path {
-    //     id: usize,
-    //     members: Vec<Token<'node>>,
-    //     leaf: Box<Node<'node>>,
-    // },
-
+    //
     // <target>[<index>]
     // Idx {
     //     id: usize,
     //     target: Box<Node<'node>>,
     //     index: Box<Node<'node>>,
-    // },
-
-    // for <param> :: <target> { <body> }
-    // For {
-    //     id: usize,
-    //     target: Box<Node<'node>>,
-    //     param: Token<'node>,
-    //     body: Vec<Node<'node>>,
     // },
 }
 

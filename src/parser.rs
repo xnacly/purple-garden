@@ -83,7 +83,6 @@ impl<'p> Parser<'p> {
             Type::Let => self.parse_let(),
             Type::Fn => self.parse_fn(),
             Type::Match => self.parse_match(),
-            Type::For => self.parse_for(),
             _ => self.parse_expr(0),
         }
     }
@@ -176,10 +175,6 @@ impl<'p> Parser<'p> {
             cases,
             default,
         })
-    }
-
-    fn parse_for(&mut self) -> Result<Node<'p>, PgError> {
-        todo!("Parser::parse_for");
     }
 
     fn parse_expr(&mut self, min_bp: u8) -> Result<Node<'p>, PgError> {

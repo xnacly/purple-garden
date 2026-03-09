@@ -19,7 +19,7 @@ impl From<&Token<'_>> for PgError {
             Type::S(i) | Type::Ident(i) | Type::D(i) | Type::I(i) => i.len(),
             Type::True => 4,
             Type::False | Type::Match => 5,
-            Type::Let | Type::For => 3,
+            Type::Let => 3,
             Type::Fn | Type::DoubleColon => 2,
             // all others are a single byte long
             _ => 1,

@@ -36,7 +36,6 @@ pub enum Type<'t> {
     Let,
     Fn,
     Match,
-    For,
     As,
 
     // type keywords
@@ -100,7 +99,6 @@ impl<'t> Type<'t> {
             Type::Let => "let",
             Type::Fn => "fn",
             Type::Match => "match",
-            Type::For => "for",
             Type::As => "as",
             Type::Str => "str",
             Type::Int => "int",
