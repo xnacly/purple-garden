@@ -138,10 +138,6 @@ impl<'l> Lexer<'l> {
             }
             b'!' => self.make_tok(Type::Exclaim),
             b'?' => self.make_tok(Type::Question),
-            b':' if matches!(self.peek(), Some(b':')) => {
-                self.advance();
-                self.make_tok(Type::DoubleColon)
-            }
             b':' => self.make_tok(Type::Colon),
             b'[' => self.make_tok(Type::BraketLeft),
             b']' => self.make_tok(Type::BraketRight),
@@ -266,11 +262,8 @@ mod tests {
 
     #[test]
     fn double_char_tokens() {
-        let toks = lex(":: == !=");
-        assert_eq!(
-            toks,
-            vec![Type::DoubleColon, Type::DoubleEqual, Type::NotEqual]
-        );
+        let toks = lex("== !=");
+        assert_eq!(toks, vec![Type::DoubleEqual, Type::NotEqual]);
     }
 
     #[test]
@@ -399,19 +392,5 @@ mod tests {
         let t2 = l.one().unwrap();
         assert_eq!(t1.t, Type::Eof);
         assert_eq!(t2.t, Type::Eof);
-    }
-
-    #[test]
-    fn weird_colons() {
-        let toks = lex("::: :: :");
-        assert_eq!(
-            toks,
-            vec![
-                Type::DoubleColon,
-                Type::Colon,
-                Type::DoubleColon,
-                Type::Colon,
-            ]
-        );
     }
 }

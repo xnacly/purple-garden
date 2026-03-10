@@ -20,7 +20,7 @@ impl From<&Token<'_>> for PgError {
             Type::True => 4,
             Type::False | Type::Match => 5,
             Type::Let => 3,
-            Type::Fn | Type::DoubleColon => 2,
+            Type::Fn => 2,
             // all others are a single byte long
             _ => 1,
         };
