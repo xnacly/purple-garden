@@ -19,7 +19,7 @@ pub fn id_from_node(node: &Node) -> Option<usize> {
         | Node::Match { id, .. }
         | Node::Call { id, .. }
         | Node::Cast { id, .. } => *id,
-        Node::Fn { .. } => return None,
+        Node::Fn { .. } | Node::Import { .. } => return None,
     })
 }
 
@@ -387,8 +387,12 @@ impl<'t> Typechecker<'t> {
                 self.map.insert(*id, first_type.clone());
                 first_type
             }
-
-            _ => todo!("{:?}", node),
+            Node::Import { id, pkgs } => {
+                // TODO: add each path to the env
+                todo!()
+            }
+            Node::Array { id, members } => todo!(),
+            Node::Object { id, pairs } => todo!(),
         })
     }
 }
