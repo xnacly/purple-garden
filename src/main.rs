@@ -3,6 +3,14 @@ use std::{collections::HashMap, fs};
 
 fn main() {
     let args = <config::Config as clap::Parser>::parse();
+    if let Some(cmd) = args.command {
+        match cmd {
+            config::Command::Doc { pkg_or_function } => {
+                todo!("doc${pkg_or_function}");
+                std::process::exit(0);
+            }
+        }
+    }
     let input = match args.run {
         Some(ref i) => i.as_bytes().to_vec(),
         None => fs::read(args.target.clone().expect("No file or `-r` specified"))

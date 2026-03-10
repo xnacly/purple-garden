@@ -18,7 +18,8 @@ pub fn id_from_node(node: &Node) -> Option<usize> {
         | Node::Let { id, .. }
         | Node::Match { id, .. }
         | Node::Call { id, .. }
-        | Node::Cast { id, .. } => *id,
+        | Node::Cast { id, .. }
+        | Node::Field { id, .. } => *id,
         Node::Fn { .. } | Node::Import { .. } => return None,
     })
 }
@@ -285,21 +286,28 @@ impl<'t> Typechecker<'t> {
                 self.map.insert(*id, cast.clone());
                 cast
             }
-            Node::Call { id, name, args } => {
-                let lex::Token {
-                    t: lex::Type::Ident(inner_name),
-                    ..
-                } = name
-                else {
-                    unreachable!()
-                };
-
-                let Some(fun) = self.functions.get(inner_name).cloned() else {
-                    return Err(PgError::with_msg(
-                        "Undefined function",
-                        format!("Call to undefined function `{}`", inner_name),
-                        name,
-                    ));
+            Node::Field { .. } => todo!(),
+            Node::Call { id, target, args } => {
+                let (tok, inner_name, fun) = match target.as_ref() {
+                    Node::Field { .. } => todo!("package.function() lookup"),
+                    Node::Atom { raw, .. } => {
+                        let lex::Token {
+                            t: lex::Type::Ident(inner_name),
+                            ..
+                        } = raw
+                        else {
+                            unreachable!();
+                        };
+                        let Some(fun) = self.functions.get(inner_name).cloned() else {
+                            return Err(PgError::with_msg(
+                                "Undefined function",
+                                format!("Call to undefined function `{}`", inner_name),
+                                raw,
+                            ));
+                        };
+                        (raw, inner_name, fun)
+                    }
+                    _ => unreachable!(),
                 };
 
                 if args.len() != fun.args.len() {
@@ -311,7 +319,7 @@ impl<'t> Typechecker<'t> {
                             fun.args.len(),
                             args.len()
                         ),
-                        name,
+                        tok,
                     ));
                 }
 
@@ -328,7 +336,7 @@ impl<'t> Typechecker<'t> {
                                 "`{}` arg{} expected type {}, got {} instead",
                                 inner_name, i, expected_type, provided_type,
                             ),
-                            name,
+                            tok,
                         ));
                     }
                 }

@@ -250,16 +250,27 @@ impl<'lower> Lower<'lower> {
                 self.block = old_block;
                 None
             }
-            Node::Call { name, args, .. } => {
-                let Type::Ident(ident_name) = name.t else {
-                    unreachable!()
+            Node::Call { target, args, .. } => {
+                let (tok, ident_name) = match target.as_ref() {
+                    Node::Field { .. } => todo!("package.function() lookup"),
+                    Node::Atom { raw, .. } => {
+                        let crate::lex::Token {
+                            t: crate::lex::Type::Ident(inner_name),
+                            ..
+                        } = raw
+                        else {
+                            unreachable!();
+                        };
+                        (raw, inner_name)
+                    }
+                    _ => unreachable!(),
                 };
 
                 let Some(target_id) = self.func_name_to_id.get(ident_name).cloned() else {
                     return Err(PgError::with_msg(
                         "Undefined function",
                         format!("Undefined function `{ident_name}`"),
-                        name,
+                        tok,
                     ));
                 };
 

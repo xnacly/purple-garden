@@ -4,13 +4,17 @@ pub mod op;
 pub mod value;
 
 pub const REGISTER_COUNT: usize = 64;
+pub const SYSCALL_COUNT: usize = 1024;
 
 use crate::config::Config;
 pub use crate::vm::anomaly::Anomaly;
 pub use crate::vm::value::Value;
 use op::Op;
 
-pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>, &[Value]) -> Option<Value>;
+pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>) -> Result<Value, Anomaly>;
+fn syscall_unimplemented<'vm>(vm: &mut Vm<'vm>) -> Result<Value, Anomaly> {
+    Err(Anomaly::InvalidSyscall { pc: vm.pc })
+}
 
 #[derive(Default, Debug)]
 pub struct CallFrame {
@@ -35,6 +39,8 @@ pub struct Vm<'vm> {
     /// function the virtual machine currently executes in, this behaviour only occurs if
     /// --backtrace was passed as an option to the interpreter
     pub backtrace: Vec<usize>,
+
+    pub syscalls: [BuiltinFn<'vm>; SYSCALL_COUNT],
 
     config: &'vm Config,
 }
@@ -72,6 +78,7 @@ impl<'vm> Vm<'vm> {
             strings: Vec::new(),
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(REGISTER_COUNT),
+            syscalls: [syscall_unimplemented; SYSCALL_COUNT],
             config,
         }
     }
@@ -81,6 +88,7 @@ impl<'vm> Vm<'vm> {
         let instructions = self.bytecode.as_mut_ptr();
         let instructions_len = self.bytecode.len();
         let globals = self.globals.as_mut_ptr();
+        let syscalls = self.syscalls.as_mut_ptr();
 
         macro_rules! r {
             ($n:tt) => {
@@ -204,6 +212,10 @@ impl<'vm> Vm<'vm> {
                     pc = func as usize;
                     continue;
                 }
+                Op::Sys { idx } => unsafe {
+                    // PERF: is ? good here? Or should i add a branch preditiction hint
+                    r_mut!(0) = (*syscalls.add(idx as usize))(self)?;
+                },
                 Op::Ret => {
                     if self.config.backtrace {
                         self.backtrace.pop();
@@ -228,6 +240,7 @@ impl<'vm> Vm<'vm> {
                 Op::CastToBool { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_bool();
                 },
+
                 i => {
                     dbg!(i);
                     return Err(Anomaly::Unimplemented { pc });

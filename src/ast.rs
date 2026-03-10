@@ -71,11 +71,18 @@ pub enum Node<'node> {
         default: (Token<'node>, Vec<Node<'node>>),
     },
 
-    /// <name>(<args>)
+    /// <target>(<args>)
     Call {
         id: usize,
-        name: Token<'node>,
+        target: Box<Node<'node>>,
         args: Vec<Node<'node>>,
+    },
+
+    /// <target>.<name>
+    Field {
+        id: usize,
+        target: Box<Node<'node>>,
+        name: Token<'node>,
     },
 
     /// <lhs> as <rhs>
@@ -191,8 +198,9 @@ impl<'a> Node<'a> {
                 }
                 writeln!(f, "{})->{}", pad, return_type)
             }
-            Node::Call { name, args, .. } => {
-                write!(f, "{}({}", pad, name.t.as_str())?;
+            Node::Call { target, args, .. } => {
+                write!(f, "{}(", pad,)?;
+                target.fmt_sexpr(f, indent);
                 if !args.is_empty() {
                     writeln!(f)?;
                     for arg in args {
@@ -234,6 +242,11 @@ impl<'a> Node<'a> {
                     write!(f, "\"{s}\"")?;
                 }
                 writeln!(f, ")")
+            }
+            Node::Field { id, target, name } => {
+                writeln!(f, "{}(get ", pad)?;
+                target.fmt_sexpr(f, indent + 1)?;
+                writeln!(f, ".{})", name.t.as_str())
             }
         }
     }

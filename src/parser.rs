@@ -217,26 +217,12 @@ impl<'p> Parser<'p> {
                 }
             }
             Type::Ident(_) => {
-                let name = self.cur.clone();
+                let first = self.cur.clone();
                 self.advance()?;
-                // we are in a function call
-                if self.cur().t == Type::BraceLeft {
-                    self.advance()?;
-                    let mut args = vec![];
-                    while !self.at_end() && self.cur().t != Type::BraceRight {
-                        args.push(self.parse_prefix()?);
-                    }
-                    self.advance()?;
-                    Node::Call {
-                        name,
-                        args,
-                        id: self.next_id(),
-                    }
-                } else {
-                    Node::Ident {
-                        name,
-                        id: self.next_id(),
-                    }
+
+                Node::Ident {
+                    name: first,
+                    id: self.next_id(),
                 }
             }
             Type::BraceLeft => {
@@ -259,6 +245,32 @@ impl<'p> Parser<'p> {
             _ => todo!("{:?}", self.cur().t),
         };
 
+        loop {
+            match self.cur().t {
+                Type::Dot => {
+                    self.advance()?;
+                    let field = self.expect_ident()?;
+
+                    todo!("add Node::Field for indexing");
+                    // lhs = Node::Field {
+                    //     id: self.next_id(),
+                    //     lhs: Box::new(lhs),
+                    //     name: field,
+                    // };
+                }
+
+                _ => break,
+            }
+        }
+
+        // postfix parsing loop
+
+        // TODO: parse Calls and indexing here, supporting:
+        //
+        // <obj>.<idx field>.<idx field>. ...
+        // <pkg>.<func>(<args>)
+
+        // infix parsing loop
         while let Type::Plus
         | Type::Minus
         | Type::Asteriks

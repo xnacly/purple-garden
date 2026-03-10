@@ -60,6 +60,14 @@ pub struct Config {
     #[arg(short)]
     pub run: Option<String>,
     pub target: Option<String>,
+
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum Command {
+    Doc { pkg_or_function: String },
 }
 
 impl Config {
@@ -78,6 +86,7 @@ impl Config {
             no_jit: false,
             run: None,
             target: None,
+            command: None,
         }
     }
 }
