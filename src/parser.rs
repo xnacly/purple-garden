@@ -34,7 +34,7 @@ impl<'p> Parser<'p> {
 
     fn expect(&mut self, ty: Type) -> Result<(), PgError> {
         if self.cur.t == ty {
-            self.next()?;
+            self.advance()?;
         } else {
             return Err(PgError::with_msg(
                 "Unexpected Token",
@@ -54,7 +54,7 @@ impl<'p> Parser<'p> {
     fn expect_ident(&mut self) -> Result<Token<'p>, PgError> {
         if let Type::Ident(_) = self.cur.t {
             let matched = self.cur.clone();
-            self.next()?;
+            self.advance()?;
             Ok(matched)
         } else {
             Err(PgError::with_msg(
@@ -65,7 +65,7 @@ impl<'p> Parser<'p> {
         }
     }
 
-    fn next(&mut self) -> Result<(), PgError> {
+    fn advance(&mut self) -> Result<(), PgError> {
         self.cur = self.lex.one()?;
         Ok(())
     }
@@ -80,11 +80,38 @@ impl<'p> Parser<'p> {
 
     fn parse_prefix(&mut self) -> Result<Node<'p>, PgError> {
         match self.cur().t {
+            Type::Import => self.parse_import(),
             Type::Let => self.parse_let(),
             Type::Fn => self.parse_fn(),
             Type::Match => self.parse_match(),
             _ => self.parse_expr(0),
         }
+    }
+
+    fn parse_import(&mut self) -> Result<Node<'p>, PgError> {
+        // skip Import
+        self.advance()?;
+        self.expect(Type::BraceLeft)?;
+
+        let mut pkgs = Vec::new();
+
+        while !self.at_end() && self.cur().t != Type::BraceRight {
+            let &Token { t: Type::S(_), .. } = self.cur() else {
+                return Err(PgError::with_msg(
+                    "Malformed import",
+                    "Only strings are allowed as import paths",
+                    &self.cur,
+                ));
+            };
+            pkgs.push(self.cur().clone());
+            self.advance()?;
+        }
+
+        self.expect(Type::BraceRight)?;
+        Ok(Node::Import {
+            id: self.next_id(),
+            pkgs,
+        })
     }
 
     fn parse_let(&mut self) -> Result<Node<'p>, PgError> {
@@ -100,12 +127,12 @@ impl<'p> Parser<'p> {
     }
 
     fn parse_fn(&mut self) -> Result<Node<'p>, PgError> {
-        self.next()?;
+        self.advance()?;
         let name = self.expect_ident()?;
 
         self.expect(Type::BraceLeft)?;
         let mut args = vec![];
-        while self.cur().t != Type::BraceRight {
+        while !self.at_end() && self.cur().t != Type::BraceRight {
             let arg_name = self.expect_ident()?;
             self.expect(Type::Colon)?;
             let arg_type = self.parse_type()?;
@@ -117,7 +144,7 @@ impl<'p> Parser<'p> {
 
         let mut body = vec![];
         self.expect(Type::CurlyLeft)?;
-        while self.cur().t != Type::CurlyRight {
+        while !self.at_end() && self.cur().t != Type::CurlyRight {
             body.push(self.parse_prefix()?);
         }
         self.expect(Type::CurlyRight)?;
@@ -131,19 +158,19 @@ impl<'p> Parser<'p> {
     }
 
     fn parse_match(&mut self) -> Result<Node<'p>, PgError> {
-        self.next()?;
+        self.advance()?;
         let mut cases = vec![];
         let mut default = None;
         let tok = self.cur().clone();
 
         self.expect(Type::CurlyLeft)?;
-        while self.cur().t != Type::CurlyRight {
+        while !self.at_end() && self.cur().t != Type::CurlyRight {
             // default case
             if self.cur().t == Type::CurlyLeft {
                 let default_token = self.cur().clone();
                 self.expect(Type::CurlyLeft)?;
                 let mut default_body = vec![];
-                while self.cur().t != Type::CurlyRight {
+                while !self.at_end() && self.cur().t != Type::CurlyRight {
                     default_body.push(self.parse_prefix()?);
                 }
                 self.expect(Type::CurlyRight)?;
@@ -153,7 +180,7 @@ impl<'p> Parser<'p> {
                 let condition = self.parse_expr(0)?;
                 self.expect(Type::CurlyLeft)?;
                 let mut body = vec![];
-                while self.cur().t != Type::CurlyRight {
+                while !self.at_end() && self.cur().t != Type::CurlyRight {
                     body.push(self.parse_prefix()?);
                 }
                 self.expect(Type::CurlyRight)?;
@@ -181,7 +208,7 @@ impl<'p> Parser<'p> {
         let mut lhs = match self.cur().t {
             Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => {
                 let raw = self.cur.clone();
-                self.next()?;
+                self.advance()?;
                 Node::Atom {
                     raw,
                     id: self.next_id(),
@@ -189,15 +216,15 @@ impl<'p> Parser<'p> {
             }
             Type::Ident(_) => {
                 let name = self.cur.clone();
-                self.next()?;
+                self.advance()?;
                 // we are in a function call
                 if self.cur().t == Type::BraceLeft {
-                    self.next()?;
+                    self.advance()?;
                     let mut args = vec![];
-                    while self.cur().t != Type::BraceRight {
+                    while !self.at_end() && self.cur().t != Type::BraceRight {
                         args.push(self.parse_prefix()?);
                     }
-                    self.next()?;
+                    self.advance()?;
                     Node::Call {
                         name,
                         args,
@@ -211,7 +238,7 @@ impl<'p> Parser<'p> {
                 }
             }
             Type::BraceLeft => {
-                self.next()?;
+                self.advance()?;
                 let e = self.parse_expr(0)?;
                 self.expect(Type::BraceRight)?;
                 e
@@ -219,7 +246,7 @@ impl<'p> Parser<'p> {
             Type::Plus | Type::Minus => {
                 let op = self.cur().clone();
                 let rbp = Parser::prefix_binding_power(&self.cur().t);
-                self.next()?;
+                self.advance()?;
                 let rhs = self.parse_expr(rbp)?;
                 Node::Unary {
                     id: self.next_id(),
@@ -243,7 +270,7 @@ impl<'p> Parser<'p> {
             let op = self.cur().clone();
 
             if let Token { t: Type::As, .. } = op {
-                self.next()?;
+                self.advance()?;
                 let ty = self.parse_type()?;
                 lhs = Node::Cast {
                     src: op,
@@ -259,7 +286,7 @@ impl<'p> Parser<'p> {
                     break;
                 }
 
-                self.next()?;
+                self.advance()?;
 
                 let rhs = self.parse_expr(rbp)?;
                 lhs = Node::Bin {
@@ -298,12 +325,12 @@ impl<'p> Parser<'p> {
         Ok(match t {
             // Optionals: ?<type>
             Type::Question => {
-                self.next()?;
+                self.advance()?;
                 TypeExpr::Option(Box::new(self.parse_type()?))
             }
             // Arrays: [<type>]
             Type::BraketLeft => {
-                self.next()?;
+                self.advance()?;
                 let inner = Box::new(self.parse_type()?);
                 self.expect(Type::BraketRight)?;
                 TypeExpr::Array(inner)
@@ -311,11 +338,11 @@ impl<'p> Parser<'p> {
             // Atom types
             Type::Str | Type::Int | Type::Bool | Type::Void | Type::Double => {
                 let tt = TypeExpr::Atom(self.cur().clone());
-                self.next()?;
+                self.advance()?;
 
                 // Map/object <type>[<type>]
                 if self.cur().t == Type::BraketLeft {
-                    self.next()?;
+                    self.advance()?;
                     let value = self.parse_type()?;
                     self.expect(Type::BraketRight)?;
                     TypeExpr::Map {
