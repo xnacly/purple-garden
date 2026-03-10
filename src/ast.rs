@@ -85,13 +85,13 @@ pub enum Node<'node> {
         lhs: Box<Node<'node>>,
         rhs: TypeExpr<'node>,
     },
-    //
-    // <target>[<index>]
-    // Idx {
-    //     id: usize,
-    //     target: Box<Node<'node>>,
-    //     index: Box<Node<'node>>,
-    // },
+
+    /// import ("<pkg name>" "<pkg name>")
+    Import {
+        id: usize,
+        /// list of packages to import as strings
+        pkgs: Vec<Token<'node>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,6 +223,16 @@ impl<'a> Node<'a> {
                 }
                 writeln!(f, "{} )", pad)?;
                 writeln!(f, "{})", pad)
+            }
+            Node::Import { id, pkgs } => {
+                write!(f, "{}(import ", pad)?;
+                for pkg in pkgs {
+                    let Token { t: Type::S(s), .. } = pkg else {
+                        unreachable!();
+                    };
+                    write!(f, "\"{s}\"")?;
+                }
+                writeln!(f, ")")
             }
         }
     }
