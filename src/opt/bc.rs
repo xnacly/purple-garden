@@ -2,7 +2,9 @@ use crate::vm::op::Op;
 
 /// self_move removes patterns conforming to
 ///
-///     Mov { dst: x, src: x },
+/// ```text
+/// Mov { dst: x, src: x },
+/// ```
 ///
 /// where both dst == src
 pub fn self_move(window: &mut [Op]) {
@@ -17,13 +19,17 @@ pub fn self_move(window: &mut [Op]) {
 }
 
 /// mov_merge merges two movs which can be represented as a single mov:
-///     
-///     Mov { dst: 8, src: 0 }
-///     Mov { dst: 2, src: 8 }
+///
+/// ```text
+/// Mov { dst: 8, src: 0 }
+/// Mov { dst: 2, src: 8 }
+/// ```
 ///
 /// Into
 ///
-///     Mov { dst: 2, src: 0 }
+/// ```text
+/// Mov { dst: 2, src: 0 }
+/// ```
 ///
 /// This is a fallback for the copy propagation missing some movs between blocks
 pub fn mov_merge(window: &mut [Op]) {

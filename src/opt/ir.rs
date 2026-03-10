@@ -2,6 +2,7 @@ use crate::ir::{self, Instr};
 
 /// merges a br to block A indirected by a single jmp in block B into a direct br to A:
 ///
+/// ```text
 ///     b1:
 ///             %v4:Bool = True
 ///             br %v4, b2, b3
@@ -9,14 +10,16 @@ use crate::ir::{self, Instr};
 ///             jmp b4(%v1) // <- redundant
 ///     b3:
 ///     b4:
+/// ```
 ///
 /// Should be:
-///
+/// ```text
 ///     b1:
 ///             %v4:Bool = True
 ///             br %v4, b4, b3
 ///     b3:
 ///     b4:
+/// ```
 pub fn indirect_jump(fun: &mut ir::Func) {
     for i in 0..fun.blocks.len() {
         let Some(ir::Terminator::Branch {
@@ -86,7 +89,8 @@ pub fn indirect_jump(fun: &mut ir::Func) {
 /// In ir terms, this detects both patterns A and B:
 ///
 /// - A: very simple tailcalls:
-/// ```
+///
+/// ```text
 /// // tailcallee
 /// fn f1(%v0) -> Int {
 /// b0(%v0):

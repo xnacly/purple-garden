@@ -30,6 +30,7 @@ pub enum Type<'t> {
     Ident(&'t str),
 
     // keywords
+    Import,
     True,
     False,
     Let,
@@ -92,6 +93,7 @@ impl<'t> Type<'t> {
             Type::D(d) => d,
             Type::I(i) => i,
             Type::Ident(i) => i,
+            Type::Import => "import",
             Type::True => "true",
             Type::False => "false",
             Type::Let => "let",
