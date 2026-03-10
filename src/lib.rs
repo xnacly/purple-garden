@@ -18,6 +18,7 @@ pub mod jit;
 pub mod lex;
 pub mod opt;
 pub mod parser;
+pub mod std;
 pub mod vm;
 
 /// Create the purple garden vm from the given input.
