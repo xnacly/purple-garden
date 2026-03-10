@@ -387,8 +387,15 @@ impl<'t> Typechecker<'t> {
                 self.map.insert(*id, first_type.clone());
                 first_type
             }
-            Node::Import { id, pkgs } => {
-                // TODO: add each path to the env
+            Node::Import { id, pkgs, src } => {
+                if pkgs.is_empty() {
+                    return Err(PgError::with_msg(
+                        "Empty import statement",
+                        "Import without any paths to import is considered invalid",
+                        src,
+                    ));
+                }
+                // TODO: add each path to the env, I THINK?
                 todo!()
             }
             Node::Array { id, members } => todo!(),

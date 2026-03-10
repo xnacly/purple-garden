@@ -89,6 +89,7 @@ impl<'p> Parser<'p> {
     }
 
     fn parse_import(&mut self) -> Result<Node<'p>, PgError> {
+        let src = self.cur.clone();
         // skip Import
         self.advance()?;
         self.expect(Type::BraceLeft)?;
@@ -109,6 +110,7 @@ impl<'p> Parser<'p> {
 
         self.expect(Type::BraceRight)?;
         Ok(Node::Import {
+            src,
             id: self.next_id(),
             pkgs,
         })

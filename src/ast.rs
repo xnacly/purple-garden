@@ -89,6 +89,7 @@ pub enum Node<'node> {
     /// import ("<pkg name>" "<pkg name>")
     Import {
         id: usize,
+        src: Token<'node>,
         /// list of packages to import as strings
         pkgs: Vec<Token<'node>>,
     },
@@ -224,7 +225,7 @@ impl<'a> Node<'a> {
                 writeln!(f, "{} )", pad)?;
                 writeln!(f, "{})", pad)
             }
-            Node::Import { id, pkgs } => {
+            Node::Import { pkgs, .. } => {
                 write!(f, "{}(import ", pad)?;
                 for pkg in pkgs {
                     let Token { t: Type::S(s), .. } = pkg else {
