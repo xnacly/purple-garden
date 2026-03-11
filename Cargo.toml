@@ -28,3 +28,7 @@ harness = false
 [[bench]]
 name = "factorial"
 harness = false
+
+[[bench]]
+name = "compilation"
+harness = false
