@@ -24,17 +24,12 @@ impl<'dis> Disassembler<'dis> {
             .map(|f| (f.pc as u32, f))
             .collect();
 
-        let globals_by_idx: HashMap<u32, &Const> = self
-            .ctx
-            .globals
-            .iter()
-            .map(|(c, idx)| (*idx as u32, c))
-            .collect();
+        let globals = self.ctx.globals.clone().to_vec();
 
-        if !self.ctx.globals.is_empty() {
+        if !globals.is_empty() {
             println!("globals:");
-            for g in &self.ctx.globals {
-                println!("  {:04}:    {}", g.1, g.0)
+            for (i, g) in globals.iter().enumerate() {
+                println!("  {:04}:    {}", i, g)
             }
         }
 
@@ -66,10 +61,7 @@ impl<'dis> Disassembler<'dis> {
                     Op::Mov { dst, src } => format!("mov r{dst}, r{src}"),
                     Op::LoadI { dst, value } => format!("load_imm r{dst}, #{value}"),
                     Op::LoadG { dst, idx } => {
-                        let val_str = globals_by_idx
-                            .get(idx)
-                            .map(|v| format!("{}", v))
-                            .unwrap_or("<unknown>".to_string());
+                        let val_str = globals[*idx as usize];
                         format!("load_global r{dst}, {idx} \t; {}", val_str)
                     }
                     Op::Jmp { target } => {

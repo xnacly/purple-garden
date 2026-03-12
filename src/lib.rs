@@ -42,7 +42,6 @@ pub fn new<'e>(config: &'e config::Config, input: &'e [u8]) -> Result<Vm<'e>, Pg
 
 #[cfg(feature = "trace")]
 pub mod trace {
-    use super::*;
     use std::sync::Once;
     use std::time::Instant;
 

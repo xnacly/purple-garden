@@ -52,6 +52,7 @@ impl From<Const<'_>> for Type {
             Const::Int(_) => Self::Int,
             Const::Double(_) => Self::Double,
             Const::Str(_) => Self::Str,
+            _ => unreachable!(),
         }
     }
 }

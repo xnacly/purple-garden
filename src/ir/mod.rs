@@ -27,8 +27,10 @@ pub mod typecheck;
 use crate::ir::ptype::Type;
 
 /// Compile time Value representation, used for interning and constant propagation
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Default)]
 pub enum Const<'c> {
+    #[default]
+    Undefined,
     False,
     True,
     Int(i64),

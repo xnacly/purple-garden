@@ -244,9 +244,9 @@ impl<'a> Node<'a> {
                 writeln!(f, ")")
             }
             Node::Field { id, target, name } => {
-                writeln!(f, "{}(get ", pad)?;
+                write!(f, "{}(get {}{}", pad, pad, name.t.as_str())?;
                 target.fmt_sexpr(f, indent + 1)?;
-                writeln!(f, ".{})", name.t.as_str())
+                write!(f, "{})", pad)
             }
         }
     }

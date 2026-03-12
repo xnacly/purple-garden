@@ -245,30 +245,24 @@ impl<'p> Parser<'p> {
             _ => todo!("{:?}", self.cur().t),
         };
 
+        // postfix parsing loop
         loop {
             match self.cur().t {
                 Type::Dot => {
                     self.advance()?;
                     let field = self.expect_ident()?;
 
-                    todo!("add Node::Field for indexing");
-                    // lhs = Node::Field {
-                    //     id: self.next_id(),
-                    //     lhs: Box::new(lhs),
-                    //     name: field,
-                    // };
+                    lhs = Node::Field {
+                        id: self.next_id(),
+                        target: Box::new(lhs),
+                        name: field,
+                    };
                 }
 
+                // TODO:
                 _ => break,
             }
         }
-
-        // postfix parsing loop
-
-        // TODO: parse Calls and indexing here, supporting:
-        //
-        // <obj>.<idx field>.<idx field>. ...
-        // <pkg>.<func>(<args>)
 
         // infix parsing loop
         while let Type::Plus

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 mod ctx;
 pub mod dis;
+mod intern;
 mod reg;
 
 use crate::{
@@ -306,8 +307,8 @@ impl<'cc> Cc<'cc> {
         }
 
         v.bytecode = self.buf;
-        v.globals = self.ctx.globals_vec.into_iter().map(Value::from).collect();
-        v.strings = self.ctx.strings_vec;
+        v.globals = self.ctx.globals.to_vec_fn(Value::from);
+        v.strings = self.ctx.strings.to_vec();
         v
     }
 

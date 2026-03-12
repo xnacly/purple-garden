@@ -160,6 +160,7 @@ impl Display for Const<'_> {
             Const::Int(int) => write!(f, "{int}"),
             Const::Double(bits) => write!(f, "{}", f64::from_bits(*bits)),
             Const::Str(str) => write!(f, "`{str}`"),
+            _ => unreachable!(),
         }
     }
 }
