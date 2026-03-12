@@ -25,11 +25,19 @@ impl<'dis> Disassembler<'dis> {
             .collect();
 
         let globals = self.ctx.globals.clone().to_vec();
+        let strings = self.ctx.strings.clone().to_vec();
 
         if !globals.is_empty() {
             println!("globals:");
             for (i, g) in globals.iter().enumerate() {
                 println!("  {:04}:    {}", i, g)
+            }
+        }
+
+        if !strings.is_empty() {
+            println!("strs:");
+            for (i, s) in strings.iter().enumerate() {
+                println!("  {:04}:    {}", i, s)
             }
         }
 
@@ -62,7 +70,17 @@ impl<'dis> Disassembler<'dis> {
                     Op::LoadI { dst, value } => format!("load_imm r{dst}, #{value}"),
                     Op::LoadG { dst, idx } => {
                         let val_str = globals[*idx as usize];
-                        format!("load_global r{dst}, {idx} \t; {}", val_str)
+
+                        // only ints bigger than i32::MAX are interned as integers, all others are
+                        // inlined into load_imm. Thus all i < i32::MAX are indexes into the string
+                        // constant pool.
+                        if let Const::Int(idx) = val_str
+                            && idx < i32::MAX as i64
+                        {
+                            format!("load_global r{dst}, {idx} \t; {}", strings[idx as usize])
+                        } else {
+                            format!("load_global r{dst}, {idx} \t; {}", val_str)
+                        }
                     }
                     Op::Jmp { target } => {
                         format!(
