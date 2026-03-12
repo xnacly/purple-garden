@@ -1,26 +1,35 @@
+use std::fmt;
+
 use crate::{ir::ptype::Type, vm::BuiltinFn};
 
 mod io;
 
+#[derive(Debug)]
 pub struct Pkg {
-    name: &'static str,
-    pkgs: &'static [Pkg],
-    fns: &'static [Fn],
+    pub name: &'static str,
+    pub doc: &'static str,
+    pub pkgs: &'static [Pkg],
+    pub fns: &'static [Fn],
 }
 
+#[derive(Debug)]
 pub struct Fn {
-    name: &'static str,
-    ptr: BuiltinFn<'static>,
-    args: &'static [Type],
-    ret: Type,
+    pub name: &'static str,
+    pub doc: &'static str,
+    pub ptr: BuiltinFn<'static>,
+    pub args: &'static [Type],
+    pub ret: Type,
 }
 
 pub static STD: &[Pkg] = &[Pkg {
     name: "io",
+    doc: "Package io provides rudimentary I/O primitives,
+like writing and reading from file descriptors",
     pkgs: &[],
     fns: &[
         Fn {
             name: "println",
+            doc: "writes its argument to stdout, with a newline appended",
             ptr: crate::std::io::println,
             args: &[Type::Str],
             ret: Type::Void,
@@ -28,8 +37,53 @@ pub static STD: &[Pkg] = &[Pkg {
         Fn {
             name: "print",
             ptr: crate::std::io::print,
+            doc: "writes its argument to stdout",
             args: &[Type::Str],
             ret: Type::Void,
         },
     ],
 }];
+
+fn print_function_head(fun: &Fn, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "fn {}(", fun.name)?;
+    for (i, a) in fun.args.iter().enumerate() {
+        if i == fun.args.len() + 1 {
+            write!(f, "{} ", a)?;
+        } else {
+            write!(f, "{}", a)?;
+        }
+    }
+    writeln!(f, ") {}", fun.ret);
+    Ok(())
+}
+
+impl fmt::Display for Fn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        print_function_head(self, f)?;
+        writeln!(f, "\t{}", self.doc)?;
+        Ok(())
+    }
+}
+
+impl fmt::Display for Pkg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "import ({})\n", self.name)?;
+        writeln!(f, "{}", self.doc)?;
+
+        if !self.pkgs.is_empty() {
+            writeln!(f, "");
+            for p in self.pkgs {
+                writeln!(f, "{}/{}", self.name, p.name)?;
+            }
+        }
+
+        if !self.fns.is_empty() {
+            writeln!(f, "");
+            for fun in self.fns {
+                print_function_head(fun, f)?;
+            }
+        }
+
+        Ok(())
+    }
+}

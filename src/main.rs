@@ -6,7 +6,51 @@ fn main() {
     if let Some(cmd) = args.command {
         match cmd {
             config::Command::Doc { pkg_or_function } => {
-                todo!("doc${pkg_or_function}");
+                let (path, method) = match pkg_or_function.split_once(".") {
+                    Some((path, method)) => (path, Some(method)),
+                    None => (pkg_or_function.as_str(), None),
+                };
+
+                let path: Vec<_> = path.split("/").collect();
+                if path.is_empty() {
+                    eprintln!("No path segment provided");
+                    std::process::exit(1);
+                }
+
+                let mut pkg = purple_garden::std::STD
+                    .iter()
+                    .find(|p| p.name == path[0])
+                    .unwrap_or_else(|| {
+                        eprintln!("No matching root package found");
+                        std::process::exit(1);
+                    });
+
+                for segment in &path[1..] {
+                    pkg = pkg
+                        .pkgs
+                        .iter()
+                        .find(|p| p.name == *segment)
+                        .unwrap_or_else(|| {
+                            eprintln!("pkg `{}` not found in `{}`", segment, pkg.name);
+                            std::process::exit(1);
+                        });
+                }
+
+                if let Some(method) = method {
+                    println!(
+                        "{}",
+                        pkg.fns
+                            .iter()
+                            .find(|f| f.name == method)
+                            .unwrap_or_else(|| {
+                                eprintln!("function {}.{} not found", pkg.name, method);
+                                std::process::exit(1);
+                            })
+                    );
+                } else {
+                    println!("{}", pkg);
+                }
+
                 std::process::exit(0);
             }
         }
