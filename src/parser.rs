@@ -259,7 +259,21 @@ impl<'p> Parser<'p> {
                     };
                 }
 
-                // TODO:
+                Type::BraceLeft => {
+                    self.advance();
+                    let mut args = vec![];
+
+                    while !self.at_end() && self.cur().t != Type::BraceRight {
+                        args.push(self.parse_prefix()?);
+                    }
+
+                    self.expect(Type::BraceRight);
+                    lhs = Node::Call {
+                        id: self.next_id(),
+                        target: Box::new(lhs),
+                        args,
+                    }
+                }
                 _ => break,
             }
         }

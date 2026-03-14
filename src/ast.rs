@@ -200,9 +200,17 @@ impl<'a> Node<'a> {
             }
             Node::Call { target, args, .. } => {
                 write!(f, "{}(", pad,)?;
-                target.fmt_sexpr(f, indent);
-                if !args.is_empty() {
+                if let Node::Atom {
+                    raw: Token { t, .. },
+                    ..
+                } = target.as_ref()
+                {
+                    write!(f, "{}", t.as_str())?;
+                } else {
                     writeln!(f)?;
+                    target.fmt_sexpr(f, indent + 1);
+                }
+                if !args.is_empty() {
                     for arg in args {
                         arg.fmt_sexpr(f, indent + 1)?;
                     }
@@ -244,9 +252,15 @@ impl<'a> Node<'a> {
                 writeln!(f, ")")
             }
             Node::Field { id, target, name } => {
-                write!(f, "{}(get {}{}", pad, pad, name.t.as_str())?;
+                writeln!(f, "{}(get", pad)?;
                 target.fmt_sexpr(f, indent + 1)?;
-                write!(f, "{})", pad)
+                // hack for pretty printing field idxing
+                Node::Atom {
+                    id: 0,
+                    raw: name.clone(),
+                }
+                .fmt_sexpr(f, indent + 1)?;
+                writeln!(f, "{})", pad)
             }
         }
     }
