@@ -1,4 +1,6 @@
-use purple_garden::{bc, config, err::PgError, ir, lex::Lexer, opt, parser::Parser, trace};
+use purple_garden::{
+    bc, config, err::PgError, ir, lex::Lexer, opt, parser::Parser, std::Pkg, trace,
+};
 use std::{collections::HashMap, fs};
 
 fn main() {
@@ -6,6 +8,21 @@ fn main() {
     if let Some(cmd) = args.command {
         match cmd {
             config::Command::Doc { pkg_or_function } => {
+                // with no argument we just print all stdlib packages
+                let Some(pkg_or_function) = pkg_or_function else {
+                    fn print_pkg(pkg: &Pkg) {
+                        println!("{}", pkg.name);
+                        for sub in pkg.pkgs {
+                            print_pkg(sub);
+                        }
+                    }
+                    println!("Purple garden standard library packages:");
+                    for pkg in purple_garden::std::STD {
+                        print_pkg(pkg)
+                    }
+                    std::process::exit(0);
+                };
+
                 let (path, method) = match pkg_or_function.split_once(".") {
                     Some((path, method)) => (path, Some(method)),
                     None => (pkg_or_function.as_str(), None),
