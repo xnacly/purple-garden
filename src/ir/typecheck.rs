@@ -317,10 +317,22 @@ impl<'t> Typechecker<'t> {
                             unreachable!();
                         };
 
-                        // TODO: add error handling for an unkown package
-                        let pkg = self.packages.get(pkg_name).unwrap();
-                        // TODO: add error handling for an unkown function
-                        (name, inner_name, pkg.get(inner_name).cloned().unwrap())
+                        let Some(pkg) = self.packages.get(pkg_name).unwrap() else {
+                            return Err(PgError::with_msg(
+                                "Undefined package",
+                                format!("Can't find package `{}`", pkg_name),
+                                raw,
+                            ));
+                        }
+
+                        let Some(fun) = pkg.get(inner_name).cloned().unwrap() else {
+                            return Err(PgError::with_msg(
+                                "Undefined function",
+                                format!("Call to undefined function `{}.{}`", pkg_name, inner_name),
+                                raw,
+                            ));
+                        };
+                        (name, inner_name, fun)
                     }
                     Node::Atom { raw, .. } => {
                         let lex::Token {
