@@ -4,6 +4,8 @@ use crate::{
     lex::{Lexer, Token, Type},
 };
 
+// TODO: add BNAF to each Parser::parse_* method
+
 /// Parsing the token stream one token at a time into the abstract syntax tree, see
 /// [ast.rs](./ast.rs) for documentation regarding each node and the way those should be parsed.
 pub struct Parser<'p> {
@@ -104,7 +106,7 @@ impl<'p> Parser<'p> {
                 src,
                 id: self.next_id(),
                 pkgs,
-            })
+            });
         }
 
         // multiple package import:

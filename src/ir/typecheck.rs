@@ -5,6 +5,7 @@ use crate::{
     err::PgError,
     ir::ptype::Type,
     lex::{self, Token},
+    std::{Pkg, STD},
 };
 
 pub fn id_from_node(node: &Node) -> Option<usize> {
@@ -32,9 +33,14 @@ struct FunctionType {
 
 #[derive(Default, Debug)]
 pub struct Typechecker<'t> {
+    /// maps each Node id to its computed type
     map: HashMap<usize, Type>,
+    /// assign a variables name in the current scope to its type
     env: HashMap<&'t str, Type>,
+    /// map a function name to its type(s)
     functions: HashMap<&'t str, FunctionType>,
+    /// map a pkg name to a map of its methods and their types
+    packages: HashMap<&'t str, HashMap<&'t str, FunctionType>>,
 }
 
 impl<'t> Typechecker<'t> {
@@ -289,7 +295,33 @@ impl<'t> Typechecker<'t> {
             Node::Field { .. } => todo!(),
             Node::Call { id, target, args } => {
                 let (tok, inner_name, fun) = match target.as_ref() {
-                    Node::Field { .. } => todo!("package.function() lookup"),
+                    Node::Field { id, target, name } => {
+                        let Node::Ident {
+                            name:
+                                lex::Token {
+                                    t: lex::Type::Ident(pkg_name),
+                                    ..
+                                },
+                            ..
+                        } = target.as_ref()
+                        else {
+                            // TODO: add error handling for non ident call targets
+                            unreachable!();
+                        };
+
+                        let lex::Token {
+                            t: lex::Type::Ident(inner_name),
+                            ..
+                        } = name
+                        else {
+                            unreachable!();
+                        };
+
+                        // TODO: add error handling for an unkown package
+                        let pkg = self.packages.get(pkg_name).unwrap();
+                        // TODO: add error handling for an unkown function
+                        (name, inner_name, pkg.get(inner_name).cloned().unwrap())
+                    }
                     Node::Atom { raw, .. } => {
                         let lex::Token {
                             t: lex::Type::Ident(inner_name),
@@ -404,8 +436,38 @@ impl<'t> Typechecker<'t> {
                     ));
                 }
 
-                // TODO: add each path to the env, I THINK?
-                todo!()
+                // TODO: think about a compile time O(1) access for all packages, not only root
+                // (io), but also nested like (io/fs)
+
+                // TODO: this does not support nested packages
+                'toplvl: for pkg in pkgs {
+                    for spkg in STD {
+                        let lex::Type::S(pkg_name) = pkg.t else {
+                            unreachable!();
+                        };
+
+                        if pkg_name == spkg.name {
+                            self.packages.insert(
+                                spkg.name,
+                                spkg.fns
+                                    .iter()
+                                    .map(|f| {
+                                        (
+                                            f.name,
+                                            FunctionType {
+                                                args: f.args.to_vec(),
+                                                ret: f.ret.clone(),
+                                            },
+                                        )
+                                    })
+                                    .collect(),
+                            );
+                            break 'toplvl;
+                        }
+                    }
+                }
+
+                Type::Void
             }
             Node::Array { id, members } => todo!(),
             Node::Object { id, pairs } => todo!(),
