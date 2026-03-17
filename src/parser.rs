@@ -90,8 +90,26 @@ impl<'p> Parser<'p> {
 
     fn parse_import(&mut self) -> Result<Node<'p>, PgError> {
         let src = self.cur.clone();
-        // skip Import
+        // skip Type::Import
         self.advance()?;
+
+        // single package import:
+        // import "io"
+        if let Type::S(_) = self.cur().t {
+            let pkgs = vec![self.cur().clone()];
+            // skip pkg name
+            self.advance()?;
+
+            return Ok(Node::Import {
+                src,
+                id: self.next_id(),
+                pkgs,
+            })
+        }
+
+        // multiple package import:
+        // import ("io" "runtime")
+
         self.expect(Type::BraceLeft)?;
 
         let mut pkgs = Vec::new();
