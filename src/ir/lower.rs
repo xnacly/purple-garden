@@ -5,6 +5,8 @@ use crate::{
     err::PgError,
     ir::{self, typecheck::id_from_node, *},
     lex::{Token, Type},
+    std as pstd,
+    std::Pkg,
 };
 
 #[derive(Default)]
@@ -32,6 +34,7 @@ pub struct Lower<'lower> {
     env: HashMap<&'lower str, Id>,
     func_name_to_id: HashMap<&'lower str, Id>,
     types: HashMap<usize, ptype::Type>,
+    packages: HashMap<&'lower str, &'lower Pkg>,
 }
 
 impl<'lower> Lower<'lower> {
@@ -191,6 +194,7 @@ impl<'lower> Lower<'lower> {
                 return_type,
                 body,
             } => {
+                // TODO: group this into Lower::ctx
                 let old_func = std::mem::take(&mut self.func);
                 let old_env = std::mem::take(&mut self.env);
                 let old_store = std::mem::take(&mut self.id_store);
@@ -294,6 +298,24 @@ impl<'lower> Lower<'lower> {
                 });
 
                 Some(dst_id)
+            }
+            Node::Import { src, pkgs, .. } => {
+                for pkg_tok in pkgs {
+                    let Token {
+                        t: Type::S(as_str), ..
+                    } = pkg_tok
+                    else {
+                        unreachable!();
+                    };
+
+                    // the type checker already checks all packages are valid
+                    let Some(pkg) = pstd::resolve_pkg(as_str) else {
+                        unreachable!()
+                    };
+
+                    self.packages.insert(as_str, pkg);
+                }
+                None
             }
             Node::Cast { lhs, rhs, .. } => {
                 let Some(from) = self.lower_node(lhs)? else {
