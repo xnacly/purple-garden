@@ -166,6 +166,9 @@ impl<'cc> Cc<'cc> {
 
     fn instr(&mut self, fun: &Func<'cc>, i: &ir::Instr<'cc>) {
         match i {
+            ir::Instr::Sys { .. } => {
+                todo!()
+            }
             ir::Instr::Cast {
                 dst:
                     TypeId {

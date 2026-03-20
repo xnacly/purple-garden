@@ -256,7 +256,11 @@ impl<'lower> Lower<'lower> {
             }
             Node::Call { target, args, .. } => {
                 let (tok, ident_name) = match target.as_ref() {
-                    Node::Field { .. } => todo!("package.function() lookup"),
+                    // 'syscall' / stdlib call
+                    Node::Field { target, name, .. } => {
+                        todo!()
+                    }
+                    // user defined function
                     Node::Atom { raw, .. } => {
                         let crate::lex::Token {
                             t: crate::lex::Type::Ident(inner_name),

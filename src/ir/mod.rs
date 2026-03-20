@@ -25,6 +25,7 @@ pub mod ptype;
 pub mod typecheck;
 
 use crate::ir::ptype::Type;
+use crate::std as pstd;
 
 /// Compile time Value representation, used for interning and constant propagation
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Default)]
@@ -80,6 +81,12 @@ pub enum Instr<'i> {
     Call {
         dst: TypeId,
         func: Id,
+        args: Vec<Id>,
+    },
+    Sys {
+        dst: TypeId,
+        path: &'i str,
+        func: &'i pstd::Fn,
         args: Vec<Id>,
     },
     Tail {

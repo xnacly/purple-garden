@@ -34,6 +34,23 @@ impl Display for Instr<'_> {
                 }
                 write!(f, ")")?;
             }
+            Instr::Sys {
+                dst,
+                path,
+                func,
+                args,
+            } => {
+                write!(f, "%v{} = ", dst)?;
+                write!(f, "sys std_{path}(")?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i + 1 == args.len() {
+                        write!(f, "%v{}", arg.0)?;
+                    } else {
+                        write!(f, "%v{}, ", arg.0)?;
+                    }
+                }
+                write!(f, ")")?;
+            }
             Instr::Tail { dst, func, args } => {
                 write!(f, "%v{} = ", dst)?;
                 write!(f, "tailcall f{}(", func.0)?;
