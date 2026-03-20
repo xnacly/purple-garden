@@ -41,7 +41,7 @@ impl Display for Instr<'_> {
                 args,
             } => {
                 write!(f, "%v{} = ", dst)?;
-                write!(f, "sys std_{path}(")?;
+                write!(f, "sys {path}.{}(", func.name)?;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {
                         write!(f, "%v{}", arg.0)?;

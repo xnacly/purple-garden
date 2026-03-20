@@ -4,9 +4,8 @@ use crate::{
     ast::{Node, TypeExpr},
     err::PgError,
     ir::{self, typecheck::id_from_node, *},
-    lex::{Token, Type},
+    lex::{self, Token, Type},
     std as pstd,
-    std::Pkg,
 };
 
 #[derive(Default)]
@@ -34,7 +33,7 @@ pub struct Lower<'lower> {
     env: HashMap<&'lower str, Id>,
     func_name_to_id: HashMap<&'lower str, Id>,
     types: HashMap<usize, ptype::Type>,
-    packages: HashMap<&'lower str, &'lower Pkg>,
+    packages: HashMap<&'lower str, (&'lower pstd::Pkg, HashMap<&'lower str, &'lower pstd::Fn>)>,
 }
 
 impl<'lower> Lower<'lower> {
@@ -255,10 +254,60 @@ impl<'lower> Lower<'lower> {
                 None
             }
             Node::Call { target, args, .. } => {
-                let (tok, ident_name) = match target.as_ref() {
+                let mut a = vec![];
+                for arg in args {
+                    let Some(id) = self.lower_node(arg)? else {
+                        unreachable!();
+                    };
+                    a.push(id);
+                }
+
+                let dst_id = self.id_store.new_value();
+                let mut dst = TypeId {
+                    // this is a placeholder
+                    ty: ptype::Type::Void,
+                    id: dst_id,
+                };
+
+                match target.as_ref() {
                     // 'syscall' / stdlib call
                     Node::Field { target, name, .. } => {
-                        todo!()
+                        let Node::Ident {
+                            name:
+                                lex::Token {
+                                    t: lex::Type::Ident(pkg_name),
+                                    ..
+                                },
+                            ..
+                        } = target.as_ref()
+                        else {
+                            unreachable!();
+                        };
+
+                        let lex::Token {
+                            t: lex::Type::Ident(inner_name),
+                            ..
+                        } = name
+                        else {
+                            unreachable!();
+                        };
+
+                        // both unwrappable because the typechecker makes sure everything is fine
+                        let fun = self
+                            .packages
+                            .get(pkg_name)
+                            .unwrap()
+                            .1
+                            .get(inner_name)
+                            .unwrap();
+
+                        dst.ty = fun.ret.clone();
+                        self.emit(Instr::Sys {
+                            dst,
+                            path: pkg_name,
+                            func: fun,
+                            args: a,
+                        });
                     }
                     // user defined function
                     Node::Atom { raw, .. } => {
@@ -269,37 +318,23 @@ impl<'lower> Lower<'lower> {
                         else {
                             unreachable!();
                         };
-                        (raw, inner_name)
+                        let Some(target_id) = self.func_name_to_id.get(inner_name).cloned() else {
+                            return Err(PgError::with_msg(
+                                "Undefined function",
+                                format!("Undefined function `{inner_name}`"),
+                                raw,
+                            ));
+                        };
+
+                        dst.ty = self.types.get(&(target_id.0 as usize)).unwrap().clone();
+                        self.emit(Instr::Call {
+                            dst,
+                            func: target_id,
+                            args: a,
+                        });
                     }
                     _ => unreachable!(),
                 };
-
-                let Some(target_id) = self.func_name_to_id.get(ident_name).cloned() else {
-                    return Err(PgError::with_msg(
-                        "Undefined function",
-                        format!("Undefined function `{ident_name}`"),
-                        tok,
-                    ));
-                };
-
-                let mut a = vec![];
-                for arg in args {
-                    let Some(id) = self.lower_node(arg)? else {
-                        unreachable!();
-                    };
-                    a.push(id);
-                }
-
-                let dst_id = self.id_store.new_value();
-                let dst = TypeId {
-                    ty: self.types.get(&(target_id.0 as usize)).unwrap().clone(),
-                    id: dst_id,
-                };
-                self.emit(Instr::Call {
-                    dst,
-                    func: target_id,
-                    args: a,
-                });
 
                 Some(dst_id)
             }
@@ -317,7 +352,10 @@ impl<'lower> Lower<'lower> {
                         unreachable!()
                     };
 
-                    self.packages.insert(as_str, pkg);
+                    self.packages.insert(
+                        as_str,
+                        (pkg, pkg.fns.into_iter().map(|f| (f.name, f)).collect()),
+                    );
                 }
                 None
             }
