@@ -5,7 +5,7 @@ use crate::{
     err::PgError,
     ir::ptype::Type,
     lex::{self, Token},
-    std::{Pkg, STD},
+    std::{self as pstd, Pkg, STD},
 };
 
 pub fn id_from_node(node: &Node) -> Option<usize> {
@@ -448,35 +448,34 @@ impl<'t> Typechecker<'t> {
                     ));
                 }
 
-                // TODO: think about a compile time O(1) access for all packages, not only root
-                // (io), but also nested like (io/fs)
+                for pkg_tok in pkgs {
+                    let lex::Type::S(pkg_name) = pkg_tok.t else {
+                        unreachable!();
+                    };
 
-                // TODO: this does not support nested packages
-                'toplvl: for pkg in pkgs {
-                    for spkg in STD {
-                        let lex::Type::S(pkg_name) = pkg.t else {
-                            unreachable!();
-                        };
+                    let Some(pkg) = pstd::resolve_pkg(pkg_name) else {
+                        return Err(PgError::with_msg(
+                            "Unresolvable pkg import",
+                            format!("Wasnt able to find a package named `{pkg_name}`"),
+                            pkg_tok,
+                        ));
+                    };
 
-                        if pkg_name == spkg.name {
-                            self.packages.insert(
-                                spkg.name,
-                                spkg.fns
-                                    .iter()
-                                    .map(|f| {
-                                        (
-                                            f.name,
-                                            FunctionType {
-                                                args: f.args.to_vec(),
-                                                ret: f.ret.clone(),
-                                            },
-                                        )
-                                    })
-                                    .collect(),
-                            );
-                            break 'toplvl;
-                        }
-                    }
+                    self.packages.insert(
+                        pkg.name,
+                        pkg.fns
+                            .iter()
+                            .map(|f| {
+                                (
+                                    f.name,
+                                    FunctionType {
+                                        args: f.args.to_vec(),
+                                        ret: f.ret.clone(),
+                                    },
+                                )
+                            })
+                            .collect(),
+                    );
                 }
 
                 Type::Void

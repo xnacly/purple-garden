@@ -1,5 +1,5 @@
 use purple_garden::{
-    bc, config, err::PgError, ir, lex::Lexer, opt, parser::Parser, std::Pkg, trace,
+    bc, config, err::PgError, ir, lex::Lexer, opt, parser::Parser, std as pstd, std::Pkg, trace,
 };
 use std::{collections::HashMap, fs};
 
@@ -28,30 +28,10 @@ fn main() {
                     None => (pkg_or_function.as_str(), None),
                 };
 
-                let path: Vec<_> = path.split("/").collect();
-                if path.is_empty() {
-                    eprintln!("No path segment provided");
+                let pkg = pstd::resolve_pkg(path).unwrap_or_else(|| {
+                    eprintln!("query {} couldnt be resolved to anything", path);
                     std::process::exit(1);
-                }
-
-                let mut pkg = purple_garden::std::STD
-                    .iter()
-                    .find(|p| p.name == path[0])
-                    .unwrap_or_else(|| {
-                        eprintln!("No matching root package found");
-                        std::process::exit(1);
-                    });
-
-                for segment in &path[1..] {
-                    pkg = pkg
-                        .pkgs
-                        .iter()
-                        .find(|p| p.name == *segment)
-                        .unwrap_or_else(|| {
-                            eprintln!("pkg `{}` not found in `{}`", segment, pkg.name);
-                            std::process::exit(1);
-                        });
-                }
+                });
 
                 if let Some(method) = method {
                     println!(
