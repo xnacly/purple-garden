@@ -317,19 +317,19 @@ impl<'t> Typechecker<'t> {
                             unreachable!();
                         };
 
-                        let Some(pkg) = self.packages.get(pkg_name).unwrap() else {
+                        let Some(pkg) = self.packages.get(pkg_name) else {
                             return Err(PgError::with_msg(
                                 "Undefined package",
                                 format!("Can't find package `{}`", pkg_name),
-                                raw,
+                                name,
                             ));
-                        }
+                        };
 
-                        let Some(fun) = pkg.get(inner_name).cloned().unwrap() else {
+                        let Some(fun) = pkg.get(inner_name).cloned() else {
                             return Err(PgError::with_msg(
                                 "Undefined function",
                                 format!("Call to undefined function `{}.{}`", pkg_name, inner_name),
-                                raw,
+                                name,
                             ));
                         };
                         (name, inner_name, fun)
