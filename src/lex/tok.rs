@@ -50,6 +50,7 @@ pub enum Type<'t> {
 #[derive(Debug, Clone, Eq)]
 pub struct Token<'t> {
     pub line: usize,
+    // TODO: This is buggy asf and not at all correct
     pub col: usize,
     pub t: Type<'t>,
 }
