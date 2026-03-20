@@ -1,31 +1,32 @@
 use std::collections::HashMap;
 
 use crate::{
-    bc::ctx::{self, Func},
+    bc,
     ir::{Const, Id},
     vm::op::Op,
 };
 
 pub struct Disassembler<'dis> {
     bc: &'dis [Op],
-    ctx: ctx::Context<'dis>,
+    cc: bc::Cc<'dis>,
 }
 
 impl<'dis> Disassembler<'dis> {
-    pub fn new(bc: &'dis [Op], ctx: ctx::Context<'dis>) -> Self {
-        Self { bc, ctx }
+    pub fn new(bc: &'dis [Op], cc: bc::Cc<'dis>) -> Self {
+        Self { bc, cc }
     }
 
     pub fn disassemble(&self) {
-        let funcs_by_pc: HashMap<u32, &Func> = self
-            .ctx
+        let funcs_by_pc: HashMap<u32, &bc::BcFunc> = self
+            .cc
             .functions
             .values()
             .map(|f| (f.pc as u32, f))
             .collect();
 
-        let globals = self.ctx.globals.clone().to_vec();
-        let strings = self.ctx.strings.clone().to_vec();
+        let globals = self.cc.globals.clone().to_vec();
+        let strings = self.cc.strings.clone().to_vec();
+        let std_funcs_by_id = self.cc.std_fns.clone().to_vec();
 
         if !globals.is_empty() {
             println!("globals:");
@@ -41,7 +42,7 @@ impl<'dis> Disassembler<'dis> {
             }
         }
 
-        let mut cur_func = self.ctx.functions.get(&Id(0)).unwrap();
+        let mut cur_func = self.cc.functions.get(&Id(0)).unwrap();
         for (pc, instr) in self.bc.iter().enumerate() {
             if let Some(func) = funcs_by_pc.get(&(pc as u32)) {
                 cur_func = func;
@@ -99,7 +100,8 @@ impl<'dis> Disassembler<'dis> {
                     ),
                     Op::Call { func } =>
                         format!("call {func} <{}>", funcs_by_pc.get(func).unwrap().name),
-                    Op::Sys { .. } => "sys <syscall_name_here>".to_string(),
+                    Op::Sys { idx } =>
+                        format!("sys {idx} <std_{:?}>", std_funcs_by_id[*idx as usize]),
                     Op::Push { src } => format!("push {src}"),
                     Op::Pop { dst } => format!("pop {dst}"),
                     Op::Ret => "ret".into(),

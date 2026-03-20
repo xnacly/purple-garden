@@ -1,22 +1,31 @@
 use std::collections::HashMap;
 
-mod ctx;
 pub mod dis;
 mod intern;
 mod reg;
 
 use crate::{
-    bc::ctx::Context,
+    bc::intern::Interner,
     config::Config,
     err::PgError,
-    ir::{self, Const, Func, TypeId, ptype},
+    ir::{self, Const, Func, Id, TypeId, ptype},
     vm::{Value, Vm, op::Op},
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
+pub struct BcFunc<'fun> {
+    pub name: &'fun str,
+    pub pc: usize,
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct Cc<'cc> {
     pub buf: Vec<Op>,
-    pub ctx: Context<'cc>,
+    pub globals: Interner<Const<'cc>>,
+    pub strings: Interner<&'cc str>,
+    // TODO: intern based on WHAT?
+    pub std_fns: Interner<()>,
+    pub functions: HashMap<Id, BcFunc<'cc>>,
     /// binding a block id to its pc
     block_map: HashMap<ir::Id, u16>,
 }
@@ -26,6 +35,15 @@ impl<'cc> Cc<'cc> {
         Self {
             buf: Vec::with_capacity(64),
             ..Default::default()
+        }
+    }
+
+    fn intern(&mut self, constant: Const<'cc>) -> u32 {
+        if let Const::Str(str) = constant {
+            let str_pool_idx = self.strings.intern(str);
+            self.globals.intern(Const::Int(str_pool_idx as i64))
+        } else {
+            self.globals.intern(constant)
         }
     }
 
@@ -50,9 +68,9 @@ impl<'cc> Cc<'cc> {
         // values at the same time
 
         let pc = self.buf.len();
-        let f: ctx::Func<'cc> = ctx::Func { pc, name: fun.name };
+        let f: BcFunc<'cc> = BcFunc { pc, name: fun.name };
         // binding the id of a function to its context
-        self.ctx.functions.insert(fun.id, f);
+        self.functions.insert(fun.id, f);
 
         for block in &fun.blocks {
             if block.tombstone {
@@ -202,7 +220,7 @@ impl<'cc> Cc<'cc> {
                         });
                     }
                     _ => {
-                        let idx = self.ctx.intern(*value);
+                        let idx = self.intern(*value);
                         self.emit(Op::LoadG {
                             dst: *dst as u8,
                             idx,
@@ -211,7 +229,7 @@ impl<'cc> Cc<'cc> {
                 }
             }
             ir::Instr::Call { dst, func, args } => {
-                let Some(func) = self.ctx.functions.get(func) else {
+                let Some(func) = self.functions.get(func) else {
                     unreachable!();
                 };
 
@@ -236,7 +254,7 @@ impl<'cc> Cc<'cc> {
                 });
             }
             ir::Instr::Tail { dst, func, args } => {
-                let Some(func) = self.ctx.functions.get(func) else {
+                let Some(func) = self.functions.get(func) else {
                     unreachable!();
                 };
 
@@ -287,7 +305,6 @@ impl<'cc> Cc<'cc> {
     pub fn finalize(mut self, config: &'cc Config) -> Vm<'cc> {
         let mut v = Vm::new(config);
         v.pc = self
-            .ctx
             .functions
             .get(&ir::Id(0))
             .map(|n| n.pc)
@@ -310,14 +327,13 @@ impl<'cc> Cc<'cc> {
         }
 
         v.bytecode = self.buf;
-        v.globals = self.ctx.globals.to_vec_fn(Value::from);
-        v.strings = self.ctx.strings.to_vec();
+        v.globals = self.globals.to_vec_fn(Value::from);
+        v.strings = self.strings.to_vec();
         v
     }
 
     pub fn function_table(&self) -> HashMap<usize, String> {
-        self.ctx
-            .functions
+        self.functions
             .values()
             .map(|f| (f.pc, f.name.to_string()))
             .collect()

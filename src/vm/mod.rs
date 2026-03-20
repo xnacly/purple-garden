@@ -213,7 +213,6 @@ impl<'vm> Vm<'vm> {
                     continue;
                 }
                 Op::Sys { idx } => unsafe {
-                    // PERF: is ? good here? Or should i add a branch preditiction hint
                     r_mut!(0) = (*syscalls.add(idx as usize))(self)?;
                 },
                 Op::Ret => {

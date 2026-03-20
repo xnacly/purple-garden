@@ -132,7 +132,7 @@ fn main() {
     };
 
     let ctx = if args.disassemble {
-        Some(cc.ctx.clone())
+        Some(cc.clone())
     } else {
         None
     };
