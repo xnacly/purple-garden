@@ -334,11 +334,11 @@ impl<'t> Typechecker<'t> {
                         };
                         (name, inner_name, fun)
                     }
-                    Node::Atom { raw, .. } => {
+                    Node::Ident { name, .. } => {
                         let lex::Token {
                             t: lex::Type::Ident(inner_name),
                             ..
-                        } = raw
+                        } = name
                         else {
                             unreachable!();
                         };
@@ -346,10 +346,10 @@ impl<'t> Typechecker<'t> {
                             return Err(PgError::with_msg(
                                 "Undefined function",
                                 format!("Call to undefined function `{}`", inner_name),
-                                raw,
+                                name,
                             ));
                         };
-                        (raw, inner_name, fun)
+                        (name, inner_name, fun)
                     }
                     _ => unreachable!(),
                 };

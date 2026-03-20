@@ -184,9 +184,6 @@ impl<'cc> Cc<'cc> {
 
     fn instr(&mut self, fun: &Func<'cc>, i: &ir::Instr<'cc>) {
         match i {
-            ir::Instr::Sys { .. } => {
-                todo!()
-            }
             ir::Instr::Cast {
                 dst:
                     TypeId {
@@ -268,6 +265,12 @@ impl<'cc> Cc<'cc> {
 
                 self.emit(Op::Tail { func: pc as u32 });
             }
+            ir::Instr::Sys {
+                dst,
+                path,
+                func,
+                args,
+            } => {}
             ir::Instr::Noop {} => {}
             ir::Instr::Bin { op, dst, lhs, rhs } => {
                 let (

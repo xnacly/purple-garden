@@ -38,7 +38,7 @@ impl<'dis> Disassembler<'dis> {
         if !strings.is_empty() {
             println!("strs:");
             for (i, s) in strings.iter().enumerate() {
-                println!("  {:04}:    {}", i, s)
+                println!("  {:04}:    \"{}\"", i, s)
             }
         }
 
@@ -78,7 +78,10 @@ impl<'dis> Disassembler<'dis> {
                         if let Const::Int(idx) = val_str
                             && idx < i32::MAX as i64
                         {
-                            format!("load_global r{dst}, {idx} \t; {}", strings[idx as usize])
+                            format!(
+                                "load_global r{dst}, {idx} \t; \"{}\"",
+                                strings[idx as usize]
+                            )
                         } else {
                             format!("load_global r{dst}, {idx} \t; {}", val_str)
                         }

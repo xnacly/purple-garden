@@ -310,11 +310,11 @@ impl<'lower> Lower<'lower> {
                         });
                     }
                     // user defined function
-                    Node::Atom { raw, .. } => {
+                    Node::Ident { name, .. } => {
                         let crate::lex::Token {
                             t: crate::lex::Type::Ident(inner_name),
                             ..
-                        } = raw
+                        } = name
                         else {
                             unreachable!();
                         };
@@ -322,7 +322,7 @@ impl<'lower> Lower<'lower> {
                             return Err(PgError::with_msg(
                                 "Undefined function",
                                 format!("Undefined function `{inner_name}`"),
-                                raw,
+                                name,
                             ));
                         };
 
