@@ -466,7 +466,6 @@ impl<'lower> Lower<'lower> {
         let mut typechecker = typecheck::Typechecker::new();
         for node in ast {
             let _t = typechecker.node(node)?;
-            crate::trace!("{} resolved to {:?}", &node, _t);
         }
         crate::trace!("Finished type checking");
         self.types = typechecker.finalise();

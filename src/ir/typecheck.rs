@@ -461,11 +461,14 @@ impl<'t> Typechecker<'t> {
                         ));
                     };
 
+                    crate::trace!("ty: resolved pkg `{}`", pkg.name);
+
                     self.packages.insert(
                         pkg.name,
                         pkg.fns
                             .iter()
                             .map(|f| {
+                                crate::trace!("ty: registered `{}.{}`", pkg.name, f.name);
                                 (
                                     f.name,
                                     FunctionType {
