@@ -26,7 +26,7 @@ impl<'dis> Disassembler<'dis> {
 
         let globals = self.cc.globals.clone().to_vec();
         let strings = self.cc.strings.clone().to_vec();
-        let std_funcs_by_id = self.cc.std_fns.clone().to_vec();
+        let std_fns = self.cc.std_fns.clone().to_vec();
 
         if !globals.is_empty() {
             println!("globals:");
@@ -39,6 +39,13 @@ impl<'dis> Disassembler<'dis> {
             println!("strs:");
             for (i, s) in strings.iter().enumerate() {
                 println!("  {:04}:    \"{}\"", i, s)
+            }
+        }
+
+        if !std_fns.is_empty() {
+            println!("std_fns:");
+            for (i, s) in std_fns.iter().enumerate() {
+                println!("  {:04}:    0x{}", i, s)
             }
         }
 
@@ -103,8 +110,7 @@ impl<'dis> Disassembler<'dis> {
                     ),
                     Op::Call { func } =>
                         format!("call {func} <{}>", funcs_by_pc.get(func).unwrap().name),
-                    Op::Sys { idx } =>
-                        format!("sys {idx} <std_{:?}>", std_funcs_by_id[*idx as usize]),
+                    Op::Sys { idx } => format!("sys {idx} <0x{:x}>", std_fns[*idx as usize]),
                     Op::Push { src } => format!("push {src}"),
                     Op::Pop { dst } => format!("pop {dst}"),
                     Op::Ret => "ret".into(),

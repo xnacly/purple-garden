@@ -9,7 +9,8 @@ use crate::{
     config::Config,
     err::PgError,
     ir::{self, Const, Func, Id, TypeId, ptype},
-    vm::{Value, Vm, op::Op},
+    std::{self as pstd, Fn, Pkg, STD},
+    vm::{BuiltinFn, Value, Vm, op::Op},
 };
 
 #[derive(Debug, Clone)]
@@ -18,13 +19,12 @@ pub struct BcFunc<'fun> {
     pub pc: usize,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Cc<'cc> {
     pub buf: Vec<Op>,
     pub globals: Interner<Const<'cc>>,
     pub strings: Interner<&'cc str>,
-    // TODO: intern based on WHAT?
-    pub std_fns: Interner<()>,
+    pub std_fns: Interner<usize>,
     pub functions: HashMap<Id, BcFunc<'cc>>,
     /// binding a block id to its pc
     block_map: HashMap<ir::Id, u16>,
@@ -34,7 +34,11 @@ impl<'cc> Cc<'cc> {
     pub fn new() -> Self {
         Self {
             buf: Vec::with_capacity(64),
-            ..Default::default()
+            globals: Interner::new(),
+            strings: Interner::new(),
+            std_fns: Interner::new(),
+            functions: HashMap::new(),
+            block_map: HashMap::new(),
         }
     }
 
@@ -270,7 +274,24 @@ impl<'cc> Cc<'cc> {
                 path,
                 func,
                 args,
-            } => {}
+            } => {
+                let idx = self.std_fns.intern(func.ptr as usize);
+                for (i, &ir::Id(arg)) in args.iter().enumerate() {
+                    let (dst, src) = (i as u8, arg as u8);
+                    if dst != src {
+                        self.emit(Op::Mov { dst, src });
+                    }
+                }
+
+                let TypeId {
+                    id: ir::Id(dst), ..
+                } = dst;
+                self.emit(Op::Sys { idx: idx as u16 });
+                self.emit(Op::Mov {
+                    dst: *dst as u8,
+                    src: 0,
+                });
+            }
             ir::Instr::Noop {} => {}
             ir::Instr::Bin { op, dst, lhs, rhs } => {
                 let (
@@ -332,9 +353,16 @@ impl<'cc> Cc<'cc> {
         v.bytecode = self.buf;
         v.globals = self.globals.to_vec_fn(Value::from);
         v.strings = self.strings.to_vec();
+        v.syscalls = self
+            .std_fns
+            .to_vec()
+            .into_iter()
+            .map(|func_ptr_as_usize| unsafe { std::mem::transmute(func_ptr_as_usize) })
+            .collect();
         v
     }
 
+    /// map pc's to function definitions
     pub fn function_table(&self) -> HashMap<usize, String> {
         self.functions
             .values()

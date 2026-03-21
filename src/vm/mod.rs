@@ -12,7 +12,7 @@ pub use crate::vm::value::Value;
 use op::Op;
 
 pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>) -> Result<Value, Anomaly>;
-fn syscall_unimplemented<'vm>(vm: &mut Vm<'vm>) -> Result<Value, Anomaly> {
+pub fn syscall_unimplemented<'vm>(vm: &mut Vm<'vm>) -> Result<Value, Anomaly> {
     Err(Anomaly::InvalidSyscall { pc: vm.pc })
 }
 
@@ -40,7 +40,8 @@ pub struct Vm<'vm> {
     /// --backtrace was passed as an option to the interpreter
     pub backtrace: Vec<usize>,
 
-    pub syscalls: [BuiltinFn<'vm>; SYSCALL_COUNT],
+    // TODO: replace this with an array
+    pub syscalls: Vec<BuiltinFn<'vm>>,
 
     config: &'vm Config,
 }
@@ -78,7 +79,7 @@ impl<'vm> Vm<'vm> {
             strings: Vec::new(),
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(REGISTER_COUNT),
-            syscalls: [syscall_unimplemented; SYSCALL_COUNT],
+            syscalls: Vec::new(),
             config,
         }
     }

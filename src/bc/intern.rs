@@ -1,12 +1,19 @@
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Interner<T> {
     pub map: HashMap<T, u32>,
     next_id: u32,
 }
 
 impl<T: std::hash::Hash + Eq + Copy + Default> Interner<T> {
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            next_id: 0,
+        }
+    }
+
     pub fn intern(&mut self, v: T) -> u32 {
         if let Some(&id) = self.map.get(&v) {
             id
@@ -43,7 +50,7 @@ mod tests {
 
     #[test]
     fn intern_str_happy_path() {
-        let mut i = Interner::default();
+        let mut i = Interner::new();
 
         let a = i.intern("hello");
         let b = i.intern("world");
@@ -54,7 +61,7 @@ mod tests {
 
     #[test]
     fn intern_str_deduplicates() {
-        let mut i = Interner::default();
+        let mut i = Interner::new();
 
         let a1 = i.intern("hello");
         let a2 = i.intern("hello");
@@ -66,7 +73,7 @@ mod tests {
 
     #[test]
     fn intern_const_happy_path() {
-        let mut i = Interner::default();
+        let mut i = Interner::new();
 
         let a = i.intern(Const::Int(10));
         let b = i.intern(Const::Str("abc"));
@@ -77,7 +84,7 @@ mod tests {
 
     #[test]
     fn intern_const_deduplicates() {
-        let mut i = Interner::default();
+        let mut i = Interner::new();
 
         let a = i.intern(Const::Int(42));
         let b = i.intern(Const::Int(42));
@@ -89,7 +96,7 @@ mod tests {
 
     #[test]
     fn to_vec_preserves_indices_for_str() {
-        let mut i = Interner::default();
+        let mut i = Interner::new();
 
         i.intern("a");
         i.intern("b");
@@ -104,7 +111,7 @@ mod tests {
 
     #[test]
     fn to_vec_preserves_indices_for_const() {
-        let mut i = Interner::default();
+        let mut i = Interner::new();
 
         i.intern(Const::Int(1));
         i.intern(Const::Int(2));
@@ -119,7 +126,7 @@ mod tests {
 
     #[test]
     fn to_vec_fn_transforms_values() {
-        let mut i = Interner::default();
+        let mut i = Interner::new();
 
         i.intern(Const::Int(1));
         i.intern(Const::Int(2));
@@ -135,7 +142,7 @@ mod tests {
 
     #[test]
     fn edge_case_empty_interner() {
-        let i: Interner<&str> = Interner::default();
+        let i: Interner<&str> = Interner::new();
 
         let v = i.to_vec();
 
@@ -144,7 +151,7 @@ mod tests {
 
     #[test]
     fn edge_case_many_strings() {
-        let mut i = Interner::default();
+        let mut i = Interner::new();
 
         for n in 0..1000 {
             let s = format!("str{n}");

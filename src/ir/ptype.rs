@@ -4,7 +4,7 @@ use std::fmt::Display;
 use crate::{ast::TypeExpr, ir::Const, lex};
 
 /// Compile time type system,
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum Type {
     Void,
     Bool,
