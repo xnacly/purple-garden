@@ -3,6 +3,7 @@ use std::fmt;
 use crate::{ir::ptype::Type, vm::BuiltinFn};
 
 mod io;
+mod strings;
 
 #[derive(Debug)]
 pub struct Pkg {
@@ -36,29 +37,6 @@ pub fn resolve_pkg(query: &str) -> Option<&Pkg> {
         pkg.pkgs.iter().find(|p| p.name == segment)
     })
 }
-
-pub static STD: &[Pkg] = &[Pkg {
-    name: "io",
-    doc: "Package io provides rudimentary I/O primitives,
-like writing and reading from file descriptors",
-    pkgs: &[],
-    fns: &[
-        Fn {
-            name: "println",
-            doc: "writes its argument to stdout, with a newline appended",
-            ptr: crate::std::io::println,
-            args: &[Type::Str],
-            ret: Type::Void,
-        },
-        Fn {
-            name: "print",
-            ptr: crate::std::io::print,
-            doc: "writes its argument to stdout",
-            args: &[Type::Str],
-            ret: Type::Void,
-        },
-    ],
-}];
 
 fn print_function_head(fun: &Fn, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "fn {}(", fun.name)?;
@@ -103,3 +81,49 @@ impl fmt::Display for Pkg {
         Ok(())
     }
 }
+
+pub static STD: &[Pkg] = &[
+    Pkg {
+        name: "io",
+        doc: "Package io provides rudimentary I/O primitives,
+like writing and reading from file descriptors",
+        pkgs: &[],
+        fns: &[
+            Fn {
+                name: "println",
+                doc: "writes its argument to stdout, with a newline appended",
+                ptr: crate::std::io::println,
+                args: &[Type::Str],
+                ret: Type::Void,
+            },
+            Fn {
+                name: "print",
+                ptr: crate::std::io::print,
+                doc: "writes its argument to stdout",
+                args: &[Type::Str],
+                ret: Type::Void,
+            },
+        ],
+    },
+    Pkg {
+        name: "strings",
+        doc: "Package strings implementes function manipulating strings",
+        pkgs: &[],
+        fns: &[
+            Fn {
+                name: "contains",
+                doc: "reports whether arg 1 is in arg 0",
+                ptr: crate::std::strings::contains,
+                args: &[Type::Str, Type::Str],
+                ret: Type::Int,
+            },
+            Fn {
+                name: "len",
+                doc: "returns len of arg 0",
+                ptr: crate::std::strings::len,
+                args: &[Type::Str],
+                ret: Type::Int,
+            },
+        ],
+    },
+];
