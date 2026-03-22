@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::mem::MaybeUninit;
 
 #[derive(Debug, Clone)]
 pub struct Interner<T> {
@@ -6,7 +7,7 @@ pub struct Interner<T> {
     next_id: u32,
 }
 
-impl<T: std::hash::Hash + Eq + Copy + Default> Interner<T> {
+impl<T: std::hash::Hash + Eq> Interner<T> {
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
@@ -26,19 +27,33 @@ impl<T: std::hash::Hash + Eq + Copy + Default> Interner<T> {
     }
 
     pub fn to_vec(self) -> Vec<T> {
-        let mut vec = vec![T::default(); self.next_id as usize];
-        for (v, i) in self.map {
-            vec[i as usize] = v;
+        let len = self.next_id as usize;
+        let mut vec: Vec<MaybeUninit<T>> = Vec::with_capacity(len);
+
+        unsafe {
+            vec.set_len(len);
         }
-        vec
+
+        for (v, i) in self.map {
+            vec[i as usize].write(v);
+        }
+
+        unsafe { std::mem::transmute::<Vec<MaybeUninit<T>>, Vec<T>>(vec) }
     }
 
-    pub fn to_vec_fn<O: std::default::Default + Copy>(self, modify: fn(T) -> O) -> Vec<O> {
-        let mut vec = vec![O::default(); self.next_id as usize];
-        for (v, i) in self.map {
-            vec[i as usize] = modify(v);
+    pub fn to_vec_fn<O>(self, modify: fn(T) -> O) -> Vec<O> {
+        let len = self.next_id as usize;
+        let mut vec: Vec<MaybeUninit<O>> = Vec::with_capacity(len);
+
+        unsafe {
+            vec.set_len(len);
         }
-        vec
+
+        for (v, i) in self.map {
+            vec[i as usize].write(modify(v));
+        }
+
+        unsafe { std::mem::transmute::<Vec<MaybeUninit<O>>, Vec<O>>(vec) }
     }
 }
 

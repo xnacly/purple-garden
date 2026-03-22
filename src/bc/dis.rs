@@ -26,7 +26,7 @@ impl<'dis> Disassembler<'dis> {
 
         let globals = self.cc.globals.clone().to_vec();
         let strings = self.cc.strings.clone().to_vec();
-        let std_fns = self.cc.std_fns.clone().to_vec();
+        let std_fns = self.cc.std_fns.clone().to_vec_fn(|f| f as usize);
 
         if !globals.is_empty() {
             println!("globals:");

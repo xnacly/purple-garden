@@ -17,7 +17,7 @@ pub struct Pkg {
 pub struct Fn {
     pub name: &'static str,
     pub doc: &'static str,
-    pub ptr: BuiltinFn<'static>,
+    pub ptr: BuiltinFn,
     pub args: &'static [Type],
     pub ret: Type,
 }

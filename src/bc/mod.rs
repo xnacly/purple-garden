@@ -24,7 +24,7 @@ pub struct Cc<'cc> {
     pub buf: Vec<Op>,
     pub globals: Interner<Const<'cc>>,
     pub strings: Interner<&'cc str>,
-    pub std_fns: Interner<usize>,
+    pub std_fns: Interner<BuiltinFn>,
     pub functions: HashMap<Id, BcFunc<'cc>>,
     /// binding a block id to its pc
     block_map: HashMap<ir::Id, u16>,
@@ -275,7 +275,7 @@ impl<'cc> Cc<'cc> {
                 func,
                 args,
             } => {
-                let idx = self.std_fns.intern(func.ptr as usize);
+                let idx = self.std_fns.intern(func.ptr);
                 for (i, &ir::Id(arg)) in args.iter().enumerate() {
                     let (dst, src) = (i as u8, arg as u8);
                     if dst != src {
@@ -353,12 +353,7 @@ impl<'cc> Cc<'cc> {
         v.bytecode = self.buf;
         v.globals = self.globals.to_vec_fn(Value::from);
         v.strings = self.strings.to_vec();
-        v.syscalls = self
-            .std_fns
-            .to_vec()
-            .into_iter()
-            .map(|func_ptr_as_usize| unsafe { std::mem::transmute(func_ptr_as_usize) })
-            .collect();
+        v.syscalls = self.std_fns.to_vec();
         v
     }
 

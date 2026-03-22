@@ -11,7 +11,7 @@ pub use crate::vm::anomaly::Anomaly;
 pub use crate::vm::value::Value;
 use op::Op;
 
-pub type BuiltinFn<'vm> = fn(&mut Vm<'vm>) -> Result<Value, Anomaly>;
+pub type BuiltinFn = fn(&mut Vm) -> Result<Value, Anomaly>;
 pub fn syscall_unimplemented<'vm>(vm: &mut Vm<'vm>) -> Result<Value, Anomaly> {
     Err(Anomaly::InvalidSyscall { pc: vm.pc })
 }
@@ -41,7 +41,7 @@ pub struct Vm<'vm> {
     pub backtrace: Vec<usize>,
 
     // TODO: replace this with an array
-    pub syscalls: Vec<BuiltinFn<'vm>>,
+    pub syscalls: Vec<BuiltinFn>,
 
     config: &'vm Config,
 }
