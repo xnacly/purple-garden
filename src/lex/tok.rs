@@ -15,6 +15,7 @@ pub enum Type<'t> {
     NotEqual,
     Question,
     Colon,
+    Dot,
     BraketLeft,
     BraketRight,
     CurlyLeft,
@@ -30,6 +31,7 @@ pub enum Type<'t> {
     Ident(&'t str),
 
     // keywords
+    Import,
     True,
     False,
     Let,
@@ -48,6 +50,7 @@ pub enum Type<'t> {
 #[derive(Debug, Clone, Eq)]
 pub struct Token<'t> {
     pub line: usize,
+    // TODO: This is buggy asf and not at all correct
     pub col: usize,
     pub t: Type<'t>,
 }
@@ -83,6 +86,7 @@ impl<'t> Type<'t> {
             Type::Exclaim => "!",
             Type::NotEqual => "!=",
             Type::Question => "?",
+            Type::Dot => ".",
             Type::Colon => ":",
             Type::BraketLeft => "[",
             Type::BraketRight => "]",
@@ -92,6 +96,7 @@ impl<'t> Type<'t> {
             Type::D(d) => d,
             Type::I(i) => i,
             Type::Ident(i) => i,
+            Type::Import => "import",
             Type::True => "true",
             Type::False => "false",
             Type::Let => "let",

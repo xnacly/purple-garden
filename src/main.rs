@@ -1,8 +1,57 @@
-use purple_garden::{bc, config, err::PgError, ir, lex::Lexer, opt, parser::Parser, trace};
+use purple_garden::{
+    bc, config, err::PgError, ir, lex::Lexer, opt, parser::Parser, std as pstd, std::Pkg, trace,
+};
 use std::{collections::HashMap, fs};
 
 fn main() {
     let args = <config::Config as clap::Parser>::parse();
+    if let Some(cmd) = args.command {
+        match cmd {
+            config::Command::Doc { pkg_or_function } => {
+                // with no argument we just print all stdlib packages
+                let Some(pkg_or_function) = pkg_or_function else {
+                    fn print_pkg(pkg: &Pkg) {
+                        println!("{}", pkg.name);
+                        for sub in pkg.pkgs {
+                            print_pkg(sub);
+                        }
+                    }
+                    println!("Purple garden standard library packages:");
+                    for pkg in purple_garden::std::STD {
+                        print_pkg(pkg)
+                    }
+                    std::process::exit(0);
+                };
+
+                let (path, method) = match pkg_or_function.split_once(".") {
+                    Some((path, method)) => (path, Some(method)),
+                    None => (pkg_or_function.as_str(), None),
+                };
+
+                let pkg = pstd::resolve_pkg(path).unwrap_or_else(|| {
+                    eprintln!("query {} couldnt be resolved to anything", path);
+                    std::process::exit(1);
+                });
+
+                if let Some(method) = method {
+                    println!(
+                        "{}",
+                        pkg.fns
+                            .iter()
+                            .find(|f| f.name == method)
+                            .unwrap_or_else(|| {
+                                eprintln!("function {}.{} not found", pkg.name, method);
+                                std::process::exit(1);
+                            })
+                    );
+                } else {
+                    println!("{}", pkg);
+                }
+
+                std::process::exit(0);
+            }
+        }
+    }
     let input = match args.run {
         Some(ref i) => i.as_bytes().to_vec(),
         None => fs::read(args.target.clone().expect("No file or `-r` specified"))
@@ -60,7 +109,7 @@ fn main() {
         }
     }
 
-    let mut cc = bc::Cc::default();
+    let mut cc = bc::Cc::new();
     if let Err(e) = cc.compile(&ir) {
         let lines = str::from_utf8(&input)
             .unwrap()
@@ -83,7 +132,7 @@ fn main() {
     };
 
     let ctx = if args.disassemble {
-        Some(cc.ctx.clone())
+        Some(cc.clone())
     } else {
         None
     };

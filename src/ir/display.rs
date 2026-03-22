@@ -34,6 +34,23 @@ impl Display for Instr<'_> {
                 }
                 write!(f, ")")?;
             }
+            Instr::Sys {
+                dst,
+                path,
+                func,
+                args,
+            } => {
+                write!(f, "%v{} = ", dst)?;
+                write!(f, "sys {path}.{}(", func.name)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i + 1 == args.len() {
+                        write!(f, "%v{}", arg.0)?;
+                    } else {
+                        write!(f, "%v{}, ", arg.0)?;
+                    }
+                }
+                write!(f, ")")?;
+            }
             Instr::Tail { dst, func, args } => {
                 write!(f, "%v{} = ", dst)?;
                 write!(f, "tailcall f{}(", func.0)?;
@@ -160,6 +177,7 @@ impl Display for Const<'_> {
             Const::Int(int) => write!(f, "{int}"),
             Const::Double(bits) => write!(f, "{}", f64::from_bits(*bits)),
             Const::Str(str) => write!(f, "`{str}`"),
+            _ => unreachable!(),
         }
     }
 }

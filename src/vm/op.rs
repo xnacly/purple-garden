@@ -25,7 +25,7 @@ pub enum Op {
     Tail { func: u32 },
 
     Call { func: u32 },
-    Sys { idx: u8 },
+    Sys { idx: u16 },
     Push { src: u8 },
     Pop { dst: u8 },
 

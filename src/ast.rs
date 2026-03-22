@@ -71,11 +71,18 @@ pub enum Node<'node> {
         default: (Token<'node>, Vec<Node<'node>>),
     },
 
-    /// <name>(<args>)
+    /// <target>(<args>)
     Call {
         id: usize,
-        name: Token<'node>,
+        target: Box<Node<'node>>,
         args: Vec<Node<'node>>,
+    },
+
+    /// <target>.<name>
+    Field {
+        id: usize,
+        target: Box<Node<'node>>,
+        name: Token<'node>,
     },
 
     /// <lhs> as <rhs>
@@ -85,13 +92,14 @@ pub enum Node<'node> {
         lhs: Box<Node<'node>>,
         rhs: TypeExpr<'node>,
     },
-    //
-    // <target>[<index>]
-    // Idx {
-    //     id: usize,
-    //     target: Box<Node<'node>>,
-    //     index: Box<Node<'node>>,
-    // },
+
+    /// import ("<pkg name>" "<pkg name>")
+    Import {
+        id: usize,
+        src: Token<'node>,
+        /// list of packages to import as strings
+        pkgs: Vec<Token<'node>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,10 +198,19 @@ impl<'a> Node<'a> {
                 }
                 writeln!(f, "{})->{}", pad, return_type)
             }
-            Node::Call { name, args, .. } => {
-                write!(f, "{}({}", pad, name.t.as_str())?;
-                if !args.is_empty() {
+            Node::Call { target, args, .. } => {
+                write!(f, "{}(", pad,)?;
+                if let Node::Atom {
+                    raw: Token { t, .. },
+                    ..
+                } = target.as_ref()
+                {
+                    write!(f, "{}", t.as_str())?;
+                } else {
                     writeln!(f)?;
+                    target.fmt_sexpr(f, indent + 1);
+                }
+                if !args.is_empty() {
                     for arg in args {
                         arg.fmt_sexpr(f, indent + 1)?;
                     }
@@ -222,6 +239,27 @@ impl<'a> Node<'a> {
                     default_member.fmt_sexpr(f, indent + 1)?;
                 }
                 writeln!(f, "{} )", pad)?;
+                writeln!(f, "{})", pad)
+            }
+            Node::Import { pkgs, .. } => {
+                write!(f, "{}(import ", pad)?;
+                for pkg in pkgs {
+                    let Token { t: Type::S(s), .. } = pkg else {
+                        unreachable!();
+                    };
+                    write!(f, "\"{s}\"")?;
+                }
+                writeln!(f, ")")
+            }
+            Node::Field { id, target, name } => {
+                writeln!(f, "{}(get", pad)?;
+                target.fmt_sexpr(f, indent + 1)?;
+                // hack for pretty printing field idxing
+                Node::Atom {
+                    id: 0,
+                    raw: name.clone(),
+                }
+                .fmt_sexpr(f, indent + 1)?;
                 writeln!(f, "{})", pad)
             }
         }

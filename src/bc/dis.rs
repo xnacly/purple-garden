@@ -1,44 +1,55 @@
 use std::collections::HashMap;
 
 use crate::{
-    bc::ctx::{self, Func},
+    bc,
     ir::{Const, Id},
     vm::op::Op,
 };
 
 pub struct Disassembler<'dis> {
     bc: &'dis [Op],
-    ctx: ctx::Context<'dis>,
+    cc: bc::Cc<'dis>,
 }
 
 impl<'dis> Disassembler<'dis> {
-    pub fn new(bc: &'dis [Op], ctx: ctx::Context<'dis>) -> Self {
-        Self { bc, ctx }
+    pub fn new(bc: &'dis [Op], cc: bc::Cc<'dis>) -> Self {
+        Self { bc, cc }
     }
 
     pub fn disassemble(&self) {
-        let funcs_by_pc: HashMap<u32, &Func> = self
-            .ctx
+        let funcs_by_pc: HashMap<u32, &bc::BcFunc> = self
+            .cc
             .functions
             .values()
             .map(|f| (f.pc as u32, f))
             .collect();
 
-        let globals_by_idx: HashMap<u32, &Const> = self
-            .ctx
-            .globals
-            .iter()
-            .map(|(c, idx)| (*idx as u32, c))
-            .collect();
+        let globals = self.cc.globals.clone().to_vec();
+        let strings = self.cc.strings.clone().to_vec();
+        let std_fns = self.cc.std_fns.clone().to_vec();
 
-        if !self.ctx.globals.is_empty() {
+        if !globals.is_empty() {
             println!("globals:");
-            for g in &self.ctx.globals {
-                println!("  {:04}:    {}", g.1, g.0)
+            for (i, g) in globals.iter().enumerate() {
+                println!("  {:04}:    {}", i, g)
             }
         }
 
-        let mut cur_func = self.ctx.functions.get(&Id(0)).unwrap();
+        if !strings.is_empty() {
+            println!("strs:");
+            for (i, s) in strings.iter().enumerate() {
+                println!("  {:04}:    \"{}\"", i, s)
+            }
+        }
+
+        if !std_fns.is_empty() {
+            println!("std_fns:");
+            for (i, s) in std_fns.iter().enumerate() {
+                println!("  {:04}:    0x{}", i, s)
+            }
+        }
+
+        let mut cur_func = self.cc.functions.get(&Id(0)).unwrap();
         for (pc, instr) in self.bc.iter().enumerate() {
             if let Some(func) = funcs_by_pc.get(&(pc as u32)) {
                 cur_func = func;
@@ -66,11 +77,21 @@ impl<'dis> Disassembler<'dis> {
                     Op::Mov { dst, src } => format!("mov r{dst}, r{src}"),
                     Op::LoadI { dst, value } => format!("load_imm r{dst}, #{value}"),
                     Op::LoadG { dst, idx } => {
-                        let val_str = globals_by_idx
-                            .get(idx)
-                            .map(|v| format!("{}", v))
-                            .unwrap_or("<unknown>".to_string());
-                        format!("load_global r{dst}, {idx} \t; {}", val_str)
+                        let val_str = globals[*idx as usize];
+
+                        // only ints bigger than i32::MAX are interned as integers, all others are
+                        // inlined into load_imm. Thus all i < i32::MAX are indexes into the string
+                        // constant pool.
+                        if let Const::Int(idx) = val_str
+                            && idx < i32::MAX as i64
+                        {
+                            format!(
+                                "load_global r{dst}, {idx} \t; \"{}\"",
+                                strings[idx as usize]
+                            )
+                        } else {
+                            format!("load_global r{dst}, {idx} \t; {}", val_str)
+                        }
                     }
                     Op::Jmp { target } => {
                         format!(
@@ -89,7 +110,7 @@ impl<'dis> Disassembler<'dis> {
                     ),
                     Op::Call { func } =>
                         format!("call {func} <{}>", funcs_by_pc.get(func).unwrap().name),
-                    Op::Sys { .. } => "sys <syscall_name_here>".to_string(),
+                    Op::Sys { idx } => format!("sys {idx} <0x{:x}>", std_fns[*idx as usize]),
                     Op::Push { src } => format!("push {src}"),
                     Op::Pop { dst } => format!("pop {dst}"),
                     Op::Ret => "ret".into(),

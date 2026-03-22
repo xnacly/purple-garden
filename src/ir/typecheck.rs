@@ -5,6 +5,7 @@ use crate::{
     err::PgError,
     ir::ptype::Type,
     lex::{self, Token},
+    std::{self as pstd, Pkg, STD},
 };
 
 pub fn id_from_node(node: &Node) -> Option<usize> {
@@ -18,8 +19,9 @@ pub fn id_from_node(node: &Node) -> Option<usize> {
         | Node::Let { id, .. }
         | Node::Match { id, .. }
         | Node::Call { id, .. }
-        | Node::Cast { id, .. } => *id,
-        Node::Fn { .. } => return None,
+        | Node::Cast { id, .. }
+        | Node::Field { id, .. } => *id,
+        Node::Fn { .. } | Node::Import { .. } => return None,
     })
 }
 
@@ -31,9 +33,14 @@ struct FunctionType {
 
 #[derive(Default, Debug)]
 pub struct Typechecker<'t> {
+    /// maps each Node id to its computed type
     map: HashMap<usize, Type>,
+    /// assign a variables name in the current scope to its type
     env: HashMap<&'t str, Type>,
+    /// map a function name to its type(s)
     functions: HashMap<&'t str, FunctionType>,
+    /// map a pkg name to a map of its methods and their types
+    packages: HashMap<&'t str, HashMap<&'t str, FunctionType>>,
 }
 
 impl<'t> Typechecker<'t> {
@@ -285,21 +292,66 @@ impl<'t> Typechecker<'t> {
                 self.map.insert(*id, cast.clone());
                 cast
             }
-            Node::Call { id, name, args } => {
-                let lex::Token {
-                    t: lex::Type::Ident(inner_name),
-                    ..
-                } = name
-                else {
-                    unreachable!()
-                };
+            Node::Field { .. } => todo!(),
+            Node::Call { id, target, args } => {
+                let (tok, inner_name, fun) = match target.as_ref() {
+                    Node::Field { id, target, name } => {
+                        let Node::Ident {
+                            name:
+                                lex::Token {
+                                    t: lex::Type::Ident(pkg_name),
+                                    ..
+                                },
+                            ..
+                        } = target.as_ref()
+                        else {
+                            // TODO: add error handling for non ident call targets
+                            unreachable!();
+                        };
 
-                let Some(fun) = self.functions.get(inner_name).cloned() else {
-                    return Err(PgError::with_msg(
-                        "Undefined function",
-                        format!("Call to undefined function `{}`", inner_name),
-                        name,
-                    ));
+                        let lex::Token {
+                            t: lex::Type::Ident(inner_name),
+                            ..
+                        } = name
+                        else {
+                            unreachable!();
+                        };
+
+                        let Some(pkg) = self.packages.get(pkg_name) else {
+                            return Err(PgError::with_msg(
+                                "Undefined package",
+                                format!("Can't find package `{}`", pkg_name),
+                                name,
+                            ));
+                        };
+
+                        let Some(fun) = pkg.get(inner_name).cloned() else {
+                            return Err(PgError::with_msg(
+                                "Undefined function",
+                                format!("Call to undefined function `{}.{}`", pkg_name, inner_name),
+                                name,
+                            ));
+                        };
+                        (name, inner_name, fun)
+                    }
+                    Node::Ident { name, .. } => {
+                        let lex::Token {
+                            t: lex::Type::Ident(inner_name),
+                            ..
+                        } = name
+                        else {
+                            unreachable!();
+                        };
+                        let Some(fun) = self.functions.get(inner_name).cloned() else {
+                            return Err(PgError::with_msg(
+                                "Undefined function",
+                                format!("Call to undefined function `{}`", inner_name),
+                                name,
+                            ));
+                        };
+                        (name, inner_name, fun)
+                    }
+                    _ => unreachable!(),
                 };
 
                 if args.len() != fun.args.len() {
@@ -311,7 +363,7 @@ impl<'t> Typechecker<'t> {
                             fun.args.len(),
                             args.len()
                         ),
-                        name,
+                        tok,
                     ));
                 }
 
@@ -328,7 +380,7 @@ impl<'t> Typechecker<'t> {
                                 "`{}` arg{} expected type {}, got {} instead",
                                 inner_name, i, expected_type, provided_type,
                             ),
-                            name,
+                            tok,
                         ));
                     }
                 }
@@ -387,8 +439,52 @@ impl<'t> Typechecker<'t> {
                 self.map.insert(*id, first_type.clone());
                 first_type
             }
+            Node::Import { id, pkgs, src } => {
+                if pkgs.is_empty() {
+                    return Err(PgError::with_msg(
+                        "Empty import statement",
+                        "Import without any paths to import is considered invalid",
+                        src,
+                    ));
+                }
 
-            _ => todo!("{:?}", node),
+                for pkg_tok in pkgs {
+                    let lex::Type::S(pkg_name) = pkg_tok.t else {
+                        unreachable!();
+                    };
+
+                    let Some(pkg) = pstd::resolve_pkg(pkg_name) else {
+                        return Err(PgError::with_msg(
+                            "Unresolvable pkg import",
+                            format!("Wasnt able to find a package named `{pkg_name}`"),
+                            pkg_tok,
+                        ));
+                    };
+
+                    crate::trace!("ty: resolved pkg `{}`", pkg.name);
+
+                    self.packages.insert(
+                        pkg.name,
+                        pkg.fns
+                            .iter()
+                            .map(|f| {
+                                crate::trace!("ty: registered `{}.{}`", pkg.name, f.name);
+                                (
+                                    f.name,
+                                    FunctionType {
+                                        args: f.args.to_vec(),
+                                        ret: f.ret.clone(),
+                                    },
+                                )
+                            })
+                            .collect(),
+                    );
+                }
+
+                Type::Void
+            }
+            Node::Array { id, members } => todo!(),
+            Node::Object { id, pairs } => todo!(),
         })
     }
 }

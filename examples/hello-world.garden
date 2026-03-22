@@ -1,4 +1,3 @@
 # vim: filetype=python
-import ("io")
-
+import "io"
 io.println("Hello World")

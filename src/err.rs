@@ -15,21 +15,12 @@ pub struct PgError {
 
 impl From<&Token<'_>> for PgError {
     fn from(value: &Token) -> Self {
-        let len = match value.t {
-            Type::S(i) | Type::Ident(i) | Type::D(i) | Type::I(i) => i.len(),
-            Type::True => 4,
-            Type::False | Type::Match => 5,
-            Type::Let => 3,
-            Type::Fn => 2,
-            // all others are a single byte long
-            _ => 1,
-        };
         PgError {
             title: "temp",
             msg: None,
             line: value.line,
             start: value.col,
-            len,
+            len: value.t.as_str().len(),
         }
     }
 }

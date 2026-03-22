@@ -72,6 +72,7 @@ impl<'l> Lexer<'l> {
     #[inline]
     fn as_keyword(&self, inner: &'l str) -> Option<Token<'l>> {
         let as_type = Some(match inner {
+            "import" => Type::Import,
             "as" => Type::As,
             "true" => Type::True,
             "false" => Type::False,
@@ -138,6 +139,7 @@ impl<'l> Lexer<'l> {
             }
             b'!' => self.make_tok(Type::Exclaim),
             b'?' => self.make_tok(Type::Question),
+            b'.' => self.make_tok(Type::Dot),
             b':' => self.make_tok(Type::Colon),
             b'[' => self.make_tok(Type::BraketLeft),
             b']' => self.make_tok(Type::BraketRight),
@@ -236,7 +238,7 @@ mod tests {
 
     #[test]
     fn single_char_tokens() {
-        let toks = lex("()+-*/=<>![]{}:?");
+        let toks = lex("()+-*/=<>![]{}.:?");
         assert_eq!(
             toks,
             vec![
@@ -254,6 +256,7 @@ mod tests {
                 Type::BraketRight,
                 Type::CurlyLeft,
                 Type::CurlyRight,
+                Type::Dot,
                 Type::Colon,
                 Type::Question,
             ]
@@ -333,12 +336,12 @@ mod tests {
     fn keywords() {
         assert_eq!(
             lex("
+    import
     true
     false
     let
     fn
     match
-    for
     str
     int
     double
@@ -346,6 +349,7 @@ mod tests {
     void
     "),
             vec![
+                Type::Import,
                 Type::True,
                 Type::False,
                 Type::Let,

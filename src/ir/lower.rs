@@ -4,7 +4,8 @@ use crate::{
     ast::{Node, TypeExpr},
     err::PgError,
     ir::{self, typecheck::id_from_node, *},
-    lex::{Token, Type},
+    lex::{self, Token, Type},
+    std as pstd,
 };
 
 #[derive(Default)]
@@ -32,6 +33,7 @@ pub struct Lower<'lower> {
     env: HashMap<&'lower str, Id>,
     func_name_to_id: HashMap<&'lower str, Id>,
     types: HashMap<usize, ptype::Type>,
+    packages: HashMap<&'lower str, (&'lower pstd::Pkg, HashMap<&'lower str, &'lower pstd::Fn>)>,
 }
 
 impl<'lower> Lower<'lower> {
@@ -191,6 +193,7 @@ impl<'lower> Lower<'lower> {
                 return_type,
                 body,
             } => {
+                // TODO: group this into Lower::ctx
                 let old_func = std::mem::take(&mut self.func);
                 let old_env = std::mem::take(&mut self.env);
                 let old_store = std::mem::take(&mut self.id_store);
@@ -250,19 +253,7 @@ impl<'lower> Lower<'lower> {
                 self.block = old_block;
                 None
             }
-            Node::Call { name, args, .. } => {
-                let Type::Ident(ident_name) = name.t else {
-                    unreachable!()
-                };
-
-                let Some(target_id) = self.func_name_to_id.get(ident_name).cloned() else {
-                    return Err(PgError::with_msg(
-                        "Undefined function",
-                        format!("Undefined function `{ident_name}`"),
-                        name,
-                    ));
-                };
-
+            Node::Call { target, args, .. } => {
                 let mut a = vec![];
                 for arg in args {
                     let Some(id) = self.lower_node(arg)? else {
@@ -272,17 +263,101 @@ impl<'lower> Lower<'lower> {
                 }
 
                 let dst_id = self.id_store.new_value();
-                let dst = TypeId {
-                    ty: self.types.get(&(target_id.0 as usize)).unwrap().clone(),
+                let mut dst = TypeId {
+                    // this is a placeholder
+                    ty: ptype::Type::Void,
                     id: dst_id,
                 };
-                self.emit(Instr::Call {
-                    dst,
-                    func: target_id,
-                    args: a,
-                });
+
+                match target.as_ref() {
+                    // 'syscall' / stdlib call
+                    Node::Field { target, name, .. } => {
+                        let Node::Ident {
+                            name:
+                                lex::Token {
+                                    t: lex::Type::Ident(pkg_name),
+                                    ..
+                                },
+                            ..
+                        } = target.as_ref()
+                        else {
+                            unreachable!();
+                        };
+
+                        let lex::Token {
+                            t: lex::Type::Ident(inner_name),
+                            ..
+                        } = name
+                        else {
+                            unreachable!();
+                        };
+
+                        // both unwrappable because the typechecker makes sure everything is fine
+                        let fun = self
+                            .packages
+                            .get(pkg_name)
+                            .unwrap()
+                            .1
+                            .get(inner_name)
+                            .unwrap();
+
+                        dst.ty = fun.ret.clone();
+                        self.emit(Instr::Sys {
+                            dst,
+                            path: pkg_name,
+                            func: fun,
+                            args: a,
+                        });
+                    }
+                    // user defined function
+                    Node::Ident { name, .. } => {
+                        let crate::lex::Token {
+                            t: crate::lex::Type::Ident(inner_name),
+                            ..
+                        } = name
+                        else {
+                            unreachable!();
+                        };
+                        let Some(target_id) = self.func_name_to_id.get(inner_name).cloned() else {
+                            return Err(PgError::with_msg(
+                                "Undefined function",
+                                format!("Undefined function `{inner_name}`"),
+                                name,
+                            ));
+                        };
+
+                        dst.ty = self.types.get(&(target_id.0 as usize)).unwrap().clone();
+                        self.emit(Instr::Call {
+                            dst,
+                            func: target_id,
+                            args: a,
+                        });
+                    }
+                    _ => unreachable!(),
+                };
 
                 Some(dst_id)
+            }
+            Node::Import { src, pkgs, .. } => {
+                for pkg_tok in pkgs {
+                    let Token {
+                        t: Type::S(as_str), ..
+                    } = pkg_tok
+                    else {
+                        unreachable!();
+                    };
+
+                    // the type checker already checks all packages are valid
+                    let Some(pkg) = pstd::resolve_pkg(as_str) else {
+                        unreachable!()
+                    };
+
+                    self.packages.insert(
+                        as_str,
+                        (pkg, pkg.fns.into_iter().map(|f| (f.name, f)).collect()),
+                    );
+                }
+                None
             }
             Node::Cast { lhs, rhs, .. } => {
                 let Some(from) = self.lower_node(lhs)? else {
@@ -391,7 +466,6 @@ impl<'lower> Lower<'lower> {
         let mut typechecker = typecheck::Typechecker::new();
         for node in ast {
             let _t = typechecker.node(node)?;
-            crate::trace!("{} resolved to {:?}", &node, _t);
         }
         crate::trace!("Finished type checking");
         self.types = typechecker.finalise();
