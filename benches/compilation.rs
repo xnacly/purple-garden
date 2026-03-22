@@ -11,6 +11,10 @@ const CONFIG_OPT: &config::Config = &{
     c.opt = 1;
     c
 };
+const RANDOM_BULLSHIT: &'static str = "match {
+    0 == 0 { 1 }
+    { 1-1+3*5 }
+}";
 const FACTORIAL: &'static str = "
 fn factorial(n:int a:int) int {
     match {
@@ -23,7 +27,7 @@ factorial(20 1)
 
 /// benchmark compilation
 pub fn bench_compilation(c: &mut Criterion) {
-    let factorial = FACTORIAL.repeat(CODE_AMOUNT);
+    let factorial = RANDOM_BULLSHIT.repeat(CODE_AMOUNT);
     c.bench_function("bench_compilation", |b| {
         b.iter(|| {
             let _ = purple_garden::new(CONFIG, factorial.as_bytes()).unwrap();
@@ -32,7 +36,7 @@ pub fn bench_compilation(c: &mut Criterion) {
 }
 
 pub fn bench_compilation_opt(c: &mut Criterion) {
-    let factorial = FACTORIAL.repeat(CODE_AMOUNT);
+    let factorial = RANDOM_BULLSHIT.repeat(CODE_AMOUNT);
     c.bench_function("bench_compilation_opt", |b| {
         b.iter(|| {
             let _ = purple_garden::new(CONFIG_OPT, factorial.as_bytes()).unwrap();

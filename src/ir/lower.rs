@@ -318,6 +318,7 @@ impl<'lower> Lower<'lower> {
                         else {
                             unreachable!();
                         };
+
                         let Some(target_id) = self.func_name_to_id.get(inner_name).cloned() else {
                             return Err(PgError::with_msg(
                                 "Undefined function",

@@ -240,6 +240,22 @@ impl<'t> Typechecker<'t> {
                 return_type,
                 body,
             } => {
+                let lex::Token {
+                    t: lex::Type::Ident(inner_name),
+                    ..
+                } = name
+                else {
+                    unreachable!()
+                };
+
+                if self.functions.contains_key(inner_name) {
+                    return Err(PgError::with_msg(
+                        "Function already defined",
+                        format!("`{}` is already defined", inner_name),
+                        name,
+                    ));
+                }
+
                 let prev_env = std::mem::take(&mut self.env);
                 let mut typed_arguments = Vec::with_capacity(args.len());
                 for (arg_name, arg_type) in args {
@@ -255,13 +271,6 @@ impl<'t> Typechecker<'t> {
                     self.env.insert(inner_name, t.clone());
                     typed_arguments.push(t);
                 }
-                let lex::Token {
-                    t: lex::Type::Ident(inner_name),
-                    ..
-                } = name
-                else {
-                    unreachable!()
-                };
 
                 let ret: Type = return_type.into();
 

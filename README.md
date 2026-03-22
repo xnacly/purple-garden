@@ -14,26 +14,10 @@ io.println("Hello World")
 - Extremely fast execution with a register-based VM and aggressive compile-time
   optimisations (both IR and peephole), see the [ir](./src/ir/) and
   [opt](./src/opt) modules
-- JIT compilation for runtime hotspots
-- Embeddable with minimal friction for Rust interop
+- JIT compilation for runtime hotspots, or for everything with `--native`
+- Embeddable with minimal friction for Rust interop via `vm::BuiltinFn`
 - Memory efficient, with an optional garbage collector and a minimal standard
-  library
-
-## Embedding
-
-> THIS IS A BIG WIP
-
-```rust
-let pg = purple_garden::init(purple_garden::Config{});
-pg.register_function("__todo", |_, args| {
-    if args.is_empty() {
-        return None;
-    }
-    panic!("{}", args[0]) // panics on call with Display of purple_garden::vm::Value
-    None
-});
-let return_value = pg.run(`__todo("hello world")`.as_bytes()); // None
-```
+  library, see [std](./src/std/)
 
 ## Local Setup
 
@@ -49,5 +33,5 @@ cargo +nightly run -- --help
 > These may take a while
 
 ```bash
-cargo bench --features nightly
+cargo +nightly bench --features nightly
 ```
