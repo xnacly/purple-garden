@@ -42,12 +42,7 @@ impl<'lower> Lower<'lower> {
     }
 
     fn emit(&mut self, i: Instr<'lower>) {
-        self.func
-            .blocks
-            .get_mut(self.block.0 as usize)
-            .unwrap()
-            .instructions
-            .push(i);
+        self.func.blocks[self.block.0 as usize].instructions.push(i);
     }
 
     fn cur(&self) -> &Block<'lower> {
@@ -393,7 +388,6 @@ impl<'lower> Lower<'lower> {
                 // this is only for correctness to jump into the match statements first check, we
                 // will just leave the block empty and add no terminator, meaning it will be
                 // skipped fully
-                //
                 // self.block_mut(self.block).term = Some(Terminator::Jump {
                 //     id: *check_blocks.first().unwrap(),
                 //     params: params.clone(),
