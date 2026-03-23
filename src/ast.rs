@@ -133,7 +133,10 @@ impl<'a> Node<'a> {
         let pad = "  ".repeat(indent);
 
         match &self {
-            Node::Atom { raw, .. } => writeln!(f, "{}{}", pad, raw.t.as_str()),
+            Node::Atom { raw, .. } => match raw.t {
+                Type::S(s) => writeln!(f, "{}`{s}`", pad),
+                _ => writeln!(f, "{}{}", pad, raw.t.as_str()),
+            },
             Node::Ident { name, .. } => {
                 if let Type::Ident(name) = name.t {
                     writeln!(f, "{}{}", pad, name)
