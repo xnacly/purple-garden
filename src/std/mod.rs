@@ -107,7 +107,7 @@ like writing and reading from file descriptors",
     },
     Pkg {
         name: "strings",
-        doc: "Package strings implementes function manipulating strings",
+        doc: "Package strings implements functions manipulating strings",
         pkgs: &[],
         fns: &[
             Fn {
@@ -116,6 +116,13 @@ like writing and reading from file descriptors",
                 ptr: crate::std::strings::contains,
                 args: &[Type::Str, Type::Str],
                 ret: Type::Int,
+            },
+            Fn {
+                name: "repeat",
+                doc: "repeats arg0 arg1 times",
+                ptr: crate::std::strings::repeat,
+                args: &[Type::Str, Type::Int],
+                ret: Type::Str,
             },
             Fn {
                 name: "len",
