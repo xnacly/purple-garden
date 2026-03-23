@@ -293,7 +293,9 @@ impl<'t> Typechecker<'t> {
                         return_type,
                     ));
                 }
+
                 self.env = prev_env;
+                crate::trace!("[ty]: typechecked function `{}`", inner_name);
                 ret
             }
             Node::Cast { id, lhs, rhs, src } => {

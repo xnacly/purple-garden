@@ -31,7 +31,7 @@ pub struct Lower<'lower> {
     id_store: IdStore,
     /// maps ast variable names to ssa values
     env: HashMap<&'lower str, Id>,
-    func_name_to_id: HashMap<&'lower str, Id>,
+    func_name_to_id: HashMap<&'lower str, (ir::Id, Option<ptype::Type>)>,
     types: HashMap<usize, ptype::Type>,
     packages: HashMap<&'lower str, (&'lower pstd::Pkg, HashMap<&'lower str, &'lower pstd::Fn>)>,
 }
@@ -203,21 +203,23 @@ impl<'lower> Lower<'lower> {
                 let Type::Ident(ident_name) = name.t else {
                     unreachable!()
                 };
-                self.func_name_to_id.insert(ident_name, id);
 
+                let ret = if let TypeExpr::Atom(Token { t: Type::Void, .. }) = return_type {
+                    None
+                } else {
+                    if let TypeExpr::Atom(Token { t, .. }) = return_type {
+                        Some((*t).into())
+                    } else {
+                        None
+                    }
+                };
+
+                self.func_name_to_id.insert(ident_name, (id, ret.clone()));
                 let func = Func {
                     name: ident_name,
                     id,
                     blocks: vec![],
-                    ret: if let TypeExpr::Atom(Token { t: Type::Void, .. }) = return_type {
-                        None
-                    } else {
-                        if let TypeExpr::Atom(Token { t, .. }) = return_type {
-                            Some((*t).into())
-                        } else {
-                            None
-                        }
-                    },
+                    ret,
                 };
 
                 self.func = func;
@@ -319,7 +321,8 @@ impl<'lower> Lower<'lower> {
                             unreachable!();
                         };
 
-                        let Some(target_id) = self.func_name_to_id.get(inner_name).cloned() else {
+                        let Some((target_id, ret)) = self.func_name_to_id.get(inner_name).cloned()
+                        else {
                             return Err(PgError::with_msg(
                                 "Undefined function",
                                 format!("Undefined function `{inner_name}`"),
@@ -327,7 +330,7 @@ impl<'lower> Lower<'lower> {
                             ));
                         };
 
-                        dst.ty = self.types.get(&(target_id.0 as usize)).unwrap().clone();
+                        dst.ty = ret.unwrap_or_else(|| ptype::Type::Void);
                         self.emit(Instr::Call {
                             dst,
                             func: target_id,
