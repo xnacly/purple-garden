@@ -18,6 +18,7 @@ pub mod jit;
 pub mod lex;
 pub mod opt;
 pub mod parser;
+pub mod ralloc;
 pub mod std;
 pub mod vm;
 
