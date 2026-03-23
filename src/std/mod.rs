@@ -41,7 +41,7 @@ pub fn resolve_pkg(query: &str) -> Option<&Pkg> {
 fn print_function_head(fun: &Fn, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "fn {}(", fun.name)?;
     for (i, a) in fun.args.iter().enumerate() {
-        if i == fun.args.len() + 1 {
+        if i + 1 < fun.args.len() {
             write!(f, "{} ", a)?;
         } else {
             write!(f, "{}", a)?;

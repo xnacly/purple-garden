@@ -4,7 +4,6 @@ pub mod op;
 pub mod value;
 
 pub const REGISTER_COUNT: usize = 64;
-pub const SYSCALL_COUNT: usize = 1024;
 
 use crate::config::Config;
 pub use crate::vm::anomaly::Anomaly;
@@ -33,7 +32,7 @@ pub struct Vm<'vm> {
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
-    pub strings: Vec<&'vm str>,
+    pub strings: Vec<String>,
 
     /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
     /// function the virtual machine currently executes in, this behaviour only occurs if
@@ -82,6 +81,14 @@ impl<'vm> Vm<'vm> {
             syscalls: Vec::new(),
             config,
         }
+    }
+
+    /// creates a new string in [vm::heap_strings], a reference to it into [vm::strings] and
+    /// returns the index into the latter
+    pub fn new_string(&mut self, s: String) -> usize {
+        let idx = self.strings.len();
+        self.strings.push(s);
+        idx
     }
 
     pub fn run(&mut self) -> Result<(), Anomaly> {

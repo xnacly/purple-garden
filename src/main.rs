@@ -171,10 +171,5 @@ fn main() {
         }
     }
 
-    // Trust me bro r0 is a Str, please please please.
-    //
-    // terminated by signal SIGSEGV
-    // println!("{}", vm.r[0].dbg(&vm, ir::ptype::Type::Str));
-
     trace!("Executed bytecode");
 }

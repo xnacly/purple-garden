@@ -27,8 +27,8 @@ impl Value {
     }
 
     #[inline(always)]
-    pub fn as_str<'t>(&self, pool: &'t [&'t str]) -> &'t str {
-        pool[self.0 as usize]
+    pub fn as_str<'t>(&self, pool: &'t [String]) -> &'t str {
+        pool[self.0 as usize].as_ref()
     }
 
     #[inline(always)]
@@ -55,17 +55,6 @@ impl Value {
     pub fn f64_to_int(&self) -> Self {
         Value::from(self.as_f64() as i64)
     }
-
-    pub fn dbg(&self, vm: &vm::Vm, in_form_of: ptype::Type) -> String {
-        match in_form_of {
-            ptype::Type::Void => String::new(),
-            ptype::Type::Bool => format!("{}", self.as_bool()),
-            ptype::Type::Int => format!("{}", self.as_int()),
-            ptype::Type::Double => format!("{}", self.as_f64()),
-            ptype::Type::Str => format!("{:?}", self.as_str(&vm.strings)),
-            _ => todo!(),
-        }
-    }
 }
 
 impl<'c> From<Const<'c>> for Value {
@@ -89,6 +78,12 @@ impl From<bool> for Value {
 
 impl From<i64> for Value {
     fn from(value: i64) -> Self {
+        Self(value as u64)
+    }
+}
+
+impl From<usize> for Value {
+    fn from(value: usize) -> Self {
         Self(value as u64)
     }
 }
