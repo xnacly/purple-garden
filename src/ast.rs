@@ -110,11 +110,6 @@ pub enum TypeExpr<'te> {
     Option(Box<TypeExpr<'te>>),
     /// Array via [<type>]
     Array(Box<TypeExpr<'te>>),
-    /// Map via <key_type>[<value_type>]
-    Map {
-        key: Box<TypeExpr<'te>>,
-        value: Box<TypeExpr<'te>>,
-    },
 }
 
 impl Display for TypeExpr<'_> {
@@ -123,7 +118,6 @@ impl Display for TypeExpr<'_> {
             TypeExpr::Atom(token) => write!(f, "{}", token.t.as_str()),
             TypeExpr::Option(type_expr) => write!(f, "?{}", type_expr),
             TypeExpr::Array(type_expr) => write!(f, "[{}]", type_expr),
-            TypeExpr::Map { key, value } => write!(f, "{}[{}]", key, value),
         }
     }
 }

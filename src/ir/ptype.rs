@@ -13,7 +13,6 @@ pub enum Type {
     Str,
     Option(Box<Type>),
     Array(Box<Type>),
-    Map { key: Box<Type>, value: Box<Type> },
 }
 
 impl Type {
@@ -38,9 +37,6 @@ impl Display for Type {
             Type::Str => write!(f, "Str"),
             Type::Option(inner) => write!(f, "Option<{}>", inner),
             Type::Array(inner) => write!(f, "Array<{}>", inner),
-            Type::Map { key, value } => {
-                write!(f, "Map<{}, {}>", key, value)
-            }
         }
     }
 }
@@ -76,10 +72,6 @@ impl From<&TypeExpr<'_>> for Type {
             TypeExpr::Atom(token) => token.t.into(),
             TypeExpr::Option(type_expr) => Type::Option(Box::new(type_expr.as_ref().into())),
             TypeExpr::Array(type_expr) => Type::Array(Box::new(type_expr.as_ref().into())),
-            TypeExpr::Map { key, value } => Type::Map {
-                key: Box::new(key.as_ref().into()),
-                value: Box::new(value.as_ref().into()),
-            },
         }
     }
 }

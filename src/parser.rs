@@ -381,19 +381,7 @@ impl<'p> Parser<'p> {
             Type::Str | Type::Int | Type::Bool | Type::Void | Type::Double => {
                 let tt = TypeExpr::Atom(self.cur().clone());
                 self.advance()?;
-
-                // Map/object <type>[<type>]
-                if self.cur().t == Type::BraketLeft {
-                    self.advance()?;
-                    let value = self.parse_type()?;
-                    self.expect(Type::BraketRight)?;
-                    TypeExpr::Map {
-                        key: Box::new(tt),
-                        value: Box::new(value),
-                    }
-                } else {
-                    tt
-                }
+                tt
             }
             _ => {
                 return Err(PgError::with_msg(

@@ -30,7 +30,6 @@ impl From<&TypeExpr<'_>> for PgError {
         match value {
             TypeExpr::Atom(tok) => tok.into(),
             TypeExpr::Option(inner) | TypeExpr::Array(inner) => inner.as_ref().into(),
-            TypeExpr::Map { key, .. } => key.as_ref().into(),
         }
     }
 }
