@@ -2,6 +2,7 @@ use std::fmt;
 
 use crate::{ir::ptype::Type, vm::BuiltinFn};
 
+mod conv;
 mod io;
 mod strings;
 
@@ -130,6 +131,27 @@ like writing and reading from file descriptors",
                 ptr: crate::std::strings::len,
                 args: &[Type::Str],
                 ret: Type::Int,
+            },
+        ],
+    },
+    Pkg {
+        name: "conv",
+        doc: "Package conv includes helpers for roundtripping various datatypes",
+        pkgs: &[],
+        fns: &[
+            Fn {
+                name: "from_int",
+                doc: "converts Int to Str",
+                ptr: crate::std::conv::from_int,
+                args: &[Type::Int],
+                ret: Type::Str,
+            },
+            Fn {
+                name: "from_double",
+                doc: "converts Double to Str",
+                ptr: crate::std::conv::from_double,
+                args: &[Type::Double],
+                ret: Type::Str,
             },
         ],
     },
