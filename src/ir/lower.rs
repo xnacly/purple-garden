@@ -68,7 +68,7 @@ impl<'lower> Lower<'lower> {
     }
 
     fn block_mut(&mut self, id: Id) -> &mut Block<'lower> {
-        self.func.blocks.iter_mut().find(|b| b.id == id).unwrap()
+        &mut self.func.blocks[id.0 as usize]
     }
 
     fn switch_to_block(&mut self, id: Id) {
