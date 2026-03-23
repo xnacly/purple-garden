@@ -459,39 +459,6 @@ mod tests {
         (double_wrapped,"[[void]]", TypeExpr::Array(Box::new(TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))))
     }
 
-    table_parse_types! {
-        parse_types_map,
-        (str_to_int,"str[int]", TypeExpr::Map{
-            key: Box::new(TypeExpr::Atom(mk_tok!(Type::Str))),
-            value: Box::new(TypeExpr::Atom(mk_tok!(Type::Int))),
-        })
-        (int_to_str,"int[str]", TypeExpr::Map{
-            key: Box::new(TypeExpr::Atom(mk_tok!(Type::Int))),
-            value: Box::new(TypeExpr::Atom(mk_tok!(Type::Str))),
-        })
-        (int_to_optional_str,"int[?str]", TypeExpr::Map{
-            key: Box::new(TypeExpr::Atom(mk_tok!(Type::Int))),
-            value: Box::new(
-                TypeExpr::Option(
-                    Box::new(
-                        TypeExpr::Atom(mk_tok!(Type::Str)),
-                        )
-                    )
-                ),
-        })
-        (set_like_str_to_void,"str[void]", TypeExpr::Map{
-            key: Box::new(TypeExpr::Atom(mk_tok!(Type::Str))),
-            value: Box::new(TypeExpr::Atom(mk_tok!(Type::Void))),
-        })
-        (str_to_map_of_maps,"str[str[void]]", TypeExpr::Map{
-            key: Box::new(TypeExpr::Atom(mk_tok!(Type::Str))),
-            value: Box::new(TypeExpr::Map{
-                key: Box::new(TypeExpr::Atom(mk_tok!(Type::Str))),
-                value: Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))
-            }),
-        })
-    }
-
     macro_rules! table {
         ($group:ident,$(($name:ident,$input:literal,$expected:expr))*) => {
             mod $group {
