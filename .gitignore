@@ -1,7 +1,5 @@
 # binaries
 build/*
-tests/test
 # benchmarking
 examples/bench.*
 target
-test.*
