@@ -13,6 +13,7 @@ pub mod bc;
 pub mod config;
 pub mod err;
 pub mod gc;
+pub mod help;
 pub mod ir;
 pub mod jit;
 pub mod lex;

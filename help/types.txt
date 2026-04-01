@@ -1,0 +1,15 @@
+Purple garden provides the primitive types any programmer would expect:
+
+    Void
+    Bool
+    Int
+    Double
+    Str
+
+Furthermore, there are three non primitive types:
+
+    Option
+    Array
+    Struct
+
+// TODO:

@@ -67,7 +67,10 @@ pub struct Config {
 
 #[derive(clap::Subcommand, Debug)]
 pub enum Command {
+    /// Show documentation for a package or a function
     Doc { pkg_or_function: Option<String> },
+    /// An introduction to purple garden
+    Intro { topic: Option<String> },
 }
 
 impl Config {

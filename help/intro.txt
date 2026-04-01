@@ -1,0 +1,36 @@
+Purple garden is a high performance interpreted programming language with a JIT and a
+minimalist standard library. It shines due to its embedability and its easy to extend by its
+embeder. 
+
+It can therefore be used in performance sensitive contexts and allows for disabling 
+common causes for degraded performance, like: --no-std, --no-env and --no-gc.
+
+Anyone wanting to learn about purple garden should consult:
+
+purple-garden intro <topic>
+
+Where topics include:
+
+    types 
+        as a showcase for types purple garden offers 
+    syntax 
+        a reference for purple garden language constructs, like iteration, functions, control flow,
+        etc.
+    embed 
+        for anyone interested in embedding purple garden in a rust project
+    examples 
+        a list of useful examples, from easy to more complex
+
+The purple garden command line interface is documented at:
+
+    purple-garden --help
+
+For in depth information around the standard library and its contents, there is:
+
+    purple-garden doc <pkg>[.<method>]
+
+    For instance:
+
+    $ purple-garden doc io.println
+    fn println(Str) Void
+            writes its argument to stdout, with a newline appended

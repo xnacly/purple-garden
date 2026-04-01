@@ -1,12 +1,27 @@
 use purple_garden::{
-    bc, config, err::PgError, ir, lex::Lexer, opt, parser::Parser, std as pstd, std::Pkg, trace,
+    bc, config,
+    err::PgError,
+    help, ir,
+    lex::Lexer,
+    opt,
+    parser::Parser,
+    std::{self as pstd, Pkg},
+    trace,
 };
 use std::{collections::HashMap, fs};
 
 fn main() {
     let args = <config::Config as clap::Parser>::parse();
-    if let Some(cmd) = args.command {
-        match cmd {
+    if let Some(ref cmd) = args.command {
+        match &cmd {
+            config::Command::Intro { topic } => {
+                println!(
+                    "{}",
+                    help::print_help_by_topic(topic.as_ref().map(|x| x.as_str()))
+                );
+
+                std::process::exit(0);
+            }
             config::Command::Doc { pkg_or_function } => {
                 // with no argument we just print all stdlib packages
                 let Some(pkg_or_function) = pkg_or_function else {
