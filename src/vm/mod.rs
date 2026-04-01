@@ -247,7 +247,6 @@ impl<'vm> Vm<'vm> {
                 Op::CastToBool { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_bool();
                 },
-
                 i => {
                     dbg!(i);
                     return Err(Anomaly::Unimplemented { pc });

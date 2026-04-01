@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use crate::{
     bc,
     ir::{Const, Id},
-    vm::op::Op,
+    std as pstd,
+    vm::{BuiltinFn, op::Op},
 };
 
 pub struct Disassembler<'dis> {
@@ -16,6 +17,43 @@ impl<'dis> Disassembler<'dis> {
         Self { bc, cc }
     }
 
+    /// maps the pointer to any stdlib function to its <pkg>.<name>
+
+    pub fn build_fn_map() -> HashMap<BuiltinFn, String> {
+        fn walk(
+            pkgs: &'static [pstd::Pkg],
+            path: &mut Vec<&'static str>,
+            out: &mut HashMap<BuiltinFn, String>,
+        ) {
+            for pkg in pkgs {
+                path.push(pkg.name);
+
+                // register all functions in this package
+                for f in pkg.fns {
+                    let mut full = String::new();
+
+                    for segment in path.iter() {
+                        full.push_str(segment);
+                        full.push('.');
+                    }
+
+                    full.push_str(f.name);
+
+                    out.insert(f.ptr, full);
+                }
+
+                // recurse into subpackages
+                walk(pkg.pkgs, path, out);
+
+                path.pop();
+            }
+        }
+
+        let mut map = HashMap::new();
+        walk(pstd::STD, &mut Vec::new(), &mut map);
+        map
+    }
+
     pub fn disassemble(&self) {
         let funcs_by_pc: HashMap<u32, &bc::BcFunc> = self
             .cc
@@ -26,7 +64,8 @@ impl<'dis> Disassembler<'dis> {
 
         let globals = self.cc.globals.clone().to_vec();
         let strings = self.cc.strings.clone().to_vec();
-        let std_fns = self.cc.std_fns.clone().to_vec_fn(|f| f as usize);
+        let std_fns = self.cc.std_fns.clone().to_vec();
+        let std_mapping = Self::build_fn_map();
 
         if !globals.is_empty() {
             println!("globals:");
@@ -39,13 +78,6 @@ impl<'dis> Disassembler<'dis> {
             println!("strs:");
             for (i, s) in strings.iter().enumerate() {
                 println!("  {:04}:    \"{}\"", i, s)
-            }
-        }
-
-        if !std_fns.is_empty() {
-            println!("std_fns:");
-            for (i, s) in std_fns.iter().enumerate() {
-                println!("  {:04}:    0x{}", i, s)
             }
         }
 
@@ -86,11 +118,11 @@ impl<'dis> Disassembler<'dis> {
                             && idx < i32::MAX as i64
                         {
                             format!(
-                                "load_global r{dst}, {idx} \t; \"{}\"",
+                                "load_global r{dst}, {idx} \t; = \"{}\"",
                                 strings[idx as usize]
                             )
                         } else {
-                            format!("load_global r{dst}, {idx} \t; {}", val_str)
+                            format!("load_global r{dst}, {idx} \t; = {}", val_str)
                         }
                     }
                     Op::Jmp { target } => {
@@ -110,7 +142,11 @@ impl<'dis> Disassembler<'dis> {
                     ),
                     Op::Call { func } =>
                         format!("call {func} <{}>", funcs_by_pc.get(func).unwrap().name),
-                    Op::Sys { idx } => format!("sys {idx} <0x{:x}>", std_fns[*idx as usize]),
+                    Op::Sys { idx } => format!(
+                        "sys {idx} <{}> \t; @ 0x{:x}",
+                        std_mapping.get(&std_fns[*idx as usize]).unwrap(),
+                        std_fns[*idx as usize] as usize,
+                    ),
                     Op::Push { src } => format!("push {src}"),
                     Op::Pop { dst } => format!("pop {dst}"),
                     Op::Ret => "ret".into(),
