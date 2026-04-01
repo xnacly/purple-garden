@@ -19,6 +19,11 @@ io.println("Hello World")
 - Memory efficient, with an optional garbage collector and a minimal standard
   library, see [std](./src/std/)
 
+## Documentation
+
+For an intro to purple garden see [help/intro.txt](./help/intro.txt) or run
+`purple-garden intro` after installing the binary.
+
 ## Local Setup
 
 > Nightly Rust is required due to branch prediction optimisations in the VM.
