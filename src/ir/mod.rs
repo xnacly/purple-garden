@@ -24,6 +24,8 @@ pub mod lower;
 pub mod ptype;
 pub mod typecheck;
 
+use std::collections::HashMap;
+
 use crate::ir::ptype::Type;
 use crate::std as pstd;
 
@@ -131,6 +133,10 @@ pub struct Block<'b> {
 pub struct Func<'f> {
     pub name: &'f str,
     pub id: Id,
+    /// mapping any vN to (def, last_use), used for spill detection for preserving registers around
+    /// call boundaries, since all registers in pg are callersaved (def(v) lteq C lt last_use(v)).
+    pub live_set: HashMap<u32, (u32, u32)>,
+    pub params: Vec<Id>,
     pub ret: Option<Type>,
     pub blocks: Vec<Block<'f>>,
 }

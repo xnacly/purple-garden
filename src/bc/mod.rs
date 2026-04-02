@@ -83,8 +83,8 @@ impl<'cc> Cc<'cc> {
 
             self.block_map.insert(block.id, self.buf.len() as u16);
 
-            for instruction in &block.instructions {
-                self.instr(fun, instruction);
+            for (i, instruction) in block.instructions.iter().enumerate() {
+                self.instr(fun, i as u32, instruction);
             }
 
             self.term(fun, block.term.as_ref());
@@ -186,7 +186,7 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn instr(&mut self, fun: &Func<'cc>, i: &ir::Instr<'cc>) {
+    fn instr(&mut self, fun: &Func<'cc>, pos: u32, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::Cast {
                 dst:
@@ -235,15 +235,29 @@ impl<'cc> Cc<'cc> {
                 };
 
                 let pc = func.pc;
+                let mut r_to_spil = vec![];
+                for (v, (def, last_use)) in &fun.live_set {
+                    // the value is defined before the call and used after the call, thus must be
+                    // spilled
+                    if def < &pos && &pos < last_use {
+                        crate::trace!(
+                            "[bc] spilled r{} at call_idx={};def={};last_use={}",
+                            v,
+                            pos,
+                            def,
+                            last_use
+                        );
+                        r_to_spil.push(v);
+                        self.emit(Op::Push { src: *v as u8 });
+                    }
+                }
+
                 for (i, &ir::Id(arg)) in args.iter().enumerate() {
                     let (dst, src) = (i as u8, arg as u8);
                     if dst != src {
                         self.emit(Op::Mov { dst, src });
                     }
                 }
-
-                // TODO: we need a live set building pass to save values that are used
-                // after the call and were defined before the Call with Push, Pop
 
                 let TypeId {
                     id: ir::Id(dst), ..
@@ -253,6 +267,10 @@ impl<'cc> Cc<'cc> {
                     dst: *dst as u8,
                     src: 0,
                 });
+
+                for r in r_to_spil {
+                    self.emit(Op::Pop { dst: *r as u8 });
+                }
             }
             ir::Instr::Tail { dst, func, args } => {
                 let Some(func) = self.functions.get(func) else {

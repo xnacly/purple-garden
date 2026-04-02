@@ -21,10 +21,10 @@ impl Display for Instr<'_> {
                 write!(f, "%v{} = {:?} %v{}, %v{}", dst, op, lhs.0, rhs.0)?
             }
             Instr::LoadConst { dst, value } => write!(f, "%v{} = {}", dst, value)?,
-            Instr::Noop => write!(f, "nop")?,
+            Instr::Noop => write!(f, "Nop")?,
             Instr::Call { dst, func, args } => {
                 write!(f, "%v{} = ", dst)?;
-                write!(f, "call f{}(", func.0)?;
+                write!(f, "Call f{}(", func.0)?;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {
                         write!(f, "%v{}", arg.0)?;
@@ -41,7 +41,7 @@ impl Display for Instr<'_> {
                 args,
             } => {
                 write!(f, "%v{} = ", dst)?;
-                write!(f, "sys {path}.{}(", func.name)?;
+                write!(f, "Sys {path}.{}(", func.name)?;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {
                         write!(f, "%v{}", arg.0)?;
@@ -53,7 +53,7 @@ impl Display for Instr<'_> {
             }
             Instr::Tail { dst, func, args } => {
                 write!(f, "%v{} = ", dst)?;
-                write!(f, "tailcall f{}(", func.0)?;
+                write!(f, "Tailcall f{}(", func.0)?;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {
                         write!(f, "%v{}", arg.0)?;
@@ -64,7 +64,7 @@ impl Display for Instr<'_> {
                 write!(f, ")")?;
             }
             Instr::Cast { dst: value, from } => {
-                write!(f, "%v{} = cast_to_{} %v{}", value, value.ty, from.0)?
+                write!(f, "%v{} = Cast_to_{} %v{}", value, value.ty, from.0)?
             }
         }
         Ok(())
@@ -121,8 +121,8 @@ impl Display for Func<'_> {
             .expect("Func.entry does not reference a valid block");
 
         write!(f, "// {}\nfn f{}(", self.name, self.id.0)?;
-        for (i, arg) in entry_block.params.iter().enumerate() {
-            if i + 1 == entry_block.params.len() {
+        for (i, arg) in self.params.iter().enumerate() {
+            if i + 1 == self.params.len() {
                 write!(f, "%v{}", arg)?;
             } else {
                 write!(f, "%v{}, ", arg)?;
