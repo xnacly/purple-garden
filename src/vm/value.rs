@@ -27,7 +27,7 @@ impl Value {
     }
 
     #[inline(always)]
-    pub fn as_str<'t>(&self, pool: &'t [String]) -> &'t str {
+    pub fn as_str<'t>(&self, pool: &'t [Box<str>]) -> &'t str {
         pool[self.0 as usize].as_ref()
     }
 

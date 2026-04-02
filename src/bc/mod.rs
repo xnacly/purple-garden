@@ -352,7 +352,7 @@ impl<'cc> Cc<'cc> {
 
         v.bytecode = self.buf;
         v.globals = self.globals.to_vec_fn(Value::from);
-        v.strings = self.strings.to_vec_fn(|s| s.to_string());
+        v.strings = self.strings.to_vec_fn(|s| s.to_owned().into_boxed_str());
         v.syscalls = self.std_fns.to_vec();
         v
     }

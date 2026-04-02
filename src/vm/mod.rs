@@ -32,7 +32,7 @@ pub struct Vm<'vm> {
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
-    pub strings: Vec<String>,
+    pub strings: Vec<Box<str>>,
 
     /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
     /// function the virtual machine currently executes in, this behaviour only occurs if
@@ -87,7 +87,7 @@ impl<'vm> Vm<'vm> {
     /// returns the index into the latter
     pub fn new_string(&mut self, s: String) -> usize {
         let idx = self.strings.len();
-        self.strings.push(s);
+        self.strings.push(s.into_boxed_str());
         idx
     }
 
