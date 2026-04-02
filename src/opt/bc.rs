@@ -58,7 +58,7 @@ pub fn mov_merge(window: &mut [Op]) {
 }
 
 #[cfg(test)]
-mod bc {
+mod bc_test {
     use crate::vm::op::Op;
 
     #[test]

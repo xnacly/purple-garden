@@ -11,11 +11,11 @@ const CONFIG_OPT: &config::Config = &{
     c.opt = 1;
     c
 };
-const RANDOM_BULLSHIT: &'static str = "match {
+const RANDOM_BULLSHIT: &str = "match {
     0 == 0 { 1 }
     { 1-1+3*5 }
 }";
-const FACTORIAL: &'static str = "
+const FACTORIAL: &str = "
 fn factorial(n:int a:int) int {
     match {
         n == 0 { a }

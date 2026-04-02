@@ -120,10 +120,10 @@ pub fn tailcall(fun: &mut ir::Func) {
 
     // verify the return block is trivial: no instructions and a simple return
     let last = &fun.blocks[last_id];
-    let trivial_return = match (&last.instructions[..], &last.term) {
-        ([], Some(ir::Terminator::Return(_))) => true,
-        _ => false,
-    };
+    let trivial_return = matches!(
+        (&last.instructions[..], &last.term),
+        ([], Some(ir::Terminator::Return(_)))
+    );
 
     for i in 0..fun.blocks.len() {
         let block = &mut fun.blocks[i];

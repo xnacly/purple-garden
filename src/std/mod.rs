@@ -67,14 +67,14 @@ impl fmt::Display for Pkg {
         writeln!(f, "{}", self.doc)?;
 
         if !self.pkgs.is_empty() {
-            writeln!(f, "");
+            writeln!(f);
             for p in self.pkgs {
                 writeln!(f, "{}/{}", self.name, p.name)?;
             }
         }
 
         if !self.fns.is_empty() {
-            writeln!(f, "");
+            writeln!(f);
             for fun in self.fns {
                 print_function_head(fun, f)?;
             }

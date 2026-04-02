@@ -325,7 +325,7 @@ impl<'lower> Lower<'lower> {
                             ));
                         };
 
-                        dst.ty = ret.unwrap_or_else(|| ptype::Type::Void);
+                        dst.ty = ret.unwrap_or(ptype::Type::Void);
                         self.emit(Instr::Call {
                             dst,
                             func: target_id,
@@ -351,10 +351,8 @@ impl<'lower> Lower<'lower> {
                         unreachable!()
                     };
 
-                    self.packages.insert(
-                        as_str,
-                        (pkg, pkg.fns.into_iter().map(|f| (f.name, f)).collect()),
-                    );
+                    self.packages
+                        .insert(as_str, (pkg, pkg.fns.iter().map(|f| (f.name, f)).collect()));
                 }
                 None
             }

@@ -18,7 +18,6 @@ impl<'dis> Disassembler<'dis> {
     }
 
     /// maps the pointer to any stdlib function to its <pkg>.<name>
-
     pub fn build_fn_map() -> HashMap<BuiltinFn, String> {
         fn walk(
             pkgs: &'static [pstd::Pkg],
@@ -62,9 +61,9 @@ impl<'dis> Disassembler<'dis> {
             .map(|f| (f.pc as u32, f))
             .collect();
 
-        let globals = self.cc.globals.clone().to_vec();
-        let strings = self.cc.strings.clone().to_vec();
-        let std_fns = self.cc.std_fns.clone().to_vec();
+        let globals = self.cc.globals.clone().into_vec();
+        let strings = self.cc.strings.clone().into_vec();
+        let std_fns = self.cc.std_fns.clone().into_vec();
         let std_mapping = Self::build_fn_map();
 
         if !globals.is_empty() {

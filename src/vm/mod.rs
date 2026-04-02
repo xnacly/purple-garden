@@ -140,7 +140,7 @@ impl<'vm> Vm<'vm> {
                 Op::IDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
-                    trap_if!(r == 0, Anomaly::DivisionByZero { pc: pc });
+                    trap_if!(r == 0, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l / r);
                 },
                 Op::IEq { dst, lhs, rhs } => unsafe {
@@ -176,7 +176,7 @@ impl<'vm> Vm<'vm> {
                 Op::DDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
-                    trap_if!(r == 0 as f64, Anomaly::DivisionByZero { pc: pc });
+                    trap_if!(r == 0 as f64, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l / r);
                 },
                 Op::DGt { dst, lhs, rhs } => unsafe {

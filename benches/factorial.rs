@@ -10,7 +10,7 @@ const CONFIG_OPT: &config::Config = &{
     c.opt = 1;
     c
 };
-const FACTORIAL: &'static str = "
+const FACTORIAL: &str = "
 fn factorial(n:int a:int) int {
     match {
         n == 0 { a }

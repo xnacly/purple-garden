@@ -26,7 +26,7 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
         }
     }
 
-    pub fn to_vec(self) -> Vec<T> {
+    pub fn into_vec(self) -> Vec<T> {
         let len = self.next_id as usize;
         let mut vec: Vec<MaybeUninit<T>> = Vec::with_capacity(len);
 
@@ -41,7 +41,7 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
         unsafe { std::mem::transmute::<Vec<MaybeUninit<T>>, Vec<T>>(vec) }
     }
 
-    pub fn to_vec_fn<O>(self, modify: fn(T) -> O) -> Vec<O> {
+    pub fn into_vec_fn<O>(self, modify: fn(T) -> O) -> Vec<O> {
         let len = self.next_id as usize;
         let mut vec: Vec<MaybeUninit<O>> = Vec::with_capacity(len);
 
@@ -117,7 +117,7 @@ mod tests {
         i.intern("b");
         i.intern("c");
 
-        let v = i.to_vec();
+        let v = i.into_vec();
 
         assert_eq!(v[0], "a");
         assert_eq!(v[1], "b");
@@ -132,7 +132,7 @@ mod tests {
         i.intern(Const::Int(2));
         i.intern(Const::Str("x"));
 
-        let v = i.to_vec();
+        let v = i.into_vec();
 
         assert_eq!(v[0], Const::Int(1));
         assert_eq!(v[1], Const::Int(2));
@@ -146,7 +146,7 @@ mod tests {
         i.intern(Const::Int(1));
         i.intern(Const::Int(2));
 
-        let v = i.to_vec_fn(|c| match c {
+        let v = i.into_vec_fn(|c| match c {
             Const::Int(v) => v,
             _ => 0,
         });
@@ -159,7 +159,7 @@ mod tests {
     fn edge_case_empty_interner() {
         let i: Interner<&str> = Interner::new();
 
-        let v = i.to_vec();
+        let v = i.into_vec();
 
         assert!(v.is_empty());
     }
@@ -174,7 +174,7 @@ mod tests {
             assert_eq!(i.intern(leaked), n);
         }
 
-        let v = i.to_vec();
+        let v = i.into_vec();
 
         assert_eq!(v.len(), 1000);
     }

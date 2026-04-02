@@ -25,7 +25,7 @@ pub mod vm;
 
 /// Create the purple garden vm from the given input.
 pub fn new<'e>(config: &'e config::Config, input: &'e [u8]) -> Result<Vm<'e>, PgError> {
-    let lexer = lex::Lexer::new(&input);
+    let lexer = lex::Lexer::new(input);
     let ast = parser::Parser::new(lexer)?.parse()?;
 
     let mut ir = ir::lower::Lower::new().ir_from(&ast)?;
@@ -39,7 +39,7 @@ pub fn new<'e>(config: &'e config::Config, input: &'e [u8]) -> Result<Vm<'e>, Pg
         opt::bc(&mut cc.buf);
     }
 
-    Ok(cc.finalize(&config))
+    Ok(cc.finalize(config))
 }
 
 #[cfg(feature = "trace")]

@@ -351,9 +351,9 @@ impl<'cc> Cc<'cc> {
         }
 
         v.bytecode = self.buf;
-        v.globals = self.globals.to_vec_fn(Value::from);
-        v.strings = self.strings.to_vec_fn(|s| s.to_owned().into_boxed_str());
-        v.syscalls = self.std_fns.to_vec();
+        v.globals = self.globals.into_vec_fn(Value::from);
+        v.strings = self.strings.into_vec_fn(|s| s.to_owned().into_boxed_str());
+        v.syscalls = self.std_fns.into_vec();
         v
     }
 
@@ -363,5 +363,11 @@ impl<'cc> Cc<'cc> {
             .values()
             .map(|f| (f.pc, f.name.to_string()))
             .collect()
+    }
+}
+
+impl<'cc> Default for Cc<'cc> {
+    fn default() -> Self {
+        Self::new()
     }
 }
