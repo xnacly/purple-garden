@@ -23,7 +23,7 @@ pub struct Config {
     #[arg(short = 'N', long)]
     pub native: bool,
 
-    /// Execute the whole pipeline but stop before executing either in the vm or in the native code
+    /// Execute the whole pipeline but stop before execution
     #[arg(short = 'd', long)]
     pub dry: bool,
 

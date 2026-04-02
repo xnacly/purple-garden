@@ -22,8 +22,7 @@ impl IdStore {
 }
 
 #[derive(Default)]
-pub struct Lower<'lower> {
-    functions: Vec<Func<'lower>>,
+struct LowerCtx<'lower> {
     /// current function
     func: Func<'lower>,
     /// current block
@@ -31,6 +30,12 @@ pub struct Lower<'lower> {
     id_store: IdStore,
     /// maps ast variable names to ssa values
     env: HashMap<&'lower str, Id>,
+}
+
+#[derive(Default)]
+pub struct Lower<'lower> {
+    ctx: LowerCtx<'lower>,
+    functions: Vec<Func<'lower>>,
     func_name_to_id: HashMap<&'lower str, (ir::Id, Option<ptype::Type>)>,
     types: HashMap<usize, ptype::Type>,
     packages: HashMap<&'lower str, (&'lower pstd::Pkg, HashMap<&'lower str, &'lower pstd::Fn>)>,
@@ -42,17 +47,19 @@ impl<'lower> Lower<'lower> {
     }
 
     fn emit(&mut self, i: Instr<'lower>) {
-        self.func.blocks[self.block.0 as usize].instructions.push(i);
+        self.ctx.func.blocks[self.ctx.block.0 as usize]
+            .instructions
+            .push(i);
     }
 
     fn cur(&self) -> &Block<'lower> {
-        let ir::Id(idx) = self.block;
-        self.func.blocks.get(idx as usize).unwrap()
+        let ir::Id(idx) = self.ctx.block;
+        self.ctx.func.blocks.get(idx as usize).unwrap()
     }
 
     fn new_block(&mut self) -> Id {
-        let id = Id(self.func.blocks.len() as u32);
-        self.func.blocks.push(Block {
+        let id = Id(self.ctx.func.blocks.len() as u32);
+        self.ctx.func.blocks.push(Block {
             id,
             tombstone: false,
             instructions: vec![],
@@ -63,11 +70,11 @@ impl<'lower> Lower<'lower> {
     }
 
     fn block_mut(&mut self, id: Id) -> &mut Block<'lower> {
-        &mut self.func.blocks[id.0 as usize]
+        &mut self.ctx.func.blocks[id.0 as usize]
     }
 
     fn switch_to_block(&mut self, id: Id) {
-        self.block = id
+        self.ctx.block = id
     }
 
     fn lower_node(&mut self, node: &Node<'lower>) -> Result<Option<Id>, PgError> {
@@ -90,7 +97,7 @@ impl<'lower> Lower<'lower> {
                     _ => unreachable!(),
                 };
 
-                let id = self.id_store.new_value();
+                let id = self.ctx.id_store.new_value();
                 self.emit(Instr::LoadConst {
                     dst: TypeId {
                         id,
@@ -105,7 +112,7 @@ impl<'lower> Lower<'lower> {
                 let Type::Ident(i) = name.t else {
                     unreachable!()
                 };
-                if let Some(id) = self.env.get(i) {
+                if let Some(id) = self.ctx.env.get(i) {
                     Some(*id)
                 } else {
                     return Err(PgError::with_msg(
@@ -129,7 +136,7 @@ impl<'lower> Lower<'lower> {
                     unreachable!()
                 };
 
-                let dst_id = self.id_store.new_value();
+                let dst_id = self.ctx.id_store.new_value();
                 let dst = TypeId {
                     id: dst_id,
                     ty: self.types.get(id).unwrap().clone(),
@@ -172,7 +179,7 @@ impl<'lower> Lower<'lower> {
                     unreachable!()
                 };
                 if let Some(id) = self.lower_node(rhs)? {
-                    self.env.insert(i, id);
+                    self.ctx.env.insert(i, id);
                 } else {
                     return Err(PgError::with_msg(
                         "Empty binding value",
@@ -188,11 +195,7 @@ impl<'lower> Lower<'lower> {
                 return_type,
                 body,
             } => {
-                // TODO: group this into Lower::ctx
-                let old_func = std::mem::take(&mut self.func);
-                let old_env = std::mem::take(&mut self.env);
-                let old_store = std::mem::take(&mut self.id_store);
-                let old_block = std::mem::take(&mut self.block);
+                let old_ctx = std::mem::take(&mut self.ctx);
 
                 let id = Id(self.functions.len() as u32 + 1);
                 let Type::Ident(ident_name) = name.t else {
@@ -217,16 +220,16 @@ impl<'lower> Lower<'lower> {
                     ret,
                 };
 
-                self.func = func;
+                self.ctx.func = func;
                 let entry = self.new_block();
                 self.block_mut(entry).params = args
                     .iter()
                     .map(|(token, _)| {
-                        let id = self.id_store.new_value();
+                        let id = self.ctx.id_store.new_value();
                         let Type::Ident(ident) = token.t else {
                             unreachable!();
                         };
-                        self.env.insert(ident, id);
+                        self.ctx.env.insert(ident, id);
                         id
                     })
                     .collect();
@@ -237,17 +240,14 @@ impl<'lower> Lower<'lower> {
                     last = self.lower_node(node)?;
                 }
 
-                if self.func.ret.is_some() {
-                    self.block_mut(self.block).term = Some(Terminator::Return(last));
+                if self.ctx.func.ret.is_some() {
+                    self.block_mut(self.ctx.block).term = Some(Terminator::Return(last));
                 } else {
-                    self.block_mut(self.block).term = Some(Terminator::Return(None));
+                    self.block_mut(self.ctx.block).term = Some(Terminator::Return(None));
                 }
 
-                self.functions.push(std::mem::take(&mut self.func));
-                self.env = old_env;
-                self.func = old_func;
-                self.id_store = old_store;
-                self.block = old_block;
+                self.functions.push(std::mem::take(&mut self.ctx.func));
+                self.ctx = old_ctx;
                 None
             }
             Node::Call { target, args, .. } => {
@@ -259,7 +259,7 @@ impl<'lower> Lower<'lower> {
                     a.push(id);
                 }
 
-                let dst_id = self.id_store.new_value();
+                let dst_id = self.ctx.id_store.new_value();
                 let mut dst = TypeId {
                     // this is a placeholder
                     ty: ptype::Type::Void,
@@ -361,7 +361,7 @@ impl<'lower> Lower<'lower> {
                     unreachable!()
                 };
 
-                let dst = self.id_store.new_value();
+                let dst = self.ctx.id_store.new_value();
                 let value = TypeId {
                     id: dst,
                     ty: rhs.into(),
@@ -466,7 +466,7 @@ impl<'lower> Lower<'lower> {
         crate::trace!("Finished type checking");
         self.types = typechecker.finalise();
 
-        self.func = Func {
+        self.ctx.func = Func {
             id: Id(0),
             name: "entry",
             ret: None,
@@ -481,7 +481,7 @@ impl<'lower> Lower<'lower> {
             self.switch_to_block(entry);
         }
 
-        self.functions.push(self.func);
+        self.functions.push(self.ctx.func);
         Ok(self.functions)
     }
 }
