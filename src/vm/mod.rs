@@ -23,12 +23,12 @@ pub struct CallFrame {
 #[repr(C)]
 #[derive(Debug)]
 pub struct Vm<'vm> {
-    pub r: [Value; REGISTER_COUNT],
+    r: [Value; REGISTER_COUNT],
     pub pc: usize,
 
-    pub frames: Vec<CallFrame>,
+    frames: Vec<CallFrame>,
     /// a stack to keep values alive across recursive function invocations
-    pub spilled: Vec<Value>,
+    spilled: Vec<Value>,
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
@@ -259,6 +259,18 @@ impl<'vm> Vm<'vm> {
         self.pc = pc;
 
         Ok(())
+    }
+
+    #[inline(always)]
+    /// access register [idx] by indexing [vm::r]
+    pub fn r(&self, idx: usize) -> &Value {
+        unsafe { &*self.r.as_ptr().add(idx) }
+    }
+
+    #[inline(always)]
+    /// access register [idx] mutably by indexing [vm::r]
+    pub fn r_mut(&mut self, idx: usize) -> &mut Value {
+        unsafe { &mut *self.r.as_mut_ptr().add(idx) }
     }
 }
 
