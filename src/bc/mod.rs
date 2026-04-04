@@ -59,6 +59,22 @@ impl<'cc> Cc<'cc> {
         pc
     }
 
+    fn ensure_register(&self, Id(ref id): Id) -> u8 {
+        let Some(location) = self.regalloc.map.get(id) else {
+            unreachable!(
+                "Attempted a register alloc lookup for a not defined ssa virtual register %v{}",
+                id
+            );
+        };
+
+        match location {
+            regalloc::Location::Reg(r) => *r,
+            regalloc::Location::Stack => {
+                todo!("no stack handling yet, maybe this should be a stack slot?")
+            }
+        }
+    }
+
     /// Compile a list of ir functions to bytecode instructions
     pub fn compile(&mut self, ir: &[Func<'cc>]) -> Result<(), PgError> {
         for func in ir {
@@ -198,44 +214,31 @@ impl<'cc> Cc<'cc> {
     fn instr(&mut self, fun: &Func<'cc>, pos: u32, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::Cast {
-                dst:
-                    TypeId {
-                        id: ir::Id(dst),
-                        ty,
-                    },
-                from: ir::Id(src),
+                dst: TypeId { id, ty },
+                from,
             } => {
-                let dst = *dst as u8;
-                let src = *src as u8;
-
+                let dst = self.ensure_register(*id);
+                let src = self.ensure_register(*from);
                 let op = match ty {
                     ptype::Type::Bool => Op::CastToBool { dst, src },
                     ptype::Type::Int => Op::CastToInt { dst, src },
                     ptype::Type::Double => Op::CastToDouble { dst, src },
                     _ => unreachable!("Not a valid cast, see typecheck::Typechecker::cast"),
                 };
-
                 self.emit(op);
             }
             ir::Instr::LoadConst { dst, value } => {
-                let TypeId {
-                    id: ir::Id(dst), ..
-                } = dst;
-
-                match value {
-                    Const::Int(i) if *i < i32::MAX as i64 => {
-                        self.emit(Op::LoadI {
-                            dst: *dst as u8,
-                            value: *i as i32,
-                        });
-                    }
-                    _ => {
-                        let idx = self.intern(*value);
-                        self.emit(Op::LoadG {
-                            dst: *dst as u8,
-                            idx,
-                        });
-                    }
+                let dst = self.ensure_register(dst.id);
+                if let Const::Int(i) = value
+                    && *i < i32::MAX as i64
+                {
+                    self.emit(Op::LoadI {
+                        dst,
+                        value: *i as i32,
+                    });
+                } else {
+                    let idx = self.intern(*value);
+                    self.emit(Op::LoadG { dst, idx });
                 }
             }
             ir::Instr::Call { dst, func, args } => {
@@ -341,13 +344,9 @@ impl<'cc> Cc<'cc> {
             }
             ir::Instr::Noop {} => {}
             ir::Instr::Bin { op, dst, lhs, rhs } => {
-                let (
-                    TypeId {
-                        id: ir::Id(dst), ..
-                    },
-                    ir::Id(lhs),
-                    ir::Id(rhs),
-                ) = (dst, lhs, rhs);
+                let dst = self.ensure_register(dst.id);
+                let lhs = self.ensure_register(*lhs);
+                let rhs = self.ensure_register(*rhs);
 
                 macro_rules! emit_bins {
                     ($($name:ident),*) => {
@@ -355,9 +354,9 @@ impl<'cc> Cc<'cc> {
                             $(
                                 ir::BinOp::$name => {
                                     Op::$name {
-                                        dst: (*dst) as u8,
-                                        lhs: (*lhs) as u8,
-                                        rhs: (*rhs) as u8,
+                                        dst,
+                                        lhs,
+                                        rhs,
                                     }
                                 },
                             )*

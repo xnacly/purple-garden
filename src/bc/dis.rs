@@ -146,17 +146,17 @@ impl<'dis> Disassembler<'dis> {
                         std_mapping.get(&std_fns[*idx as usize]).unwrap(),
                         std_fns[*idx as usize] as usize,
                     ),
-                    Op::Push { src } => format!("push {src}"),
-                    Op::Pop { dst } => format!("pop {dst}"),
+                    Op::Push { src } => format!("push r{src}"),
+                    Op::Pop { dst } => format!("pop r{dst}"),
                     Op::Ret => "ret".into(),
                     Op::CastToBool { dst, src } => {
-                        format!("cast_to_bool {dst}, {src}")
+                        format!("cast_to_bool r{dst}, r{src}")
                     }
                     Op::CastToInt { dst, src } => {
-                        format!("cast_to_int {dst}, {src}")
+                        format!("cast_to_int r{dst}, r{src}")
                     }
                     Op::CastToDouble { dst, src } => {
-                        format!("cast_to_double {dst}, {src}")
+                        format!("cast_to_double r{dst}, r{src}")
                     }
                     Op::Nop => "nop".into(),
                 }
