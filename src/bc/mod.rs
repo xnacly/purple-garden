@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 pub mod dis;
 mod intern;
-mod reg;
 mod regalloc;
 
 use crate::{
@@ -63,12 +62,12 @@ impl<'cc> Cc<'cc> {
     /// Compile a list of ir functions to bytecode instructions
     pub fn compile(&mut self, ir: &[Func<'cc>]) -> Result<(), PgError> {
         for func in ir {
-            let _ = self.cc(func)?;
+            self.cc(func)?;
         }
         Ok(())
     }
 
-    fn cc(&mut self, fun: &Func<'cc>) -> Result<Option<reg::Reg>, PgError> {
+    fn cc(&mut self, fun: &Func<'cc>) -> Result<(), PgError> {
         // since we have a ssa based ir, we use our register allocator in a function local way and
         // spill any register usage >= 64 on the vm stack, this should be very fast for the general
         // usage and extensible enough for extreme niche usecases requiring more than 64 alive
@@ -82,6 +81,7 @@ impl<'cc> Cc<'cc> {
         );
         let pc = self.buf.len();
         let f: BcFunc<'cc> = BcFunc { pc, name: fun.name };
+
         // binding the id of a function to its context
         self.functions.insert(fun.id, f);
 
@@ -105,7 +105,7 @@ impl<'cc> Cc<'cc> {
             self.buf.len() - pc
         );
 
-        Ok(None)
+        Ok(())
     }
 
     fn term(&mut self, fun: &Func<'cc>, t: Option<&ir::Terminator>) {
@@ -348,6 +348,7 @@ impl<'cc> Cc<'cc> {
                     ir::Id(lhs),
                     ir::Id(rhs),
                 ) = (dst, lhs, rhs);
+
                 macro_rules! emit_bins {
                     ($($name:ident),*) => {
                         match op {
