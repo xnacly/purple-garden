@@ -6,7 +6,7 @@ mod reg;
 mod regalloc;
 
 use crate::{
-    bc::intern::Interner,
+    bc::{intern::Interner, regalloc::Ralloc},
     config::Config,
     err::PgError,
     ir::{self, Const, Func, Id, TypeId, ptype},
@@ -29,6 +29,7 @@ pub struct Cc<'cc> {
     pub functions: HashMap<Id, BcFunc<'cc>>,
     /// binding a block id to its pc
     block_map: HashMap<ir::Id, u16>,
+    regalloc: Ralloc,
 }
 
 impl<'cc> Cc<'cc> {
@@ -40,6 +41,7 @@ impl<'cc> Cc<'cc> {
             std_fns: Interner::new(),
             functions: HashMap::new(),
             block_map: HashMap::new(),
+            regalloc: Ralloc::default(),
         }
     }
 
@@ -72,6 +74,12 @@ impl<'cc> Cc<'cc> {
         // usage and extensible enough for extreme niche usecases requiring more than 64 alive
         // values at the same time
 
+        self.regalloc = Ralloc::new(&fun.live_set);
+        crate::trace!(
+            "[bc] Computed ralloc map for `{}`: {:#?}",
+            fun.name,
+            &self.regalloc.map
+        );
         let pc = self.buf.len();
         let f: BcFunc<'cc> = BcFunc { pc, name: fun.name };
         // binding the id of a function to its context
@@ -234,6 +242,26 @@ impl<'cc> Cc<'cc> {
                 let Some(func) = self.functions.get(func) else {
                     unreachable!();
                 };
+
+                // [ live registers ]
+                //         |
+                //         v
+                //    (spill live values)
+                //         |
+                //         v
+                //    (move args → r0..rN)
+                //         |
+                //         v
+                //         call
+                //         |
+                //         v
+                //    r0 = return value
+                //         |
+                //         v
+                //    (reload spilled values)
+                //         |
+                //         v
+                // [ continue ]
 
                 let pc = func.pc;
                 let mut r_to_spil = vec![];

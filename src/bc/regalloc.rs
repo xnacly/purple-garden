@@ -25,55 +25,61 @@ struct Interval {
 /// 3. For each interval:
 ///     - Remove active.end lt current.start
 ///     - Try allocating a register; if avail, otherwise spilled
+#[derive(Clone, Debug, Default)]
 pub struct Ralloc {
     intervals: Vec<Interval>,
     pub map: HashMap<u32, Location>,
+    next_spill_slot: u32,
 }
 
 impl Ralloc {
-    pub fn new(live_set: HashMap<u32, (u32, u32)>) -> Self {
+    pub fn new(live_set: &HashMap<u32, (u32, u32)>) -> Self {
         let mut intervals: Vec<Interval> = live_set
-            .into_iter()
+            .iter()
             .map(|(v, (start, end))| Interval {
-                v,
-                start,
-                end,
+                v: *v,
+                start: *start,
+                end: *end,
                 reg: None,
             })
             .collect();
 
         intervals.sort_by_key(|i| i.start);
+
         let mut ralloc = Self {
             intervals,
             map: HashMap::new(),
+            next_spill_slot: 0,
         };
+
         ralloc.allocate();
         ralloc
     }
 
     fn allocate(&mut self) {
         let mut active: Vec<Interval> = Vec::new();
+
         let mut free_regs: Vec<u8> = (0..vm::REGISTER_COUNT as u8).collect();
 
-        for mut interval in self.intervals.clone() {
-            // expire old intervals
-            active.retain(|i| i.end >= interval.start);
-
-            // reclaim registers from expired intervals / recompute free list each time
-            free_regs = (0..vm::REGISTER_COUNT as u8).collect();
-
-            for i in &active {
-                if let Some(r) = i.reg {
-                    free_regs.retain(|&x| x != r);
+        for interval in &mut self.intervals {
+            active.retain(|i| {
+                if i.end < interval.start {
+                    if let Some(r) = i.reg {
+                        free_regs.push(r);
+                    }
+                    false
+                } else {
+                    true
                 }
-            }
+            });
 
             if let Some(reg) = free_regs.pop() {
                 interval.reg = Some(reg);
                 active.push(interval.clone());
                 self.map.insert(interval.v, Location::Reg(reg));
             } else {
-                let slot = self.map.len() as u32;
+                let slot = self.next_spill_slot;
+                self.next_spill_slot += 1;
                 self.map.insert(interval.v, Location::Stack(slot));
             }
         }
@@ -93,7 +99,7 @@ mod regalloc_test {
         // v1: [3, 5]
         live_set.insert(1, (3, 5));
 
-        let ralloc = Ralloc::new(live_set);
+        let ralloc = Ralloc::new(&live_set);
 
         let loc0 = ralloc.map.get(&0).unwrap();
         let loc1 = ralloc.map.get(&1).unwrap();
@@ -116,7 +122,7 @@ mod regalloc_test {
         // v1: [2, 6] overlaps with v0
         live_set.insert(1, (2, 6));
 
-        let ralloc = Ralloc::new(live_set);
+        let ralloc = Ralloc::new(&live_set);
 
         let loc0 = ralloc.map.get(&0).unwrap();
         let loc1 = ralloc.map.get(&1).unwrap();
@@ -140,7 +146,7 @@ mod regalloc_test {
             live_set.insert(i as u32, (0, 10));
         }
 
-        let ralloc = Ralloc::new(live_set);
+        let ralloc = Ralloc::new(&live_set);
 
         let mut reg_assigned = 0;
         let mut spilled = 0;
@@ -167,7 +173,7 @@ mod regalloc_test {
             live_set.insert(i, (i, i + 1));
         }
 
-        let ralloc = Ralloc::new(live_set);
+        let ralloc = Ralloc::new(&live_set);
 
         for i in 0..10 {
             assert!(
@@ -188,7 +194,7 @@ mod regalloc_test {
         live_set.insert(2, (2, 8));
         live_set.insert(3, (3, 7));
 
-        let ralloc = Ralloc::new(live_set);
+        let ralloc = Ralloc::new(&live_set);
 
         let mut active: Vec<(u32, u32, u8)> = vec![];
 
