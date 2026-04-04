@@ -214,23 +214,17 @@ impl<'cc> Cc<'cc> {
     fn instr(&mut self, fun: &Func<'cc>, pos: u32, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::Cast {
-                dst:
-                    TypeId {
-                        id: ir::Id(dst),
-                        ty,
-                    },
-                from: ir::Id(src),
+                dst: TypeId { id, ty },
+                from,
             } => {
-                let dst = *dst as u8;
-                let src = *src as u8;
-
+                let dst = self.ensure_register(*id);
+                let src = self.ensure_register(*from);
                 let op = match ty {
                     ptype::Type::Bool => Op::CastToBool { dst, src },
                     ptype::Type::Int => Op::CastToInt { dst, src },
                     ptype::Type::Double => Op::CastToDouble { dst, src },
                     _ => unreachable!("Not a valid cast, see typecheck::Typechecker::cast"),
                 };
-
                 self.emit(op);
             }
             ir::Instr::LoadConst { dst, value } => {
