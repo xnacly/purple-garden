@@ -3,6 +3,7 @@ use std::collections::HashMap;
 pub mod dis;
 mod intern;
 mod reg;
+mod regalloc;
 
 use crate::{
     bc::intern::Interner,
