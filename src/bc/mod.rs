@@ -228,24 +228,17 @@ impl<'cc> Cc<'cc> {
                 self.emit(op);
             }
             ir::Instr::LoadConst { dst, value } => {
-                let TypeId {
-                    id: ir::Id(dst), ..
-                } = dst;
-
-                match value {
-                    Const::Int(i) if *i < i32::MAX as i64 => {
-                        self.emit(Op::LoadI {
-                            dst: *dst as u8,
-                            value: *i as i32,
-                        });
-                    }
-                    _ => {
-                        let idx = self.intern(*value);
-                        self.emit(Op::LoadG {
-                            dst: *dst as u8,
-                            idx,
-                        });
-                    }
+                let dst = self.ensure_register(dst.id);
+                if let Const::Int(i) = value
+                    && *i < i32::MAX as i64
+                {
+                    self.emit(Op::LoadI {
+                        dst,
+                        value: *i as i32,
+                    });
+                } else {
+                    let idx = self.intern(*value);
+                    self.emit(Op::LoadG { dst, idx });
                 }
             }
             ir::Instr::Call { dst, func, args } => {
