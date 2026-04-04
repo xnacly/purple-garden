@@ -344,13 +344,9 @@ impl<'cc> Cc<'cc> {
             }
             ir::Instr::Noop {} => {}
             ir::Instr::Bin { op, dst, lhs, rhs } => {
-                let (
-                    TypeId {
-                        id: ir::Id(dst), ..
-                    },
-                    ir::Id(lhs),
-                    ir::Id(rhs),
-                ) = (dst, lhs, rhs);
+                let dst = self.ensure_register(dst.id);
+                let lhs = self.ensure_register(*lhs);
+                let rhs = self.ensure_register(*rhs);
 
                 macro_rules! emit_bins {
                     ($($name:ident),*) => {
@@ -358,9 +354,9 @@ impl<'cc> Cc<'cc> {
                             $(
                                 ir::BinOp::$name => {
                                     Op::$name {
-                                        dst: (*dst) as u8,
-                                        lhs: (*lhs) as u8,
-                                        rhs: (*rhs) as u8,
+                                        dst,
+                                        lhs,
+                                        rhs,
                                     }
                                 },
                             )*
