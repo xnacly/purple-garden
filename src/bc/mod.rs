@@ -59,6 +59,22 @@ impl<'cc> Cc<'cc> {
         pc
     }
 
+    fn ensure_register(&self, Id(ref id): Id) -> u8 {
+        let Some(location) = self.regalloc.map.get(id) else {
+            unreachable!(
+                "Attempted a register alloc lookup for a not defined ssa virtual register %v{}",
+                id
+            );
+        };
+
+        match location {
+            regalloc::Location::Reg(r) => *r,
+            regalloc::Location::Stack => {
+                todo!("no stack handling yet, maybe this should be a stack slot?")
+            }
+        }
+    }
+
     /// Compile a list of ir functions to bytecode instructions
     pub fn compile(&mut self, ir: &[Func<'cc>]) -> Result<(), PgError> {
         for func in ir {
