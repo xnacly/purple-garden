@@ -4,7 +4,7 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Location {
     Reg(u8),
-    Stack(u32),
+    Stack,
 }
 
 #[derive(Clone, Debug)]
@@ -29,7 +29,6 @@ struct Interval {
 pub struct Ralloc {
     intervals: Vec<Interval>,
     pub map: HashMap<u32, Location>,
-    next_spill_slot: u32,
 }
 
 impl Ralloc {
@@ -49,7 +48,6 @@ impl Ralloc {
         let mut ralloc = Self {
             intervals,
             map: HashMap::new(),
-            next_spill_slot: 0,
         };
 
         ralloc.allocate();
@@ -59,7 +57,7 @@ impl Ralloc {
     fn allocate(&mut self) {
         let mut active: Vec<Interval> = Vec::new();
 
-        let mut free_regs: Vec<u8> = (0..vm::REGISTER_COUNT as u8).collect();
+        let mut free_regs: Vec<u8> = (0..vm::REGISTER_COUNT as u8).rev().collect();
 
         for interval in &mut self.intervals {
             active.retain(|i| {
@@ -78,9 +76,7 @@ impl Ralloc {
                 active.push(interval.clone());
                 self.map.insert(interval.v, Location::Reg(reg));
             } else {
-                let slot = self.next_spill_slot;
-                self.next_spill_slot += 1;
-                self.map.insert(interval.v, Location::Stack(slot));
+                self.map.insert(interval.v, Location::Stack);
             }
         }
     }
@@ -154,7 +150,7 @@ mod regalloc_test {
         for v in 0..(reg_count + 2) {
             match ralloc.map.get(&(v as u32)).unwrap() {
                 Location::Reg(_) => reg_assigned += 1,
-                Location::Stack(_) => spilled += 1,
+                Location::Stack => spilled += 1,
             }
         }
 
