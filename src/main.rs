@@ -186,5 +186,8 @@ fn main() {
         }
     }
 
+    let r = 2;
+    println!("r{r}={}", vm.r(r).as_int());
+
     trace!("Executed bytecode");
 }

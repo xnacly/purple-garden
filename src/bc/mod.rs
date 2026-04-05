@@ -9,6 +9,7 @@ use crate::{
     config::Config,
     err::PgError,
     ir::{self, Const, Func, Id, TypeId, ptype},
+    opt,
     std::{self as pstd, Fn, Pkg, STD},
     vm::{BuiltinFn, Value, Vm, op::Op},
 };
@@ -124,6 +125,28 @@ impl<'cc> Cc<'cc> {
         Ok(())
     }
 
+    /// spill all arguments to the stack so the shuffling of values into registers as arguments
+    /// does not clobber otherwise alive values. Spills r0..rN, where N := |args|
+    fn save_call_args(&mut self, args: &[Id]) -> Vec<u8> {
+        let mut r_to_spil = vec![];
+        for (i, arg) in args.iter().enumerate() {
+            let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(&arg.0) else {
+                unreachable!();
+            };
+
+            let src = *src;
+            r_to_spil.push(src);
+            self.emit(Op::Push { src });
+        }
+        r_to_spil
+    }
+
+    fn restore_call_args(&mut self, r_to_spil: &[u8]) {
+        for dst in r_to_spil.into_iter().rev() {
+            self.emit(Op::Pop { dst: *dst });
+        }
+    }
+
     fn term(&mut self, fun: &Func<'cc>, t: Option<&ir::Terminator>) {
         let Some(term) = t else {
             return;
@@ -139,21 +162,19 @@ impl<'cc> Cc<'cc> {
             }
             ir::Terminator::Jump { id, params } => {
                 let target = &fun.blocks.get(id.0 as usize).unwrap();
-                for (i, param) in params.iter().enumerate() {
-                    let ir::Id(src) = param;
-                    let ir::Id(dst) = target.params[i];
 
-                    if *src == dst {
+                for (i, param) in params.iter().enumerate() {
+                    let src = self.ensure_register(*param);
+                    let dst = self.ensure_register(target.params[i]);
+
+                    if src == dst {
                         continue;
                     }
-
-                    self.emit(Op::Mov {
-                        dst: dst as u8,
-                        src: *src as u8,
-                    });
+                    self.emit(Op::Mov { dst, src });
                 }
 
                 let ir::Id(id) = id;
+                // this gets patched in Cc::finalize after all bytecode is emitted
                 self.emit(Op::Jmp { target: *id as u16 });
             }
             ir::Terminator::Branch {
@@ -164,38 +185,30 @@ impl<'cc> Cc<'cc> {
             } => {
                 let target = &fun.blocks.get(yes.0 as usize).unwrap();
                 for (i, param) in yes_params.iter().enumerate() {
-                    let ir::Id(src) = param;
-                    let ir::Id(dst) = target.params[i];
+                    let src = self.ensure_register(*param);
+                    let dst = self.ensure_register(target.params[i]);
 
-                    if *src == dst {
+                    if src == dst {
                         continue;
                     }
-
-                    self.emit(Op::Mov {
-                        dst: dst as u8,
-                        src: *src as u8,
-                    });
+                    self.emit(Op::Mov { dst, src });
                 }
 
-                let ir::Id(cond) = cond;
+                let cond = self.ensure_register(*cond);
                 self.emit(Op::JmpF {
-                    cond: *cond as u8,
+                    cond,
                     target: yes.0 as u16,
                 });
 
                 let target = &fun.blocks.get(no.0 as usize).unwrap();
                 for (i, param) in no_params.iter().enumerate() {
-                    let ir::Id(src) = param;
-                    let ir::Id(dst) = target.params[i];
+                    let src = self.ensure_register(*param);
+                    let dst = self.ensure_register(target.params[i]);
 
-                    if *src == dst {
+                    if src == dst {
                         continue;
                     }
-
-                    self.emit(Op::Mov {
-                        dst: dst as u8,
-                        src: *src as u8,
-                    });
+                    self.emit(Op::Mov { dst, src });
                 }
 
                 self.emit(Op::Jmp {
@@ -240,28 +253,9 @@ impl<'cc> Cc<'cc> {
                     unreachable!();
                 };
 
-                // [ live registers ]
-                //         |
-                //         v
-                //    (spill live values)
-                //         |
-                //         v
-                //    (move args → r0..rN)
-                //         |
-                //         v
-                //         call
-                //         |
-                //         v
-                //    r0 = return value
-                //         |
-                //         v
-                //    (reload spilled values)
-                //         |
-                //         v
-                // [ continue ]
-
                 let pc = func.pc;
-                let mut r_to_spil = vec![];
+
+                let mut alive_after_call_spill = vec![];
                 for (v, (def, last_use)) in &fun.live_set {
                     // the value is defined before the call and used after the call, thus must be
                     // spilled
@@ -273,29 +267,28 @@ impl<'cc> Cc<'cc> {
                             def,
                             last_use
                         );
-                        r_to_spil.push(v);
-                        self.emit(Op::Push { src: *v as u8 });
+                        let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(&v) else {
+                            unreachable!();
+                        };
+
+                        let src = *src;
+                        alive_after_call_spill.push(src);
+                        self.emit(Op::Push { src });
                     }
                 }
 
-                for (i, &ir::Id(arg)) in args.iter().enumerate() {
-                    let (dst, src) = (i as u8, arg as u8);
+                for (i, arg) in args.iter().enumerate() {
+                    let (dst, src) = (i as u8, self.ensure_register(*arg));
                     if dst != src {
                         self.emit(Op::Mov { dst, src });
                     }
                 }
 
-                let TypeId {
-                    id: ir::Id(dst), ..
-                } = dst;
+                let dst = self.ensure_register(dst.id);
                 self.emit(Op::Call { func: pc as u32 });
-                self.emit(Op::Mov {
-                    dst: *dst as u8,
-                    src: 0,
-                });
-
-                for r in r_to_spil {
-                    self.emit(Op::Pop { dst: *r as u8 });
+                self.emit(Op::Mov { dst, src: 0 });
+                for dst in alive_after_call_spill.iter().rev() {
+                    self.emit(Op::Pop { dst: *dst });
                 }
             }
             ir::Instr::Tail { dst, func, args } => {
@@ -304,20 +297,14 @@ impl<'cc> Cc<'cc> {
                 };
 
                 let pc = func.pc;
-                for (i, &ir::Id(arg)) in args.iter().enumerate() {
-                    let (dst, src) = (i as u8, arg as u8);
+                for (i, arg) in args.iter().enumerate() {
+                    let (dst, src) = (i as u8, self.ensure_register(*arg));
                     if dst != src {
                         self.emit(Op::Mov { dst, src });
                     }
                 }
 
                 self.emit(Op::Tail { func: pc as u32 });
-                // TODO: isnt this missing?
-                //
-                // self.emit(Op::Mov {
-                //     dst: *dst as u8,
-                //     src: 0,
-                // });
             }
             ir::Instr::Sys {
                 dst,
@@ -326,21 +313,28 @@ impl<'cc> Cc<'cc> {
                 args,
             } => {
                 let idx = self.std_fns.intern(func.ptr);
-                for (i, &ir::Id(arg)) in args.iter().enumerate() {
-                    let (dst, src) = (i as u8, arg as u8);
+                let mut r_to_spil = vec![];
+                for (i, arg) in args.iter().enumerate() {
+                    let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(&arg.0) else {
+                        unreachable!();
+                    };
+
+                    let src = *src;
+                    r_to_spil.push(src);
+                    self.emit(Op::Push { src });
+                }
+                for (i, arg) in args.iter().enumerate() {
+                    let (dst, src) = (i as u8, self.ensure_register(*arg));
                     if dst != src {
                         self.emit(Op::Mov { dst, src });
                     }
                 }
-
-                let TypeId {
-                    id: ir::Id(dst), ..
-                } = dst;
+                let dst = self.ensure_register(dst.id);
                 self.emit(Op::Sys { idx: idx as u16 });
-                self.emit(Op::Mov {
-                    dst: *dst as u8,
-                    src: 0,
-                });
+                self.emit(Op::Mov { dst, src: 0 });
+                for dst in r_to_spil.into_iter().rev() {
+                    self.emit(Op::Pop { dst });
+                }
             }
             ir::Instr::Noop {} => {}
             ir::Instr::Bin { op, dst, lhs, rhs } => {
@@ -388,9 +382,15 @@ impl<'cc> Cc<'cc> {
                     cond,
                     target: *self.block_map.get(&ir::Id(target as u32)).unwrap(),
                 }),
-                Op::Jmp { target } => Some(Op::Jmp {
-                    target: *self.block_map.get(&ir::Id(target as u32)).unwrap(),
-                }),
+                Op::Jmp { target } => {
+                    let target = *self.block_map.get(&ir::Id(target as u32)).unwrap();
+                    // PERF: this removes self+1 jumps
+                    Some(if target == i as u16 + 1 {
+                        Op::Nop
+                    } else {
+                        Op::Jmp { target }
+                    })
+                }
                 _ => None,
             } {
                 self.buf[i] = new

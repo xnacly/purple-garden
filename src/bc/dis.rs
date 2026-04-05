@@ -126,7 +126,7 @@ impl<'dis> Disassembler<'dis> {
                     }
                     Op::Jmp { target } => {
                         format!(
-                            "jmp {target} <{}+0x{:0X}>",
+                            "jmp {target} <{}+0x{:0x}>",
                             cur_func.name,
                             *target as usize - cur_func.pc
                         )
@@ -135,7 +135,7 @@ impl<'dis> Disassembler<'dis> {
                         format!("tail {func} <{}>", funcs_by_pc.get(func).unwrap().name)
                     }
                     Op::JmpF { cond, target } => format!(
-                        "jmpf r{cond}, {target} <{}+0x{:0X}>",
+                        "jmpf r{cond}, {target} <{}+0x{:0x}>",
                         cur_func.name,
                         *target as usize - cur_func.pc
                     ),
