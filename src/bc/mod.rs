@@ -131,16 +131,10 @@ impl<'cc> Cc<'cc> {
 
         match term {
             ir::Terminator::Return(id) => {
-                // only insert a return value mov if the return value is not in r0
-                if let Some(ir::Id(src)) = id
-                    && src != &0
-                {
-                    self.emit(Op::Mov {
-                        dst: 0,
-                        src: *src as u8,
-                    });
+                if let Some(src_id) = id {
+                    let src = self.ensure_register(*src_id);
+                    self.emit(Op::Mov { dst: 0, src });
                 }
-
                 self.emit(Op::Ret);
             }
             ir::Terminator::Jump { id, params } => {
@@ -318,6 +312,12 @@ impl<'cc> Cc<'cc> {
                 }
 
                 self.emit(Op::Tail { func: pc as u32 });
+                // TODO: isnt this missing?
+                //
+                // self.emit(Op::Mov {
+                //     dst: *dst as u8,
+                //     src: 0,
+                // });
             }
             ir::Instr::Sys {
                 dst,
