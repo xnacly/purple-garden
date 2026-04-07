@@ -1,5 +1,5 @@
 #[derive(clap::Parser, Debug)]
-#[command(about, version, long_about=None)]
+#[command(about, long_about=None)]
 pub struct Config {
     /// Set optimisation level. Higher levels increase compile time.
     ///
@@ -61,6 +61,10 @@ pub struct Config {
     pub run: Option<String>,
     pub target: Option<String>,
 
+    /// display version information, view more with -VV
+    #[arg(short = 'V', action = clap::ArgAction::Count)]
+    pub version: u8,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -90,6 +94,7 @@ impl Config {
             run: None,
             target: None,
             command: None,
+            version: 0,
         }
     }
 }

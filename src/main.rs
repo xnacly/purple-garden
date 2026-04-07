@@ -10,8 +10,41 @@ use purple_garden::{
 };
 use std::{collections::HashMap, fs};
 
+pub const BUILD_INFO: &str = concat!(
+    "version=",
+    env!("CARGO_PKG_VERSION"),
+    ";commit=",
+    env!("GIT_HASH"),
+    ";built=",
+    env!("BUILD_TIMESTAMP"),
+    ";features=",
+    env!("BUILD_FEATURES"),
+    ";profile=",
+    env!("BUILD_PROFILE"),
+);
+
 fn main() {
     let args = <config::Config as clap::Parser>::parse();
+    match args.version {
+        1 => {
+            println!(
+                "purple-garden version {} by xnacly and contributors",
+                env!("CARGO_PKG_VERSION")
+            );
+            std::process::exit(0);
+        }
+        2 => {
+            println!(
+                "purple-garden version {} by xnacly and contributors",
+                env!("CARGO_PKG_VERSION")
+            );
+            println!("{}", BUILD_INFO.replace(";", "\n"));
+            let exe = std::env::current_exe().unwrap();
+            println!("from: {}", exe.display());
+            std::process::exit(0);
+        }
+        _ => {}
+    }
     if let Some(ref cmd) = args.command {
         match &cmd {
             config::Command::Intro { topic } => {
