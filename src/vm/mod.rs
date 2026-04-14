@@ -202,6 +202,9 @@ impl<'vm> Vm<'vm> {
                     continue;
                 }
                 Op::Tail { func } => {
+                    if self.config.backtrace {
+                        self.backtrace.push(func as usize);
+                    }
                     pc = func as usize;
                     continue;
                 }
