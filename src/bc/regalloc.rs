@@ -43,7 +43,7 @@ impl Ralloc {
             })
             .collect();
 
-        intervals.sort_by_key(|i| i.start);
+        intervals.sort_by_key(|i| (i.start, i.v));
 
         let mut ralloc = Self {
             intervals,

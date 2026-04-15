@@ -102,6 +102,7 @@ fn main() {
     }
     let input = match args.run {
         Some(ref i) => i.as_bytes().to_vec(),
+        // PERF: mmap this
         None => fs::read(args.target.clone().expect("No file or `-r` specified"))
             .expect("Failed to read from file")
             .to_vec(),

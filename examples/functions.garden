@@ -1,5 +1,5 @@
 # vim: filetype=python
-import "test"
+import "testing"
 
 # compute n! with acumulator a
 # see https://en.wikipedia.org/wiki/Factorial
@@ -9,7 +9,7 @@ fn factorial(n:int a:int) int {
         { factorial(n-1 n*a) }
     }
 }
-test.assert(factorial(16 1) == 20922789888000)
+testing.assert(factorial(16 1) == 20922789888000)
 
 fn fib(n:int) int {
     match {
@@ -17,7 +17,7 @@ fn fib(n:int) int {
         { fib(n - 1) + fib(n - 2) }
     }
 }
-test.assert(fib(85) == 259695496911122585)
+testing.assert(fib(85) == 259695496911122585)
 
 # tail calls 
 fn inc(x:int) int {x + 1}
@@ -26,4 +26,4 @@ fn call2(x:int) int {call1(x)}
 fn call3(x:int) int {call2(x)}
 fn call4(x:int) int {call3(x)}
 fn call5(x:int) int {call4(x)}
-test.assert(call5(0) == 1)
+testing.assert(call5(0) == 1)
