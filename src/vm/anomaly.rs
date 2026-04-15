@@ -4,6 +4,7 @@ pub enum Anomaly {
     DivisionByZero { pc: usize },
     Unimplemented { pc: usize },
     InvalidSyscall { pc: usize },
+    Msg { msg: &'static str, pc: usize },
 }
 
 impl Anomaly {
@@ -12,6 +13,7 @@ impl Anomaly {
             Anomaly::DivisionByZero { .. } => "Division by zero",
             Anomaly::Unimplemented { .. } => "Unimplemented",
             Anomaly::InvalidSyscall { .. } => "InvalidSyscall",
+            Anomaly::Msg { msg, .. } => msg,
         }
     }
 }

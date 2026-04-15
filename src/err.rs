@@ -38,8 +38,12 @@ impl From<Anomaly> for PgError {
     fn from(value: Anomaly) -> Self {
         // TODO: do some prep in anomaly for finding out which ast node resulted in what bytecode
         // ranges
+        let title = match value {
+            Anomaly::Msg { msg, .. } => msg,
+            _ => "Virtual Machine Anomaly",
+        };
         PgError {
-            title: "Virtual Machine Anomaly",
+            title,
             msg: Some(value.as_str().to_string()),
             line: 0,
             start: 0,
