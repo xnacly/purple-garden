@@ -5,7 +5,7 @@ use crate::{ir::ptype::Type, vm::BuiltinFn};
 mod conv;
 mod io;
 mod strings;
-mod test;
+mod testing;
 
 #[derive(Debug)]
 pub struct Pkg {
@@ -157,13 +157,13 @@ like writing and reading from file descriptors",
         ],
     },
     Pkg {
-        name: "test",
+        name: "testing",
         doc: "Package test includes helpers for runtime assertions and the likes",
         pkgs: &[],
         fns: &[Fn {
             name: "assert",
             doc: "Asserts arg0 is true",
-            ptr: crate::std::test::assert,
+            ptr: crate::std::testing::assert,
             args: &[Type::Bool],
             ret: Type::Void,
         }],
