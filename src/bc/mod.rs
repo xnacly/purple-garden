@@ -90,7 +90,9 @@ impl<'cc> Cc<'cc> {
         // usage and extensible enough for extreme niche usecases requiring more than 64 alive
         // values at the same time
 
-        self.regalloc = Ralloc::new(&fun.live_set);
+        let live_set = fun.live_set();
+        crate::trace!("Computed live_set for {}: {:?}", fun.name, live_set);
+        self.regalloc = Ralloc::new(&live_set);
         crate::trace!(
             "[bc] Computed ralloc map for `{}`: {:#?}",
             fun.name,
@@ -110,7 +112,7 @@ impl<'cc> Cc<'cc> {
             self.block_map.insert(block.id, self.buf.len() as u16);
 
             for (i, instruction) in block.instructions.iter().enumerate() {
-                self.instr(fun, i as u32, instruction);
+                self.instr(fun, &live_set, i as u32, instruction);
             }
 
             self.term(fun, block.term.as_ref());
@@ -142,7 +144,7 @@ impl<'cc> Cc<'cc> {
     }
 
     fn restore_call_args(&mut self, r_to_spil: &[u8]) {
-        for dst in r_to_spil.into_iter().rev() {
+        for dst in r_to_spil.iter().rev() {
             self.emit(Op::Pop { dst: *dst });
         }
     }
@@ -218,7 +220,13 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn instr(&mut self, fun: &Func<'cc>, pos: u32, i: &ir::Instr<'cc>) {
+    fn instr(
+        &mut self,
+        fun: &Func<'cc>,
+        live_set: &HashMap<u32, (u32, u32)>,
+        pos: u32,
+        i: &ir::Instr<'cc>,
+    ) {
         match i {
             ir::Instr::Cast {
                 dst: TypeId { id, ty },
@@ -256,7 +264,7 @@ impl<'cc> Cc<'cc> {
                 let pc = func.pc;
 
                 let mut alive_after_call_spill = vec![];
-                for (v, (def, last_use)) in &fun.live_set {
+                for (v, (def, last_use)) in live_set {
                     // the value is defined before the call and used after the call, thus must be
                     // spilled
                     if def < &pos && &pos < last_use {
@@ -267,7 +275,7 @@ impl<'cc> Cc<'cc> {
                             def,
                             last_use
                         );
-                        let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(&v) else {
+                        let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(v) else {
                             unreachable!();
                         };
 
