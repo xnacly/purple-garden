@@ -40,7 +40,7 @@ fn main() {
             );
             println!("{}", BUILD_INFO.replace(";", "\n"));
             let exe = std::env::current_exe().unwrap();
-            println!("from: {}", exe.display());
+            println!("from={}", exe.display());
             std::process::exit(0);
         }
         _ => {}
