@@ -14,6 +14,7 @@ pub mod config;
 pub mod err;
 pub mod gc;
 pub mod help;
+pub mod input;
 pub mod ir;
 pub mod jit;
 pub mod lex;
