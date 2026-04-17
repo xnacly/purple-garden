@@ -17,6 +17,7 @@ pub mod help;
 pub mod ir;
 pub mod jit;
 pub mod lex;
+pub mod mmap;
 pub mod opt;
 pub mod parser;
 pub mod std;

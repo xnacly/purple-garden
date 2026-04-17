@@ -3,12 +3,12 @@ use purple_garden::{
     err::PgError,
     help, ir,
     lex::Lexer,
-    opt,
+    mmap, opt,
     parser::Parser,
     std::{self as pstd, Pkg},
     trace,
 };
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs::File, os::fd::AsRawFd};
 
 pub const BUILD_INFO: &str = concat!(
     "version=",
@@ -100,12 +100,40 @@ fn main() {
             }
         }
     }
-    let input = match args.run {
-        Some(ref i) => i.as_bytes().to_vec(),
-        // PERF: mmap this
-        None => fs::read(args.target.clone().expect("No file or `-r` specified"))
-            .expect("Failed to read from file")
-            .to_vec(),
+
+    // TODO: replace this with an "owning" type
+    let input: &[u8] = match args.run {
+        Some(ref i) => i.as_bytes(),
+        None => {
+            let file_name = args.target.as_ref().expect("No file or `-r` specified");
+
+            #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+            {
+                let file = File::open(file_name).expect("Failed to open file");
+                let meta = file.metadata().expect("Failed to get metadata");
+                let len = meta.len() as usize;
+                let ptr = mmap::mmap(
+                    None,
+                    len,
+                    mmap::MmapProt::READ,
+                    mmap::MmapFlags::PRIVATE,
+                    file.as_raw_fd(),
+                    0,
+                )
+                .expect("Failed to memory map file");
+                unsafe { std::slice::from_raw_parts(ptr.as_ptr(), len) }
+            }
+
+            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+            {
+                let mut file = File::open(file_name).expect("Failed to open file");
+                let meta = file.metadata().expect("Failed to get metadata");
+                let len = meta.len() as usize;
+                let mut buf = Vec::with_capacity(len);
+                std::io::Read::read_to_end(&mut file, &mut buf).expect("Failed to read file");
+                &buf
+            }
+        }
     };
 
     let lexer = Lexer::new(&input);
