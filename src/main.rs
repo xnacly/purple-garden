@@ -103,11 +103,15 @@ fn main() {
         }
     }
 
-    let input = match args.run {
-        Some(ref i) => Input::Str(i.clone()),
+    let (input, input_source) = match args.run {
+        Some(ref i) => (Input::Str(i.clone()), "stdio"),
         None => {
-            let file_name = args.target.as_ref().expect("No file or `-r` specified");
-            Input::from_file(file_name)
+            let file_name = args
+                .target
+                .as_ref()
+                .expect("No file or `-r` specified")
+                .as_str();
+            (Input::from_file(file_name), file_name)
         }
     };
 
@@ -116,7 +120,7 @@ fn main() {
         Ok(a) => a,
         Err(e) => {
             let lines = input.as_str().lines().collect::<Vec<&str>>();
-            e.render(&lines);
+            e.render(input_source, &lines);
             std::process::exit(1);
         }
     };
@@ -138,7 +142,7 @@ fn main() {
         Ok(ir) => ir,
         Err(e) => {
             let lines = input.as_str().lines().collect::<Vec<&str>>();
-            e.render(&lines);
+            e.render(input_source, &lines);
             std::process::exit(1);
         }
     };
@@ -158,7 +162,7 @@ fn main() {
     let mut cc = bc::Cc::new();
     if let Err(e) = cc.compile(&ir) {
         let lines = input.as_str().lines().collect::<Vec<&str>>();
-        e.render(&lines);
+        e.render(input_source, &lines);
         std::process::exit(1);
     };
 
@@ -191,7 +195,7 @@ fn main() {
 
     if let Err(e) = vm.run() {
         let lines = input.as_str().lines().collect::<Vec<&str>>();
-        Into::<PgError>::into(e).render(&lines);
+        Into::<PgError>::into(e).render(input_source, &lines);
 
         if args.backtrace {
             let entry_point_pc = function_table

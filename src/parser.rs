@@ -39,7 +39,6 @@ impl<'p> Parser<'p> {
             self.advance()?;
         } else {
             return Err(PgError::with_msg(
-                "Unexpected Token",
                 format!(
                     "Expected `{:?}`, got {}({:?})",
                     ty,
@@ -60,7 +59,6 @@ impl<'p> Parser<'p> {
             Ok(matched)
         } else {
             Err(PgError::with_msg(
-                "Unexpected Token",
                 format!("Expected an identifier, got {:?}", self.cur.t),
                 &self.cur,
             ))
@@ -119,7 +117,6 @@ impl<'p> Parser<'p> {
         while !self.at_end() && self.cur().t != Type::BraceRight {
             let &Token { t: Type::S(_), .. } = self.cur() else {
                 return Err(PgError::with_msg(
-                    "Malformed import",
                     "Only strings are allowed as import paths",
                     &self.cur,
                 ));
@@ -213,7 +210,6 @@ impl<'p> Parser<'p> {
 
         let Some(default) = default else {
             return Err(PgError::with_msg(
-                "Missing match default branch",
                 "A match statement requires a default branch",
                 &tok,
             ));
@@ -385,7 +381,6 @@ impl<'p> Parser<'p> {
             }
             _ => {
                 return Err(PgError::with_msg(
-                    "Unexpected Malformed Type",
                     "Bad type, expected either type, ?type, [type] or type[type], where type is str, int, double, bool or void",
                     self.cur(),
                 ));

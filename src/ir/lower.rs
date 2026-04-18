@@ -85,13 +85,15 @@ impl<'lower> Lower<'lower> {
                     Type::D(doub) => Const::Double(
                         doub.parse::<f64>()
                             .map_err(|e: num::ParseFloatError| {
-                                PgError::with_msg("Number parsing failure", e.to_string(), raw)
+                                PgError::with_msg(e.to_string(), raw)
                             })?
                             .to_bits(),
                     ),
-                    Type::I(int) => Const::Int(int.parse().map_err(|e: num::ParseIntError| {
-                        PgError::with_msg("Number parsing failure", e.to_string(), raw)
-                    })?),
+                    Type::I(int) => {
+                        Const::Int(int.parse().map_err(|e: num::ParseIntError| {
+                            PgError::with_msg(e.to_string(), raw)
+                        })?)
+                    }
                     Type::True => Const::True,
                     Type::False => Const::False,
                     _ => unreachable!(),
@@ -116,7 +118,6 @@ impl<'lower> Lower<'lower> {
                     Some(*id)
                 } else {
                     return Err(PgError::with_msg(
-                        "Undefined binding",
                         format!("Undefined variable `{}`", i),
                         name,
                     ));
@@ -182,7 +183,6 @@ impl<'lower> Lower<'lower> {
                     self.ctx.env.insert(i, id);
                 } else {
                     return Err(PgError::with_msg(
-                        "Empty binding value",
                         "RHS of let has to return a value, but it didnt",
                         name,
                     ));
@@ -322,7 +322,6 @@ impl<'lower> Lower<'lower> {
                         let Some((target_id, ret)) = self.func_name_to_id.get(inner_name).cloned()
                         else {
                             return Err(PgError::with_msg(
-                                "Undefined function",
                                 format!("Undefined function `{inner_name}`"),
                                 name,
                             ));

@@ -65,7 +65,6 @@ impl<'t> Typechecker<'t> {
                     (Type::Double, Type::Double) => Type::Double,
                     (_, _) if lhs == rhs => {
                         return Err(PgError::with_msg(
-                            "Type error",
                             format!(
                                 "Unsupported type {} for {:?}, want Int or Double",
                                 lhs,
@@ -76,7 +75,6 @@ impl<'t> Typechecker<'t> {
                     }
                     (_, _) => {
                         return Err(PgError::with_msg(
-                            "Type error",
                             format!(
                                 "Incompatible types {} and {} for {:?}",
                                 lhs,
@@ -94,7 +92,6 @@ impl<'t> Typechecker<'t> {
                     (Type::Int, Type::Int) => {}
                     (_, _) if lhs == rhs => {
                         return Err(PgError::with_msg(
-                            "Type error",
                             format!(
                                 "Unsupported type {} for {:?}, want Int or Double",
                                 lhs,
@@ -105,7 +102,6 @@ impl<'t> Typechecker<'t> {
                     }
                     (_, _) => {
                         return Err(PgError::with_msg(
-                            "Type error",
                             format!(
                                 "Incompatible types {} and {} for {:?}, want Int",
                                 lhs,
@@ -125,7 +121,6 @@ impl<'t> Typechecker<'t> {
                     (Type::Int, Type::Int) => {}
                     (_, _) if lhs == rhs => {
                         return Err(PgError::with_msg(
-                            "Type error",
                             format!(
                                 "Unsupported type {} for {:?}, want Int or Double for both sides",
                                 lhs,
@@ -136,7 +131,6 @@ impl<'t> Typechecker<'t> {
                     }
                     (_, _) => {
                         return Err(PgError::with_msg(
-                            "Type error",
                             format!(
                                 "Incompatible types {} and {} for {:?}",
                                 lhs,
@@ -163,7 +157,6 @@ impl<'t> Typechecker<'t> {
             (Type::Int, Type::Bool) => Type::Bool,
             (_, _) => {
                 return Err(PgError::with_msg(
-                    "Cast type error",
                     format!("Can not cast {} to {}", i, o),
                     at,
                 ));
@@ -200,11 +193,7 @@ impl<'t> Typechecker<'t> {
                 };
 
                 let t = self.env.get(inner_name).ok_or_else(|| {
-                    PgError::with_msg(
-                        "Undefined Binding",
-                        format!("binding `{inner_name}` not found"),
-                        name,
-                    )
+                    PgError::with_msg(format!("binding `{inner_name}` not found"), name)
                 })?;
 
                 self.map.insert(*id, t.clone());
@@ -250,7 +239,6 @@ impl<'t> Typechecker<'t> {
 
                 if self.functions.contains_key(inner_name) {
                     return Err(PgError::with_msg(
-                        "Function already defined",
                         format!("`{}` is already defined", inner_name),
                         name,
                     ));
@@ -285,7 +273,6 @@ impl<'t> Typechecker<'t> {
                 let computed_ret = self.block_type(body)?;
                 if ret != computed_ret {
                     return Err(PgError::with_msg(
-                        "Function return type mismatch",
                         format!(
                             "`{}` annotated with return type {}, but returns {}",
                             inner_name, ret, computed_ret
@@ -330,7 +317,6 @@ impl<'t> Typechecker<'t> {
 
                         let Some(pkg) = self.packages.get(pkg_name) else {
                             return Err(PgError::with_msg(
-                                "Undefined package",
                                 format!("Can't find package `{}`", pkg_name),
                                 name,
                             ));
@@ -338,7 +324,6 @@ impl<'t> Typechecker<'t> {
 
                         let Some(fun) = pkg.get(inner_name).cloned() else {
                             return Err(PgError::with_msg(
-                                "Undefined function",
                                 format!("Call to undefined function `{}.{}`", pkg_name, inner_name),
                                 name,
                             ));
@@ -355,7 +340,6 @@ impl<'t> Typechecker<'t> {
                         };
                         let Some(fun) = self.functions.get(inner_name).cloned() else {
                             return Err(PgError::with_msg(
-                                "Undefined function",
                                 format!("Call to undefined function `{}`", inner_name),
                                 name,
                             ));
@@ -367,7 +351,6 @@ impl<'t> Typechecker<'t> {
 
                 if args.len() != fun.args.len() {
                     return Err(PgError::with_msg(
-                        "Function argument count mismatch",
                         format!(
                             "`{}` requires {} arguments, got {}",
                             inner_name,
@@ -386,7 +369,6 @@ impl<'t> Typechecker<'t> {
 
                     if expected_type != &provided_type {
                         return Err(PgError::with_msg(
-                            "Function argument type mismatch",
                             format!(
                                 "`{}` arg{} expected type {}, got {} instead",
                                 inner_name, i, expected_type, provided_type,
@@ -415,7 +397,6 @@ impl<'t> Typechecker<'t> {
 
                     if condition_type != Type::Bool {
                         return Err(PgError::with_msg(
-                            "Non bool match condition",
                             format!(
                                 "Match conditions must be Bool, got {} instead",
                                 condition_type
@@ -437,7 +418,6 @@ impl<'t> Typechecker<'t> {
 
                     if ty != &first_type {
                         return Err(PgError::with_msg(
-                            "Incompatible match case return type",
                             format!(
                                 "Match cases must resolve to the same type, but got {} and {}",
                                 first_type, ty
@@ -453,7 +433,6 @@ impl<'t> Typechecker<'t> {
             Node::Import { id, pkgs, src } => {
                 if pkgs.is_empty() {
                     return Err(PgError::with_msg(
-                        "Empty import statement",
                         "Import without any paths to import is considered invalid",
                         src,
                     ));
@@ -466,7 +445,6 @@ impl<'t> Typechecker<'t> {
 
                     let Some(pkg) = pstd::resolve_pkg(pkg_name) else {
                         return Err(PgError::with_msg(
-                            "Unresolvable pkg import",
                             format!("Wasnt able to find a package named `{pkg_name}`"),
                             pkg_tok,
                         ));

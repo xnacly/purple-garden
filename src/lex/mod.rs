@@ -33,8 +33,7 @@ impl<'l> Lexer<'l> {
 
     fn make_err(&self, msg: impl Into<String>, start: usize) -> PgError {
         PgError {
-            title: "Lexer error",
-            msg: Some(msg.into()),
+            msg: msg.into(),
             line: self.line,
             start,
             len: self.col - start,
