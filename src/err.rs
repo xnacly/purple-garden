@@ -6,8 +6,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct PgError {
-    pub title: &'static str,
-    pub msg: Option<String>,
+    pub msg: String,
     pub line: usize,
     pub start: usize,
     pub len: usize,
@@ -16,8 +15,7 @@ pub struct PgError {
 impl From<&Token<'_>> for PgError {
     fn from(value: &Token) -> Self {
         PgError {
-            title: "temp",
-            msg: None,
+            msg: String::new(),
             line: value.line,
             start: value.col,
             len: value.t.as_str().len(),
@@ -38,9 +36,12 @@ impl From<Anomaly> for PgError {
     fn from(value: Anomaly) -> Self {
         // TODO: do some prep in anomaly for finding out which ast node resulted in what bytecode
         // ranges
+        let title = match value {
+            Anomaly::Msg { msg, .. } => msg,
+            _ => "Virtual Machine Anomaly",
+        };
         PgError {
-            title: "Virtual Machine Anomaly",
-            msg: Some(value.as_str().to_string()),
+            msg: value.as_str().to_string(),
             line: 0,
             start: 0,
             len: 0,
@@ -49,34 +50,19 @@ impl From<Anomaly> for PgError {
 }
 
 impl PgError {
-    pub fn render(self, lines: &[&str]) {
-        println!("-> err: {}", self.title);
-        println!("   {}\n", self.msg.unwrap_or_default());
-
-        let prev = self.line.saturating_sub(1);
-        if let Some(prev_line) = lines.get(prev)
-            && prev != self.line
-        {
-            println!("{:03} | {prev_line}", prev + 1);
-        }
+    // TODO: introduce a writer to write errors to?
+    pub fn render(self, file: &str, lines: &[&str]) {
+        println!("{file}:{}:{}: {}", self.line, self.start, self.msg);
 
         if let Some(line) = lines.get(self.line) {
-            println!("{:03} | {line}", self.line + 1);
-            println!("{}~ here", " ".repeat(self.start + 7))
-        }
-
-        let next = self.line + 1;
-        if let Some(next_line) = lines.get(next)
-            && next != self.line
-        {
-            println!("{:03} | {next_line}", next + 1);
+            println!("{line}");
+            println!("{}~", " ".repeat(self.start))
         }
     }
 
-    pub fn with_msg(title: &'static str, msg: impl Into<String>, from: impl Into<PgError>) -> Self {
+    pub fn with_msg(msg: impl Into<String>, from: impl Into<PgError>) -> Self {
         let mut conv = from.into();
-        conv.msg = Some(msg.into());
-        conv.title = title;
+        conv.msg = msg.into();
         conv
     }
 }

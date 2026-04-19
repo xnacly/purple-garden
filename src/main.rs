@@ -1,14 +1,16 @@
 use purple_garden::{
     bc, config,
     err::PgError,
-    help, ir,
+    help,
+    input::Input,
+    ir,
     lex::Lexer,
     opt,
     parser::Parser,
     std::{self as pstd, Pkg},
     trace,
 };
-use std::{collections::HashMap, fs};
+use std::collections::HashMap;
 
 pub const BUILD_INFO: &str = concat!(
     "version=",
@@ -40,7 +42,7 @@ fn main() {
             );
             println!("{}", BUILD_INFO.replace(";", "\n"));
             let exe = std::env::current_exe().unwrap();
-            println!("from: {}", exe.display());
+            println!("from={}", exe.display());
             std::process::exit(0);
         }
         _ => {}
@@ -100,23 +102,25 @@ fn main() {
             }
         }
     }
-    let input = match args.run {
-        Some(ref i) => i.as_bytes().to_vec(),
-        // PERF: mmap this
-        None => fs::read(args.target.clone().expect("No file or `-r` specified"))
-            .expect("Failed to read from file")
-            .to_vec(),
+
+    let (input, input_source) = match args.run {
+        Some(ref i) => (Input::Str(i.clone()), "stdio"),
+        None => {
+            let file_name = args
+                .target
+                .as_ref()
+                .expect("No file or `-r` specified")
+                .as_str();
+            (Input::from_file(file_name), file_name)
+        }
     };
 
-    let lexer = Lexer::new(&input);
+    let lexer = Lexer::new(input.as_bytes());
     let ast = match Parser::new(lexer).and_then(|n| n.parse()) {
         Ok(a) => a,
         Err(e) => {
-            let lines = str::from_utf8(&input)
-                .unwrap()
-                .lines()
-                .collect::<Vec<&str>>();
-            e.render(&lines);
+            let lines = input.as_str().lines().collect::<Vec<&str>>();
+            e.render(input_source, &lines);
             std::process::exit(1);
         }
     };
@@ -137,11 +141,8 @@ fn main() {
     let mut ir = match lower.ir_from(&ast) {
         Ok(ir) => ir,
         Err(e) => {
-            let lines = str::from_utf8(&input)
-                .unwrap()
-                .lines()
-                .collect::<Vec<&str>>();
-            e.render(&lines);
+            let lines = input.as_str().lines().collect::<Vec<&str>>();
+            e.render(input_source, &lines);
             std::process::exit(1);
         }
     };
@@ -160,11 +161,8 @@ fn main() {
 
     let mut cc = bc::Cc::new();
     if let Err(e) = cc.compile(&ir) {
-        let lines = str::from_utf8(&input)
-            .unwrap()
-            .lines()
-            .collect::<Vec<&str>>();
-        e.render(&lines);
+        let lines = input.as_str().lines().collect::<Vec<&str>>();
+        e.render(input_source, &lines);
         std::process::exit(1);
     };
 
@@ -196,11 +194,8 @@ fn main() {
     }
 
     if let Err(e) = vm.run() {
-        let lines = str::from_utf8(&input)
-            .unwrap()
-            .lines()
-            .collect::<Vec<&str>>();
-        Into::<PgError>::into(e).render(&lines);
+        let lines = input.as_str().lines().collect::<Vec<&str>>();
+        Into::<PgError>::into(e).render(input_source, &lines);
 
         if args.backtrace {
             let entry_point_pc = function_table

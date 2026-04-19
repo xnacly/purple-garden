@@ -1,9 +1,12 @@
 use crate::vm::{Anomaly, Value, Vm};
 
-pub fn assert(vm: &mut Vm) -> Value {
+pub fn assert(vm: &mut Vm) -> Result<Value, Anomaly> {
     if !vm.r(0).as_bool() {
-        // TODO: replace this with some kind of error as a value? No idea
-        panic!("test.assert: assertion failed")
+        Err(Anomaly::Msg {
+            msg: "test.assert: assertion failed",
+            pc: vm.pc,
+        })
+    } else {
+        Ok(Value(0))
     }
-    Value(0)
 }

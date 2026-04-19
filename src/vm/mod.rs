@@ -10,7 +10,7 @@ pub use crate::vm::anomaly::Anomaly;
 pub use crate::vm::value::Value;
 use op::Op;
 
-pub type BuiltinFn = fn(&mut Vm) -> Value;
+pub type BuiltinFn = fn(&mut Vm) -> Result<Value, Anomaly>;
 pub fn syscall_unimplemented<'vm>(vm: &mut Vm<'vm>) -> Result<Value, Anomaly> {
     Err(Anomaly::InvalidSyscall { pc: vm.pc })
 }
@@ -224,7 +224,7 @@ impl<'vm> Vm<'vm> {
                     continue;
                 }
                 Op::Sys { idx } => unsafe {
-                    r_mut!(0) = (*syscalls.add(idx as usize))(self);
+                    r_mut!(0) = (*syscalls.add(idx as usize))(self)?;
                 },
                 Op::Ret => {
                     if self.config.backtrace {

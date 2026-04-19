@@ -85,13 +85,15 @@ impl<'lower> Lower<'lower> {
                     Type::D(doub) => Const::Double(
                         doub.parse::<f64>()
                             .map_err(|e: num::ParseFloatError| {
-                                PgError::with_msg("Number parsing failure", e.to_string(), raw)
+                                PgError::with_msg(e.to_string(), raw)
                             })?
                             .to_bits(),
                     ),
-                    Type::I(int) => Const::Int(int.parse().map_err(|e: num::ParseIntError| {
-                        PgError::with_msg("Number parsing failure", e.to_string(), raw)
-                    })?),
+                    Type::I(int) => {
+                        Const::Int(int.parse().map_err(|e: num::ParseIntError| {
+                            PgError::with_msg(e.to_string(), raw)
+                        })?)
+                    }
                     Type::True => Const::True,
                     Type::False => Const::False,
                     _ => unreachable!(),
@@ -116,7 +118,6 @@ impl<'lower> Lower<'lower> {
                     Some(*id)
                 } else {
                     return Err(PgError::with_msg(
-                        "Undefined binding",
                         format!("Undefined variable `{}`", i),
                         name,
                     ));
@@ -182,7 +183,6 @@ impl<'lower> Lower<'lower> {
                     self.ctx.env.insert(i, id);
                 } else {
                     return Err(PgError::with_msg(
-                        "Empty binding value",
                         "RHS of let has to return a value, but it didnt",
                         name,
                     ));
@@ -215,7 +215,6 @@ impl<'lower> Lower<'lower> {
                 self.func_name_to_id.insert(ident_name, (id, ret.clone()));
                 let func = Func {
                     name: ident_name,
-                    live_set: HashMap::new(),
                     id,
                     params: args
                         .iter()
@@ -323,7 +322,6 @@ impl<'lower> Lower<'lower> {
                         let Some((target_id, ret)) = self.func_name_to_id.get(inner_name).cloned()
                         else {
                             return Err(PgError::with_msg(
-                                "Undefined function",
                                 format!("Undefined function `{inner_name}`"),
                                 name,
                             ));
@@ -461,84 +459,6 @@ impl<'lower> Lower<'lower> {
         })
     }
 
-    pub fn determine_live_set(func: &mut Func<'_>) {
-        let mut def = HashMap::new();
-        let mut last_use = HashMap::new();
-
-        let mut idx = 0;
-        for param in &func.params {
-            def.insert(param.0, idx);
-            last_use.entry(param.0).or_insert(idx);
-        }
-
-        for block in &func.blocks {
-            for instr in &block.instructions {
-                match instr {
-                    Instr::Bin { dst, lhs, rhs, .. } => {
-                        last_use.insert(lhs.0, idx);
-                        last_use.insert(rhs.0, idx);
-
-                        def.insert(dst.id.0, idx);
-                        last_use.entry(dst.id.0).or_insert(idx);
-                    }
-                    Instr::LoadConst { dst, .. } => {
-                        def.insert(dst.id.0, idx);
-                        last_use.entry(dst.id.0).or_insert(idx);
-                    }
-                    Instr::Call { dst, args, .. }
-                    | Instr::Sys { dst, args, .. }
-                    | Instr::Tail { dst, args, .. } => {
-                        for arg in args {
-                            last_use.insert(arg.0, idx);
-                        }
-
-                        def.insert(dst.id.0, idx);
-                        last_use.entry(dst.id.0).or_insert(idx);
-                    }
-                    Instr::Cast { dst, from } => {
-                        last_use.insert(from.0, idx);
-
-                        def.insert(dst.id.0, idx);
-                        last_use.entry(dst.id.0).or_insert(idx);
-                    }
-                    _ => unreachable!(),
-                }
-
-                idx += 1;
-            }
-
-            if let Some(term) = &block.term {
-                match term {
-                    Terminator::Return(Some(Id(id))) => {
-                        last_use.insert(*id, idx);
-                    }
-                    Terminator::Jump { params, .. } => {
-                        for id in params {
-                            last_use.insert(id.0, idx);
-                        }
-                    }
-                    Terminator::Branch { cond, yes, no } => {
-                        last_use.insert(cond.0, idx);
-
-                        for id in &yes.1 {
-                            last_use.insert(id.0, idx);
-                        }
-
-                        for id in &no.1 {
-                            last_use.insert(id.0, idx);
-                        }
-                    }
-                    _ => (),
-                }
-            }
-        }
-
-        for (v, d) in def {
-            let l = last_use.get(&v).copied().unwrap_or(d);
-            func.live_set.insert(v, (d, l));
-        }
-    }
-
     /// Lower [ast] into a list of Func nodes, the entry point is always `entry`
     pub fn ir_from(mut self, ast: &[Node<'lower>]) -> Result<Vec<Func<'lower>>, PgError> {
         let mut typechecker = typecheck::Typechecker::new();
@@ -554,7 +474,6 @@ impl<'lower> Lower<'lower> {
             ret: None,
             blocks: vec![],
             params: vec![],
-            live_set: HashMap::new(),
         };
         let entry = self.new_block();
         self.switch_to_block(entry);
@@ -566,11 +485,6 @@ impl<'lower> Lower<'lower> {
         }
 
         self.functions.push(self.ctx.func);
-
-        for func in self.functions.iter_mut() {
-            Self::determine_live_set(func);
-            crate::trace!("Computed live_set for {}: {:?}", func.name, func.live_set);
-        }
 
         Ok(self.functions)
     }

@@ -135,7 +135,7 @@ mod regalloc_test {
     fn spilling_when_registers_exhausted() {
         let mut live_set = std::collections::HashMap::new();
 
-        let reg_count = crate::vm::REGISTER_COUNT as usize;
+        let reg_count = crate::vm::REGISTER_COUNT;
 
         // Create more intervals than registers
         for i in 0..reg_count + 2 {
