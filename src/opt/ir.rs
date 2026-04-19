@@ -167,11 +167,7 @@ pub fn tailcall(fun: &mut ir::Func) {
 
         opt_trace!(
             "ir::tailcall",
-            format!(
-                "replaced `{}` with `{}`",
-                &block.instructions.last().unwrap(),
-                &tail
-            )
+            format!("tailcalled b{}s last instruction", i)
         );
 
         *block.instructions.last_mut().unwrap() = tail;

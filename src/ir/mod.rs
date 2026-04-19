@@ -139,6 +139,9 @@ pub struct Func<'f> {
 }
 
 impl Func<'_> {
+    // TODO: rework this to work in reverse, last use and first def should be easier to compute,
+    // since the value id is the definition and the first seen usage is the last usage
+
     /// mapping any vN to (def, last_use), used for spill detection for preserving registers around
     /// call boundaries, since all registers in pg are callersaved (def(v) lteq C lt last_use(v)).
     pub fn live_set(&self) -> HashMap<u32, (u32, u32)> {

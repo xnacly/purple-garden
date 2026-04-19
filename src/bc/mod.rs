@@ -91,10 +91,10 @@ impl<'cc> Cc<'cc> {
         // values at the same time
 
         let live_set = fun.live_set();
-        crate::trace!("Computed live_set for {}: {:?}", fun.name, live_set);
+        crate::trace!("[bc::Cc::cc][{}] live_set: {:#?}", fun.name, live_set);
         self.regalloc = Ralloc::new(&live_set);
         crate::trace!(
-            "[bc] Computed ralloc map for `{}`: {:#?}",
+            "[bc::Cc::cc][{}] regalloc map: {:#?}",
             fun.name,
             &self.regalloc.map
         );
@@ -118,11 +118,7 @@ impl<'cc> Cc<'cc> {
             self.term(fun, block.term.as_ref());
         }
 
-        crate::trace!(
-            "[bc] compiled `{}` (size={})",
-            fun.name,
-            self.buf.len() - pc
-        );
+        crate::trace!("[bc::Cc::cc][{}] size={}", fun.name, self.buf.len() - pc);
 
         Ok(())
     }

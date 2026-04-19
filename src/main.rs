@@ -129,7 +129,7 @@ fn main() {
         }
     };
 
-    trace!("Tokenisation and Parsing done");
+    trace!("[main] Tokenisation and Parsing done");
 
     if args.ast {
         print!(
@@ -151,7 +151,7 @@ fn main() {
         }
     };
 
-    trace!("Lowered AST to IR");
+    trace!("[main] Lowered AST to IR");
 
     if args.opt >= 1 {
         opt::ir(&mut ir);
@@ -170,7 +170,7 @@ fn main() {
         std::process::exit(1);
     };
 
-    trace!("Lowered IR to bytecode");
+    trace!("[main] Lowered IR to bytecode");
 
     if args.opt >= 1 {
         opt::bc(&mut cc.buf);
@@ -219,5 +219,5 @@ fn main() {
         }
     }
 
-    trace!("Executed bytecode");
+    trace!("[main] Executed bytecode");
 }
