@@ -114,8 +114,9 @@ The 'Type::Foreign("counter")' is used to distinguish different foreign
 interactions in the typechecker, thus making things like the following
 impossible:
 
-    # counter1 is a copy of the counter package registered before, just the
-    # Foreign str id is counter1, instead of counter
+    # counter1 is a second foreign namespace instance with a different type ID
+    # than counter, but with the same functions, just the # Foreign str id is
+    # counter1, instead of counter
     import ("counter" "counter1" "testing")
 
     let c = counter.new()
