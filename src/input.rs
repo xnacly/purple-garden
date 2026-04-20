@@ -22,6 +22,10 @@ impl Input {
             let file = File::open(file_name).expect("Failed to open file");
             let meta = file.metadata().expect("Failed to get metadata");
             let len = meta.len() as usize;
+            if len == 0 {
+                return Input::Str(String::new());
+            }
+
             let ptr = mmap::mmap(
                 None,
                 len,
@@ -40,6 +44,9 @@ impl Input {
             let mut file = File::open(file_name).expect("Failed to open file");
             let meta = file.metadata().expect("Failed to get metadata");
             let len = meta.len() as usize;
+            if len == 0 {
+                return Input::Str(String::new());
+            }
             let mut buf = Vec::with_capacity(len);
             std::io::Read::read_to_end(&mut file, &mut buf).expect("Failed to read file");
             Self::File(buf)
@@ -64,6 +71,18 @@ impl Input {
                 str::from_utf8(std::slice::from_raw_parts(ptr.as_ptr(), *len)).unwrap()
             },
         }
+    }
+
+    pub fn size(&self) -> usize {
+        match self {
+            Input::Str(s) => s.len(),
+            Input::File(bytes) => bytes.len(),
+            Input::MmapedFile { len, .. } => *len,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.size() == 0
     }
 }
 
