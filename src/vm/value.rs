@@ -64,8 +64,7 @@ impl<'c> From<Const<'c>> for Value {
             Const::True => 1u64,
             Const::Int(i) => i as u64,
             Const::Double(bits) => bits,
-            // my favorite placeholder
-            _ => return Value(0xDEADAFFE),
+            _ => unimplemented!("0xDEADAFFE"),
         })
     }
 }
