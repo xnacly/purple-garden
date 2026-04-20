@@ -2,7 +2,6 @@ Purple garden was created to be fast, but also to be embeddable and to be used
 in embedding contexts like scripting for game engines, http servers and the
 likes. 
 
-
 Lets consider a simple counter, we will make it thread safe via AtomicI64:
 
 
@@ -101,10 +100,19 @@ package:
         ],
     },
 
+These registered functions can now be used in the purple garden language:
+
+    import ("counter" "testing")
+
+    let c = counter.new()
+    counter.increment(c)
+    counter.increment(c)
+    counter.increment(c)
+    testing.assert(counter.get(c) == 3)
+
 The 'Type::Foreign("counter")' is used to distinguish different foreign
 interactions in the typechecker, thus making things like the following
 impossible:
-
 
     # counter1 is a copy of the counter package registered before, just the
     # Foreign str id is counter1, instead of counter
