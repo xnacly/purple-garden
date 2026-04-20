@@ -158,7 +158,7 @@ like writing and reading from file descriptors",
     },
     Pkg {
         name: "testing",
-        doc: "Package test includes helpers for runtime assertions and the likes",
+        doc: "Package testing includes helpers for runtime assertions and the likes",
         pkgs: &[],
         fns: &[Fn {
             name: "assert",
