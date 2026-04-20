@@ -6,10 +6,9 @@ Purple garden provides the primitive types any programmer would expect:
     Double
     Str
 
-Furthermore, there are three non primitive types:
+Furthermore, there are four non primitive types:
 
     Option
     Array
     Struct
-
-// TODO:
+    Foreign

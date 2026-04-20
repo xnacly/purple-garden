@@ -52,7 +52,7 @@ impl From<Anomaly> for PgError {
 impl PgError {
     // TODO: introduce a writer to write errors to?
     pub fn render(self, file: &str, lines: &[&str]) {
-        println!("{file}:{}:{}: {}", self.line, self.start, self.msg);
+        println!("{file}:{}:{}: {}:", self.line, self.start, self.msg);
 
         if let Some(line) = lines.get(self.line) {
             println!("{line}");

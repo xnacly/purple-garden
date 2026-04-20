@@ -328,7 +328,10 @@ impl<'t> Typechecker<'t> {
                                 name,
                             ));
                         };
-                        (name, inner_name, fun)
+                        let mut s = String::from(*pkg_name);
+                        s.push('.');
+                        s.push_str(*inner_name);
+                        (name, s, fun)
                     }
                     Node::Ident { name, .. } => {
                         let lex::Token {
@@ -344,7 +347,7 @@ impl<'t> Typechecker<'t> {
                                 name,
                             ));
                         };
-                        (name, inner_name, fun)
+                        (name, inner_name.to_string(), fun)
                     }
                     _ => unreachable!(),
                 };
@@ -370,7 +373,7 @@ impl<'t> Typechecker<'t> {
                     if expected_type != &provided_type {
                         return Err(PgError::with_msg(
                             format!(
-                                "`{}` arg{} expected type {}, got {} instead",
+                                "`{}` arg{} expected {}, got {} instead",
                                 inner_name, i, expected_type, provided_type,
                             ),
                             tok,

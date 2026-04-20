@@ -13,6 +13,13 @@ pub enum Type {
     Str,
     Option(Box<Type>),
     Array(Box<Type>),
+    // Foreign type for handling opaque rust data feed into the vm runtime
+    //
+    // which is useful for something like Foreign("counter") vs
+    // Foreign("player") in the typesystem, meaning functions defined on the former can not be
+    // called on the latter, resulting in a type error
+    Foreign(&'static str),
+    // TODO: add Record type for structuring data together as fields
 }
 
 impl Type {
@@ -35,6 +42,7 @@ impl Display for Type {
             Type::Int => write!(f, "Int"),
             Type::Double => write!(f, "Double"),
             Type::Str => write!(f, "Str"),
+            Type::Foreign(id) => write!(f, "Foreign<{id}>"),
             Type::Option(inner) => write!(f, "Option<{}>", inner),
             Type::Array(inner) => write!(f, "Array<{}>", inner),
         }
