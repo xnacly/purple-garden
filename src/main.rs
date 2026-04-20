@@ -115,6 +115,10 @@ fn main() {
         }
     };
 
+    if input.is_empty() {
+        return;
+    }
+
     let lexer = Lexer::new(input.as_bytes());
     let ast = match Parser::new(lexer).and_then(|n| n.parse()) {
         Ok(a) => a,
