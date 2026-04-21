@@ -3,6 +3,7 @@ use crate::{
     lex::{Token, Type},
     vm::Anomaly,
 };
+use std::fmt::Write;
 
 #[derive(Debug)]
 pub struct PgError {
@@ -50,14 +51,20 @@ impl From<Anomaly> for PgError {
 }
 
 impl PgError {
-    // TODO: introduce a writer to write errors to?
-    pub fn render(self, file: &str, lines: &[&str]) {
-        println!("{file}:{}:{}: {}:", self.line, self.start, self.msg);
+    pub fn render(self, file: &str, lines: &[&str]) -> String {
+        let mut buf = String::new();
+        writeln!(
+            &mut buf,
+            "{file}:{}:{}: {}:",
+            self.line, self.start, self.msg
+        );
 
         if let Some(line) = lines.get(self.line) {
-            println!("{line}");
-            println!("{}~", " ".repeat(self.start))
-        }
+            writeln!(&mut buf, "{line}");
+            writeln!(&mut buf, "{}~", " ".repeat(self.start));
+        };
+
+        buf
     }
 
     pub fn with_msg(msg: impl Into<String>, from: impl Into<PgError>) -> Self {
