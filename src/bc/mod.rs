@@ -389,11 +389,12 @@ impl<'cc> Cc<'cc> {
                 Op::Jmp { target } => {
                     let target = *self.block_map.get(&ir::Id(target as u32)).unwrap();
                     // PERF: this removes self+1 jumps
-                    Some(if target == i as u16 + 1 {
-                        Op::Nop
-                    } else {
-                        Op::Jmp { target }
-                    })
+                    Some(
+                        /*if target == i as u16 + 1 {
+                            Op::Nop
+                        } else {*/
+                        Op::Jmp { target }, /*}*/
+                    )
                 }
                 _ => None,
             } {
