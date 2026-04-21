@@ -26,8 +26,8 @@ pub const BUILD_INFO: &str = concat!(
 );
 
 fn main() {
-    let args = <config::Config as clap::Parser>::parse();
-    match args.version {
+    let conf = <config::Config as clap::Parser>::parse();
+    match conf.version {
         1 => {
             println!(
                 "purple-garden version {} by xnacly and contributors",
@@ -47,7 +47,7 @@ fn main() {
         }
         _ => {}
     }
-    if let Some(ref cmd) = args.command {
+    if let Some(ref cmd) = conf.command {
         match &cmd {
             config::Command::Intro { topic } => {
                 println!(
@@ -103,10 +103,10 @@ fn main() {
         }
     }
 
-    let (input, input_source) = match args.run {
+    let (input, input_source) = match conf.run {
         Some(ref i) => (Input::Str(i.clone()), "stdio"),
         None => {
-            let file_name = args
+            let file_name = conf
                 .target
                 .as_ref()
                 .expect("No file or `-r` specified")
@@ -131,7 +131,7 @@ fn main() {
 
     trace!("[main] Tokenisation and Parsing done");
 
-    if args.ast {
+    if conf.ast {
         print!(
             "{}",
             ast.iter()
@@ -153,18 +153,18 @@ fn main() {
 
     trace!("[main] Lowered AST to IR");
 
-    if args.opt >= 1 {
+    if conf.opt >= 1 {
         opt::ir(&mut ir);
     }
 
-    if args.ir {
+    if conf.ir {
         for func in ir.iter() {
             println!("{func}");
         }
     }
 
     let mut cc = bc::Cc::new();
-    if let Err(e) = cc.compile(&ir) {
+    if let Err(e) = cc.compile(&conf, &ir) {
         let lines = input.as_str().lines().collect::<Vec<&str>>();
         e.render(input_source, &lines);
         std::process::exit(1);
@@ -172,28 +172,28 @@ fn main() {
 
     trace!("[main] Lowered IR to bytecode");
 
-    if args.opt >= 1 {
+    if conf.opt >= 1 {
         opt::bc(&mut cc.buf);
     }
 
-    let function_table = if args.backtrace {
+    let function_table = if conf.backtrace {
         cc.function_table()
     } else {
         HashMap::new()
     };
 
-    let ctx = if args.disassemble {
+    let ctx = if conf.disassemble {
         Some(cc.clone())
     } else {
         None
     };
-    let mut vm = cc.finalize(&args);
+    let mut vm = cc.finalize(&conf);
 
-    if args.disassemble {
+    if conf.disassemble {
         bc::dis::Disassembler::new(&vm.bytecode, ctx.unwrap()).disassemble();
     }
 
-    if args.dry {
+    if conf.dry {
         return;
     }
 
@@ -201,7 +201,7 @@ fn main() {
         let lines = input.as_str().lines().collect::<Vec<&str>>();
         Into::<PgError>::into(e).render(input_source, &lines);
 
-        if args.backtrace {
+        if conf.backtrace {
             let entry_point_pc = function_table
                 .iter()
                 .find(|(_, name)| name.as_str() == "entry")

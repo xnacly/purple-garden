@@ -36,6 +36,9 @@ pub struct Config {
     /// Readable immediate representation
     #[arg(short = 'I', long)]
     pub ir: bool,
+    /// Dump liveness as <%v>: (<def>,<last_use>)
+    #[arg(short = 'L', long)]
+    pub liveness: bool,
     /// Generate backtraces for function calls
     ///
     /// Technically a brain child of my interview at apple in which we talked about ways of implementing
@@ -95,6 +98,7 @@ impl Config {
             target: None,
             command: None,
             version: 0,
+            liveness: todo!(),
         }
     }
 }

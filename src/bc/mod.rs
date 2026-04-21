@@ -6,7 +6,7 @@ mod regalloc;
 
 use crate::{
     bc::{intern::Interner, regalloc::Ralloc},
-    config::Config,
+    config::{self, Config},
     err::PgError,
     ir::{self, Const, Func, Id, TypeId, ptype},
     opt,
@@ -77,8 +77,20 @@ impl<'cc> Cc<'cc> {
     }
 
     /// Compile a list of ir functions to bytecode instructions
-    pub fn compile(&mut self, ir: &[Func<'cc>]) -> Result<(), PgError> {
+    pub fn compile(&mut self, conf: &config::Config, ir: &[Func<'cc>]) -> Result<(), PgError> {
         for func in ir {
+            if conf.liveness {
+                let intervals = func.live_set();
+                let mut entries: Vec<_> = intervals.iter().collect();
+                entries.sort_by_key(|(id, _)| *id);
+                println!(
+                    "{}",
+                    entries
+                        .into_iter()
+                        .map(|(id, (def, last_use))| format!("{id}: ({def},{last_use})\n"))
+                        .collect::<String>()
+                )
+            }
             self.cc(func)?;
         }
         Ok(())
@@ -91,7 +103,6 @@ impl<'cc> Cc<'cc> {
         // values at the same time
 
         let live_set = fun.live_set();
-        crate::trace!("[bc::Cc::cc][{}] live_set: {:#?}", fun.name, live_set);
         self.regalloc = Ralloc::new(&live_set);
         crate::trace!(
             "[bc::Cc::cc][{}] regalloc map: {:#?}",

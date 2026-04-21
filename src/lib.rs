@@ -35,7 +35,7 @@ pub fn new<'e>(config: &'e config::Config, input: &'e [u8]) -> Result<Vm<'e>, Pg
     }
 
     let mut cc = bc::Cc::new();
-    cc.compile(&ir)?;
+    cc.compile(&config, &ir)?;
     if config.opt >= 1 {
         opt::bc(&mut cc.buf);
     }

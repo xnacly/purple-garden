@@ -114,7 +114,6 @@ impl<'vm> Vm<'vm> {
 
         while pc < instructions_len {
             let op = unsafe { *instructions.add(pc) };
-            crate::trace!("[vm][{:04}] {:?}", pc, op);
 
             match op {
                 Op::Nop => {}
