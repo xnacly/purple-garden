@@ -25,7 +25,13 @@ pub const BUILD_INFO: &str = concat!(
     env!("BUILD_PROFILE"),
 );
 
-fn main() {
+macro_rules! err {
+    ($msg:expr) => {
+        Err($msg.into())
+    };
+}
+
+fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let conf = <config::Config as clap::Parser>::parse();
     match conf.version {
         1 => {
@@ -33,7 +39,7 @@ fn main() {
                 "purple-garden version {} by xnacly and contributors",
                 env!("CARGO_PKG_VERSION")
             );
-            std::process::exit(0);
+            return Ok(());
         }
         2 => {
             println!(
@@ -43,10 +49,11 @@ fn main() {
             println!("{}", BUILD_INFO.replace(";", "\n"));
             let exe = std::env::current_exe().unwrap();
             println!("from={}", exe.display());
-            std::process::exit(0);
+            return Ok(());
         }
         _ => {}
     }
+
     if let Some(ref cmd) = conf.command {
         match &cmd {
             config::Command::Intro { topic } => {
@@ -78,22 +85,15 @@ fn main() {
                     None => (pkg_or_function.as_str(), None),
                 };
 
-                let pkg = pstd::resolve_pkg(path).unwrap_or_else(|| {
-                    eprintln!("query {} couldnt be resolved to anything", path);
-                    std::process::exit(1);
-                });
+                let Some(pkg) = pstd::resolve_pkg(path) else {
+                    return err!(format!("query {} couldnt be resolved to anything", path));
+                };
 
                 if let Some(method) = method {
-                    println!(
-                        "{}",
-                        pkg.fns
-                            .iter()
-                            .find(|f| f.name == method)
-                            .unwrap_or_else(|| {
-                                eprintln!("function {}.{} not found", pkg.name, method);
-                                std::process::exit(1);
-                            })
-                    );
+                    let Some(fun) = pkg.fns.iter().find(|f| f.name == method) else {
+                        return err!(format!("function {}.{} not found", pkg.name, method));
+                    };
+                    println!("{fun}",);
                 } else {
                     println!("{}", pkg);
                 }
@@ -106,17 +106,15 @@ fn main() {
     let (input, input_source) = match conf.run {
         Some(ref i) => (Input::Str(i.clone()), "stdio"),
         None => {
-            let file_name = conf
-                .target
-                .as_ref()
-                .expect("No file or `-r` specified")
-                .as_str();
+            let Some(file_name) = conf.target.as_ref().map(|f| f.as_str()) else {
+                return err!("No file or `-r` specified");
+            };
             (Input::from_file(file_name), file_name)
         }
     };
 
     if input.is_empty() {
-        return;
+        return Ok(());
     }
 
     let lexer = Lexer::new(input.as_bytes());
@@ -124,8 +122,7 @@ fn main() {
         Ok(a) => a,
         Err(e) => {
             let lines = input.as_str().lines().collect::<Vec<&str>>();
-            e.render(input_source, &lines);
-            std::process::exit(1);
+            return err!(e.render(input_source, &lines));
         }
     };
 
@@ -146,8 +143,7 @@ fn main() {
         Ok(ir) => ir,
         Err(e) => {
             let lines = input.as_str().lines().collect::<Vec<&str>>();
-            e.render(input_source, &lines);
-            std::process::exit(1);
+            return err!(e.render(input_source, &lines));
         }
     };
 
@@ -166,8 +162,7 @@ fn main() {
     let mut cc = bc::Cc::new();
     if let Err(e) = cc.compile(&conf, &ir) {
         let lines = input.as_str().lines().collect::<Vec<&str>>();
-        e.render(input_source, &lines);
-        std::process::exit(1);
+        return err!(e.render(input_source, &lines));
     };
 
     trace!("[main] Lowered IR to bytecode");
@@ -194,7 +189,7 @@ fn main() {
     }
 
     if conf.dry {
-        return;
+        return Ok(());
     }
 
     if let Err(e) = vm.run() {
@@ -220,4 +215,11 @@ fn main() {
     }
 
     trace!("[main] Executed bytecode");
+    Ok(())
+}
+
+fn main() {
+    if let Err(e) = entry() {
+        println!("{e}")
+    }
 }
