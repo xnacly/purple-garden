@@ -139,89 +139,21 @@ pub struct Func<'f> {
 }
 
 impl Func<'_> {
-    // TODO: rework this to work in reverse, last use and first def should be easier to compute,
-    // since the value id is the definition and the first seen usage is the last usage
-
-    /// mapping any vN to (def, last_use), used for spill detection for preserving registers around
-    /// call boundaries, since all registers in pg are callersaved (def(v) lteq C lt last_use(v)).
-    pub fn live_set(&self) -> HashMap<u32, (u32, u32)> {
-        let mut def = HashMap::new();
-        let mut last_use = HashMap::new();
-        let mut live_set = HashMap::new();
-
-        let mut idx = 0;
-        for param in &self.params {
-            def.insert(param.0, idx);
-            last_use.entry(param.0).or_insert(idx);
+    /// Map VReg to its (start, end)
+    pub fn live_set(&self) -> HashMap<Id, (Id, Id)> {
+        struct Liveness {
+            /// LiveIn[B]: set of VRegs alive at B entry
+            live_in: HashMap<Id, Vec<Id>>,
+            /// LiveOut[B]: set of VRegs alive at B exit
+            live_out: HashMap<Id, Vec<Id>>,
         }
 
-        for block in &self.blocks {
-            for instr in &block.instructions {
-                match instr {
-                    Instr::Bin { dst, lhs, rhs, .. } => {
-                        last_use.insert(lhs.0, idx);
-                        last_use.insert(rhs.0, idx);
-
-                        def.insert(dst.id.0, idx);
-                        last_use.entry(dst.id.0).or_insert(idx);
-                    }
-                    Instr::LoadConst { dst, .. } => {
-                        def.insert(dst.id.0, idx);
-                        last_use.entry(dst.id.0).or_insert(idx);
-                    }
-                    Instr::Call { dst, args, .. }
-                    | Instr::Sys { dst, args, .. }
-                    | Instr::Tail { dst, args, .. } => {
-                        for arg in args {
-                            last_use.insert(arg.0, idx);
-                        }
-
-                        def.insert(dst.id.0, idx);
-                        last_use.entry(dst.id.0).or_insert(idx);
-                    }
-                    Instr::Cast { dst, from } => {
-                        last_use.insert(from.0, idx);
-
-                        def.insert(dst.id.0, idx);
-                        last_use.entry(dst.id.0).or_insert(idx);
-                    }
-                    _ => unreachable!(),
-                }
-
-                idx += 1;
-            }
-
-            if let Some(term) = &block.term {
-                match term {
-                    Terminator::Return(Some(Id(id))) => {
-                        last_use.insert(*id, idx);
-                    }
-                    Terminator::Jump { params, .. } => {
-                        for id in params {
-                            last_use.insert(id.0, idx);
-                        }
-                    }
-                    Terminator::Branch { cond, yes, no } => {
-                        last_use.insert(cond.0, idx);
-
-                        for id in &yes.1 {
-                            last_use.insert(id.0, idx);
-                        }
-
-                        for id in &no.1 {
-                            last_use.insert(id.0, idx);
-                        }
-                    }
-                    _ => (),
-                }
-            }
+        for b in &self.blocks {
+            let live_in = &b.params;
+            let live_out = &b.term;
+            dbg!((live_in, live_out));
         }
 
-        for (v, d) in def {
-            let l = last_use.get(&v).copied().unwrap_or(d);
-            live_set.insert(v, (d, l));
-        }
-
-        live_set
+        HashMap::new()
     }
 }
