@@ -103,7 +103,7 @@ impl<'cc> Cc<'cc> {
         // values at the same time
 
         let live_set = fun.live_set();
-        self.regalloc = Ralloc::new(&live_set);
+        self.regalloc = Ralloc::new(live_set.clone());
         crate::trace!(
             "[bc::Cc::cc][{}] regalloc map: {:#?}",
             fun.name,
@@ -230,7 +230,7 @@ impl<'cc> Cc<'cc> {
     fn instr(
         &mut self,
         fun: &Func<'cc>,
-        live_set: &HashMap<u32, (u32, u32)>,
+        live_set: &HashMap<Id, (Id, Id)>,
         pos: u32,
         i: &ir::Instr<'cc>,
     ) {
@@ -271,7 +271,7 @@ impl<'cc> Cc<'cc> {
                 let pc = func.pc;
 
                 let mut alive_after_call_spill = vec![];
-                for (v, (def, last_use)) in live_set {
+                for (Id(v), (Id(def), Id(last_use))) in live_set {
                     // the value is defined before the call and used after the call, thus must be
                     // spilled
                     if def < &pos && &pos < last_use {

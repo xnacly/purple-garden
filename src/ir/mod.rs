@@ -41,7 +41,7 @@ pub enum Const<'c> {
     Str(&'c str),
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Id(pub u32);
 
 #[derive(Debug, Clone)]
@@ -139,8 +139,10 @@ pub struct Func<'f> {
 }
 
 impl Func<'_> {
-    /// Map VReg to its (start, end)
     pub fn live_set(&self) -> HashMap<Id, (Id, Id)> {
+        // PERF: this whole process should be a set theory based bit set, since we have at most 64
+        // registers (i think?), thus a BitSet(u64) should be a perfect abstraction
+
         struct Liveness {
             /// LiveIn[B]: set of VRegs alive at B entry
             live_in: HashMap<Id, Vec<Id>>,
@@ -149,9 +151,12 @@ impl Func<'_> {
         }
 
         for b in &self.blocks {
+            // defs are both block params and each instruction
+
             let live_in = &b.params;
             let live_out = &b.term;
-            dbg!((live_in, live_out));
+
+            // TODO:
         }
 
         HashMap::new()

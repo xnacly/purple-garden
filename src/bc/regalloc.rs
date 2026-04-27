@@ -1,4 +1,4 @@
-use crate::vm;
+use crate::{ir::Id, vm};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,13 +32,13 @@ pub struct Ralloc {
 }
 
 impl Ralloc {
-    pub fn new(live_set: &HashMap<u32, (u32, u32)>) -> Self {
+    pub fn new(live_set: HashMap<Id, (Id, Id)>) -> Self {
         let mut intervals: Vec<Interval> = live_set
-            .iter()
-            .map(|(v, (start, end))| Interval {
-                v: *v,
-                start: *start,
-                end: *end,
+            .into_iter()
+            .map(|(Id(v), (Id(start), Id(end)))| Interval {
+                v,
+                start,
+                end,
                 reg: None,
             })
             .collect();
@@ -84,18 +84,21 @@ impl Ralloc {
 
 #[cfg(test)]
 mod regalloc_test {
-    use crate::bc::regalloc::{Location, Ralloc};
+    use crate::{
+        bc::regalloc::{Location, Ralloc},
+        ir::Id,
+    };
 
     #[test]
     fn non_overlapping_reuses_registers() {
         let mut live_set = std::collections::HashMap::new();
 
         // v0: [0, 2]
-        live_set.insert(0, (0, 2));
+        live_set.insert(Id(0), (Id(0), Id(2)));
         // v1: [3, 5]
-        live_set.insert(1, (3, 5));
+        live_set.insert(Id(1), (Id(3), Id(5)));
 
-        let ralloc = Ralloc::new(&live_set);
+        let ralloc = Ralloc::new(live_set);
 
         let loc0 = ralloc.map.get(&0).unwrap();
         let loc1 = ralloc.map.get(&1).unwrap();
@@ -114,11 +117,11 @@ mod regalloc_test {
         let mut live_set = std::collections::HashMap::new();
 
         // v0: [0, 5]
-        live_set.insert(0, (0, 5));
+        live_set.insert(Id(0), (Id(0), Id(5)));
         // v1: [2, 6] overlaps with v0
-        live_set.insert(1, (2, 6));
+        live_set.insert(Id(1), (Id(2), Id(6)));
 
-        let ralloc = Ralloc::new(&live_set);
+        let ralloc = Ralloc::new(live_set);
 
         let loc0 = ralloc.map.get(&0).unwrap();
         let loc1 = ralloc.map.get(&1).unwrap();
@@ -139,10 +142,10 @@ mod regalloc_test {
 
         // Create more intervals than registers
         for i in 0..reg_count + 2 {
-            live_set.insert(i as u32, (0, 10));
+            live_set.insert(Id(i as u32), (Id(0), Id(10)));
         }
 
-        let ralloc = Ralloc::new(&live_set);
+        let ralloc = Ralloc::new(live_set);
 
         let mut reg_assigned = 0;
         let mut spilled = 0;
@@ -166,10 +169,10 @@ mod regalloc_test {
         let mut live_set = std::collections::HashMap::new();
 
         for i in 0..10 {
-            live_set.insert(i, (i, i + 1));
+            live_set.insert(Id(i), (Id(i), Id(i + 1)));
         }
 
-        let ralloc = Ralloc::new(&live_set);
+        let ralloc = Ralloc::new(live_set);
 
         for i in 0..10 {
             assert!(
@@ -185,12 +188,12 @@ mod regalloc_test {
         let mut live_set = std::collections::HashMap::new();
 
         // overlapping chain
-        live_set.insert(0, (0, 10));
-        live_set.insert(1, (1, 9));
-        live_set.insert(2, (2, 8));
-        live_set.insert(3, (3, 7));
+        live_set.insert(Id(0), (Id(0), Id(10)));
+        live_set.insert(Id(1), (Id(1), Id(9)));
+        live_set.insert(Id(2), (Id(2), Id(8)));
+        live_set.insert(Id(3), (Id(3), Id(7)));
 
-        let ralloc = Ralloc::new(&live_set);
+        let ralloc = Ralloc::new(live_set);
 
         let mut active: Vec<(u32, u32, u8)> = vec![];
 
