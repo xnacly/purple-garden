@@ -41,7 +41,7 @@ pub enum Const<'c> {
     Str(&'c str),
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Id(pub u32);
 
 #[derive(Debug, Clone)]
