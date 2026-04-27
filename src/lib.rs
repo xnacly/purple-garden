@@ -21,6 +21,7 @@ pub mod lex;
 pub mod mmap;
 pub mod opt;
 pub mod parser;
+pub mod repl;
 pub mod std;
 pub mod vm;
 

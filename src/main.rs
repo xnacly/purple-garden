@@ -7,6 +7,7 @@ use purple_garden::{
     lex::Lexer,
     opt,
     parser::Parser,
+    repl,
     std::{self as pstd, Pkg},
     trace,
 };
@@ -56,6 +57,10 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(ref cmd) = conf.command {
         match &cmd {
+            config::Command::Repl => {
+                repl::Repl::start();
+                std::process::exit(0);
+            }
             config::Command::Intro { topic } => {
                 println!(
                     "{}",

@@ -78,6 +78,8 @@ pub enum Command {
     Doc { pkg_or_function: Option<String> },
     /// An introduction to purple garden
     Intro { topic: Option<String> },
+    /// Start an read-eval-print-loop
+    Repl,
 }
 
 impl Config {
