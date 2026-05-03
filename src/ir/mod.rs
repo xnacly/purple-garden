@@ -142,7 +142,19 @@ impl Func<'_> {
     /// Map VReg to its (start, end)
     pub fn live_set(&self) -> HashMap<Id, (Id, Id)> {
         let mut ranges: HashMap<Id, (Id, Id)> = HashMap::new();
-        let mut pos = 0;
+        let mut block_pos: HashMap<Id, u32> = HashMap::new();
+        let mut pos = 0u32;
+
+        for block in &self.blocks {
+            if block.tombstone {
+                continue;
+            }
+            block_pos.insert(block.id, pos);
+            pos += block.instructions.len() as u32;
+            if block.term.is_some() {
+                pos += 1;
+            }
+        }
 
         fn define(ranges: &mut HashMap<Id, (Id, Id)>, id: Id, pos: u32) {
             ranges.entry(id).or_insert((Id(pos), Id(pos)));
@@ -153,10 +165,31 @@ impl Func<'_> {
             entry.1 = Id(entry.1.0.max(pos));
         }
 
+        fn use_edge_params(
+            ranges: &mut HashMap<Id, (Id, Id)>,
+            block_pos: &HashMap<Id, u32>,
+            edge_pos: u32,
+            target: Id,
+            params: &[Id],
+        ) {
+            let Some(target_pos) = block_pos.get(&target).copied() else {
+                return;
+            };
+            let use_pos = edge_pos.max(target_pos);
+
+            for param in params {
+                use_id(ranges, *param, use_pos);
+            }
+        }
+
         for block in &self.blocks {
             if block.tombstone {
                 continue;
             }
+
+            let mut pos = *block_pos
+                .get(&block.id)
+                .expect("non-tombstone block must have a position");
 
             for param in &block.params {
                 define(&mut ranges, *param, pos);
@@ -191,26 +224,75 @@ impl Func<'_> {
                 match term {
                     Terminator::Return(Some(id)) => use_id(&mut ranges, *id, pos),
                     Terminator::Return(None) => {}
-                    Terminator::Jump { params, .. } => {
-                        for param in params {
-                            use_id(&mut ranges, *param, pos);
-                        }
+                    Terminator::Jump { id, params } => {
+                        use_edge_params(&mut ranges, &block_pos, pos, *id, params);
                     }
                     Terminator::Branch {
                         cond,
-                        yes: (_, yes_params),
-                        no: (_, no_params),
+                        yes: (yes, yes_params),
+                        no: (no, no_params),
                     } => {
                         use_id(&mut ranges, *cond, pos);
-                        for param in yes_params.iter().chain(no_params) {
-                            use_id(&mut ranges, *param, pos);
-                        }
+                        use_edge_params(&mut ranges, &block_pos, pos, *yes, yes_params);
+                        use_edge_params(&mut ranges, &block_pos, pos, *no, no_params);
                     }
                 }
-                pos += 1;
             }
         }
 
         ranges
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int_id(id: u32) -> TypeId {
+        TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        }
+    }
+
+    #[test]
+    fn live_set_extends_values_passed_to_block_params() {
+        let func = Func {
+            name: "test",
+            id: Id(0),
+            params: vec![],
+            ret: None,
+            blocks: vec![
+                Block {
+                    tombstone: false,
+                    id: Id(0),
+                    instructions: vec![Instr::LoadConst {
+                        dst: int_id(0),
+                        value: Const::Int(1),
+                    }],
+                    params: vec![],
+                    term: Some(Terminator::Jump {
+                        id: Id(1),
+                        params: vec![Id(0)],
+                    }),
+                },
+                Block {
+                    tombstone: false,
+                    id: Id(1),
+                    instructions: vec![Instr::Bin {
+                        op: BinOp::IAdd,
+                        dst: int_id(2),
+                        lhs: Id(1),
+                        rhs: Id(1),
+                    }],
+                    params: vec![Id(1)],
+                    term: Some(Terminator::Return(Some(Id(2)))),
+                },
+            ],
+        };
+
+        let live = func.live_set();
+        assert_eq!(live.get(&Id(0)), Some(&(Id(0), Id(2))));
+        assert_eq!(live.get(&Id(1)), Some(&(Id(2), Id(2))));
     }
 }

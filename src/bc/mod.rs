@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub mod dis;
 mod intern;
@@ -29,6 +29,7 @@ pub struct Cc<'cc> {
     pub functions: HashMap<Id, BcFunc<'cc>>,
     /// binding a block id to its pc
     block_map: HashMap<ir::Id, u16>,
+    raw_jumps: HashSet<usize>,
     regalloc: Ralloc,
 }
 
@@ -41,6 +42,7 @@ impl<'cc> Cc<'cc> {
             std_fns: Interner::new(),
             functions: HashMap::new(),
             block_map: HashMap::new(),
+            raw_jumps: HashSet::new(),
             regalloc: Ralloc::default(),
         }
     }
@@ -115,6 +117,7 @@ impl<'cc> Cc<'cc> {
         // binding the id of a function to its context
         self.functions.insert(fun.id, f);
 
+        let mut pos = 0;
         for block in &fun.blocks {
             if block.tombstone {
                 continue;
@@ -122,11 +125,15 @@ impl<'cc> Cc<'cc> {
 
             self.block_map.insert(block.id, self.buf.len() as u16);
 
-            for (i, instruction) in block.instructions.iter().enumerate() {
-                self.instr(fun, &live_set, i as u32, instruction);
+            for instruction in &block.instructions {
+                self.instr(fun, &live_set, pos, instruction);
+                pos += 1;
             }
 
             self.term(fun, block.term.as_ref());
+            if block.term.is_some() {
+                pos += 1;
+            }
         }
 
         crate::trace!("[bc::Cc::cc][{}] size={}", fun.name, self.buf.len() - pc);
@@ -192,22 +199,8 @@ impl<'cc> Cc<'cc> {
                 no: (no, no_params),
                 ..
             } => {
-                let target = &fun.blocks.get(yes.0 as usize).unwrap();
-                for (i, param) in yes_params.iter().enumerate() {
-                    let src = self.ensure_register(*param);
-                    let dst = self.ensure_register(target.params[i]);
-
-                    if src == dst {
-                        continue;
-                    }
-                    self.emit(Op::Mov { dst, src });
-                }
-
                 let cond = self.ensure_register(*cond);
-                self.emit(Op::JmpF {
-                    cond,
-                    target: yes.0 as u16,
-                });
+                let branch_pc = self.emit(Op::JmpF { cond, target: 0 });
 
                 let target = &fun.blocks.get(no.0 as usize).unwrap();
                 for (i, param) in no_params.iter().enumerate() {
@@ -222,6 +215,28 @@ impl<'cc> Cc<'cc> {
 
                 self.emit(Op::Jmp {
                     target: no.0 as u16,
+                });
+
+                let yes_copy_pc = self.buf.len() as u16;
+                self.buf[branch_pc] = Op::JmpF {
+                    cond,
+                    target: yes_copy_pc,
+                };
+                self.raw_jumps.insert(branch_pc);
+
+                let target = &fun.blocks.get(yes.0 as usize).unwrap();
+                for (i, param) in yes_params.iter().enumerate() {
+                    let src = self.ensure_register(*param);
+                    let dst = self.ensure_register(target.params[i]);
+
+                    if src == dst {
+                        continue;
+                    }
+                    self.emit(Op::Mov { dst, src });
+                }
+
+                self.emit(Op::Jmp {
+                    target: yes.0 as u16,
                 });
             }
         }
@@ -391,6 +406,10 @@ impl<'cc> Cc<'cc> {
             .unwrap_or_default();
 
         for i in 0..self.buf.len() {
+            if self.raw_jumps.contains(&i) {
+                continue;
+            }
+
             let instr = self.buf[i];
             if let Some(new) = match instr {
                 Op::JmpF { target, cond } => Some(Op::JmpF {
@@ -432,5 +451,138 @@ impl<'cc> Cc<'cc> {
 impl<'cc> Default for Cc<'cc> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{BinOp, Block, Instr, Terminator};
+
+    fn int_id(id: u32) -> TypeId {
+        TypeId {
+            id: Id(id),
+            ty: ptype::Type::Int,
+        }
+    }
+
+    fn run_func(func: Func<'static>) -> Value {
+        let config = Config::default();
+        let mut cc = Cc::new();
+        let entry = Func {
+            name: "entry",
+            id: Id(0),
+            params: vec![],
+            ret: None,
+            blocks: vec![Block {
+                tombstone: false,
+                id: Id(0),
+                instructions: vec![Instr::Call {
+                    dst: int_id(100),
+                    func: func.id,
+                    args: vec![],
+                }],
+                params: vec![],
+                term: None,
+            }],
+        };
+        cc.compile(&config, &[func, entry]).unwrap();
+        let mut vm = cc.finalize(&config);
+        vm.run().unwrap();
+        *vm.r(0)
+    }
+
+    #[test]
+    fn jump_block_param_swap_preserves_sources() {
+        let func = Func {
+            name: "test",
+            id: Id(1),
+            params: vec![],
+            ret: None,
+            blocks: vec![
+                Block {
+                    tombstone: false,
+                    id: Id(0),
+                    instructions: vec![
+                        Instr::LoadConst {
+                            dst: int_id(0),
+                            value: Const::Int(1),
+                        },
+                        Instr::LoadConst {
+                            dst: int_id(1),
+                            value: Const::Int(2),
+                        },
+                    ],
+                    params: vec![],
+                    term: Some(Terminator::Jump {
+                        id: Id(1),
+                        params: vec![Id(1), Id(0)],
+                    }),
+                },
+                Block {
+                    tombstone: false,
+                    id: Id(1),
+                    instructions: vec![],
+                    params: vec![Id(2), Id(3)],
+                    term: Some(Terminator::Return(Some(Id(3)))),
+                },
+            ],
+        };
+
+        assert_eq!(run_func(func).as_int(), 1);
+    }
+
+    #[test]
+    fn branch_param_copy_does_not_clobber_condition() {
+        let func = Func {
+            name: "test",
+            id: Id(1),
+            params: vec![],
+            ret: None,
+            blocks: vec![
+                Block {
+                    tombstone: false,
+                    id: Id(0),
+                    instructions: vec![
+                        Instr::LoadConst {
+                            dst: TypeId {
+                                id: Id(0),
+                                ty: ptype::Type::Bool,
+                            },
+                            value: Const::False,
+                        },
+                        Instr::LoadConst {
+                            dst: int_id(1),
+                            value: Const::Int(123),
+                        },
+                    ],
+                    params: vec![],
+                    term: Some(Terminator::Branch {
+                        cond: Id(0),
+                        yes: (Id(1), vec![Id(1)]),
+                        no: (Id(2), vec![]),
+                    }),
+                },
+                Block {
+                    tombstone: false,
+                    id: Id(1),
+                    instructions: vec![],
+                    params: vec![Id(2)],
+                    term: Some(Terminator::Return(Some(Id(2)))),
+                },
+                Block {
+                    tombstone: false,
+                    id: Id(2),
+                    instructions: vec![Instr::LoadConst {
+                        dst: int_id(3),
+                        value: Const::Int(0),
+                    }],
+                    params: vec![],
+                    term: Some(Terminator::Return(Some(Id(3)))),
+                },
+            ],
+        };
+
+        assert_eq!(run_func(func).as_int(), 0);
     }
 }

@@ -199,7 +199,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Err(e) = vm.run() {
         let lines = input.as_str().lines().collect::<Vec<&str>>();
-        Into::<PgError>::into(e).render(input_source, &lines);
+        let rendered = Into::<PgError>::into(e).render(input_source, &lines);
 
         if conf.backtrace {
             let entry_point_pc = function_table
@@ -217,6 +217,8 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                 println!(" #{idx} {name}");
             }
         }
+
+        return err!(rendered);
     }
 
     trace!("[main] Executed bytecode");
@@ -225,6 +227,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
 fn main() {
     if let Err(e) = entry() {
-        println!("{e}")
+        println!("{e}");
+        std::process::exit(1);
     }
 }
