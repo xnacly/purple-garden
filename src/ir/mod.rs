@@ -141,19 +141,76 @@ pub struct Func<'f> {
 impl Func<'_> {
     /// Map VReg to its (start, end)
     pub fn live_set(&self) -> HashMap<Id, (Id, Id)> {
-        struct Liveness {
-            /// LiveIn[B]: set of VRegs alive at B entry
-            live_in: HashMap<Id, Vec<Id>>,
-            /// LiveOut[B]: set of VRegs alive at B exit
-            live_out: HashMap<Id, Vec<Id>>,
+        let mut ranges: HashMap<Id, (Id, Id)> = HashMap::new();
+        let mut pos = 0;
+
+        fn define(ranges: &mut HashMap<Id, (Id, Id)>, id: Id, pos: u32) {
+            ranges.entry(id).or_insert((Id(pos), Id(pos)));
         }
 
-        for b in &self.blocks {
-            let live_in = &b.params;
-            let live_out = &b.term;
-            dbg!((live_in, live_out));
+        fn use_id(ranges: &mut HashMap<Id, (Id, Id)>, id: Id, pos: u32) {
+            let entry = ranges.entry(id).or_insert((Id(pos), Id(pos)));
+            entry.1 = Id(entry.1.0.max(pos));
         }
 
-        HashMap::new()
+        for block in &self.blocks {
+            if block.tombstone {
+                continue;
+            }
+
+            for param in &block.params {
+                define(&mut ranges, *param, pos);
+            }
+
+            for instr in &block.instructions {
+                match instr {
+                    Instr::Bin { dst, lhs, rhs, .. } => {
+                        use_id(&mut ranges, *lhs, pos);
+                        use_id(&mut ranges, *rhs, pos);
+                        define(&mut ranges, dst.id, pos);
+                    }
+                    Instr::LoadConst { dst, .. } => define(&mut ranges, dst.id, pos),
+                    Instr::Call { dst, args, .. }
+                    | Instr::Sys { dst, args, .. }
+                    | Instr::Tail { dst, args, .. } => {
+                        for arg in args {
+                            use_id(&mut ranges, *arg, pos);
+                        }
+                        define(&mut ranges, dst.id, pos);
+                    }
+                    Instr::Cast { dst, from } => {
+                        use_id(&mut ranges, *from, pos);
+                        define(&mut ranges, dst.id, pos);
+                    }
+                    Instr::Noop => {}
+                }
+                pos += 1;
+            }
+
+            if let Some(term) = &block.term {
+                match term {
+                    Terminator::Return(Some(id)) => use_id(&mut ranges, *id, pos),
+                    Terminator::Return(None) => {}
+                    Terminator::Jump { params, .. } => {
+                        for param in params {
+                            use_id(&mut ranges, *param, pos);
+                        }
+                    }
+                    Terminator::Branch {
+                        cond,
+                        yes: (_, yes_params),
+                        no: (_, no_params),
+                    } => {
+                        use_id(&mut ranges, *cond, pos);
+                        for param in yes_params.iter().chain(no_params) {
+                            use_id(&mut ranges, *param, pos);
+                        }
+                    }
+                }
+                pos += 1;
+            }
+        }
+
+        ranges
     }
 }

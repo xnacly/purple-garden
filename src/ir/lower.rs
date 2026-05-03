@@ -36,6 +36,7 @@ struct LowerCtx<'lower> {
 pub struct Lower<'lower> {
     ctx: LowerCtx<'lower>,
     functions: Vec<Func<'lower>>,
+    next_func_id: u32,
     func_name_to_id: HashMap<&'lower str, (ir::Id, Option<ptype::Type>)>,
     types: HashMap<usize, ptype::Type>,
     packages: HashMap<&'lower str, (&'lower pstd::Pkg, HashMap<&'lower str, &'lower pstd::Fn>)>,
@@ -66,6 +67,12 @@ impl<'lower> Lower<'lower> {
             params: vec![],
             term: None,
         });
+        id
+    }
+
+    fn new_func_id(&mut self) -> Id {
+        let id = Id(self.next_func_id);
+        self.next_func_id += 1;
         id
     }
 
@@ -197,7 +204,7 @@ impl<'lower> Lower<'lower> {
             } => {
                 let old_ctx = std::mem::take(&mut self.ctx);
 
-                let id = Id(self.functions.len() as u32 + 1);
+                let id = self.new_func_id();
                 let Type::Ident(ident_name) = name.t else {
                     unreachable!()
                 };
@@ -461,6 +468,7 @@ impl<'lower> Lower<'lower> {
 
     /// Lower [ast] into a list of Func nodes, the entry point is always `entry`
     pub fn ir_from(mut self, ast: &[Node<'lower>]) -> Result<Vec<Func<'lower>>, PgError> {
+        self.next_func_id = 1;
         let mut typechecker = typecheck::Typechecker::new();
         for node in ast {
             let _t = typechecker.node(node)?;

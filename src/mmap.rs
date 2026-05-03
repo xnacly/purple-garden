@@ -1,7 +1,8 @@
 //! copied and applied from https://github.com/xnacly/stinkarm/blob/master/src/mem/mmap.rs
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const MMAP_SYSCALL: i64 = 9;
-const MPROTECT_SYSCALL: i64 = 10;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const MUNMAP_SYSCALL: i64 = 11;
 
 // Not an enum, since NONE, READ, WRITE and EXEC arent mutually exclusive
@@ -61,6 +62,7 @@ impl std::ops::BitOr for MmapFlags {
     }
 }
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[inline(always)]
 pub fn mmap(
     ptr: Option<std::ptr::NonNull<u8>>,
@@ -99,6 +101,20 @@ pub fn mmap(
     Ok(unsafe { std::ptr::NonNull::new_unchecked(ret as *mut u8) })
 }
 
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+#[inline(always)]
+pub fn mmap(
+    _ptr: Option<std::ptr::NonNull<u8>>,
+    _length: usize,
+    _prot: MmapProt,
+    _flags: MmapFlags,
+    _fd: i32,
+    _offset: i64,
+) -> Result<std::ptr::NonNull<u8>, String> {
+    Err("mmap is only implemented for linux/x86_64".into())
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[inline(always)]
 pub fn munmap(ptr: std::ptr::NonNull<u8>, size: usize) -> Result<(), String> {
     let ret: isize;
@@ -124,4 +140,10 @@ pub fn munmap(ptr: std::ptr::NonNull<u8>, size: usize) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+#[inline(always)]
+pub fn munmap(_ptr: std::ptr::NonNull<u8>, _size: usize) -> Result<(), String> {
+    Err("munmap is only implemented for linux/x86_64".into())
 }

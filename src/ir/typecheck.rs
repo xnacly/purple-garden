@@ -67,6 +67,10 @@ impl<'t> Typechecker<'t> {
         self.map
     }
 
+    pub fn block(nodes: &'t [Node]) -> Result<Type, PgError> {
+        Self::new().block_type(nodes)
+    }
+
     fn already_checked(&'t self, node: &Node) -> Option<&'t Type> {
         self.map.get(&id_from_node(node)?)
     }

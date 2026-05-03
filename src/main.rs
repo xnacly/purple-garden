@@ -58,8 +58,8 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref cmd) = conf.command {
         match &cmd {
             config::Command::Repl => {
-                repl::Repl::start();
-                std::process::exit(0);
+                repl::Repl::start(&conf)?;
+                return Ok(());
             }
             config::Command::Intro { topic } => {
                 println!(
