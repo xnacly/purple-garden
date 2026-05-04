@@ -224,6 +224,21 @@ impl<'cc> Cc<'cc> {
                     target: no.0 as u16,
                 });
             }
+            ir::Terminator::Tail { func, args } => {
+                let Some(func) = self.functions.get(func) else {
+                    unreachable!();
+                };
+
+                let pc = func.pc;
+                for (i, arg) in args.iter().enumerate() {
+                    let (dst, src) = (i as u8, self.ensure_register(*arg));
+                    if dst != src {
+                        self.emit(Op::Mov { dst, src });
+                    }
+                }
+
+                self.emit(Op::Tail { func: pc as u32 });
+            }
         }
     }
 
@@ -305,21 +320,6 @@ impl<'cc> Cc<'cc> {
                 for dst in alive_after_call_spill.iter().rev() {
                     self.emit(Op::Pop { dst: *dst });
                 }
-            }
-            ir::Instr::Tail { dst, func, args } => {
-                let Some(func) = self.functions.get(func) else {
-                    unreachable!();
-                };
-
-                let pc = func.pc;
-                for (i, arg) in args.iter().enumerate() {
-                    let (dst, src) = (i as u8, self.ensure_register(*arg));
-                    if dst != src {
-                        self.emit(Op::Mov { dst, src });
-                    }
-                }
-
-                self.emit(Op::Tail { func: pc as u32 });
             }
             ir::Instr::Sys {
                 dst,

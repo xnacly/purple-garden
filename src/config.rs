@@ -98,7 +98,7 @@ impl Config {
             target: None,
             command: None,
             version: 0,
-            liveness: todo!(),
+            liveness: false,
         }
     }
 }

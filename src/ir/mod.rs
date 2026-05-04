@@ -91,11 +91,6 @@ pub enum Instr<'i> {
         func: &'i pstd::Fn,
         args: Vec<Id>,
     },
-    Tail {
-        dst: TypeId,
-        func: Id,
-        args: Vec<Id>,
-    },
     Cast {
         dst: TypeId,
         from: Id,
@@ -114,6 +109,10 @@ pub enum Terminator {
         cond: Id,
         yes: (Id, Vec<Id>),
         no: (Id, Vec<Id>),
+    },
+    Tail {
+        func: Id,
+        args: Vec<Id>,
     },
 }
 
@@ -151,7 +150,6 @@ impl Func<'_> {
             | Instr::LoadConst { dst, .. }
             | Instr::Call { dst, .. }
             | Instr::Sys { dst, .. }
-            | Instr::Tail { dst, .. }
             | Instr::Cast { dst, .. } => Some(dst.id),
             Instr::Noop => None,
         }
@@ -160,9 +158,7 @@ impl Func<'_> {
     fn uses_of_instr(instr: &Instr<'_>) -> Vec<Id> {
         match instr {
             Instr::Bin { lhs, rhs, .. } => vec![*lhs, *rhs],
-            Instr::Call { args, .. } | Instr::Sys { args, .. } | Instr::Tail { args, .. } => {
-                args.clone()
-            }
+            Instr::Call { args, .. } | Instr::Sys { args, .. } => args.clone(),
             Instr::Cast { from, .. } => vec![*from],
             Instr::LoadConst { .. } | Instr::Noop => vec![],
         }
@@ -173,6 +169,7 @@ impl Func<'_> {
             Terminator::Return(Some(id)) => vec![*id],
             Terminator::Return(None) => vec![],
             Terminator::Jump { params, .. } => params.clone(),
+            Terminator::Tail { args, .. } => args.clone(),
             Terminator::Branch {
                 cond,
                 yes: (_, yes_params),
@@ -191,6 +188,7 @@ impl Func<'_> {
         match term {
             Terminator::Return(Some(id)) => vec![*id],
             Terminator::Return(None) | Terminator::Jump { .. } => vec![],
+            Terminator::Tail { args, .. } => args.clone(),
             Terminator::Branch { cond, .. } => vec![*cond],
         }
     }
@@ -211,7 +209,7 @@ impl Func<'_> {
                     args: no.1.clone(),
                 },
             ],
-            Some(Terminator::Return(_)) | None => vec![],
+            Some(Terminator::Return(_) | Terminator::Tail { .. }) | None => vec![],
         }
     }
 

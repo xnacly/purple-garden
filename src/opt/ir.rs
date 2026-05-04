@@ -163,13 +163,53 @@ pub fn tailcall(fun: &mut ir::Func) {
             continue;
         }
 
-        let tail = Instr::Tail { dst, func, args };
-
         opt_trace!(
             "ir::tailcall",
             format!("tailcalled b{}s last instruction", i)
         );
 
-        *block.instructions.last_mut().unwrap() = tail;
+        block.instructions.pop();
+        block.term = Some(ir::Terminator::Tail { func, args });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tailcall;
+    use crate::ir::{self, Instr, Terminator, TypeId, ptype::Type};
+
+    #[test]
+    fn tailcall_rewrites_call_return_to_tail_terminator() {
+        let mut fun = ir::Func {
+            name: "tail",
+            id: ir::Id(0),
+            params: vec![ir::Id(0)],
+            ret: Some(Type::Int),
+            blocks: vec![ir::Block {
+                tombstone: false,
+                id: ir::Id(0),
+                params: vec![ir::Id(0)],
+                instructions: vec![Instr::Call {
+                    dst: TypeId {
+                        id: ir::Id(1),
+                        ty: Type::Int,
+                    },
+                    func: ir::Id(42),
+                    args: vec![ir::Id(0)],
+                }],
+                term: Some(Terminator::Return(Some(ir::Id(1)))),
+            }],
+        };
+
+        tailcall(&mut fun);
+
+        assert!(fun.blocks[0].instructions.is_empty());
+        assert!(matches!(
+            &fun.blocks[0].term,
+            Some(Terminator::Tail {
+                func,
+                args
+            }) if *func == ir::Id(42) && args == &vec![ir::Id(0)]
+        ));
     }
 }
