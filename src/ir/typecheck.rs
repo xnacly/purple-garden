@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     ast::Node,
@@ -29,6 +29,21 @@ pub fn id_from_node(node: &Node) -> Option<usize> {
 struct FunctionType {
     args: Vec<Type>,
     ret: Type,
+}
+
+impl Display for FunctionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(")?;
+        for (i, t) in self.args.iter().enumerate() {
+            if i + 1 == self.args.len() {
+                write!(f, "{t}")?;
+            } else {
+                write!(f, "{t} ")?;
+            }
+        }
+        write!(f, ") -> {}", self.ret)?;
+        Ok(())
+    }
 }
 
 #[derive(Default, Debug)]
@@ -261,20 +276,17 @@ impl<'t> Typechecker<'t> {
                 }
 
                 let ret: Type = return_type.into();
-
-                self.functions.insert(
-                    inner_name,
-                    FunctionType {
-                        args: typed_arguments,
-                        ret: ret.clone(),
-                    },
-                );
+                let f_type = FunctionType {
+                    args: typed_arguments,
+                    ret: ret.clone(),
+                };
+                self.functions.insert(inner_name, f_type.clone());
 
                 let computed_ret = self.block_type(body)?;
                 if ret != computed_ret {
                     return Err(PgError::with_msg(
                         format!(
-                            "`{}` annotated with return type {}, but returns {}",
+                            "`{}` should return {}, but returns {}",
                             inner_name, ret, computed_ret
                         ),
                         return_type,
@@ -282,7 +294,11 @@ impl<'t> Typechecker<'t> {
                 }
 
                 self.env = prev_env;
-                crate::trace!("[ty]: typechecked function `{}`", inner_name);
+                crate::trace!(
+                    "[ir::typecheck::Typechecker::node][{}]: {}",
+                    inner_name,
+                    f_type
+                );
                 ret
             }
             Node::Cast { id, lhs, rhs, src } => {

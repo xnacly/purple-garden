@@ -465,7 +465,7 @@ impl<'lower> Lower<'lower> {
         for node in ast {
             let _t = typechecker.node(node)?;
         }
-        crate::trace!("Finished type checking");
+        crate::trace!("[ir::lower::Lower::ir_from] Finished type checking");
         self.types = typechecker.finalise();
 
         self.ctx.func = Func {

@@ -25,15 +25,21 @@ pub const BUILD_INFO: &str = concat!(
     env!("BUILD_PROFILE"),
 );
 
-fn main() {
-    let args = <config::Config as clap::Parser>::parse();
-    match args.version {
+macro_rules! err {
+    ($msg:expr) => {
+        Err($msg.into())
+    };
+}
+
+fn entry() -> Result<(), Box<dyn std::error::Error>> {
+    let conf = <config::Config as clap::Parser>::parse();
+    match conf.version {
         1 => {
             println!(
                 "purple-garden version {} by xnacly and contributors",
                 env!("CARGO_PKG_VERSION")
             );
-            std::process::exit(0);
+            return Ok(());
         }
         2 => {
             println!(
@@ -43,11 +49,12 @@ fn main() {
             println!("{}", BUILD_INFO.replace(";", "\n"));
             let exe = std::env::current_exe().unwrap();
             println!("from={}", exe.display());
-            std::process::exit(0);
+            return Ok(());
         }
         _ => {}
     }
-    if let Some(ref cmd) = args.command {
+
+    if let Some(ref cmd) = conf.command {
         match &cmd {
             config::Command::Intro { topic } => {
                 println!(
@@ -78,22 +85,15 @@ fn main() {
                     None => (pkg_or_function.as_str(), None),
                 };
 
-                let pkg = pstd::resolve_pkg(path).unwrap_or_else(|| {
-                    eprintln!("query {} couldnt be resolved to anything", path);
-                    std::process::exit(1);
-                });
+                let Some(pkg) = pstd::resolve_pkg(path) else {
+                    return err!(format!("query {} couldnt be resolved to anything", path));
+                };
 
                 if let Some(method) = method {
-                    println!(
-                        "{}",
-                        pkg.fns
-                            .iter()
-                            .find(|f| f.name == method)
-                            .unwrap_or_else(|| {
-                                eprintln!("function {}.{} not found", pkg.name, method);
-                                std::process::exit(1);
-                            })
-                    );
+                    let Some(fun) = pkg.fns.iter().find(|f| f.name == method) else {
+                        return err!(format!("function {}.{} not found", pkg.name, method));
+                    };
+                    println!("{fun}",);
                 } else {
                     println!("{}", pkg);
                 }
@@ -103,20 +103,18 @@ fn main() {
         }
     }
 
-    let (input, input_source) = match args.run {
+    let (input, input_source) = match conf.run {
         Some(ref i) => (Input::Str(i.clone()), "stdio"),
         None => {
-            let file_name = args
-                .target
-                .as_ref()
-                .expect("No file or `-r` specified")
-                .as_str();
+            let Some(file_name) = conf.target.as_ref().map(|f| f.as_str()) else {
+                return err!("No file or `-r` specified");
+            };
             (Input::from_file(file_name), file_name)
         }
     };
 
     if input.is_empty() {
-        return;
+        return Ok(());
     }
 
     let lexer = Lexer::new(input.as_bytes());
@@ -124,14 +122,13 @@ fn main() {
         Ok(a) => a,
         Err(e) => {
             let lines = input.as_str().lines().collect::<Vec<&str>>();
-            e.render(input_source, &lines);
-            std::process::exit(1);
+            return err!(e.render(input_source, &lines));
         }
     };
 
-    trace!("Tokenisation and Parsing done");
+    trace!("[main] Tokenisation and Parsing done");
 
-    if args.ast {
+    if conf.ast {
         print!(
             "{}",
             ast.iter()
@@ -146,62 +143,60 @@ fn main() {
         Ok(ir) => ir,
         Err(e) => {
             let lines = input.as_str().lines().collect::<Vec<&str>>();
-            e.render(input_source, &lines);
-            std::process::exit(1);
+            return err!(e.render(input_source, &lines));
         }
     };
 
-    trace!("Lowered AST to IR");
+    trace!("[main] Lowered AST to IR");
 
-    if args.opt >= 1 {
+    if conf.opt >= 1 {
         opt::ir(&mut ir);
     }
 
-    if args.ir {
+    if conf.ir {
         for func in ir.iter() {
             println!("{func}");
         }
     }
 
     let mut cc = bc::Cc::new();
-    if let Err(e) = cc.compile(&ir) {
+    if let Err(e) = cc.compile(&conf, &ir) {
         let lines = input.as_str().lines().collect::<Vec<&str>>();
-        e.render(input_source, &lines);
-        std::process::exit(1);
+        return err!(e.render(input_source, &lines));
     };
 
-    trace!("Lowered IR to bytecode");
+    trace!("[main] Lowered IR to bytecode");
 
-    if args.opt >= 1 {
+    if conf.opt >= 1 {
         opt::bc(&mut cc.buf);
     }
 
-    let function_table = if args.backtrace {
+    let function_table = if conf.backtrace {
         cc.function_table()
     } else {
         HashMap::new()
     };
 
-    let ctx = if args.disassemble {
+    let ctx = if conf.disassemble {
         Some(cc.clone())
     } else {
         None
     };
-    let mut vm = cc.finalize(&args);
+    let mut vm = cc.finalize(&conf);
 
-    if args.disassemble {
+    if conf.disassemble {
         bc::dis::Disassembler::new(&vm.bytecode, ctx.unwrap()).disassemble();
     }
 
-    if args.dry {
-        return;
+    if conf.dry {
+        return Ok(());
     }
 
     if let Err(e) = vm.run() {
         let lines = input.as_str().lines().collect::<Vec<&str>>();
         Into::<PgError>::into(e).render(input_source, &lines);
 
-        if args.backtrace {
+        if conf.backtrace {
             let entry_point_pc = function_table
                 .iter()
                 .find(|(_, name)| name.as_str() == "entry")
@@ -219,5 +214,12 @@ fn main() {
         }
     }
 
-    trace!("Executed bytecode");
+    trace!("[main] Executed bytecode");
+    Ok(())
+}
+
+fn main() {
+    if let Err(e) = entry() {
+        println!("{e}")
+    }
 }

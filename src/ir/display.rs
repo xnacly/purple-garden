@@ -51,18 +51,6 @@ impl Display for Instr<'_> {
                 }
                 write!(f, ")")?;
             }
-            Instr::Tail { dst, func, args } => {
-                write!(f, "%v{} = ", dst)?;
-                write!(f, "Tailcall f{}(", func.0)?;
-                for (i, arg) in args.iter().enumerate() {
-                    if i + 1 == args.len() {
-                        write!(f, "%v{}", arg.0)?;
-                    } else {
-                        write!(f, "%v{}, ", arg.0)?;
-                    }
-                }
-                write!(f, ")")?;
-            }
             Instr::Cast { dst: value, from } => {
                 write!(f, "%v{} = Cast_to_{} %v{}", value, value.ty, from.0)?
             }
@@ -108,6 +96,17 @@ impl Display for Terminator {
                     .collect::<Vec<_>>()
                     .join(", "),
             )?,
+            Terminator::Tail { func, args } => {
+                write!(f, "tail f{}(", func.0)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i + 1 == args.len() {
+                        write!(f, "%v{}", arg.0)?;
+                    } else {
+                        write!(f, "%v{}, ", arg.0)?;
+                    }
+                }
+                write!(f, ")")?;
+            }
         }
         Ok(())
     }

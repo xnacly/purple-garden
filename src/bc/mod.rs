@@ -6,7 +6,7 @@ mod regalloc;
 
 use crate::{
     bc::{intern::Interner, regalloc::Ralloc},
-    config::Config,
+    config::{self, Config},
     err::PgError,
     ir::{self, Const, Func, Id, TypeId, ptype},
     opt,
@@ -77,8 +77,20 @@ impl<'cc> Cc<'cc> {
     }
 
     /// Compile a list of ir functions to bytecode instructions
-    pub fn compile(&mut self, ir: &[Func<'cc>]) -> Result<(), PgError> {
+    pub fn compile(&mut self, conf: &config::Config, ir: &[Func<'cc>]) -> Result<(), PgError> {
         for func in ir {
+            if conf.liveness {
+                let intervals = func.live_set();
+                let mut entries: Vec<_> = intervals.iter().collect();
+                entries.sort_by_key(|(id, _)| *id);
+                println!(
+                    "{}",
+                    entries
+                        .into_iter()
+                        .map(|(id, (def, last_use))| format!("{id}: ({def},{last_use})\n"))
+                        .collect::<String>()
+                )
+            }
             self.cc(func)?;
         }
         Ok(())
@@ -91,10 +103,9 @@ impl<'cc> Cc<'cc> {
         // values at the same time
 
         let live_set = fun.live_set();
-        crate::trace!("Computed live_set for {}: {:?}", fun.name, live_set);
-        self.regalloc = Ralloc::new(&live_set);
+        self.regalloc = Ralloc::new(live_set.clone());
         crate::trace!(
-            "[bc] Computed ralloc map for `{}`: {:#?}",
+            "[bc::Cc::cc][{}] regalloc map: {:#?}",
             fun.name,
             &self.regalloc.map
         );
@@ -118,11 +129,7 @@ impl<'cc> Cc<'cc> {
             self.term(fun, block.term.as_ref());
         }
 
-        crate::trace!(
-            "[bc] compiled `{}` (size={})",
-            fun.name,
-            self.buf.len() - pc
-        );
+        crate::trace!("[bc::Cc::cc][{}] size={}", fun.name, self.buf.len() - pc);
 
         Ok(())
     }
@@ -217,13 +224,28 @@ impl<'cc> Cc<'cc> {
                     target: no.0 as u16,
                 });
             }
+            ir::Terminator::Tail { func, args } => {
+                let Some(func) = self.functions.get(func) else {
+                    unreachable!();
+                };
+
+                let pc = func.pc;
+                for (i, arg) in args.iter().enumerate() {
+                    let (dst, src) = (i as u8, self.ensure_register(*arg));
+                    if dst != src {
+                        self.emit(Op::Mov { dst, src });
+                    }
+                }
+
+                self.emit(Op::Tail { func: pc as u32 });
+            }
         }
     }
 
     fn instr(
         &mut self,
         fun: &Func<'cc>,
-        live_set: &HashMap<u32, (u32, u32)>,
+        live_set: &HashMap<Id, (Id, Id)>,
         pos: u32,
         i: &ir::Instr<'cc>,
     ) {
@@ -264,7 +286,7 @@ impl<'cc> Cc<'cc> {
                 let pc = func.pc;
 
                 let mut alive_after_call_spill = vec![];
-                for (v, (def, last_use)) in live_set {
+                for (Id(v), (Id(def), Id(last_use))) in live_set {
                     // the value is defined before the call and used after the call, thus must be
                     // spilled
                     if def < &pos && &pos < last_use {
@@ -298,21 +320,6 @@ impl<'cc> Cc<'cc> {
                 for dst in alive_after_call_spill.iter().rev() {
                     self.emit(Op::Pop { dst: *dst });
                 }
-            }
-            ir::Instr::Tail { dst, func, args } => {
-                let Some(func) = self.functions.get(func) else {
-                    unreachable!();
-                };
-
-                let pc = func.pc;
-                for (i, arg) in args.iter().enumerate() {
-                    let (dst, src) = (i as u8, self.ensure_register(*arg));
-                    if dst != src {
-                        self.emit(Op::Mov { dst, src });
-                    }
-                }
-
-                self.emit(Op::Tail { func: pc as u32 });
             }
             ir::Instr::Sys {
                 dst,
@@ -393,11 +400,12 @@ impl<'cc> Cc<'cc> {
                 Op::Jmp { target } => {
                     let target = *self.block_map.get(&ir::Id(target as u32)).unwrap();
                     // PERF: this removes self+1 jumps
-                    Some(if target == i as u16 + 1 {
-                        Op::Nop
-                    } else {
-                        Op::Jmp { target }
-                    })
+                    Some(
+                        /*if target == i as u16 + 1 {
+                            Op::Nop
+                        } else {*/
+                        Op::Jmp { target }, /*}*/
+                    )
                 }
                 _ => None,
             } {

@@ -35,7 +35,7 @@ impl Input {
                 0,
             )
             .expect("Failed to memory map file");
-            crate::trace!("mmaped the file");
+            crate::trace!("[input::Input::from_file] mmaped the file");
             Self::MmapedFile { file, len, ptr }
         }
 
