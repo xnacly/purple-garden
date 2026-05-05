@@ -109,7 +109,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
             let Some(file_name) = conf.target.as_ref().map(|f| f.as_str()) else {
                 return err!("No file or `-r` specified");
             };
-            (Input::from_file(file_name), file_name)
+            (Input::from_file(file_name)?, file_name)
         }
     };
 
@@ -194,7 +194,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Err(e) = vm.run() {
         let lines = input.as_str().lines().collect::<Vec<&str>>();
-        Into::<PgError>::into(e).render(input_source, &lines);
+        println!("{}", Into::<PgError>::into(e).render(input_source, &lines));
 
         if conf.backtrace {
             let entry_point_pc = function_table
@@ -212,6 +212,8 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                 println!(" #{idx} {name}");
             }
         }
+
+        std::process::exit(1);
     }
 
     trace!("[main] Executed bytecode");
@@ -220,6 +222,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
 fn main() {
     if let Err(e) = entry() {
-        println!("{e}")
+        println!("{e}");
+        std::process::exit(1);
     }
 }

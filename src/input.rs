@@ -16,14 +16,17 @@ pub enum Input {
 }
 
 impl Input {
-    pub fn from_file(file_name: &str) -> Self {
+    pub fn from_file(file_name: &str) -> Result<Self, String> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
-            let file = File::open(file_name).expect("Failed to open file");
-            let meta = file.metadata().expect("Failed to get metadata");
+            let file = File::open(file_name)
+                .map_err(|e| format!("Failed to open file '{file_name}': {e}"))?;
+            let meta = file
+                .metadata()
+                .map_err(|e| format!("Failed to read metadata for '{file_name}': {e}"))?;
             let len = meta.len() as usize;
             if len == 0 {
-                return Input::Str(String::new());
+                return Ok(Input::Str(String::new()));
             }
 
             let ptr = mmap::mmap(
@@ -34,22 +37,26 @@ impl Input {
                 file.as_raw_fd(),
                 0,
             )
-            .expect("Failed to memory map file");
+            .map_err(|e| format!("Failed to memory map '{file_name}': {e}"))?;
             crate::trace!("[input::Input::from_file] mmaped the file");
-            Self::MmapedFile { file, len, ptr }
+            Ok(Self::MmapedFile { file, len, ptr })
         }
 
         #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
         {
-            let mut file = File::open(file_name).expect("Failed to open file");
-            let meta = file.metadata().expect("Failed to get metadata");
+            let mut file = File::open(file_name)
+                .map_err(|e| format!("Failed to open file '{file_name}': {e}"))?;
+            let meta = file
+                .metadata()
+                .map_err(|e| format!("Failed to read metadata for '{file_name}': {e}"))?;
             let len = meta.len() as usize;
             if len == 0 {
-                return Input::Str(String::new());
+                return Ok(Input::Str(String::new()));
             }
             let mut buf = Vec::with_capacity(len);
-            std::io::Read::read_to_end(&mut file, &mut buf).expect("Failed to read file");
-            Self::File(buf)
+            std::io::Read::read_to_end(&mut file, &mut buf)
+                .map_err(|e| format!("Failed to read file '{file_name}': {e}"))?;
+            Ok(Self::File(buf))
         }
     }
 
