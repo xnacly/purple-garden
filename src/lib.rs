@@ -1,11 +1,6 @@
 #![cfg_attr(feature = "nightly", feature(likely_unlikely))]
-#![allow(unused)]
 
-use crate::{
-    config::Config,
-    err::PgError,
-    vm::{Value, Vm},
-};
+use crate::{err::PgError, vm::Vm};
 
 pub mod asm;
 pub mod ast;

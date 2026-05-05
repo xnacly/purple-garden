@@ -49,15 +49,13 @@ fn print_function_head(fun: &Fn, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "{}", a)?;
         }
     }
-    writeln!(f, ") {}", fun.ret);
-    Ok(())
+    writeln!(f, ") {}", fun.ret)
 }
 
 impl fmt::Display for Fn {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         print_function_head(self, f)?;
-        writeln!(f, "\t{}", self.doc)?;
-        Ok(())
+        writeln!(f, "\t{}", self.doc)
     }
 }
 
@@ -67,14 +65,14 @@ impl fmt::Display for Pkg {
         writeln!(f, "{}", self.doc)?;
 
         if !self.pkgs.is_empty() {
-            writeln!(f);
+            writeln!(f)?;
             for p in self.pkgs {
                 writeln!(f, "{}/{}", self.name, p.name)?;
             }
         }
 
         if !self.fns.is_empty() {
-            writeln!(f);
+            writeln!(f)?;
             for fun in self.fns {
                 print_function_head(fun, f)?;
             }

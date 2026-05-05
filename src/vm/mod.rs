@@ -116,7 +116,6 @@ impl<'vm> Vm<'vm> {
             let op = unsafe { *instructions.add(pc) };
 
             match op {
-                Op::Nop => {}
                 Op::LoadI { dst, value } => unsafe {
                     r_mut!(dst) = Value::from(value as i64);
                 },
@@ -208,7 +207,7 @@ impl<'vm> Vm<'vm> {
                     continue;
                 }
                 Op::JmpF { target, cond } => unsafe {
-                    if (r!(cond).as_bool()) {
+                    if r!(cond).as_bool() {
                         pc = target as usize;
                         continue;
                     }
@@ -249,10 +248,7 @@ impl<'vm> Vm<'vm> {
                 Op::CastToBool { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_bool();
                 },
-                i => {
-                    dbg!(i);
-                    return Err(Anomaly::Unimplemented { pc });
-                }
+                Op::Nop => {}
             }
 
             pc += 1;
@@ -277,4 +273,342 @@ impl<'vm> Vm<'vm> {
 }
 
 #[cfg(test)]
-mod ops {}
+mod ops {
+    use super::*;
+    use crate::config::Config;
+
+    fn run(bytecode: Vec<Op>, config: &Config) -> Vm<'_> {
+        let mut vm = Vm::new(config);
+        vm.bytecode = bytecode;
+        vm.run().expect("vm run failed");
+        vm
+    }
+
+    fn run_err(bytecode: Vec<Op>, config: &Config) -> Anomaly {
+        let mut vm = Vm::new(config);
+        vm.bytecode = bytecode;
+        vm.run().expect_err("vm run unexpectedly succeeded")
+    }
+
+    #[test]
+    fn iadd() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 7 },
+                Op::LoadI { dst: 1, value: 35 },
+                Op::IAdd {
+                    dst: 2,
+                    lhs: 0,
+                    rhs: 1,
+                },
+            ],
+            &cfg,
+        );
+        assert_eq!(vm.r(2).as_int(), 42);
+    }
+
+    #[test]
+    fn isub() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 50 },
+                Op::LoadI { dst: 1, value: 8 },
+                Op::ISub {
+                    dst: 2,
+                    lhs: 0,
+                    rhs: 1,
+                },
+            ],
+            &cfg,
+        );
+        assert_eq!(vm.r(2).as_int(), 42);
+    }
+
+    #[test]
+    fn imul() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 6 },
+                Op::LoadI { dst: 1, value: 7 },
+                Op::IMul {
+                    dst: 2,
+                    lhs: 0,
+                    rhs: 1,
+                },
+            ],
+            &cfg,
+        );
+        assert_eq!(vm.r(2).as_int(), 42);
+    }
+
+    #[test]
+    fn idiv() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 84 },
+                Op::LoadI { dst: 1, value: 2 },
+                Op::IDiv {
+                    dst: 2,
+                    lhs: 0,
+                    rhs: 1,
+                },
+            ],
+            &cfg,
+        );
+        assert_eq!(vm.r(2).as_int(), 42);
+    }
+
+    #[test]
+    fn idiv_by_zero_traps() {
+        let cfg = Config::default();
+        let err = run_err(
+            vec![
+                Op::LoadI { dst: 0, value: 1 },
+                Op::LoadI { dst: 1, value: 0 },
+                Op::IDiv {
+                    dst: 2,
+                    lhs: 0,
+                    rhs: 1,
+                },
+            ],
+            &cfg,
+        );
+        assert!(matches!(err, Anomaly::DivisionByZero { .. }));
+    }
+
+    #[test]
+    fn ddiv_by_zero_traps() {
+        let cfg = Config::default();
+        let mut vm = Vm::new(&cfg);
+        vm.globals.push(Value::from(4.0_f64));
+        vm.globals.push(Value::from(0.0_f64));
+        vm.bytecode = vec![
+            Op::LoadG { dst: 0, idx: 0 },
+            Op::LoadG { dst: 1, idx: 1 },
+            Op::DDiv {
+                dst: 2,
+                lhs: 0,
+                rhs: 1,
+            },
+        ];
+        let err = vm.run().expect_err("ddiv by zero should trap");
+        assert!(matches!(err, Anomaly::DivisionByZero { .. }));
+    }
+
+    #[test]
+    fn int_compare() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 3 },
+                Op::LoadI { dst: 1, value: 5 },
+                Op::IEq {
+                    dst: 2,
+                    lhs: 0,
+                    rhs: 1,
+                },
+                Op::ILt {
+                    dst: 3,
+                    lhs: 0,
+                    rhs: 1,
+                },
+                Op::IGt {
+                    dst: 4,
+                    lhs: 0,
+                    rhs: 1,
+                },
+            ],
+            &cfg,
+        );
+        assert!(!vm.r(2).as_bool());
+        assert!(vm.r(3).as_bool());
+        assert!(!vm.r(4).as_bool());
+    }
+
+    #[test]
+    fn double_arith() {
+        let cfg = Config::default();
+        let mut vm = Vm::new(&cfg);
+        vm.globals.push(Value::from(1.5_f64));
+        vm.globals.push(Value::from(2.5_f64));
+        vm.bytecode = vec![
+            Op::LoadG { dst: 0, idx: 0 },
+            Op::LoadG { dst: 1, idx: 1 },
+            Op::DAdd {
+                dst: 2,
+                lhs: 0,
+                rhs: 1,
+            },
+            Op::DSub {
+                dst: 3,
+                lhs: 1,
+                rhs: 0,
+            },
+            Op::DMul {
+                dst: 4,
+                lhs: 0,
+                rhs: 1,
+            },
+            Op::DDiv {
+                dst: 5,
+                lhs: 1,
+                rhs: 0,
+            },
+        ];
+        vm.run().unwrap();
+        assert_eq!(vm.r(2).as_f64(), 4.0);
+        assert_eq!(vm.r(3).as_f64(), 1.0);
+        assert_eq!(vm.r(4).as_f64(), 3.75);
+        assert_eq!(vm.r(5).as_f64(), 2.5 / 1.5);
+    }
+
+    #[test]
+    fn mov() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![Op::LoadI { dst: 5, value: 99 }, Op::Mov { dst: 0, src: 5 }],
+            &cfg,
+        );
+        assert_eq!(vm.r(0).as_int(), 99);
+        assert_eq!(vm.r(5).as_int(), 99);
+    }
+
+    #[test]
+    fn jmp_skips_instructions() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 1 },
+                Op::Jmp { target: 3 },
+                Op::LoadI { dst: 0, value: 999 }, // skipped
+                Op::LoadI { dst: 1, value: 2 },
+            ],
+            &cfg,
+        );
+        assert_eq!(vm.r(0).as_int(), 1);
+        assert_eq!(vm.r(1).as_int(), 2);
+    }
+
+    /// Op::JmpF is misnamed — semantically it is "jump if true". Pin that down.
+    #[test]
+    fn jmpf_jumps_when_cond_is_true() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 1 }, // truthy
+                Op::JmpF { cond: 0, target: 3 },
+                Op::LoadI { dst: 1, value: 999 }, // skipped
+                Op::LoadI { dst: 2, value: 7 },
+            ],
+            &cfg,
+        );
+        assert_eq!(vm.r(1).as_int(), 0);
+        assert_eq!(vm.r(2).as_int(), 7);
+    }
+
+    #[test]
+    fn jmpf_falls_through_when_cond_is_false() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 0 },
+                Op::JmpF { cond: 0, target: 3 },
+                Op::LoadI { dst: 1, value: 11 },
+                Op::LoadI { dst: 2, value: 22 },
+            ],
+            &cfg,
+        );
+        assert_eq!(vm.r(1).as_int(), 11);
+        assert_eq!(vm.r(2).as_int(), 22);
+    }
+
+    #[test]
+    fn push_pop_roundtrip() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 10 },
+                Op::LoadI { dst: 1, value: 20 },
+                Op::Push { src: 0 },
+                Op::Push { src: 1 },
+                Op::LoadI { dst: 0, value: 0 },
+                Op::LoadI { dst: 1, value: 0 },
+                Op::Pop { dst: 1 },
+                Op::Pop { dst: 0 },
+            ],
+            &cfg,
+        );
+        assert_eq!(vm.r(0).as_int(), 10);
+        assert_eq!(vm.r(1).as_int(), 20);
+    }
+
+    #[test]
+    fn casts() {
+        let cfg = Config::default();
+        let mut vm = Vm::new(&cfg);
+        vm.globals.push(Value::from(3.7_f64));
+        vm.bytecode = vec![
+            Op::LoadI { dst: 0, value: 5 },
+            Op::CastToDouble { dst: 1, src: 0 },
+            Op::LoadG { dst: 2, idx: 0 },
+            Op::CastToInt { dst: 3, src: 2 },
+            Op::CastToBool { dst: 4, src: 0 },
+            Op::LoadI { dst: 5, value: 0 },
+            Op::CastToBool { dst: 6, src: 5 },
+        ];
+        vm.run().unwrap();
+        assert_eq!(vm.r(1).as_f64(), 5.0);
+        assert_eq!(vm.r(3).as_int(), 3);
+        assert!(vm.r(4).as_bool());
+        assert!(!vm.r(6).as_bool());
+    }
+
+    #[test]
+    fn call_ret_roundtrip() {
+        let cfg = Config::default();
+        // Callee at pc=4 sets r1 = 7, returns. Caller calls it, then writes r2 = 99.
+        let vm = run(
+            vec![
+                Op::Call { func: 4 },
+                Op::LoadI { dst: 2, value: 99 },
+                Op::Jmp { target: 6 }, // skip over callee
+                Op::Nop,               // padding so pc=4 is the callee
+                Op::LoadI { dst: 1, value: 7 },
+                Op::Ret,
+                Op::Nop, // jump landing
+            ],
+            &cfg,
+        );
+        assert_eq!(vm.r(1).as_int(), 7);
+        assert_eq!(vm.r(2).as_int(), 99);
+    }
+
+    #[test]
+    fn beq() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 1 },
+                Op::LoadI { dst: 1, value: 1 },
+                Op::LoadI { dst: 2, value: 0 },
+                Op::BEq {
+                    dst: 3,
+                    lhs: 0,
+                    rhs: 1,
+                },
+                Op::BEq {
+                    dst: 4,
+                    lhs: 0,
+                    rhs: 2,
+                },
+            ],
+            &cfg,
+        );
+        assert!(vm.r(3).as_bool());
+        assert!(!vm.r(4).as_bool());
+    }
+}

@@ -1,8 +1,4 @@
-use crate::{
-    ast::TypeExpr,
-    lex::{Token, Type},
-    vm::Anomaly,
-};
+use crate::{ast::TypeExpr, lex::Token, vm::Anomaly};
 use std::fmt::Write;
 
 #[derive(Debug)]
@@ -37,10 +33,6 @@ impl From<Anomaly> for PgError {
     fn from(value: Anomaly) -> Self {
         // TODO: do some prep in anomaly for finding out which ast node resulted in what bytecode
         // ranges
-        let title = match value {
-            Anomaly::Msg { msg, .. } => msg,
-            _ => "Virtual Machine Anomaly",
-        };
         PgError {
             msg: value.as_str().to_string(),
             line: 0,
@@ -57,11 +49,18 @@ impl PgError {
             &mut buf,
             "{file}:{}:{}: {}:",
             self.line, self.start, self.msg
-        );
+        )
+        .unwrap();
 
         if let Some(line) = lines.get(self.line) {
-            writeln!(&mut buf, "{line}");
-            writeln!(&mut buf, "{}~", " ".repeat(self.start));
+            writeln!(&mut buf, "{line}").unwrap();
+            writeln!(
+                &mut buf,
+                "{}{}",
+                " ".repeat(self.start),
+                "~".repeat(self.len.max(1))
+            )
+            .unwrap();
         };
 
         buf

@@ -2,7 +2,6 @@
 #[derive(Debug)]
 pub enum Anomaly {
     DivisionByZero { pc: usize },
-    Unimplemented { pc: usize },
     InvalidSyscall { pc: usize },
     Msg { msg: &'static str, pc: usize },
 }
@@ -11,7 +10,6 @@ impl Anomaly {
     pub fn as_str(&self) -> &str {
         match self {
             Anomaly::DivisionByZero { .. } => "Division by zero",
-            Anomaly::Unimplemented { .. } => "Unimplemented",
             Anomaly::InvalidSyscall { .. } => "InvalidSyscall",
             Anomaly::Msg { msg, .. } => msg,
         }

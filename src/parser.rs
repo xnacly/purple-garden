@@ -276,14 +276,14 @@ impl<'p> Parser<'p> {
                 }
 
                 Type::BraceLeft => {
-                    self.advance();
+                    self.advance()?;
                     let mut args = vec![];
 
                     while !self.at_end() && self.cur().t != Type::BraceRight {
                         args.push(self.parse_prefix()?);
                     }
 
-                    self.expect(Type::BraceRight);
+                    self.expect(Type::BraceRight)?;
                     lhs = Node::Call {
                         id: self.next_id(),
                         target: Box::new(lhs),
@@ -299,7 +299,6 @@ impl<'p> Parser<'p> {
         | Type::Minus
         | Type::Asteriks
         | Type::Slash
-        | Type::Equal
         | Type::DoubleEqual
         | Type::As
         | Type::LessThan
@@ -415,7 +414,7 @@ mod tests {
                 $(
                     #[test]
                     fn $name() {
-                        let mut l = Lexer::new($input.as_bytes());
+                        let l = Lexer::new($input.as_bytes());
                         let mut p = Parser::new(l).unwrap();
                         let tt = p.parse_type().unwrap();
                         assert_eq!(tt, $expected);
@@ -462,7 +461,7 @@ mod tests {
                 $(
                     #[test]
                     fn $name() {
-                        let mut l = Lexer::new($input.as_bytes());
+                        let l = Lexer::new($input.as_bytes());
                         let p = Parser::new(l).unwrap();
                         let tt = p.parse().unwrap();
                         assert_eq!(tt, $expected);
@@ -530,5 +529,13 @@ mod tests {
                 }
             ]
         )
+    }
+
+    #[test]
+    fn equal_in_expression_terminates() {
+        let l = Lexer::new(b"(5 = 6)");
+        let p = Parser::new(l).unwrap();
+        let result = p.parse();
+        assert!(result.is_err(), "expected parse error, got: {:?}", result);
     }
 }

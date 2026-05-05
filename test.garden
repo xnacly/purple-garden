@@ -1,0 +1,17 @@
+import ("testing")
+fn fibt(n:int a:int b:int) int {
+    match {
+        n == 0 { a }
+        n == 1 { b } 
+        { fibt(n-1 b a+b) }
+    }
+}
+testing.assert(fibt(35 0 1) == 9227465)
+
+fn fib(n:int) int {
+    match {
+        n < 2 { 1 }
+        { fib(n - 1) + fib(n - 2) }
+    }
+}
+testing.assert(fib(35) == 9227465)

@@ -36,7 +36,7 @@ impl<'l> Lexer<'l> {
             msg: msg.into(),
             line: self.line,
             start,
-            len: self.col - start,
+            len: self.col.saturating_sub(start),
         }
     }
 
@@ -395,5 +395,20 @@ mod tests {
         let t2 = l.one().unwrap();
         assert_eq!(t1.t, Type::Eof);
         assert_eq!(t2.t, Type::Eof);
+    }
+
+    #[test]
+    fn unknown_character_error_carries_position() {
+        let mut l = Lexer::new(b"  $");
+        let err = l.one().expect_err("expected lexer error on `$`");
+        assert_eq!(err.line, 0);
+        assert_eq!(err.start, 2, "column of the offending character");
+    }
+
+    #[test]
+    fn error_after_newline_does_not_underflow() {
+        let mut l = Lexer::new(b"\n$");
+        let err = l.one().expect_err("expected lexer error on `$`");
+        assert_eq!(err.line, 1);
     }
 }
