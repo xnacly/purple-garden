@@ -4,7 +4,7 @@ purple_garden is a lean scripting language designed for performance, with a
 focus on aggressive compile-time optimisations, JIT compilation, fine-grained
 memory control, and optional garbage collection.
 
-```python
+```garden
 import ("io")
 io.println("Hello World")
 ```

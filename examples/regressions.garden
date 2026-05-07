@@ -1,0 +1,60 @@
+# Regressions for codegen bugs
+import "testing"
+import "io"
+
+# Branch successor-param liveness: if the param-shuffle into the join
+# block's parameter register lands on cond's register, JmpF reads the
+# wrong value and the wrong branch fires. Reproduces when the first arm
+# returns a function parameter (so its shuffle dst matches cond's reg).
+fn pick(n:int a:int) int {
+    match {
+        n == 0 { a }
+        { 999 }
+    }
+}
+testing.assert(pick(0 11) == 11)
+testing.assert(pick(5 22) == 999)
+testing.assert(pick(7 33) == 999)
+
+# Caller-save spill across Call: %v9 (fib(n-1)) lives in r1 across the
+# fib(n-2) call; if pos used the block-local index instead of the global
+# live_set coordinate, the spill check misses r1 and the recursive call
+# clobbers it. Result is wrong unless r1 is actually pushed across the
+# nested call.
+fn fib(n:int) int {
+    match {
+        n == 0 { 0 }
+        n == 1 { 1 }
+        { fib(n - 1) + fib(n - 2) }
+    }
+}
+testing.assert(fib(10) == 55)
+
+# Parallel-move shuffle on Call args: io.println consumes r0 first, so
+# the regalloc places the next call's args in r1, r0 — a swap relative
+# to r0, r1. Sequential `mov` would clobber a still-needed source (and
+# mov_merge would then collapse the swap into nops).
+fn diff(a:int b:int) int { a - b }
+io.println("ready")
+testing.assert(diff(10 3) == 7)
+testing.assert(diff(100 1) == 99)
+
+# block_map collisions across functions: ir block ids restart at 0 per
+# function, so a shared block_map patched at finalize would route a
+# branch in the first function to a block in the second.
+fn first_branch(n:int) int {
+    match {
+        n == 0 { 1 }
+        { 2 }
+    }
+}
+fn second_branch(n:int) int {
+    match {
+        n == 0 { 10 }
+        { 20 }
+    }
+}
+testing.assert(first_branch(0) == 1)
+testing.assert(first_branch(1) == 2)
+testing.assert(second_branch(0) == 10)
+testing.assert(second_branch(1) == 20)
