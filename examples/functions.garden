@@ -11,14 +11,6 @@ fn factorial(n:int a:int) int {
 }
 testing.assert(factorial(16 1) == 20922789888000)
 
-fn fib(n:int) int {
-    match {
-        n == 0 { 0 }
-        n == 1 { 1 } 
-        { fib(n - 1) + fib(n - 2) }
-    }
-}
-testing.assert(fib(35) == 9227465)
 fn fibt(n:int a:int b:int) int {
     match {
         n == 0 { a }
@@ -27,6 +19,16 @@ fn fibt(n:int a:int b:int) int {
     }
 }
 testing.assert(fibt(35 0 1) == 9227465)
+
+fn fib(n:int) int {
+    match {
+        n == 0 { 0 }
+        n == 1 { 1 }
+        { fib(n - 1) + fib(n - 2) }
+    }
+}
+
+testing.assert(fib(35) == 9227465)
 
 # tail calls 
 fn inc(x:int) int {x + 1}

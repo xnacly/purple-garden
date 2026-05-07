@@ -9,8 +9,6 @@ use crate::{
     config::{self, Config},
     err::PgError,
     ir::{self, Const, Func, Id, TypeId, ptype},
-    opt,
-    std::{self as pstd, Fn, Pkg, STD},
     vm::{BuiltinFn, Value, Vm, op::Op},
 };
 
@@ -97,11 +95,6 @@ impl<'cc> Cc<'cc> {
     }
 
     fn cc(&mut self, fun: &Func<'cc>) -> Result<(), PgError> {
-        // since we have a ssa based ir, we use our register allocator in a function local way and
-        // spill any register usage >= 64 on the vm stack, this should be very fast for the general
-        // usage and extensible enough for extreme niche usecases requiring more than 64 alive
-        // values at the same time
-
         let live_set = fun.live_set();
         self.regalloc = Ralloc::new(live_set.clone());
         crate::trace!(
@@ -115,6 +108,17 @@ impl<'cc> Cc<'cc> {
         // binding the id of a function to its context
         self.functions.insert(fun.id, f);
 
+        // block_map is keyed by ir::Id, but ir block ids restart at 0 in
+        // every function, thus we need to clear it on each new function
+        self.block_map.clear();
+
+        // pos must mirror the global position counter used by Func::live_set:
+        // +1 for the block's params row, +1 per instruction, +1 for the
+        // terminator.
+        //
+        // The caller save spill check around call uses pos to idx into (def, last_use) intervals
+        // from live_set.
+        let mut pos: u32 = 0;
         for block in &fun.blocks {
             if block.tombstone {
                 continue;
@@ -122,11 +126,27 @@ impl<'cc> Cc<'cc> {
 
             self.block_map.insert(block.id, self.buf.len() as u16);
 
-            for (i, instruction) in block.instructions.iter().enumerate() {
-                self.instr(fun, &live_set, i as u32, instruction);
+            pos += 1; // block params row
+            for instruction in &block.instructions {
+                self.instr(&live_set, pos, instruction);
+                pos += 1;
             }
 
             self.term(fun, block.term.as_ref());
+            pos += 1; // terminator row
+        }
+
+        for i in pc..self.buf.len() {
+            self.buf[i] = match self.buf[i] {
+                Op::JmpF { cond, target } => Op::JmpF {
+                    cond,
+                    target: *self.block_map.get(&ir::Id(target as u32)).unwrap(),
+                },
+                Op::Jmp { target } => Op::Jmp {
+                    target: *self.block_map.get(&ir::Id(target as u32)).unwrap(),
+                },
+                other => other,
+            };
         }
 
         crate::trace!("[bc::Cc::cc][{}] size={}", fun.name, self.buf.len() - pc);
@@ -134,25 +154,18 @@ impl<'cc> Cc<'cc> {
         Ok(())
     }
 
-    /// spill all arguments to the stack so the shuffling of values into registers as arguments
-    /// does not clobber otherwise alive values. Spills r0..rN, where N := |args|
-    fn save_call_args(&mut self, args: &[Id]) -> Vec<u8> {
-        let mut r_to_spil = vec![];
-        for (i, arg) in args.iter().enumerate() {
-            let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(&arg.0) else {
-                unreachable!();
-            };
-
-            let src = *src;
-            r_to_spil.push(src);
+    /// Move `args[i]` into the i argument register (`r0..rN`) for a call
+    /// or tail.
+    fn emit_arg_shuffle(&mut self, args: &[Id]) {
+        // PERF: only spill sources that are also someone else's
+        // destination (or break cycles with a single scratch reg). Most calls
+        // don't have any conflict and could use direct movs.
+        for arg in args.iter() {
+            let src = self.ensure_register(*arg);
             self.emit(Op::Push { src });
         }
-        r_to_spil
-    }
-
-    fn restore_call_args(&mut self, r_to_spil: &[u8]) {
-        for dst in r_to_spil.iter().rev() {
-            self.emit(Op::Pop { dst: *dst });
+        for i in (0..args.len()).rev() {
+            self.emit(Op::Pop { dst: i as u8 });
         }
     }
 
@@ -230,25 +243,14 @@ impl<'cc> Cc<'cc> {
                 };
 
                 let pc = func.pc;
-                for (i, arg) in args.iter().enumerate() {
-                    let (dst, src) = (i as u8, self.ensure_register(*arg));
-                    if dst != src {
-                        self.emit(Op::Mov { dst, src });
-                    }
-                }
+                self.emit_arg_shuffle(args);
 
                 self.emit(Op::Tail { func: pc as u32 });
             }
         }
     }
 
-    fn instr(
-        &mut self,
-        fun: &Func<'cc>,
-        live_set: &HashMap<Id, (Id, Id)>,
-        pos: u32,
-        i: &ir::Instr<'cc>,
-    ) {
+    fn instr(&mut self, live_set: &HashMap<Id, (Id, Id)>, pos: u32, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::Cast {
                 dst: TypeId { id, ty },
@@ -307,12 +309,7 @@ impl<'cc> Cc<'cc> {
                     }
                 }
 
-                for (i, arg) in args.iter().enumerate() {
-                    let (dst, src) = (i as u8, self.ensure_register(*arg));
-                    if dst != src {
-                        self.emit(Op::Mov { dst, src });
-                    }
-                }
+                self.emit_arg_shuffle(args);
 
                 let dst = self.ensure_register(dst.id);
                 self.emit(Op::Call { func: pc as u32 });
@@ -322,14 +319,11 @@ impl<'cc> Cc<'cc> {
                 }
             }
             ir::Instr::Sys {
-                dst,
-                path,
-                func,
-                args,
+                dst, func, args, ..
             } => {
                 let idx = self.std_fns.intern(func.ptr);
                 let mut r_to_spil = vec![];
-                for (i, arg) in args.iter().enumerate() {
+                for arg in args.iter() {
                     let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(&arg.0) else {
                         unreachable!();
                     };
@@ -382,36 +376,13 @@ impl<'cc> Cc<'cc> {
         };
     }
 
-    pub fn finalize(mut self, config: &'cc Config) -> Vm<'cc> {
+    pub fn finalize(self, config: &'cc Config) -> Vm<'cc> {
         let mut v = Vm::new(config);
         v.pc = self
             .functions
             .get(&ir::Id(0))
             .map(|n| n.pc)
             .unwrap_or_default();
-
-        for i in 0..self.buf.len() {
-            let instr = self.buf[i];
-            if let Some(new) = match instr {
-                Op::JmpF { target, cond } => Some(Op::JmpF {
-                    cond,
-                    target: *self.block_map.get(&ir::Id(target as u32)).unwrap(),
-                }),
-                Op::Jmp { target } => {
-                    let target = *self.block_map.get(&ir::Id(target as u32)).unwrap();
-                    // PERF: this removes self+1 jumps
-                    Some(
-                        /*if target == i as u16 + 1 {
-                            Op::Nop
-                        } else {*/
-                        Op::Jmp { target }, /*}*/
-                    )
-                }
-                _ => None,
-            } {
-                self.buf[i] = new
-            }
-        }
 
         v.bytecode = self.buf;
         v.globals = self.globals.into_vec_fn(Value::from);

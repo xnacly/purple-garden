@@ -313,6 +313,39 @@ impl Func<'_> {
                         format!("b{} term {}", block.id.0, term),
                     );
                 }
+
+                // The bc emitter writes outgoing param values into the
+                // successor's param registers right before the terminator
+                // op. For a Branch this means the yes-target shuffle can
+                // clobber cond before JmpF reads it (cond appears dead to
+                // the regalloc at the terminator, so its register is
+                // reusable as a shuffle dst). Marking the successor params
+                // as defined here forces the regalloc to keep them out of
+                // cond's register.
+                //
+                // TODO: a parallel-move resolver in the bc emitter would
+                // be the more general fix — it would also close the
+                // analogous parallel-move hazards on Jump/Tail (where
+                // dst[i] == src[j] for j > i clobbers a not-yet-read
+                // source).
+                if let Terminator::Branch { yes, no, .. } = term {
+                    for &target_param in &self.blocks[yes.0.0 as usize].params {
+                        define(
+                            &mut intervals,
+                            target_param,
+                            pos,
+                            format!("b{} branch yes shuffle dst", block.id.0),
+                        );
+                    }
+                    for &target_param in &self.blocks[no.0.0 as usize].params {
+                        define(
+                            &mut intervals,
+                            target_param,
+                            pos,
+                            format!("b{} branch no shuffle dst", block.id.0),
+                        );
+                    }
+                }
             } else {
                 crate::trace!(
                     "[ir::Func::live_set][{}] b{} has no terminator @{}",
@@ -424,8 +457,12 @@ mod tests {
         assert_eq!(live_set.get(&Id(0)), Some(&(Id(0), Id(3))));
         assert_eq!(live_set.get(&Id(1)), Some(&(Id(1), Id(3))));
         assert_eq!(live_set.get(&Id(2)), Some(&(Id(2), Id(3))));
-        assert_eq!(live_set.get(&Id(3)), Some(&(Id(4), Id(5))));
-        assert_eq!(live_set.get(&Id(4)), Some(&(Id(6), Id(7))));
+        // %v3 and %v4 are successor block params of the Branch in block 0
+        // and so are extra-defined at the branch position (pos=3) — see
+        // live_set: this is what keeps them out of cond's register at the
+        // shuffle.
+        assert_eq!(live_set.get(&Id(3)), Some(&(Id(3), Id(5))));
+        assert_eq!(live_set.get(&Id(4)), Some(&(Id(3), Id(7))));
         assert_eq!(live_set.get(&Id(5)), Some(&(Id(7), Id(8))));
     }
 }
