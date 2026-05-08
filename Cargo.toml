@@ -34,3 +34,7 @@ harness = false
 [[bench]]
 name = "compilation"
 harness = false
+
+[[bench]]
+name = "fib"
+harness = false
