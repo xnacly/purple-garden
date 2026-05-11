@@ -175,6 +175,48 @@ impl<'lower> Lower<'lower> {
 
                 Some(dst_id)
             }
+            Node::Unary { op, rhs, .. } => {
+                let inner_ty = self
+                    .types
+                    .get(&id_from_node(rhs).unwrap())
+                    .cloned()
+                    .unwrap();
+                let Some(rhs_id) = self.lower_node(rhs)? else {
+                    unreachable!()
+                };
+
+                match op.t {
+                    Type::Plus => Some(rhs_id),
+                    Type::Minus => {
+                        let (zero_const, bin_op) = match inner_ty {
+                            ptype::Type::Int => (Const::Int(0), BinOp::ISub),
+                            ptype::Type::Double => (Const::Double(0u64), BinOp::DSub),
+                            _ => unreachable!(),
+                        };
+                        let zero_id = self.ctx.id_store.new_value();
+                        self.emit(Instr::LoadConst {
+                            dst: TypeId {
+                                id: zero_id,
+                                ty: inner_ty.clone(),
+                            },
+                            value: zero_const,
+                        });
+
+                        let dst_id = self.ctx.id_store.new_value();
+                        self.emit(Instr::Bin {
+                            op: bin_op,
+                            dst: TypeId {
+                                id: dst_id,
+                                ty: inner_ty,
+                            },
+                            lhs: zero_id,
+                            rhs: rhs_id,
+                        });
+                        Some(dst_id)
+                    }
+                    _ => unreachable!(),
+                }
+            }
             Node::Let { name, rhs, .. } => {
                 let Type::Ident(i) = name.t else {
                     unreachable!()

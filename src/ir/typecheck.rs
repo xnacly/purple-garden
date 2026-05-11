@@ -223,8 +223,24 @@ impl<'t> Typechecker<'t> {
                 self.map.insert(*id, res.clone());
                 res
             }
-            Node::Unary { .. } => {
-                todo!("{:?}", node);
+            Node::Unary { id, op, rhs } => {
+                let inner = self.node(rhs)?;
+                let t = match (&op.t, &inner) {
+                    (lex::Type::Plus | lex::Type::Minus, Type::Int) => Type::Int,
+                    (lex::Type::Plus | lex::Type::Minus, Type::Double) => Type::Double,
+                    _ => {
+                        return Err(PgError::with_msg(
+                            format!(
+                                "Unary {:?} requires Int or Double, got {}",
+                                op.t.as_str(),
+                                inner
+                            ),
+                            op,
+                        ));
+                    }
+                };
+                self.map.insert(*id, t.clone());
+                t
             }
             Node::Let { id, name, rhs } => {
                 let inner = self.node(rhs)?;
