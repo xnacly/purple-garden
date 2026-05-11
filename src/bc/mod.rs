@@ -349,18 +349,23 @@ impl<'cc> Cc<'cc> {
             } => {
                 let idx = self.std_fns.intern(func.ptr);
 
-                // Caller-save spill mirrors Instr::Call: protect only values
-                // alive across the syscall (def before pos, last use after
-                // pos).
+                // Syscall calling convention: only r0 is clobbered by the
+                // syscall body (it gets the result). The shuffle additionally
+                // writes r0..r{argcount-1}. Combined clobber range is
+                // r0..max(argcount, 1). Spill only alive-across values whose
+                // register falls in that range; everything else is preserved
+                // by the convention.
+                let clobber_end = args.len().max(1) as u8;
                 let mut alive_across_spill = vec![];
                 for (Id(v), (Id(def), Id(last_use))) in live_set {
                     if def < &pos && &pos < last_use {
                         let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(v) else {
                             unreachable!();
                         };
-                        let src = *src;
-                        alive_across_spill.push(src);
-                        self.emit(Op::Push { src });
+                        if *src < clobber_end {
+                            alive_across_spill.push(*src);
+                            self.emit(Op::Push { src: *src });
+                        }
                     }
                 }
 
