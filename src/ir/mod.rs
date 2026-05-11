@@ -217,8 +217,7 @@ impl Func<'_> {
         // PERF: this whole process should be a set theory based bit set, since we have at most 64
         // registers (i think?), thus a BitSet(u64) should be a perfect abstraction
 
-        fn define(intervals: &mut HashMap<Id, (Id, Id)>, id: Id, pos: u32, reason: String) {
-            crate::trace!("[ir::Func::live_set] def %v{} @{} ({})", id.0, pos, reason);
+        fn define(intervals: &mut HashMap<Id, (Id, Id)>, id: Id, pos: u32) {
             intervals
                 .entry(id)
                 .and_modify(|(def, last_use)| {
@@ -228,8 +227,7 @@ impl Func<'_> {
                 .or_insert((Id(pos), Id(pos)));
         }
 
-        fn use_value(intervals: &mut HashMap<Id, (Id, Id)>, id: Id, pos: u32, reason: String) {
-            crate::trace!("[ir::Func::live_set] use %v{} @{} ({})", id.0, pos, reason);
+        fn use_value(intervals: &mut HashMap<Id, (Id, Id)>, id: Id, pos: u32) {
             intervals
                 .entry(id)
                 .and_modify(|(_, last_use)| last_use.0 = last_use.0.max(pos))
@@ -258,12 +256,13 @@ impl Func<'_> {
                 pos
             );
             for param in &block.params {
-                define(
-                    &mut intervals,
-                    *param,
+                crate::trace!(
+                    "[ir::Func::live_set] def %v{} @{} (b{} param)",
+                    param.0,
                     pos,
-                    format!("b{} param", block.id.0),
+                    block.id.0
                 );
+                define(&mut intervals, *param, pos);
             }
             pos += 1;
 
@@ -277,21 +276,25 @@ impl Func<'_> {
                 );
 
                 for use_id in Self::uses_of_instr(instr) {
-                    use_value(
-                        &mut intervals,
-                        use_id,
+                    crate::trace!(
+                        "[ir::Func::live_set] use %v{} @{} (b{} instr {})",
+                        use_id.0,
                         pos,
-                        format!("b{} instr {}", block.id.0, instr),
+                        block.id.0,
+                        instr
                     );
+                    use_value(&mut intervals, use_id, pos);
                 }
 
                 if let Some(def_id) = Self::def_of(instr) {
-                    define(
-                        &mut intervals,
-                        def_id,
+                    crate::trace!(
+                        "[ir::Func::live_set] def %v{} @{} (b{} instr {})",
+                        def_id.0,
                         pos,
-                        format!("b{} instr {}", block.id.0, instr),
+                        block.id.0,
+                        instr
                     );
+                    define(&mut intervals, def_id, pos);
                 }
                 pos += 1;
             }
@@ -306,12 +309,14 @@ impl Func<'_> {
                 );
 
                 for use_id in Self::uses_of_term(term) {
-                    use_value(
-                        &mut intervals,
-                        use_id,
+                    crate::trace!(
+                        "[ir::Func::live_set] use %v{} @{} (b{} term {})",
+                        use_id.0,
                         pos,
-                        format!("b{} term {}", block.id.0, term),
+                        block.id.0,
+                        term
                     );
+                    use_value(&mut intervals, use_id, pos);
                 }
 
                 // The bc emitter writes outgoing param values into the
@@ -330,20 +335,22 @@ impl Func<'_> {
                 // source).
                 if let Terminator::Branch { yes, no, .. } = term {
                     for &target_param in &self.blocks[yes.0.0 as usize].params {
-                        define(
-                            &mut intervals,
-                            target_param,
+                        crate::trace!(
+                            "[ir::Func::live_set] def %v{} @{} (b{} branch yes shuffle dst)",
+                            target_param.0,
                             pos,
-                            format!("b{} branch yes shuffle dst", block.id.0),
+                            block.id.0
                         );
+                        define(&mut intervals, target_param, pos);
                     }
                     for &target_param in &self.blocks[no.0.0 as usize].params {
-                        define(
-                            &mut intervals,
-                            target_param,
+                        crate::trace!(
+                            "[ir::Func::live_set] def %v{} @{} (b{} branch no shuffle dst)",
+                            target_param.0,
                             pos,
-                            format!("b{} branch no shuffle dst", block.id.0),
+                            block.id.0
                         );
+                        define(&mut intervals, target_param, pos);
                     }
                 }
             } else {

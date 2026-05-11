@@ -96,7 +96,7 @@ impl<'cc> Cc<'cc> {
 
     fn cc(&mut self, fun: &Func<'cc>) -> Result<(), PgError> {
         let live_set = fun.live_set();
-        self.regalloc = Ralloc::new(live_set.clone());
+        self.regalloc = Ralloc::new(&live_set);
         crate::trace!(
             "[bc::Cc::cc][{}] regalloc map: {:#?}",
             fun.name,

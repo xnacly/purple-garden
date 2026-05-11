@@ -32,13 +32,13 @@ pub struct Ralloc {
 }
 
 impl Ralloc {
-    pub fn new(live_set: HashMap<Id, (Id, Id)>) -> Self {
+    pub fn new(live_set: &HashMap<Id, (Id, Id)>) -> Self {
         let mut intervals: Vec<Interval> = live_set
-            .into_iter()
+            .iter()
             .map(|(Id(v), (Id(start), Id(end)))| Interval {
-                v,
-                start,
-                end,
+                v: *v,
+                start: *start,
+                end: *end,
                 reg: None,
             })
             .collect();
@@ -98,7 +98,7 @@ mod regalloc_test {
         // v1: [3, 5]
         live_set.insert(Id(1), (Id(3), Id(5)));
 
-        let ralloc = Ralloc::new(live_set);
+        let ralloc = Ralloc::new(&live_set);
 
         let loc0 = ralloc.map.get(&0).unwrap();
         let loc1 = ralloc.map.get(&1).unwrap();
@@ -121,7 +121,7 @@ mod regalloc_test {
         // v1: [2, 6] overlaps with v0
         live_set.insert(Id(1), (Id(2), Id(6)));
 
-        let ralloc = Ralloc::new(live_set);
+        let ralloc = Ralloc::new(&live_set);
 
         let loc0 = ralloc.map.get(&0).unwrap();
         let loc1 = ralloc.map.get(&1).unwrap();
@@ -145,7 +145,7 @@ mod regalloc_test {
             live_set.insert(Id(i as u32), (Id(0), Id(10)));
         }
 
-        let ralloc = Ralloc::new(live_set);
+        let ralloc = Ralloc::new(&live_set);
 
         let mut reg_assigned = 0;
         let mut spilled = 0;
@@ -172,7 +172,7 @@ mod regalloc_test {
             live_set.insert(Id(i), (Id(i), Id(i + 1)));
         }
 
-        let ralloc = Ralloc::new(live_set);
+        let ralloc = Ralloc::new(&live_set);
 
         for i in 0..10 {
             assert!(
@@ -193,7 +193,7 @@ mod regalloc_test {
         live_set.insert(Id(2), (Id(2), Id(8)));
         live_set.insert(Id(3), (Id(3), Id(7)));
 
-        let ralloc = Ralloc::new(live_set);
+        let ralloc = Ralloc::new(&live_set);
 
         let mut active: Vec<(u32, u32, u8)> = vec![];
 
