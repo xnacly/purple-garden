@@ -5,7 +5,7 @@ use crate::{
     err::PgError,
     ir::ptype::Type,
     lex::{self, Token},
-    std::{self as pstd, Pkg, STD},
+    std::{self as pstd},
 };
 
 pub fn id_from_node(node: &Node) -> Option<usize> {
@@ -101,14 +101,14 @@ impl<'t> Typechecker<'t> {
                     }
                 }
             }
-            // comparing ints
             lex::Type::DoubleEqual | lex::Type::NotEqual => {
                 match (lhs, rhs) {
                     (Type::Int, Type::Int) => {}
+                    (Type::Bool, Type::Bool) => {}
                     (_, _) if lhs == rhs => {
                         return Err(PgError::with_msg(
                             format!(
-                                "Unsupported type {} for {:?}, want Int or Double",
+                                "Unsupported type {} for {:?}, want Int or Bool",
                                 lhs,
                                 op.t.as_str()
                             ),
@@ -118,7 +118,7 @@ impl<'t> Typechecker<'t> {
                     (_, _) => {
                         return Err(PgError::with_msg(
                             format!(
-                                "Incompatible types {} and {} for {:?}, want Int",
+                                "Incompatible types {} and {} for {:?}, want both sides Int or both sides Bool",
                                 lhs,
                                 rhs,
                                 op.t.as_str()
@@ -129,7 +129,6 @@ impl<'t> Typechecker<'t> {
                 };
                 Type::Bool
             }
-            // comparing doubles
             lex::Type::LessThan | lex::Type::GreaterThan => {
                 match (lhs, rhs) {
                     (Type::Double, Type::Double) => {}
@@ -170,6 +169,7 @@ impl<'t> Typechecker<'t> {
             (Type::Int, Type::Double) => Type::Double,
             (Type::Double, Type::Int) => Type::Int,
             (Type::Int, Type::Bool) => Type::Bool,
+            (Type::Bool, Type::Int) => Type::Int,
             (_, _) => {
                 return Err(PgError::with_msg(
                     format!("Can not cast {} to {}", i, o),
@@ -180,10 +180,12 @@ impl<'t> Typechecker<'t> {
     }
 
     fn block_type(&mut self, nodes: &'t [Node]) -> Result<Type, PgError> {
+        let saved_env = self.env.clone();
         let mut last_type = Type::Void;
         for node in nodes {
             last_type = self.node(node)?;
         }
+        self.env = saved_env;
         Ok(last_type)
     }
 

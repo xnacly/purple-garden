@@ -148,6 +148,8 @@ pub enum Op {
         dst: u8,
         src: u8,
     },
+    /// Reads `src` as a u64 and stores `!= 0`. Not valid for f64 inputs:
+    /// -0.0 and NaN would land as `true`.
     CastToBool {
         dst: u8,
         src: u8,

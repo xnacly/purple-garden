@@ -93,7 +93,7 @@ pub enum Instr<'i> {
     },
     Cast {
         dst: TypeId,
-        from: Id,
+        from: TypeId,
     },
     Noop,
 }
@@ -159,7 +159,7 @@ impl Func<'_> {
         match instr {
             Instr::Bin { lhs, rhs, .. } => vec![*lhs, *rhs],
             Instr::Call { args, .. } | Instr::Sys { args, .. } => args.clone(),
-            Instr::Cast { from, .. } => vec![*from],
+            Instr::Cast { from, .. } => vec![from.id],
             Instr::LoadConst { .. } | Instr::Noop => vec![],
         }
     }
@@ -538,7 +538,7 @@ mod tests {
                     params: vec![Id(4)],
                     instructions: vec![Instr::Cast {
                         dst: type_id(5),
-                        from: Id(4),
+                        from: type_id(4),
                     }],
                     term: Some(Terminator::Return(Some(Id(5)))),
                 },

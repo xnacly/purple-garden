@@ -359,7 +359,11 @@ impl<'lower> Lower<'lower> {
                 None
             }
             Node::Cast { lhs, rhs, .. } => {
-                let Some(from) = self.lower_node(lhs)? else {
+                let src_ty = id_from_node(lhs)
+                    .and_then(|aid| self.types.get(&aid).cloned())
+                    .expect("typechecker should have typed the cast's lhs");
+
+                let Some(from_id) = self.lower_node(lhs)? else {
                     unreachable!()
                 };
 
@@ -369,7 +373,13 @@ impl<'lower> Lower<'lower> {
                     ty: rhs.into(),
                 };
 
-                self.emit(Instr::Cast { dst: value, from });
+                self.emit(Instr::Cast {
+                    dst: value,
+                    from: TypeId {
+                        id: from_id,
+                        ty: src_ty,
+                    },
+                });
                 Some(dst)
             }
             Node::Match { cases, default, .. } => {

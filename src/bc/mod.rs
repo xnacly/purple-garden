@@ -304,15 +304,18 @@ impl<'cc> Cc<'cc> {
     fn instr(&mut self, live_set: &[(u32, u32)], pos: u32, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::Cast {
-                dst: TypeId { id, ty },
-                from,
+                dst: TypeId { id, ty: dst_ty },
+                from: TypeId { id: src_id, ty: src_ty },
             } => {
                 let dst = self.ensure_register(*id);
-                let src = self.ensure_register(*from);
-                let op = match ty {
-                    ptype::Type::Bool => Op::CastToBool { dst, src },
-                    ptype::Type::Int => Op::CastToInt { dst, src },
-                    ptype::Type::Double => Op::CastToDouble { dst, src },
+                let src = self.ensure_register(*src_id);
+                use ptype::Type::*;
+                let op = match (src_ty, dst_ty) {
+                    (Int, Double) => Op::CastToDouble { dst, src },
+                    (Double, Int) => Op::CastToInt { dst, src },
+                    (Int, Bool) => Op::CastToBool { dst, src },
+                    // Bool and Int share the same u64 representation.
+                    (Bool, Int) => Op::Mov { dst, src },
                     _ => unreachable!("Not a valid cast, see typecheck::Typechecker::cast"),
                 };
                 self.emit(op);

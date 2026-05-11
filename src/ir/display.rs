@@ -52,7 +52,11 @@ impl Display for Instr<'_> {
                 write!(f, ")")?;
             }
             Instr::Cast { dst: value, from } => {
-                write!(f, "%v{} = Cast_to_{} %v{}", value, value.ty, from.0)?
+                write!(
+                    f,
+                    "%v{} = Cast<{}->{}> %v{}",
+                    value, from.ty, value.ty, from.id.0
+                )?
             }
         }
         Ok(())
