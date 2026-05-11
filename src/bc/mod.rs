@@ -31,6 +31,13 @@ pub struct Cc<'cc> {
     /// indexed by id beats a HashMap on both alloc cost and lookup speed.
     block_map: Vec<u16>,
     regalloc: Ralloc,
+    /// Scratch buffers reused across [`Cc::cc`] invocations. `live_set` and
+    /// `arg_hints` are taken out of `self` via [`std::mem::take`] for the
+    /// duration of one compile, then put back with their grown capacity —
+    /// so after the first few functions warm the buffers, subsequent
+    /// `cc()` calls never re-allocate.
+    live_set: Vec<(u32, u32)>,
+    arg_hints: Vec<Option<u8>>,
 }
 
 impl<'cc> Cc<'cc> {
@@ -43,6 +50,8 @@ impl<'cc> Cc<'cc> {
             functions: HashMap::new(),
             block_map: Vec::new(),
             regalloc: Ralloc::default(),
+            live_set: Vec::new(),
+            arg_hints: Vec::new(),
         }
     }
 
@@ -78,7 +87,8 @@ impl<'cc> Cc<'cc> {
     pub fn compile(&mut self, conf: &config::Config, ir: &[Func<'cc>]) -> Result<(), PgError> {
         for func in ir {
             if conf.liveness {
-                let intervals = func.live_set();
+                let mut intervals = Vec::new();
+                func.live_set_into(&mut intervals);
                 let mut out = String::new();
                 for (id, &(def, last_use)) in intervals.iter().enumerate() {
                     if def == u32::MAX {
@@ -94,9 +104,18 @@ impl<'cc> Cc<'cc> {
     }
 
     fn cc(&mut self, fun: &Func<'cc>) -> Result<(), PgError> {
-        let live_set = fun.live_set();
-        let hints = fun.arg_hints();
-        self.regalloc = Ralloc::new(&live_set, &hints);
+        // Take the reusable scratch buffers out of self so we can hold an
+        // immutable borrow of `live_set` across calls to `&mut self`
+        // helpers (e.g. `self.instr`) without tripping the borrow checker.
+        //
+        // Put them back at the end so the next cc() reuses the same
+        // capacity — after a few warm functions, this path is alloc-free.
+        let mut live_set = std::mem::take(&mut self.live_set);
+        let mut arg_hints = std::mem::take(&mut self.arg_hints);
+
+        fun.live_set_into(&mut live_set);
+        fun.arg_hints_into(&mut arg_hints);
+        self.regalloc.rebuild(&live_set, &arg_hints);
         crate::trace!(
             "[bc::Cc::cc][{}] regalloc map: {:#?}",
             fun.name,
@@ -152,6 +171,10 @@ impl<'cc> Cc<'cc> {
         }
 
         crate::trace!("[bc::Cc::cc][{}] size={}", fun.name, self.buf.len() - pc);
+
+        // Hand the scratch buffers back to self with their grown capacity.
+        self.live_set = live_set;
+        self.arg_hints = arg_hints;
 
         Ok(())
     }

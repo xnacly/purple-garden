@@ -216,8 +216,12 @@ impl Func<'_> {
     /// Per-SSA live interval, indexed by id. `(u32::MAX, 0)` marks a slot
     /// with no def — only happens for params of tombstoned blocks since
     /// SSA ids are otherwise dense.
-    pub fn live_set(&self) -> Vec<(u32, u32)> {
+    ///
+    /// Writes into `out`, clearing first. Lets the caller reuse a buffer
+    /// across function compiles so we don't allocate fresh per `cc()`.
+    pub fn live_set_into(&self, out: &mut Vec<(u32, u32)>) {
         const UNSET: (u32, u32) = (u32::MAX, 0);
+        out.clear();
 
         fn ensure(v: &mut Vec<(u32, u32)>, id: u32) {
             let idx = id as usize;
@@ -249,7 +253,7 @@ impl Func<'_> {
 
         crate::trace!("[ir::Func::live_set][{}] start", self.name);
 
-        let mut intervals: Vec<(u32, u32)> = Vec::new();
+        let intervals = &mut *out;
         let mut pos = 0;
 
         for block in &self.blocks {
@@ -275,7 +279,7 @@ impl Func<'_> {
                     pos,
                     block.id.0
                 );
-                define(&mut intervals, *param, pos);
+                define(intervals, *param, pos);
             }
             pos += 1;
 
@@ -296,7 +300,7 @@ impl Func<'_> {
                         block.id.0,
                         instr
                     );
-                    use_value(&mut intervals, use_id, pos);
+                    use_value(intervals, use_id, pos);
                 }
 
                 if let Some(def_id) = Self::def_of(instr) {
@@ -307,7 +311,7 @@ impl Func<'_> {
                         block.id.0,
                         instr
                     );
-                    define(&mut intervals, def_id, pos);
+                    define(intervals, def_id, pos);
                 }
                 pos += 1;
             }
@@ -329,7 +333,7 @@ impl Func<'_> {
                         block.id.0,
                         term
                     );
-                    use_value(&mut intervals, use_id, pos);
+                    use_value(intervals, use_id, pos);
                 }
 
                 // The bc emitter writes outgoing param values into the
@@ -354,7 +358,7 @@ impl Func<'_> {
                             pos,
                             block.id.0
                         );
-                        define(&mut intervals, target_param, pos);
+                        define(intervals, target_param, pos);
                     }
                     for &target_param in &self.blocks[no.0.0 as usize].params {
                         crate::trace!(
@@ -363,7 +367,7 @@ impl Func<'_> {
                             pos,
                             block.id.0
                         );
-                        define(&mut intervals, target_param, pos);
+                        define(intervals, target_param, pos);
                     }
                 }
             } else {
@@ -390,8 +394,6 @@ impl Func<'_> {
                 last_use
             );
         }
-
-        intervals
     }
 
     /// Per-SSA register hints for `Ralloc`. Walks every call-shaped
@@ -404,8 +406,8 @@ impl Func<'_> {
     /// Soft: the allocator honors the hint only if the preferred register
     /// is free when this interval is allocated. If multiple call sites
     /// hint the same SSA id to different registers, first hint wins.
-    pub fn arg_hints(&self) -> Vec<Option<u8>> {
-        let mut hints: Vec<Option<u8>> = Vec::new();
+    pub fn arg_hints_into(&self, hints: &mut Vec<Option<u8>>) {
+        hints.clear();
 
         fn ensure(v: &mut Vec<Option<u8>>, id: u32) {
             let idx = id as usize;
@@ -439,7 +441,7 @@ impl Func<'_> {
             && !entry.tombstone
         {
             for (i, param) in entry.params.iter().enumerate() {
-                put_force(&mut hints, *param, i as u8);
+                put_force(hints, *param, i as u8);
             }
         }
 
@@ -451,20 +453,19 @@ impl Func<'_> {
                 match instr {
                     Instr::Call { dst, args, .. } | Instr::Sys { dst, args, .. } => {
                         for (i, arg) in args.iter().enumerate() {
-                            put(&mut hints, *arg, i as u8);
+                            put(hints, *arg, i as u8);
                         }
-                        put(&mut hints, dst.id, 0u8);
+                        put(hints, dst.id, 0u8);
                     }
                     _ => {}
                 }
             }
             if let Some(Terminator::Tail { args, .. }) = &block.term {
                 for (i, arg) in args.iter().enumerate() {
-                    put(&mut hints, *arg, i as u8);
+                    put(hints, *arg, i as u8);
                 }
             }
         }
-        hints
     }
 }
 
@@ -544,7 +545,8 @@ mod tests {
             ],
         };
 
-        let live_set = fun.live_set();
+        let mut live_set = Vec::new();
+        fun.live_set_into(&mut live_set);
 
         assert_eq!(live_set[0], (0, 3));
         assert_eq!(live_set[1], (1, 3));

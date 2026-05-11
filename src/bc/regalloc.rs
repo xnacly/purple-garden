@@ -37,38 +37,46 @@ pub struct Ralloc {
     /// Per-SSA location, indexed by id. Entries for ids without a live
     /// interval stay [`Location::Unassigned`].
     pub map: Vec<Location>,
+    /// Running active-set scratch buffer for [`Ralloc::allocate`]. Hoisted
+    /// onto the struct so consecutive function compiles reuse the same
+    /// allocation.
+    active: Vec<Interval>,
 }
 
 impl Ralloc {
+    /// Refill `intervals`/`map` for a new function and run the linear scan.
+    /// Reuses the existing Vec capacities — no allocation when the new
+    /// function fits within the previous high-water mark.
+    ///
     /// `live_set[id]` is the (def_pos, last_use_pos) for SSA id; entries
     /// with `def_pos == u32::MAX` are unused. `hints[id]` is the optional
-    /// preferred register from [`ir::Func::arg_hints`].
-    pub fn new(live_set: &[(u32, u32)], hints: &[Option<u8>]) -> Self {
-        let mut intervals: Vec<Interval> = live_set
-            .iter()
-            .enumerate()
-            .filter_map(|(v, &(start, end))| {
-                if start == u32::MAX {
-                    return None;
-                }
-                let v = v as u32;
-                Some(Interval {
-                    v,
-                    start,
-                    end,
-                    reg: None,
-                    preferred: hints.get(v as usize).copied().flatten(),
-                })
-            })
-            .collect();
+    /// preferred register from [`ir::Func::arg_hints_into`].
+    pub fn rebuild(&mut self, live_set: &[(u32, u32)], hints: &[Option<u8>]) {
+        self.intervals.clear();
+        self.intervals.extend(
+            live_set
+                .iter()
+                .enumerate()
+                .filter_map(|(v, &(start, end))| {
+                    if start == u32::MAX {
+                        return None;
+                    }
+                    let v = v as u32;
+                    Some(Interval {
+                        v,
+                        start,
+                        end,
+                        reg: None,
+                        preferred: hints.get(v as usize).copied().flatten(),
+                    })
+                }),
+        );
+        self.intervals.sort_by_key(|i| (i.start, i.v));
 
-        intervals.sort_by_key(|i| (i.start, i.v));
+        self.map.clear();
+        self.map.resize(live_set.len(), Location::Unassigned);
 
-        let map = vec![Location::Unassigned; live_set.len()];
-        let mut ralloc = Self { intervals, map };
-
-        ralloc.allocate();
-        ralloc
+        self.allocate();
     }
 
     fn allocate(&mut self) {
@@ -81,7 +89,6 @@ impl Ralloc {
             "free-reg bitmap fits 64 regs; bump to u128 if REGISTER_COUNT grows"
         );
 
-        let mut active: Vec<Interval> = Vec::new();
         // All REGISTER_COUNT low bits set. For REGISTER_COUNT == 64 this
         // is `!0u64`; the shift handles smaller counts cleanly.
         let mut free: u64 = if vm::REGISTER_COUNT == 64 {
@@ -90,8 +97,17 @@ impl Ralloc {
             (1u64 << vm::REGISTER_COUNT) - 1
         };
 
-        for interval in &mut self.intervals {
-            active.retain(|i| {
+        // Split-borrow so we can iterate `intervals` while also mutating
+        // `map` and `active` — they're disjoint fields of self.
+        let Self {
+            intervals,
+            map,
+            active,
+        } = self;
+        active.clear();
+
+        for interval in intervals.iter_mut() {
+            active.retain(|i: &Interval| {
                 if i.end < interval.start {
                     if let Some(r) = i.reg {
                         free |= 1u64 << r;
@@ -129,9 +145,9 @@ impl Ralloc {
             if let Some(reg) = reg {
                 interval.reg = Some(reg);
                 active.push(interval.clone());
-                self.map[interval.v as usize] = Location::Reg(reg);
+                map[interval.v as usize] = Location::Reg(reg);
             } else {
-                self.map[interval.v as usize] = Location::Stack;
+                map[interval.v as usize] = Location::Stack;
             }
         }
     }
@@ -154,7 +170,8 @@ mod regalloc_test {
     fn non_overlapping_reuses_registers() {
         let live_set = build(&[(0, (0, 2)), (1, (3, 5))]);
 
-        let ralloc = Ralloc::new(&live_set, &[]);
+        let mut ralloc = Ralloc::default();
+        ralloc.rebuild(&live_set, &[]);
 
         match (ralloc.map[0], ralloc.map[1]) {
             (Location::Reg(r0), Location::Reg(r1)) => {
@@ -170,7 +187,8 @@ mod regalloc_test {
         // v0: [0, 5], v1: [2, 6] overlaps with v0
         let live_set = build(&[(0, (0, 5)), (1, (2, 6))]);
 
-        let ralloc = Ralloc::new(&live_set, &[]);
+        let mut ralloc = Ralloc::default();
+        ralloc.rebuild(&live_set, &[]);
 
         match (ralloc.map[0], ralloc.map[1]) {
             (Location::Reg(r0), Location::Reg(r1)) => {
@@ -187,7 +205,8 @@ mod regalloc_test {
         // Create more intervals than registers
         let live_set: Vec<(u32, u32)> = (0..reg_count + 2).map(|_| (0u32, 10u32)).collect();
 
-        let ralloc = Ralloc::new(&live_set, &[]);
+        let mut ralloc = Ralloc::default();
+        ralloc.rebuild(&live_set, &[]);
 
         let mut reg_assigned = 0;
         let mut spilled = 0;
@@ -211,7 +230,8 @@ mod regalloc_test {
     fn all_values_assigned() {
         let live_set: Vec<(u32, u32)> = (0..10u32).map(|i| (i, i + 1)).collect();
 
-        let ralloc = Ralloc::new(&live_set, &[]);
+        let mut ralloc = Ralloc::default();
+        ralloc.rebuild(&live_set, &[]);
 
         for i in 0..10 {
             assert!(
@@ -226,7 +246,8 @@ mod regalloc_test {
         // overlapping chain
         let live_set = build(&[(0, (0, 10)), (1, (1, 9)), (2, (2, 8)), (3, (3, 7))]);
 
-        let ralloc = Ralloc::new(&live_set, &[]);
+        let mut ralloc = Ralloc::default();
+        ralloc.rebuild(&live_set, &[]);
 
         let mut active: Vec<(u32, u32, u8)> = vec![];
 
