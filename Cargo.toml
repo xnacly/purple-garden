@@ -28,13 +28,5 @@ name = "dispatch"
 harness = false
 
 [[bench]]
-name = "factorial"
-harness = false
-
-[[bench]]
-name = "compilation"
-harness = false
-
-[[bench]]
-name = "fib"
+name = "suite"
 harness = false

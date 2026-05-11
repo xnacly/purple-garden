@@ -1,0 +1,14 @@
+# Takeuchi function — three-arg recursion popular as a Lisp bench.
+# tak(18, 12, 6) = 7. Each call may recurse three times in the else branch,
+# so this stresses parallel-move arg shuffles and caller-save spill.
+import "testing"
+
+# Knuth's `y`-variant of Takeuchi: returns y in the base case.
+# Used as a workload, not a verification of a specific external value.
+fn tak(x:int y:int z:int) int {
+    match {
+        y < x { tak(tak(x-1 y z) tak(y-1 z x) tak(z-1 x y)) }
+        { y }
+    }
+}
+testing.assert(tak(18 12 6) == 18)

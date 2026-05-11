@@ -1,0 +1,26 @@
+# Sum of Collatz step counts from 1 to N. Mixed branching, integer division,
+# multiplication. `n % 2` is computed as `n - 2 * (n / 2)` since the language
+# lacks modulo (FOR NOW).
+import "testing"
+
+fn is_even(n:int) bool {
+    n - 2 * (n / 2) == 0
+}
+
+fn collatz_steps(n:int acc:int) int {
+    match {
+        n == 1 { acc }
+        is_even(n) { collatz_steps(n / 2  acc + 1) }
+        { collatz_steps(3 * n + 1  acc + 1) }
+    }
+}
+
+fn sum_steps(i:int n:int acc:int) int {
+    match {
+        i > n { acc }
+        { sum_steps(i + 1  n  acc + collatz_steps(i 0)) }
+    }
+}
+
+# steps for 1..1000 sums to a known value.
+testing.assert(sum_steps(1 1000 0) == 59542)
