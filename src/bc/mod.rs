@@ -138,7 +138,7 @@ impl<'cc> Cc<'cc> {
 
         for i in pc..self.buf.len() {
             self.buf[i] = match self.buf[i] {
-                Op::JmpF { cond, target } => Op::JmpF {
+                Op::JmpT { cond, target } => Op::JmpT {
                     cond,
                     target: *self.block_map.get(&ir::Id(target as u32)).unwrap(),
                 },
@@ -243,7 +243,7 @@ impl<'cc> Cc<'cc> {
                 }
 
                 let cond = self.ensure_register(*cond);
-                self.emit(Op::JmpF {
+                self.emit(Op::JmpT {
                     cond,
                     target: yes.0 as u16,
                 });
@@ -448,7 +448,7 @@ impl<'cc> Cc<'cc> {
                 Op::Jmp { target } => {
                     *target = old_to_new[*target as usize];
                 }
-                Op::JmpF { target, .. } => {
+                Op::JmpT { target, .. } => {
                     *target = old_to_new[*target as usize];
                 }
                 Op::Call { func } => {

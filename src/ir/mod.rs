@@ -322,7 +322,7 @@ impl Func<'_> {
                 // The bc emitter writes outgoing param values into the
                 // successor's param registers right before the terminator
                 // op. For a Branch this means the yes-target shuffle can
-                // clobber cond before JmpF reads it (cond appears dead to
+                // clobber cond before JmpT reads it (cond appears dead to
                 // the regalloc at the terminator, so its register is
                 // reusable as a shuffle dst). Marking the successor params
                 // as defined here forces the regalloc to keep them out of

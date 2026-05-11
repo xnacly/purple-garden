@@ -30,6 +30,11 @@ pub fn syscall_unimplemented<'vm>(vm: &mut Vm<'vm>) -> Result<Value, Anomaly> {
 #[derive(Default, Debug)]
 pub struct CallFrame {
     pub return_to: usize,
+    /// Snapshot of [Vm::spilled].len() at call entry. Used by the debug
+    /// check on [Op::Ret] to catch bytecode that leaves the spill stack
+    /// unbalanced across a call.
+    #[cfg(debug_assertions)]
+    pub spilled_depth: usize,
 }
 
 #[repr(C)]
@@ -218,7 +223,7 @@ impl<'vm> Vm<'vm> {
                     pc = func as usize;
                     continue;
                 }
-                Op::JmpF { target, cond } => unsafe {
+                Op::JmpT { target, cond } => unsafe {
                     if r!(cond).as_bool() {
                         pc = target as usize;
                         continue;
@@ -229,7 +234,11 @@ impl<'vm> Vm<'vm> {
                         self.backtrace.push(func as usize);
                     }
 
-                    self.frames.push(CallFrame { return_to: pc });
+                    self.frames.push(CallFrame {
+                        return_to: pc,
+                        #[cfg(debug_assertions)]
+                        spilled_depth: self.spilled.len(),
+                    });
                     pc = func as usize;
                     continue;
                 }
@@ -260,6 +269,19 @@ impl<'vm> Vm<'vm> {
                     let Some(frame) = self.frames.pop() else {
                         unreachable!("Op::Ret had no frame to drop, this is a compiler bug");
                     };
+                    // See Op::Push: every function must leave the spill
+                    // stack at the depth it found it. Catches arg-shuffle
+                    // cycle paths or caller-save spills that forgot to
+                    // pair their Pops.
+                    #[cfg(debug_assertions)]
+                    debug_assert_eq!(
+                        frame.spilled_depth,
+                        self.spilled.len(),
+                        "function returning to pc={} left vm.spilled unbalanced (entered at depth {}, exiting at depth {})",
+                        frame.return_to,
+                        frame.spilled_depth,
+                        self.spilled.len(),
+                    );
                     pc = frame.return_to;
                 }
                 Op::Push { src } => unsafe {
@@ -522,14 +544,13 @@ mod ops {
         assert_eq!(vm.r(1).as_int(), 2);
     }
 
-    /// Op::JmpF is misnamed — semantically it is "jump if true". Pin that down.
     #[test]
-    fn jmpf_jumps_when_cond_is_true() {
+    fn jmpt_jumps_when_cond_is_true() {
         let cfg = Config::default();
         let vm = run(
             vec![
                 Op::LoadI { dst: 0, value: 1 }, // truthy
-                Op::JmpF { cond: 0, target: 3 },
+                Op::JmpT { cond: 0, target: 3 },
                 Op::LoadI { dst: 1, value: 999 }, // skipped
                 Op::LoadI { dst: 2, value: 7 },
             ],
@@ -540,12 +561,12 @@ mod ops {
     }
 
     #[test]
-    fn jmpf_falls_through_when_cond_is_false() {
+    fn jmpt_falls_through_when_cond_is_false() {
         let cfg = Config::default();
         let vm = run(
             vec![
                 Op::LoadI { dst: 0, value: 0 },
-                Op::JmpF { cond: 0, target: 3 },
+                Op::JmpT { cond: 0, target: 3 },
                 Op::LoadI { dst: 1, value: 11 },
                 Op::LoadI { dst: 2, value: 22 },
             ],
