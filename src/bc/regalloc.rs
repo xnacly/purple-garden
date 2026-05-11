@@ -13,6 +13,10 @@ struct Interval {
     start: u32,
     end: u32,
     reg: Option<u8>,
+    /// Soft hint from `ir::Func::arg_hints`: pick this register when
+    /// allocating this interval *if* it's currently free. Never blocks
+    /// correctness; falls back to standard LIFO if denied.
+    preferred: Option<u8>,
 }
 
 /// Ralloc is a dumb linear scan register allocator for the purple garden virtual machine.
@@ -32,14 +36,15 @@ pub struct Ralloc {
 }
 
 impl Ralloc {
-    pub fn new(live_set: &HashMap<Id, (Id, Id)>) -> Self {
+    pub fn new(live_set: &HashMap<Id, (Id, Id)>, hints: &HashMap<Id, u8>) -> Self {
         let mut intervals: Vec<Interval> = live_set
             .iter()
-            .map(|(Id(v), (Id(start), Id(end)))| Interval {
-                v: *v,
+            .map(|(id, (Id(start), Id(end)))| Interval {
+                v: id.0,
                 start: *start,
                 end: *end,
                 reg: None,
+                preferred: hints.get(id).copied(),
             })
             .collect();
 
@@ -71,7 +76,19 @@ impl Ralloc {
                 }
             });
 
-            if let Some(reg) = free_regs.pop() {
+            // Soft hint: take the preferred reg if it's currently free,
+            // otherwise fall through to default LIFO pop.
+            let reg = interval
+                .preferred
+                .and_then(|p| {
+                    free_regs
+                        .iter()
+                        .position(|r| *r == p)
+                        .map(|pos| free_regs.swap_remove(pos))
+                })
+                .or_else(|| free_regs.pop());
+
+            if let Some(reg) = reg {
                 interval.reg = Some(reg);
                 active.push(interval.clone());
                 self.map.insert(interval.v, Location::Reg(reg));
@@ -88,6 +105,7 @@ mod regalloc_test {
         bc::regalloc::{Location, Ralloc},
         ir::Id,
     };
+    use std::collections::HashMap;
 
     #[test]
     fn non_overlapping_reuses_registers() {
@@ -98,7 +116,7 @@ mod regalloc_test {
         // v1: [3, 5]
         live_set.insert(Id(1), (Id(3), Id(5)));
 
-        let ralloc = Ralloc::new(&live_set);
+        let ralloc = Ralloc::new(&live_set, &HashMap::new());
 
         let loc0 = ralloc.map.get(&0).unwrap();
         let loc1 = ralloc.map.get(&1).unwrap();
@@ -121,7 +139,7 @@ mod regalloc_test {
         // v1: [2, 6] overlaps with v0
         live_set.insert(Id(1), (Id(2), Id(6)));
 
-        let ralloc = Ralloc::new(&live_set);
+        let ralloc = Ralloc::new(&live_set, &HashMap::new());
 
         let loc0 = ralloc.map.get(&0).unwrap();
         let loc1 = ralloc.map.get(&1).unwrap();
@@ -145,7 +163,7 @@ mod regalloc_test {
             live_set.insert(Id(i as u32), (Id(0), Id(10)));
         }
 
-        let ralloc = Ralloc::new(&live_set);
+        let ralloc = Ralloc::new(&live_set, &HashMap::new());
 
         let mut reg_assigned = 0;
         let mut spilled = 0;
@@ -172,7 +190,7 @@ mod regalloc_test {
             live_set.insert(Id(i), (Id(i), Id(i + 1)));
         }
 
-        let ralloc = Ralloc::new(&live_set);
+        let ralloc = Ralloc::new(&live_set, &HashMap::new());
 
         for i in 0..10 {
             assert!(
@@ -193,7 +211,7 @@ mod regalloc_test {
         live_set.insert(Id(2), (Id(2), Id(8)));
         live_set.insert(Id(3), (Id(3), Id(7)));
 
-        let ralloc = Ralloc::new(&live_set);
+        let ralloc = Ralloc::new(&live_set, &HashMap::new());
 
         let mut active: Vec<(u32, u32, u8)> = vec![];
 

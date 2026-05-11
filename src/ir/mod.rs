@@ -24,7 +24,7 @@ pub mod lower;
 pub mod ptype;
 pub mod typecheck;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::ir::ptype::Type;
 use crate::std as pstd;
@@ -380,6 +380,42 @@ impl Func<'_> {
         }
 
         intervals
+    }
+
+    /// Per-SSA register hints for `Ralloc`. Walks every call-shaped
+    /// instruction/terminator in this function and records that:
+    /// - `args[i]` would prefer `r_i` (the arg-passing register)
+    /// - the result of a `Call`/`Sys` would prefer `r0` (the return
+    ///   register, so the post-call `Mov dst, r0` becomes a self-mov that
+    ///   peephole + `compact_nops` will erase).
+    ///
+    /// Soft: the allocator honors the hint only if the preferred register
+    /// is free when this interval is allocated. If multiple call sites
+    /// hint the same SSA id to different registers, first hint wins.
+    pub fn arg_hints(&self) -> HashMap<Id, u8> {
+        let mut hints: HashMap<Id, u8> = HashMap::new();
+        for block in &self.blocks {
+            if block.tombstone {
+                continue;
+            }
+            for instr in &block.instructions {
+                match instr {
+                    Instr::Call { dst, args, .. } | Instr::Sys { dst, args, .. } => {
+                        for (i, arg) in args.iter().enumerate() {
+                            hints.entry(*arg).or_insert(i as u8);
+                        }
+                        hints.entry(dst.id).or_insert(0u8);
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(Terminator::Tail { args, .. }) = &block.term {
+                for (i, arg) in args.iter().enumerate() {
+                    hints.entry(*arg).or_insert(i as u8);
+                }
+            }
+        }
+        hints
     }
 }
 
