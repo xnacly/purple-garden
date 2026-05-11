@@ -94,7 +94,7 @@ impl<'vm> Vm<'vm> {
             globals: Vec::new(),
             strings: Vec::new(),
             backtrace: Vec::new(),
-            spilled: Vec::with_capacity(REGISTER_COUNT),
+            spilled: Vec::with_capacity(4096),
             syscalls: Vec::new(),
             config,
         }
