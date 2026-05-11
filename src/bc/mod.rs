@@ -156,16 +156,42 @@ impl<'cc> Cc<'cc> {
 
     /// Move `args[i]` into the i argument register (`r0..rN`) for a call
     /// or tail.
+    ///
+    /// Parallel-move: emit a direct Mov for any pending pair whose
+    /// dst isn't another pending move's src. When all that remains is one
+    /// or more cycles (e.g. swap r0,r1), fall back to push and pop for those
+    /// leftovers only.
     fn emit_arg_shuffle(&mut self, args: &[Id]) {
-        // PERF: only spill sources that are also someone else's
-        // destination (or break cycles with a single scratch reg). Most calls
-        // don't have any conflict and could use direct movs.
-        for arg in args.iter() {
-            let src = self.ensure_register(*arg);
-            self.emit(Op::Push { src });
-        }
-        for i in (0..args.len()).rev() {
-            self.emit(Op::Pop { dst: i as u8 });
+        let mut todo: Vec<(u8, u8)> = args
+            .iter()
+            .enumerate()
+            .map(|(i, a)| (self.ensure_register(*a), i as u8))
+            .filter(|(s, d)| s != d)
+            .collect();
+
+        'outer: loop {
+            if todo.is_empty() {
+                return;
+            }
+            for i in 0..todo.len() {
+                let (src, dst) = todo[i];
+                if !todo.iter().any(|(s, _)| *s == dst) {
+                    self.emit(Op::Mov { dst, src });
+                    todo.swap_remove(i);
+                    continue 'outer;
+                }
+            }
+
+            // Remaining moves form one or more cycles; break them via the
+            // spill stack. Push all sources, then pop into dsts in reverse
+            // so the LIFO order lines up.
+            for &(src, _) in &todo {
+                self.emit(Op::Push { src });
+            }
+            for &(_, dst) in todo.iter().rev() {
+                self.emit(Op::Pop { dst });
+            }
+            return;
         }
     }
 
@@ -322,26 +348,28 @@ impl<'cc> Cc<'cc> {
                 dst, func, args, ..
             } => {
                 let idx = self.std_fns.intern(func.ptr);
-                let mut r_to_spil = vec![];
-                for arg in args.iter() {
-                    let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(&arg.0) else {
-                        unreachable!();
-                    };
 
-                    let src = *src;
-                    r_to_spil.push(src);
-                    self.emit(Op::Push { src });
-                }
-                for (i, arg) in args.iter().enumerate() {
-                    let (dst, src) = (i as u8, self.ensure_register(*arg));
-                    if dst != src {
-                        self.emit(Op::Mov { dst, src });
+                // Caller-save spill mirrors Instr::Call: protect only values
+                // alive across the syscall (def before pos, last use after
+                // pos).
+                let mut alive_across_spill = vec![];
+                for (Id(v), (Id(def), Id(last_use))) in live_set {
+                    if def < &pos && &pos < last_use {
+                        let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(v) else {
+                            unreachable!();
+                        };
+                        let src = *src;
+                        alive_across_spill.push(src);
+                        self.emit(Op::Push { src });
                     }
                 }
+
+                self.emit_arg_shuffle(args);
+
                 let dst = self.ensure_register(dst.id);
                 self.emit(Op::Sys { idx: idx as u16 });
                 self.emit(Op::Mov { dst, src: 0 });
-                for dst in r_to_spil.into_iter().rev() {
+                for dst in alive_across_spill.into_iter().rev() {
                     self.emit(Op::Pop { dst });
                 }
             }
@@ -376,14 +404,14 @@ impl<'cc> Cc<'cc> {
         };
     }
 
+    // PERF: i have no idea how this impacts the compilation cost, but its better for runtime, since
+    // peephole now no longer leaves artifacts behind inflicting dispatch cost
+
     /// Strip [Op::Nop]s left behind by [opt::bc] and patch every absolute pc
     /// (jump targets, call/tail targets, function entry pcs in
     /// [Cc::functions]) through an old->new pc remap. Must run after all
     /// peephole passes since indices shift here.
-    ///
     pub fn compact_nops(&mut self) {
-        // PERF: i have no idea how this impacts the compilation cost, but its better for runtime, since
-        // peephole now no longer leaves artifacts behind inflicting dispatch cost
         let bc = &mut self.buf;
         if bc.is_empty() {
             return;
@@ -395,7 +423,7 @@ impl<'cc> Cc<'cc> {
             return;
         }
 
-        // bc.len() fits in u16 since Op::Jmp.target is u16; halve the remap
+        // bc.len() fits in u16 since Jmp.target is u16; halve the remap
         // table's cache footprint vs Vec<u32>.
         let mut old_to_new = vec![0u16; bc.len() + 1];
         let mut new_pc: u16 = 0;
