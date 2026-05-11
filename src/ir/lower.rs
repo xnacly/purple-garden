@@ -37,7 +37,7 @@ pub struct Lower<'lower> {
     ctx: LowerCtx<'lower>,
     functions: Vec<Func<'lower>>,
     func_name_to_id: HashMap<&'lower str, (ir::Id, Option<ptype::Type>)>,
-    types: HashMap<usize, ptype::Type>,
+    types: Vec<Option<ptype::Type>>,
     packages: HashMap<&'lower str, (&'lower pstd::Pkg, HashMap<&'lower str, &'lower pstd::Fn>)>,
 }
 
@@ -124,11 +124,7 @@ impl<'lower> Lower<'lower> {
                 }
             }
             Node::Bin { op, lhs, rhs, id } => {
-                let src_type = self
-                    .types
-                    .get(&id_from_node(lhs).unwrap())
-                    .cloned()
-                    .unwrap();
+                let src_type = self.types[id_from_node(lhs).unwrap()].clone().unwrap();
 
                 let Some(lhs) = self.lower_node(lhs)? else {
                     unreachable!()
@@ -140,7 +136,7 @@ impl<'lower> Lower<'lower> {
                 let dst_id = self.ctx.id_store.new_value();
                 let dst = TypeId {
                     id: dst_id,
-                    ty: self.types.get(id).unwrap().clone(),
+                    ty: self.types[*id].clone().unwrap(),
                 };
 
                 use BinOp::*;
@@ -176,11 +172,7 @@ impl<'lower> Lower<'lower> {
                 Some(dst_id)
             }
             Node::Unary { op, rhs, .. } => {
-                let inner_ty = self
-                    .types
-                    .get(&id_from_node(rhs).unwrap())
-                    .cloned()
-                    .unwrap();
+                let inner_ty = self.types[id_from_node(rhs).unwrap()].clone().unwrap();
                 let Some(rhs_id) = self.lower_node(rhs)? else {
                     unreachable!()
                 };
@@ -402,7 +394,7 @@ impl<'lower> Lower<'lower> {
             }
             Node::Cast { lhs, rhs, .. } => {
                 let src_ty = id_from_node(lhs)
-                    .and_then(|aid| self.types.get(&aid).cloned())
+                    .and_then(|aid| self.types.get(aid).cloned().flatten())
                     .expect("typechecker should have typed the cast's lhs");
 
                 let Some(from_id) = self.lower_node(lhs)? else {
