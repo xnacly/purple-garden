@@ -25,8 +25,11 @@ pub struct Cc<'cc> {
     pub strings: Interner<&'cc str>,
     pub std_fns: Interner<BuiltinFn>,
     pub functions: HashMap<Id, BcFunc<'cc>>,
-    /// binding a block id to its pc
-    block_map: HashMap<ir::Id, u16>,
+    /// `block_map[block_id]` is the absolute pc of that block's first op,
+    /// after lowering. `u16::MAX` marks blocks that weren't emitted (e.g.,
+    /// tombstoned blocks). Block ids are dense per-function so a Vec
+    /// indexed by id beats a HashMap on both alloc cost and lookup speed.
+    block_map: Vec<u16>,
     regalloc: Ralloc,
 }
 
@@ -38,7 +41,7 @@ impl<'cc> Cc<'cc> {
             strings: Interner::new(),
             std_fns: Interner::new(),
             functions: HashMap::new(),
-            block_map: HashMap::new(),
+            block_map: Vec::new(),
             regalloc: Ralloc::default(),
         }
     }
@@ -58,19 +61,16 @@ impl<'cc> Cc<'cc> {
         pc
     }
 
-    fn ensure_register(&self, Id(ref id): Id) -> u8 {
-        let Some(location) = self.regalloc.map.get(id) else {
-            unreachable!(
-                "Attempted a register alloc lookup for a not defined ssa virtual register %v{}",
-                id
-            );
-        };
-
-        match location {
-            regalloc::Location::Reg(r) => *r,
-            regalloc::Location::Stack => {
+    fn ensure_register(&self, Id(id): Id) -> u8 {
+        match self.regalloc.map.get(id as usize) {
+            Some(regalloc::Location::Reg(r)) => *r,
+            Some(regalloc::Location::Stack) => {
                 todo!("no stack handling yet, maybe this should be a stack slot?")
             }
+            Some(regalloc::Location::Unassigned) | None => unreachable!(
+                "Attempted a register alloc lookup for a not defined ssa virtual register %v{}",
+                id
+            ),
         }
     }
 
@@ -79,15 +79,14 @@ impl<'cc> Cc<'cc> {
         for func in ir {
             if conf.liveness {
                 let intervals = func.live_set();
-                let mut entries: Vec<_> = intervals.iter().collect();
-                entries.sort_by_key(|(id, _)| *id);
-                println!(
-                    "{}",
-                    entries
-                        .into_iter()
-                        .map(|(id, (def, last_use))| format!("{id}: ({def},{last_use})\n"))
-                        .collect::<String>()
-                )
+                let mut out = String::new();
+                for (id, &(def, last_use)) in intervals.iter().enumerate() {
+                    if def == u32::MAX {
+                        continue;
+                    }
+                    out.push_str(&format!("{id}: ({def},{last_use})\n"));
+                }
+                println!("{out}");
             }
             self.cc(func)?;
         }
@@ -109,9 +108,11 @@ impl<'cc> Cc<'cc> {
         // binding the id of a function to its context
         self.functions.insert(fun.id, f);
 
-        // block_map is keyed by ir::Id, but ir block ids restart at 0 in
-        // every function, thus we need to clear it on each new function
+        // block_map is indexed by ir block id, and block ids restart at 0 per function; size it to
+        // the current function's block count and fill with the u16::MAX sentinel for
+        // tombstoned/unemitted blocks.
         self.block_map.clear();
+        self.block_map.resize(fun.blocks.len(), u16::MAX);
 
         // pos must mirror the global position counter used by Func::live_set:
         // +1 for the block's params row, +1 per instruction, +1 for the
@@ -125,7 +126,7 @@ impl<'cc> Cc<'cc> {
                 continue;
             }
 
-            self.block_map.insert(block.id, self.buf.len() as u16);
+            self.block_map[block.id.0 as usize] = self.buf.len() as u16;
 
             pos += 1; // block params row
             for instruction in &block.instructions {
@@ -141,10 +142,10 @@ impl<'cc> Cc<'cc> {
             self.buf[i] = match self.buf[i] {
                 Op::JmpT { cond, target } => Op::JmpT {
                     cond,
-                    target: *self.block_map.get(&ir::Id(target as u32)).unwrap(),
+                    target: self.block_map[target as usize],
                 },
                 Op::Jmp { target } => Op::Jmp {
-                    target: *self.block_map.get(&ir::Id(target as u32)).unwrap(),
+                    target: self.block_map[target as usize],
                 },
                 other => other,
             };
@@ -277,7 +278,7 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn instr(&mut self, live_set: &HashMap<Id, (Id, Id)>, pos: u32, i: &ir::Instr<'cc>) {
+    fn instr(&mut self, live_set: &[(u32, u32)], pos: u32, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::Cast {
                 dst: TypeId { id, ty },
@@ -315,10 +316,13 @@ impl<'cc> Cc<'cc> {
                 let pc = func.pc;
 
                 let mut alive_after_call_spill = vec![];
-                for (Id(v), (Id(def), Id(last_use))) in live_set {
+                for (v, &(def, last_use)) in live_set.iter().enumerate() {
+                    if def == u32::MAX {
+                        continue;
+                    }
                     // the value is defined before the call and used after the call, thus must be
                     // spilled
-                    if def < &pos && &pos < last_use {
+                    if def < pos && pos < last_use {
                         crate::trace!(
                             "[bc] spilled r{} at call_idx={};def={};last_use={}",
                             v,
@@ -326,11 +330,10 @@ impl<'cc> Cc<'cc> {
                             def,
                             last_use
                         );
-                        let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(v) else {
+                        let regalloc::Location::Reg(src) = self.regalloc.map[v] else {
                             unreachable!();
                         };
 
-                        let src = *src;
                         alive_after_call_spill.push(src);
                         self.emit(Op::Push { src });
                     }
@@ -358,14 +361,17 @@ impl<'cc> Cc<'cc> {
                 // by the convention.
                 let clobber_end = args.len().max(1) as u8;
                 let mut alive_across_spill = vec![];
-                for (Id(v), (Id(def), Id(last_use))) in live_set {
-                    if def < &pos && &pos < last_use {
-                        let Some(regalloc::Location::Reg(src)) = self.regalloc.map.get(v) else {
+                for (v, &(def, last_use)) in live_set.iter().enumerate() {
+                    if def == u32::MAX {
+                        continue;
+                    }
+                    if def < pos && pos < last_use {
+                        let regalloc::Location::Reg(src) = self.regalloc.map[v] else {
                             unreachable!();
                         };
-                        if *src < clobber_end {
-                            alive_across_spill.push(*src);
-                            self.emit(Op::Push { src: *src });
+                        if src < clobber_end {
+                            alive_across_spill.push(src);
+                            self.emit(Op::Push { src });
                         }
                     }
                 }

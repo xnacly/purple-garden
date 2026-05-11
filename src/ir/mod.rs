@@ -213,30 +213,43 @@ impl Func<'_> {
         }
     }
 
-    pub fn live_set(&self) -> HashMap<Id, (Id, Id)> {
-        // PERF: this whole process should be a set theory based bit set, since we have at most 64
-        // registers (i think?), thus a BitSet(u64) should be a perfect abstraction
+    /// Per-SSA live interval, indexed by id. `(u32::MAX, 0)` marks a slot
+    /// with no def — only happens for params of tombstoned blocks since
+    /// SSA ids are otherwise dense.
+    pub fn live_set(&self) -> Vec<(u32, u32)> {
+        const UNSET: (u32, u32) = (u32::MAX, 0);
 
-        fn define(intervals: &mut HashMap<Id, (Id, Id)>, id: Id, pos: u32) {
-            intervals
-                .entry(id)
-                .and_modify(|(def, last_use)| {
-                    def.0 = def.0.min(pos);
-                    last_use.0 = last_use.0.max(pos);
-                })
-                .or_insert((Id(pos), Id(pos)));
+        fn ensure(v: &mut Vec<(u32, u32)>, id: u32) {
+            let idx = id as usize;
+            if idx >= v.len() {
+                v.resize(idx + 1, UNSET);
+            }
         }
 
-        fn use_value(intervals: &mut HashMap<Id, (Id, Id)>, id: Id, pos: u32) {
-            intervals
-                .entry(id)
-                .and_modify(|(_, last_use)| last_use.0 = last_use.0.max(pos))
-                .or_insert((Id(pos), Id(pos)));
+        fn define(intervals: &mut Vec<(u32, u32)>, id: Id, pos: u32) {
+            ensure(intervals, id.0);
+            let e = &mut intervals[id.0 as usize];
+            if e.0 == u32::MAX {
+                *e = (pos, pos);
+            } else {
+                e.0 = e.0.min(pos);
+                e.1 = e.1.max(pos);
+            }
+        }
+
+        fn use_value(intervals: &mut Vec<(u32, u32)>, id: Id, pos: u32) {
+            ensure(intervals, id.0);
+            let e = &mut intervals[id.0 as usize];
+            if e.0 == u32::MAX {
+                *e = (pos, pos);
+            } else {
+                e.1 = e.1.max(pos);
+            }
         }
 
         crate::trace!("[ir::Func::live_set][{}] start", self.name);
 
-        let mut intervals = HashMap::new();
+        let mut intervals: Vec<(u32, u32)> = Vec::new();
         let mut pos = 0;
 
         for block in &self.blocks {
@@ -365,18 +378,17 @@ impl Func<'_> {
         }
 
         #[cfg(feature = "trace")]
-        {
-            let mut ordered: Vec<_> = intervals.iter().collect();
-            ordered.sort_by_key(|(id, _)| id.0);
-            for (id, (def, last_use)) in ordered {
-                crate::trace!(
-                    "[ir::Func::live_set][{}] interval %v{} = ({}..{})",
-                    self.name,
-                    id.0,
-                    def.0,
-                    last_use.0
-                );
+        for (id, &(def, last_use)) in intervals.iter().enumerate() {
+            if def == u32::MAX {
+                continue;
             }
+            crate::trace!(
+                "[ir::Func::live_set][{}] interval %v{} = ({}..{})",
+                self.name,
+                id,
+                def,
+                last_use
+            );
         }
 
         intervals
@@ -392,8 +404,45 @@ impl Func<'_> {
     /// Soft: the allocator honors the hint only if the preferred register
     /// is free when this interval is allocated. If multiple call sites
     /// hint the same SSA id to different registers, first hint wins.
-    pub fn arg_hints(&self) -> HashMap<Id, u8> {
-        let mut hints: HashMap<Id, u8> = HashMap::new();
+    pub fn arg_hints(&self) -> Vec<Option<u8>> {
+        let mut hints: Vec<Option<u8>> = Vec::new();
+
+        fn ensure(v: &mut Vec<Option<u8>>, id: u32) {
+            let idx = id as usize;
+            if idx >= v.len() {
+                v.resize(idx + 1, None);
+            }
+        }
+        // First-hint-wins: skip if already set.
+        fn put(v: &mut Vec<Option<u8>>, id: Id, reg: u8) {
+            ensure(v, id.0);
+            let e = &mut v[id.0 as usize];
+            if e.is_none() {
+                *e = Some(reg);
+            }
+        }
+        // Overwrite unconditionally — used for entry-block params so they
+        // beat any subsequent inner-call hint and stay pinned to the
+        // calling convention's r0..r{N-1}.
+        fn put_force(v: &mut Vec<Option<u8>>, id: Id, reg: u8) {
+            ensure(v, id.0);
+            v[id.0 as usize] = Some(reg);
+        }
+
+        // Entry block params arrive in r0..r{N-1} per the calling convention.
+        // Pin them first so they take priority over inner-call hints —
+        // otherwise an inner call that uses the function's first param as
+        // its arg-2 would hint it to r2, the regalloc would place it in
+        // r2, and the caller still writes the arg to r0 → the function
+        // reads garbage.
+        if let Some(entry) = self.blocks.first()
+            && !entry.tombstone
+        {
+            for (i, param) in entry.params.iter().enumerate() {
+                put_force(&mut hints, *param, i as u8);
+            }
+        }
+
         for block in &self.blocks {
             if block.tombstone {
                 continue;
@@ -402,16 +451,16 @@ impl Func<'_> {
                 match instr {
                     Instr::Call { dst, args, .. } | Instr::Sys { dst, args, .. } => {
                         for (i, arg) in args.iter().enumerate() {
-                            hints.entry(*arg).or_insert(i as u8);
+                            put(&mut hints, *arg, i as u8);
                         }
-                        hints.entry(dst.id).or_insert(0u8);
+                        put(&mut hints, dst.id, 0u8);
                     }
                     _ => {}
                 }
             }
             if let Some(Terminator::Tail { args, .. }) = &block.term {
                 for (i, arg) in args.iter().enumerate() {
-                    hints.entry(*arg).or_insert(i as u8);
+                    put(&mut hints, *arg, i as u8);
                 }
             }
         }
@@ -497,15 +546,15 @@ mod tests {
 
         let live_set = fun.live_set();
 
-        assert_eq!(live_set.get(&Id(0)), Some(&(Id(0), Id(3))));
-        assert_eq!(live_set.get(&Id(1)), Some(&(Id(1), Id(3))));
-        assert_eq!(live_set.get(&Id(2)), Some(&(Id(2), Id(3))));
+        assert_eq!(live_set[0], (0, 3));
+        assert_eq!(live_set[1], (1, 3));
+        assert_eq!(live_set[2], (2, 3));
         // %v3 and %v4 are successor block params of the Branch in block 0
         // and so are extra-defined at the branch position (pos=3) — see
         // live_set: this is what keeps them out of cond's register at the
         // shuffle.
-        assert_eq!(live_set.get(&Id(3)), Some(&(Id(3), Id(5))));
-        assert_eq!(live_set.get(&Id(4)), Some(&(Id(3), Id(7))));
-        assert_eq!(live_set.get(&Id(5)), Some(&(Id(7), Id(8))));
+        assert_eq!(live_set[3], (3, 5));
+        assert_eq!(live_set[4], (3, 7));
+        assert_eq!(live_set[5], (7, 8));
     }
 }
