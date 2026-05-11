@@ -376,6 +376,68 @@ impl<'cc> Cc<'cc> {
         };
     }
 
+    /// Strip [Op::Nop]s left behind by [opt::bc] and patch every absolute pc
+    /// (jump targets, call/tail targets, function entry pcs in
+    /// [Cc::functions]) through an old->new pc remap. Must run after all
+    /// peephole passes since indices shift here.
+    ///
+    pub fn compact_nops(&mut self) {
+        // PERF: i have no idea how this impacts the compilation cost, but its better for runtime, since
+        // peephole now no longer leaves artifacts behind inflicting dispatch cost
+        let bc = &mut self.buf;
+        if bc.is_empty() {
+            return;
+        }
+
+        // Skip the whole pass when peephole produced nothing to compact.
+        // Avoids the remap allocation and second walk in the common no-op case.
+        if !bc.iter().any(|op| matches!(op, Op::Nop)) {
+            return;
+        }
+
+        // bc.len() fits in u16 since Op::Jmp.target is u16; halve the remap
+        // table's cache footprint vs Vec<u32>.
+        let mut old_to_new = vec![0u16; bc.len() + 1];
+        let mut new_pc: u16 = 0;
+        for (i, op) in bc.iter().enumerate() {
+            old_to_new[i] = new_pc;
+            if !matches!(op, Op::Nop) {
+                new_pc += 1;
+            }
+        }
+        // sentinel so a pc that points one past the end remaps cleanly
+        old_to_new[bc.len()] = new_pc;
+
+        let mut w = 0;
+        for r in 0..bc.len() {
+            let mut op = bc[r];
+            match &mut op {
+                Op::Jmp { target } => {
+                    *target = old_to_new[*target as usize];
+                }
+                Op::JmpF { target, .. } => {
+                    *target = old_to_new[*target as usize];
+                }
+                Op::Call { func } => {
+                    *func = old_to_new[*func as usize] as u32;
+                }
+                Op::Tail { func } => {
+                    *func = old_to_new[*func as usize] as u32;
+                }
+                _ => {}
+            }
+            if !matches!(op, Op::Nop) {
+                bc[w] = op;
+                w += 1;
+            }
+        }
+        bc.truncate(w);
+
+        for f in self.functions.values_mut() {
+            f.pc = old_to_new[f.pc] as usize;
+        }
+    }
+
     pub fn finalize(self, config: &'cc Config) -> Vm<'cc> {
         let mut v = Vm::new(config);
         v.pc = self
