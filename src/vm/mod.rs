@@ -10,6 +10,18 @@ pub use crate::vm::anomaly::Anomaly;
 pub use crate::vm::value::Value;
 use op::Op;
 
+/// Signature for a purple garden syscall
+///
+/// Calling convention
+/// - Args are passed in `r0..r{argcount-1}`. Read them via `vm.r(i)`.
+/// - The returned [Value] is written to `r0` by the dispatcher; do not
+///   write `r0` yourself.
+/// - Do not modify any register other than (implicitly) r0. The bytecode
+///   emitter only spills caller-save values that land in
+///   `r0..r{argcount-1}`, relying on this convention to leave `r{argcount}+`
+///   untouched. A violation silently corrupts live values in release;
+///   debug builds catch it via the `debug_assert_eq!` in [Vm::run]'s
+///   `Op::Sys` arm.
 pub type BuiltinFn = fn(&mut Vm) -> Result<Value, Anomaly>;
 pub fn syscall_unimplemented<'vm>(vm: &mut Vm<'vm>) -> Result<Value, Anomaly> {
     Err(Anomaly::InvalidSyscall { pc: vm.pc })
@@ -222,7 +234,24 @@ impl<'vm> Vm<'vm> {
                     continue;
                 }
                 Op::Sys { idx } => unsafe {
+                    // Codegen assumes the syscall calling convention: a
+                    // syscall body reads its args from r0..r{argcount-1} and
+                    // writes only r0 (the result). If a syscall ever touches
+                    // r1+, the bc emitter's caller-save spill (bc::Cc::instr,
+                    // Instr::Sys) will silently corrupt a live value.
+                    #[cfg(debug_assertions)]
+                    let pre_sys: [Value; REGISTER_COUNT] = self.r;
+
                     r_mut!(0) = (*syscalls.add(idx as usize))(self)?;
+
+                    #[cfg(debug_assertions)]
+                    for i in 1..REGISTER_COUNT {
+                        debug_assert_eq!(
+                            pre_sys[i].0, self.r[i].0,
+                            "syscall idx={} wrote r{} — convention only permits writes to r0",
+                            idx, i
+                        );
+                    }
                 },
                 Op::Ret => {
                     if self.config.backtrace {
