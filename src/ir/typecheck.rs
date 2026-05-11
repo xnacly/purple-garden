@@ -376,7 +376,7 @@ impl<'t> Typechecker<'t> {
                         };
                         let mut s = String::from(*pkg_name);
                         s.push('.');
-                        s.push_str(*inner_name);
+                        s.push_str(inner_name);
                         (name, s, fun)
                     }
                     Node::Ident { name, .. } => {

@@ -1,9 +1,6 @@
 use std::fmt::Debug;
 
-use crate::{
-    ir::{Const, ptype},
-    vm,
-};
+use crate::ir::Const;
 
 #[derive(PartialEq, Clone, Default, Copy, Debug)]
 #[repr(transparent)]

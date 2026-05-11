@@ -24,8 +24,6 @@ pub mod lower;
 pub mod ptype;
 pub mod typecheck;
 
-use std::collections::HashMap;
-
 use crate::ir::ptype::Type;
 use crate::std as pstd;
 
@@ -137,12 +135,6 @@ pub struct Func<'f> {
     pub blocks: Vec<Block<'f>>,
 }
 
-#[derive(Debug, Clone)]
-struct Edge {
-    to: Id,
-    args: Vec<Id>,
-}
-
 impl Func<'_> {
     fn def_of(instr: &Instr<'_>) -> Option<Id> {
         match instr {
@@ -181,35 +173,6 @@ impl Func<'_> {
                 uses.extend(no_params.iter().copied());
                 uses
             }
-        }
-    }
-
-    fn local_term_uses(term: &Terminator) -> Vec<Id> {
-        match term {
-            Terminator::Return(Some(id)) => vec![*id],
-            Terminator::Return(None) | Terminator::Jump { .. } => vec![],
-            Terminator::Tail { args, .. } => args.clone(),
-            Terminator::Branch { cond, .. } => vec![*cond],
-        }
-    }
-
-    fn successors(term: Option<&Terminator>) -> Vec<Edge> {
-        match term {
-            Some(Terminator::Jump { id, params }) => vec![Edge {
-                to: *id,
-                args: params.clone(),
-            }],
-            Some(Terminator::Branch { yes, no, .. }) => vec![
-                Edge {
-                    to: yes.0,
-                    args: yes.1.clone(),
-                },
-                Edge {
-                    to: no.0,
-                    args: no.1.clone(),
-                },
-            ],
-            Some(Terminator::Return(_) | Terminator::Tail { .. }) | None => vec![],
         }
     }
 
@@ -472,26 +435,11 @@ impl Func<'_> {
 #[cfg(test)]
 mod tests {
     use super::{ptype::Type, *};
-    use std::collections::HashSet;
 
     fn type_id(id: u32) -> TypeId {
         TypeId {
             id: Id(id),
             ty: Type::Int,
-        }
-    }
-
-    fn ids(ids: &[u32]) -> HashSet<Id> {
-        ids.iter().copied().map(Id).collect()
-    }
-
-    fn empty_block(id: u32, params: Vec<Id>, term: Terminator) -> Block<'static> {
-        Block {
-            tombstone: false,
-            id: Id(id),
-            params,
-            instructions: vec![],
-            term: Some(term),
         }
     }
 

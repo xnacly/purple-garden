@@ -373,7 +373,7 @@ impl<'lower> Lower<'lower> {
 
                 Some(dst_id)
             }
-            Node::Import { src, pkgs, .. } => {
+            Node::Import { pkgs, .. } => {
                 for pkg_tok in pkgs {
                     let Token {
                         t: Type::S(as_str), ..

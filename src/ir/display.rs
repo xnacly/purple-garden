@@ -118,11 +118,6 @@ impl Display for Terminator {
 
 impl Display for Func<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let entry_block = self
-            .blocks
-            .first()
-            .expect("Func.entry does not reference a valid block");
-
         write!(f, "// {}\nfn f{}(", self.name, self.id.0)?;
         for (i, arg) in self.params.iter().enumerate() {
             if i + 1 == self.params.len() {

@@ -106,7 +106,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let (input, input_source) = match conf.run {
         Some(ref i) => (Input::Str(i.clone()), "stdio"),
         None => {
-            let Some(file_name) = conf.target.as_ref().map(|f| f.as_str()) else {
+            let Some(file_name) = conf.target.as_deref() else {
                 return err!("No file or `-r` specified");
             };
             (Input::from_file(file_name)?, file_name)
