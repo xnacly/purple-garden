@@ -251,10 +251,12 @@ impl<'cc> Cc<'cc> {
             }
             ir::Terminator::Jump { id, params, .. } => {
                 let target = &fun.blocks.get(id.0 as usize).unwrap();
+                let src_params = fun.params(*params);
+                let dst_params = fun.params(target.params);
 
-                for (i, param) in params.iter().enumerate() {
-                    let src = self.ensure_register(*param);
-                    let dst = self.ensure_register(target.params[i]);
+                for (i, &param) in src_params.iter().enumerate() {
+                    let src = self.ensure_register(param);
+                    let dst = self.ensure_register(dst_params[i]);
 
                     if src == dst {
                         continue;
@@ -272,10 +274,12 @@ impl<'cc> Cc<'cc> {
                 no: (no, no_params),
                 ..
             } => {
-                let target = &fun.blocks.get(yes.0 as usize).unwrap();
-                for (i, param) in yes_params.iter().enumerate() {
-                    let src = self.ensure_register(*param);
-                    let dst = self.ensure_register(target.params[i]);
+                let yes_target = &fun.blocks.get(yes.0 as usize).unwrap();
+                let yes_src = fun.params(*yes_params);
+                let yes_dst = fun.params(yes_target.params);
+                for (i, &param) in yes_src.iter().enumerate() {
+                    let src = self.ensure_register(param);
+                    let dst = self.ensure_register(yes_dst[i]);
 
                     if src == dst {
                         continue;
@@ -289,10 +293,12 @@ impl<'cc> Cc<'cc> {
                     target: yes.0 as u16,
                 });
 
-                let target = &fun.blocks.get(no.0 as usize).unwrap();
-                for (i, param) in no_params.iter().enumerate() {
-                    let src = self.ensure_register(*param);
-                    let dst = self.ensure_register(target.params[i]);
+                let no_target = &fun.blocks.get(no.0 as usize).unwrap();
+                let no_src = fun.params(*no_params);
+                let no_dst = fun.params(no_target.params);
+                for (i, &param) in no_src.iter().enumerate() {
+                    let src = self.ensure_register(param);
+                    let dst = self.ensure_register(no_dst[i]);
 
                     if src == dst {
                         continue;

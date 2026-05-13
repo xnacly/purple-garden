@@ -63,7 +63,7 @@ impl<'lower> Lower<'lower> {
             id,
             tombstone: false,
             instructions: vec![],
-            params: vec![],
+            params: ir::EMPTY_PARAMS,
             term: None,
         });
         id
@@ -252,29 +252,25 @@ impl<'lower> Lower<'lower> {
                 };
 
                 self.func_name_to_id.insert(ident_name, (id, ret.clone()));
-                let func = Func {
-                    name: ident_name,
-                    id,
-                    params: args
-                        .iter()
-                        .map(|(token, _)| {
-                            let id = self.ctx.id_store.new_value();
-                            let Type::Ident(ident) = token.t else {
-                                unreachable!();
-                            };
-                            self.ctx.env.insert(ident, id);
-                            id
-                        })
-                        .collect(),
-                    blocks: vec![],
-                    ret,
-                };
+                let func_params: Vec<Id> = args
+                    .iter()
+                    .map(|(token, _)| {
+                        let id = self.ctx.id_store.new_value();
+                        let Type::Ident(ident) = token.t else {
+                            unreachable!();
+                        };
+                        self.ctx.env.insert(ident, id);
+                        id
+                    })
+                    .collect();
+                let func = Func::new(ident_name, id, func_params, ret);
 
                 // TODO:deal with b0
 
                 self.ctx.func = func;
                 let entry = self.new_block();
-                self.block_mut(entry).params = self.ctx.func.params.clone();
+                let entry_params = self.ctx.func.intern_params(self.ctx.func.params.clone());
+                self.block_mut(entry).params = entry_params;
 
                 let mut last = None;
                 for node in body {
@@ -441,7 +437,16 @@ impl<'lower> Lower<'lower> {
                     body_blocks.push(self.new_block());
                 }
 
-                let params = self.cur().params.clone();
+                // All check/body/default blocks of this match inherit the
+                // enclosing block's params verbatim. Intern that list once
+                // and hand the same ParamsId to every sink — 4 × per case,
+                // plus the default block, plus the two Branch arms. Each
+                // assignment is a u32 copy, no allocation.
+                let case_params = {
+                    let entry_params = self.cur().params;
+                    let cloned: Vec<Id> = self.ctx.func.params(entry_params).to_vec();
+                    self.ctx.func.intern_params(cloned)
+                };
 
                 // INFO:
                 // this is only for correctness to jump into the match statements first check, we
@@ -449,7 +454,7 @@ impl<'lower> Lower<'lower> {
                 // skipped fully
                 // self.block_mut(self.block).term = Some(Terminator::Jump {
                 //     id: *check_blocks.first().unwrap(),
-                //     params: params.clone(),
+                //     params: case_params,
                 // });
 
                 // the default block
@@ -476,23 +481,24 @@ impl<'lower> Lower<'lower> {
                     let check_block_mut = self.block_mut(check_blocks[i]);
                     check_block_mut.term = Some(Terminator::Branch {
                         cond,
-                        yes: (body_blocks[i], params.clone()),
-                        no: (no_target, params.clone()),
+                        yes: (body_blocks[i], case_params),
+                        no: (no_target, case_params),
                         span: case_span,
                     });
-                    check_block_mut.params = params.clone();
+                    check_block_mut.params = case_params;
 
                     self.switch_to_block(body_blocks[i]);
-                    self.block_mut(body_blocks[i]).params = params.clone();
+                    self.block_mut(body_blocks[i]).params = case_params;
                     let mut last = None;
                     for node in body {
                         last = self.lower_node(node)?;
                     }
                     let value = last.expect("match body must produce value");
 
+                    let body_jump_params = self.ctx.func.intern_params(vec![value]);
                     self.block_mut(body_blocks[i]).term = Some(Terminator::Jump {
                         id: join,
-                        params: vec![value],
+                        params: body_jump_params,
                         span: case_span,
                     });
                 }
@@ -506,17 +512,19 @@ impl<'lower> Lower<'lower> {
                     last = self.lower_node(node)?;
                 }
 
-                let default_block = self.block_mut(default_block);
-                default_block.params = params;
                 let last = last.expect("match default must produce value");
-                default_block.term = Some(Terminator::Jump {
+                let default_jump_params = self.ctx.func.intern_params(vec![last]);
+                let join_params = self.ctx.func.intern_params(vec![last]);
+                let default_block_mut = self.block_mut(default_block);
+                default_block_mut.params = case_params;
+                default_block_mut.term = Some(Terminator::Jump {
                     id: join,
-                    params: vec![last],
+                    params: default_jump_params,
                     span: default_span,
                 });
 
                 self.switch_to_block(join);
-                self.block_mut(join).params = vec![last];
+                self.block_mut(join).params = join_params;
                 Some(last)
             }
             _ => todo!("{:?}", node),
@@ -532,13 +540,7 @@ impl<'lower> Lower<'lower> {
         crate::trace!("[ir::lower::Lower::ir_from] Finished type checking");
         self.types = typechecker.finalise();
 
-        self.ctx.func = Func {
-            id: Id(0),
-            name: "entry",
-            ret: None,
-            blocks: vec![],
-            params: vec![],
-        };
+        self.ctx.func = Func::new("entry", Id(0), Vec::new(), None);
         let entry = self.new_block();
         self.switch_to_block(entry);
 

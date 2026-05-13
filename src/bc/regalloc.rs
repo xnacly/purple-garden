@@ -40,7 +40,12 @@ pub struct Ralloc {
     /// Running active-set scratch buffer for [`Ralloc::allocate`]. Hoisted
     /// onto the struct so consecutive function compiles reuse the same
     /// allocation.
-    active: Vec<Interval>,
+    ///
+    /// Stores `(end, reg)` only — those are the two fields `retain`
+    /// reads. Cuts per-allocation clones from 24 bytes (full `Interval`)
+    /// to 5 bytes and skips the `interval.clone()` previously needed on
+    /// every successful allocation.
+    active: Vec<(u32, u8)>,
 }
 
 impl Ralloc {
@@ -107,11 +112,9 @@ impl Ralloc {
         active.clear();
 
         for interval in intervals.iter_mut() {
-            active.retain(|i: &Interval| {
-                if i.end < interval.start {
-                    if let Some(r) = i.reg {
-                        free |= 1u64 << r;
-                    }
+            active.retain(|&(end, reg)| {
+                if end < interval.start {
+                    free |= 1u64 << reg;
                     false
                 } else {
                     true
@@ -144,7 +147,7 @@ impl Ralloc {
 
             if let Some(reg) = reg {
                 interval.reg = Some(reg);
-                active.push(interval.clone());
+                active.push((interval.end, reg));
                 map[interval.v as usize] = Location::Reg(reg);
             } else {
                 map[interval.v as usize] = Location::Stack;

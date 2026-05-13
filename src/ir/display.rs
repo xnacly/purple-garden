@@ -64,42 +64,21 @@ impl Display for Instr<'_> {
     }
 }
 
+/// Display for a `Terminator` standalone (trace logs). Can't resolve
+/// `ParamsId` without a `Func`, so we print the raw pool index as `#N`.
+/// The pretty IR dump in `Func`'s Display below resolves it properly.
 impl Display for Terminator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Terminator::Return { value: Some(id), .. } => write!(f, "ret %v{}", id.0)?,
             Terminator::Return { value: None, .. } => write!(f, "ret")?,
             Terminator::Jump { id, params, .. } => {
-                if params.is_empty() {
-                    write!(f, "jmp b{}", id.0)?
-                } else {
-                    write!(
-                        f,
-                        "jmp b{}({})",
-                        id.0,
-                        params
-                            .iter()
-                            .map(|p| format!("%v{}", p.0))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?
-                }
+                write!(f, "jmp b{}(params#{})", id.0, params.0)?
             }
             Terminator::Branch { cond, yes, no, .. } => write!(
                 f,
-                "br %v{}, b{}({}), b{}({})",
-                cond.0,
-                yes.0,
-                yes.1
-                    .iter()
-                    .map(|p| format!("%v{}", p.0))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                no.0,
-                no.1.iter()
-                    .map(|p| format!("%v{}", p.0))
-                    .collect::<Vec<_>>()
-                    .join(", "),
+                "br %v{}, b{}(params#{}), b{}(params#{})",
+                cond.0, yes.0, yes.1.0, no.0, no.1.0,
             )?,
             Terminator::Tail { func, args, .. } => {
                 write!(f, "tail f{}(", func.0)?;
@@ -115,6 +94,13 @@ impl Display for Terminator {
         }
         Ok(())
     }
+}
+
+fn format_ids(ids: &[crate::ir::Id]) -> String {
+    ids.iter()
+        .map(|p| format!("%v{}", p.0))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl Display for Func<'_> {
@@ -138,17 +124,7 @@ impl Display for Func<'_> {
         )?;
 
         for block in self.blocks.iter() {
-            writeln!(
-                f,
-                "b{}({}):",
-                block.id.0,
-                block
-                    .params
-                    .iter()
-                    .map(|p| format!("%v{}", p))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )?;
+            writeln!(f, "b{}({}):", block.id.0, format_ids(self.params(block.params)))?;
 
             if block.tombstone {
                 writeln!(f, "\t<tombstone>")?;
@@ -160,7 +136,21 @@ impl Display for Func<'_> {
             }
 
             if let Some(term) = &block.term {
-                writeln!(f, "\t{term}")?;
+                match term {
+                    Terminator::Jump { id, params, .. } => {
+                        writeln!(f, "\tjmp b{}({})", id.0, format_ids(self.params(*params)))?
+                    }
+                    Terminator::Branch { cond, yes, no, .. } => writeln!(
+                        f,
+                        "\tbr %v{}, b{}({}), b{}({})",
+                        cond.0,
+                        yes.0,
+                        format_ids(self.params(yes.1)),
+                        no.0,
+                        format_ids(self.params(no.1)),
+                    )?,
+                    _ => writeln!(f, "\t{term}")?,
+                }
             }
         }
 

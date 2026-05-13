@@ -117,8 +117,8 @@ impl<'vm> Vm<'vm> {
     }
 
     /// Build a divide-by-zero trap. Marked cold + non-inline so the span
-    /// lookup doesn't bloat `Vm::run`'s hot dispatch loop — without this,
-    /// the inlined trap path measurably shifts L1i layout and slows the
+    /// lookup doesn't bloat the hot dispatch loop; without this,
+    /// the inlined trap path measurably shifts L1 layout and slows the
     /// hot path on every IDiv/DDiv execution (most run benches regressed
     /// 5–30% when the construction was inline).
     #[cold]

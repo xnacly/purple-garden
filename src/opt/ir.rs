@@ -127,8 +127,7 @@ pub fn tailcall(fun: &mut ir::Func) {
     );
 
     for i in 0..fun.blocks.len() {
-        let block = &mut fun.blocks[i];
-        if block.tombstone {
+        if fun.blocks[i].tombstone {
             continue;
         }
 
@@ -138,40 +137,40 @@ pub fn tailcall(fun: &mut ir::Func) {
             func,
             args,
             span,
-        }) = block.instructions.last().cloned()
+        }) = fun.blocks[i].instructions.last().cloned()
         else {
             continue;
         };
 
-        let mut is_tail = false;
+        // Clone the term so we can hold the match guard's borrow without
+        // blocking calls to `fun.params(...)` (a Pattern B check needs to
+        // resolve the Jump's ParamsId through the function's pool).
+        let term = fun.blocks[i].term.clone();
 
-        match &block.term {
+        let is_tail = match &term {
             // Pattern A: direct return
             Some(ir::Terminator::Return {
                 value: Some(v), ..
-            }) if v.0 == dst.id.0 => {
-                is_tail = true;
-            }
+            }) if v.0 == dst.id.0 => true,
 
             // Pattern B: jump to canonical return block
             Some(ir::Terminator::Jump {
                 id: ir::Id(id),
                 params: jump_params,
                 ..
-            }) if *id == last_id as u32
-                && trivial_return
-                && jump_params.len() == 1
-                && jump_params[0].0 == dst.id.0 =>
-            {
-                is_tail = true;
+            }) if *id == last_id as u32 && trivial_return => {
+                let resolved = fun.params(*jump_params);
+                resolved.len() == 1 && resolved[0].0 == dst.id.0
             }
 
-            _ => {}
-        }
+            _ => false,
+        };
 
         if !is_tail {
             continue;
         }
+
+        let block = &mut fun.blocks[i];
 
         opt_trace!(
             "ir::tailcall",
@@ -190,30 +189,26 @@ mod tests {
 
     #[test]
     fn tailcall_rewrites_call_return_to_tail_terminator() {
-        let mut fun = ir::Func {
-            name: "tail",
+        let mut fun = ir::Func::new("tail", ir::Id(0), vec![ir::Id(0)], Some(Type::Int));
+        let b0_params = fun.intern_params(vec![ir::Id(0)]);
+        fun.blocks = vec![ir::Block {
+            tombstone: false,
             id: ir::Id(0),
-            params: vec![ir::Id(0)],
-            ret: Some(Type::Int),
-            blocks: vec![ir::Block {
-                tombstone: false,
-                id: ir::Id(0),
-                params: vec![ir::Id(0)],
-                instructions: vec![Instr::Call {
-                    dst: TypeId {
-                        id: ir::Id(1),
-                        ty: Type::Int,
-                    },
-                    func: ir::Id(42),
-                    args: vec![ir::Id(0)],
-                    span: 0,
-                }],
-                term: Some(Terminator::Return {
-                    value: Some(ir::Id(1)),
-                    span: 0,
-                }),
+            params: b0_params,
+            instructions: vec![Instr::Call {
+                dst: TypeId {
+                    id: ir::Id(1),
+                    ty: Type::Int,
+                },
+                func: ir::Id(42),
+                args: vec![ir::Id(0)],
+                span: 0,
             }],
-        };
+            term: Some(Terminator::Return {
+                value: Some(ir::Id(1)),
+                span: 0,
+            }),
+        }];
 
         tailcall(&mut fun);
 
