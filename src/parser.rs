@@ -399,8 +399,7 @@ mod tests {
     macro_rules! mk_tok {
         ($type:expr) => {
             Token {
-                line: 0,
-                col: 0,
+                start: 0,
                 t: $type,
             }
         };

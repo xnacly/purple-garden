@@ -121,8 +121,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let ast = match Parser::new(lexer).and_then(|n| n.parse()) {
         Ok(a) => a,
         Err(e) => {
-            let lines = input.as_str().lines().collect::<Vec<&str>>();
-            return err!(e.render(input_source, &lines));
+            return err!(e.render(input_source, input.as_bytes()));
         }
     };
 
@@ -142,8 +141,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let mut ir = match lower.ir_from(&ast) {
         Ok(ir) => ir,
         Err(e) => {
-            let lines = input.as_str().lines().collect::<Vec<&str>>();
-            return err!(e.render(input_source, &lines));
+            return err!(e.render(input_source, input.as_bytes()));
         }
     };
 
@@ -161,8 +159,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut cc = bc::Cc::new();
     if let Err(e) = cc.compile(&conf, &ir) {
-        let lines = input.as_str().lines().collect::<Vec<&str>>();
-        return err!(e.render(input_source, &lines));
+        return err!(e.render(input_source, input.as_bytes()));
     };
 
     trace!("[main] Lowered IR to bytecode");
@@ -193,8 +190,10 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Err(e) = vm.run() {
-        let lines = input.as_str().lines().collect::<Vec<&str>>();
-        println!("{}", Into::<PgError>::into(e).render(input_source, &lines));
+        println!(
+            "{}",
+            Into::<PgError>::into(e).render(input_source, input.as_bytes())
+        );
 
         if conf.backtrace {
             let entry_point_pc = function_table
