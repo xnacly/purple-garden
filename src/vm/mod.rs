@@ -24,7 +24,10 @@ use op::Op;
 ///   `Op::Sys` arm.
 pub type BuiltinFn = fn(&mut Vm) -> Result<Value, Anomaly>;
 pub fn syscall_unimplemented<'vm>(vm: &mut Vm<'vm>) -> Result<Value, Anomaly> {
-    Err(Anomaly::InvalidSyscall { pc: vm.pc })
+    Err(Anomaly::InvalidSyscall {
+        pc: vm.pc,
+        span: vm.span_at(vm.pc),
+    })
 }
 
 #[derive(Default, Debug)]
@@ -48,6 +51,11 @@ pub struct Vm<'vm> {
     spilled: Vec<Value>,
 
     pub bytecode: Vec<Op>,
+    /// `pc_to_span[pc]` is the byte offset into the source of the AST node
+    /// that produced the op at `pc`. Populated by `bc::Cc::finalize` and
+    /// consulted by trap sites in `run` so `Anomaly` carries a usable
+    /// source location.
+    pub pc_to_span: Vec<u32>,
     pub globals: Vec<Value>,
     pub strings: Vec<Box<str>>,
 
@@ -91,12 +99,34 @@ impl<'vm> Vm<'vm> {
             frames: Vec::with_capacity(64),
             pc: 0,
             bytecode: Vec::new(),
+            pc_to_span: Vec::new(),
             globals: Vec::new(),
             strings: Vec::new(),
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(4096),
             syscalls: Vec::new(),
             config,
+        }
+    }
+
+    /// Lookup the source byte offset for a given pc, or 0 if the table
+    /// hasn't been populated .
+    #[inline]
+    pub fn span_at(&self, pc: usize) -> u32 {
+        self.pc_to_span.get(pc).copied().unwrap_or(0)
+    }
+
+    /// Build a divide-by-zero trap. Marked cold + non-inline so the span
+    /// lookup doesn't bloat `Vm::run`'s hot dispatch loop — without this,
+    /// the inlined trap path measurably shifts L1i layout and slows the
+    /// hot path on every IDiv/DDiv execution (most run benches regressed
+    /// 5–30% when the construction was inline).
+    #[cold]
+    #[inline(never)]
+    fn trap_div_by_zero(&self, pc: usize) -> Anomaly {
+        Anomaly::DivisionByZero {
+            pc,
+            span: self.span_at(pc),
         }
     }
 
@@ -155,7 +185,7 @@ impl<'vm> Vm<'vm> {
                 Op::IDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
-                    trap_if!(r == 0, Anomaly::DivisionByZero { pc });
+                    trap_if!(r == 0, self.trap_div_by_zero(pc));
                     r_mut!(dst) = Value::from(l / r);
                 },
                 Op::IEq { dst, lhs, rhs } => unsafe {
@@ -191,7 +221,7 @@ impl<'vm> Vm<'vm> {
                 Op::DDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
-                    trap_if!(r == 0 as f64, Anomaly::DivisionByZero { pc });
+                    trap_if!(r == 0 as f64, self.trap_div_by_zero(pc));
                     r_mut!(dst) = Value::from(l / r);
                 },
                 Op::DGt { dst, lhs, rhs } => unsafe {

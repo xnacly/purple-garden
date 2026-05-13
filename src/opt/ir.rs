@@ -26,7 +26,7 @@ pub fn indirect_jump(fun: &mut ir::Func) {
             cond,
             yes: (ir::Id(yes), yes_params),
             no: (ir::Id(no), no_params),
-            ..
+            span,
         }) = fun.blocks[i].term.clone()
         else {
             continue;
@@ -34,7 +34,7 @@ pub fn indirect_jump(fun: &mut ir::Func) {
 
         let yes_target = &mut fun.blocks[yes as usize];
         let yes_edge = if yes_target.instructions.is_empty() {
-            if let Some(ir::Terminator::Jump { id, params }) = &yes_target.term {
+            if let Some(ir::Terminator::Jump { id, params, .. }) = &yes_target.term {
                 yes_target.tombstone = true;
                 Some((*id, params.clone()))
             } else {
@@ -46,7 +46,7 @@ pub fn indirect_jump(fun: &mut ir::Func) {
 
         let no_target = &mut fun.blocks[no as usize];
         let no_edge = if no_target.instructions.is_empty() {
-            if let Some(ir::Terminator::Jump { id, params }) = &no_target.term {
+            if let Some(ir::Terminator::Jump { id, params, .. }) = &no_target.term {
                 no_target.tombstone = true;
                 Some((*id, params.clone()))
             } else {
@@ -70,6 +70,7 @@ pub fn indirect_jump(fun: &mut ir::Func) {
             cond,
             yes: yes_edge.unwrap_or((ir::Id(yes), yes_params)),
             no: no_edge.unwrap_or((ir::Id(no), no_params)),
+            span,
         });
     }
 }
@@ -122,7 +123,7 @@ pub fn tailcall(fun: &mut ir::Func) {
     let last = &fun.blocks[last_id];
     let trivial_return = matches!(
         (&last.instructions[..], &last.term),
-        ([], Some(ir::Terminator::Return(_)))
+        ([], Some(ir::Terminator::Return { .. }))
     );
 
     for i in 0..fun.blocks.len() {
@@ -132,7 +133,13 @@ pub fn tailcall(fun: &mut ir::Func) {
         }
 
         // last instruction must be a call
-        let Some(Instr::Call { dst, func, args }) = block.instructions.last().cloned() else {
+        let Some(Instr::Call {
+            dst,
+            func,
+            args,
+            span,
+        }) = block.instructions.last().cloned()
+        else {
             continue;
         };
 
@@ -140,7 +147,9 @@ pub fn tailcall(fun: &mut ir::Func) {
 
         match &block.term {
             // Pattern A: direct return
-            Some(ir::Terminator::Return(Some(v))) if v.0 == dst.id.0 => {
+            Some(ir::Terminator::Return {
+                value: Some(v), ..
+            }) if v.0 == dst.id.0 => {
                 is_tail = true;
             }
 
@@ -148,6 +157,7 @@ pub fn tailcall(fun: &mut ir::Func) {
             Some(ir::Terminator::Jump {
                 id: ir::Id(id),
                 params: jump_params,
+                ..
             }) if *id == last_id as u32
                 && trivial_return
                 && jump_params.len() == 1
@@ -169,7 +179,7 @@ pub fn tailcall(fun: &mut ir::Func) {
         );
 
         block.instructions.pop();
-        block.term = Some(ir::Terminator::Tail { func, args });
+        block.term = Some(ir::Terminator::Tail { func, args, span });
     }
 }
 
@@ -196,8 +206,12 @@ mod tests {
                     },
                     func: ir::Id(42),
                     args: vec![ir::Id(0)],
+                    span: 0,
                 }],
-                term: Some(Terminator::Return(Some(ir::Id(1)))),
+                term: Some(Terminator::Return {
+                    value: Some(ir::Id(1)),
+                    span: 0,
+                }),
             }],
         };
 
@@ -208,7 +222,8 @@ mod tests {
             &fun.blocks[0].term,
             Some(Terminator::Tail {
                 func,
-                args
+                args,
+                ..
             }) if *func == ir::Id(42) && args == &vec![ir::Id(0)]
         ));
     }

@@ -30,11 +30,9 @@ impl From<&TypeExpr<'_>> for PgError {
 
 impl From<Anomaly> for PgError {
     fn from(value: Anomaly) -> Self {
-        // TODO: do some prep in anomaly for finding out which ast node resulted in what bytecode
-        // ranges
         PgError {
             msg: value.as_str().to_string(),
-            start: 0,
+            start: value.span() as usize,
             len: 0,
         }
     }

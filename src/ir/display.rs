@@ -17,12 +17,12 @@ impl Display for Id {
 impl Display for Instr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Instr::Bin { op, dst, lhs, rhs } => {
+            Instr::Bin { op, dst, lhs, rhs, .. } => {
                 write!(f, "%v{} = {:?} %v{}, %v{}", dst, op, lhs.0, rhs.0)?
             }
-            Instr::LoadConst { dst, value } => write!(f, "%v{} = {}", dst, value)?,
+            Instr::LoadConst { dst, value, .. } => write!(f, "%v{} = {}", dst, value)?,
             Instr::Noop => write!(f, "Nop")?,
-            Instr::Call { dst, func, args } => {
+            Instr::Call { dst, func, args, .. } => {
                 write!(f, "%v{} = ", dst)?;
                 write!(f, "Call f{}(", func.0)?;
                 for (i, arg) in args.iter().enumerate() {
@@ -39,6 +39,7 @@ impl Display for Instr<'_> {
                 path,
                 func,
                 args,
+                ..
             } => {
                 write!(f, "%v{} = ", dst)?;
                 write!(f, "Sys {path}.{}(", func.name)?;
@@ -51,7 +52,7 @@ impl Display for Instr<'_> {
                 }
                 write!(f, ")")?;
             }
-            Instr::Cast { dst: value, from } => {
+            Instr::Cast { dst: value, from, .. } => {
                 write!(
                     f,
                     "%v{} = Cast<{}->{}> %v{}",
@@ -66,9 +67,9 @@ impl Display for Instr<'_> {
 impl Display for Terminator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Terminator::Return(Some(id)) => write!(f, "ret %v{}", id.0)?,
-            Terminator::Return(None) => write!(f, "ret")?,
-            Terminator::Jump { id, params } => {
+            Terminator::Return { value: Some(id), .. } => write!(f, "ret %v{}", id.0)?,
+            Terminator::Return { value: None, .. } => write!(f, "ret")?,
+            Terminator::Jump { id, params, .. } => {
                 if params.is_empty() {
                     write!(f, "jmp b{}", id.0)?
                 } else {
@@ -84,7 +85,7 @@ impl Display for Terminator {
                     )?
                 }
             }
-            Terminator::Branch { cond, yes, no } => write!(
+            Terminator::Branch { cond, yes, no, .. } => write!(
                 f,
                 "br %v{}, b{}({}), b{}({})",
                 cond.0,
@@ -100,7 +101,7 @@ impl Display for Terminator {
                     .collect::<Vec<_>>()
                     .join(", "),
             )?,
-            Terminator::Tail { func, args } => {
+            Terminator::Tail { func, args, .. } => {
                 write!(f, "tail f{}(", func.0)?;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {

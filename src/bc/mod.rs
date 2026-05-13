@@ -25,12 +25,21 @@ pub struct Cc<'cc> {
     pub strings: Interner<&'cc str>,
     pub std_fns: Interner<BuiltinFn>,
     pub functions: HashMap<Id, BcFunc<'cc>>,
+    /// `pc_to_span[pc]` is the byte offset into the source of the AST node
+    /// that produced the op at `pc`. Threaded into Vm by Cc::finalize so
+    /// runtime traps can be rendered with file:line:col. Parallel to
+    /// `self.buf`.
+    pub pc_to_span: Vec<u32>,
     /// `block_map[block_id]` is the absolute pc of that block's first op,
     /// after lowering. `u16::MAX` marks blocks that weren't emitted (e.g.,
     /// tombstoned blocks). Block ids are dense per-function so a Vec
     /// indexed by id beats a HashMap on both alloc cost and lookup speed.
     block_map: Vec<u16>,
     regalloc: Ralloc,
+    /// Set once per IR Instr / Terminator before lowering, consumed by
+    /// every `emit` call within that lowering. Saves threading a span
+    /// argument through every `self.buf.push(op)` call site.
+    cur_span: u32,
     /// Scratch buffers reused across [`Cc::cc`] invocations. `live_set` and
     /// `arg_hints` are taken out of `self` via [`std::mem::take`] for the
     /// duration of one compile, then put back with their grown capacity —
@@ -44,12 +53,14 @@ impl<'cc> Cc<'cc> {
     pub fn new() -> Self {
         Self {
             buf: Vec::with_capacity(64),
+            pc_to_span: Vec::with_capacity(64),
             globals: Interner::new(),
             strings: Interner::new(),
             std_fns: Interner::new(),
             functions: HashMap::new(),
             block_map: Vec::new(),
             regalloc: Ralloc::default(),
+            cur_span: 0,
             live_set: Vec::new(),
             arg_hints: Vec::new(),
         }
@@ -67,6 +78,7 @@ impl<'cc> Cc<'cc> {
     fn emit(&mut self, op: Op) -> usize {
         let pc = self.buf.len();
         self.buf.push(op);
+        self.pc_to_span.push(self.cur_span);
         pc
     }
 
@@ -149,10 +161,14 @@ impl<'cc> Cc<'cc> {
 
             pos += 1; // block params row
             for instruction in &block.instructions {
+                self.cur_span = instruction.span();
                 self.instr(&live_set, pos, instruction);
                 pos += 1;
             }
 
+            if let Some(term) = block.term.as_ref() {
+                self.cur_span = term.span();
+            }
             self.term(fun, block.term.as_ref());
             pos += 1; // terminator row
         }
@@ -226,14 +242,14 @@ impl<'cc> Cc<'cc> {
         };
 
         match term {
-            ir::Terminator::Return(id) => {
+            ir::Terminator::Return { value: id, .. } => {
                 if let Some(src_id) = id {
                     let src = self.ensure_register(*src_id);
                     self.emit(Op::Mov { dst: 0, src });
                 }
                 self.emit(Op::Ret);
             }
-            ir::Terminator::Jump { id, params } => {
+            ir::Terminator::Jump { id, params, .. } => {
                 let target = &fun.blocks.get(id.0 as usize).unwrap();
 
                 for (i, param) in params.iter().enumerate() {
@@ -288,7 +304,7 @@ impl<'cc> Cc<'cc> {
                     target: no.0 as u16,
                 });
             }
-            ir::Terminator::Tail { func, args } => {
+            ir::Terminator::Tail { func, args, .. } => {
                 let Some(func) = self.functions.get(func) else {
                     unreachable!();
                 };
@@ -306,6 +322,7 @@ impl<'cc> Cc<'cc> {
             ir::Instr::Cast {
                 dst: TypeId { id, ty: dst_ty },
                 from: TypeId { id: src_id, ty: src_ty },
+                ..
             } => {
                 let dst = self.ensure_register(*id);
                 let src = self.ensure_register(*src_id);
@@ -320,7 +337,7 @@ impl<'cc> Cc<'cc> {
                 };
                 self.emit(op);
             }
-            ir::Instr::LoadConst { dst, value } => {
+            ir::Instr::LoadConst { dst, value, .. } => {
                 let dst = self.ensure_register(dst.id);
                 if let Const::Int(i) = value
                     && *i < i32::MAX as i64
@@ -334,7 +351,7 @@ impl<'cc> Cc<'cc> {
                     self.emit(Op::LoadG { dst, idx });
                 }
             }
-            ir::Instr::Call { dst, func, args } => {
+            ir::Instr::Call { dst, func, args, .. } => {
                 let Some(func) = self.functions.get(func) else {
                     unreachable!();
                 };
@@ -412,7 +429,7 @@ impl<'cc> Cc<'cc> {
                 }
             }
             ir::Instr::Noop {} => {}
-            ir::Instr::Bin { op, dst, lhs, rhs } => {
+            ir::Instr::Bin { op, dst, lhs, rhs, .. } => {
                 let dst = self.ensure_register(dst.id);
                 let lhs = self.ensure_register(*lhs);
                 let rhs = self.ensure_register(*rhs);
@@ -494,10 +511,12 @@ impl<'cc> Cc<'cc> {
             }
             if !matches!(op, Op::Nop) {
                 bc[w] = op;
+                self.pc_to_span[w] = self.pc_to_span[r];
                 w += 1;
             }
         }
         bc.truncate(w);
+        self.pc_to_span.truncate(w);
 
         for f in self.functions.values_mut() {
             f.pc = old_to_new[f.pc] as usize;
@@ -513,6 +532,7 @@ impl<'cc> Cc<'cc> {
             .unwrap_or_default();
 
         v.bytecode = self.buf;
+        v.pc_to_span = self.pc_to_span;
         v.globals = self.globals.into_vec_fn(Value::from);
         v.strings = self.strings.into_vec_fn(|s| s.to_owned().into_boxed_str());
         v.syscalls = self.std_fns.into_vec();

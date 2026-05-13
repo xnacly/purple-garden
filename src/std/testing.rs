@@ -5,6 +5,7 @@ pub fn assert(vm: &mut Vm) -> Result<Value, Anomaly> {
         Err(Anomaly::Msg {
             msg: "test.assert: assertion failed",
             pc: vm.pc,
+            span: vm.span_at(vm.pc),
         })
     } else {
         Ok(Value(0))

@@ -106,6 +106,7 @@ impl<'lower> Lower<'lower> {
                         ty: value.into(),
                     },
                     value,
+                    span: raw.start as u32,
                 });
 
                 Some(id)
@@ -125,6 +126,7 @@ impl<'lower> Lower<'lower> {
             }
             Node::Bin { op, lhs, rhs, id } => {
                 let src_type = self.types[id_from_node(lhs).unwrap()].clone().unwrap();
+                let span = op.start as u32;
 
                 let Some(lhs) = self.lower_node(lhs)? else {
                     unreachable!()
@@ -167,12 +169,13 @@ impl<'lower> Lower<'lower> {
                     _ => todo!("{:#?}", src_type),
                 };
 
-                self.emit(Instr::Bin { op, dst, lhs, rhs });
+                self.emit(Instr::Bin { op, dst, lhs, rhs, span });
 
                 Some(dst_id)
             }
             Node::Unary { op, rhs, .. } => {
                 let inner_ty = self.types[id_from_node(rhs).unwrap()].clone().unwrap();
+                let span = op.start as u32;
                 let Some(rhs_id) = self.lower_node(rhs)? else {
                     unreachable!()
                 };
@@ -192,6 +195,7 @@ impl<'lower> Lower<'lower> {
                                 ty: inner_ty.clone(),
                             },
                             value: zero_const,
+                            span,
                         });
 
                         let dst_id = self.ctx.id_store.new_value();
@@ -203,6 +207,7 @@ impl<'lower> Lower<'lower> {
                             },
                             lhs: zero_id,
                             rhs: rhs_id,
+                            span,
                         });
                         Some(dst_id)
                     }
@@ -277,10 +282,17 @@ impl<'lower> Lower<'lower> {
                     last = self.lower_node(node)?;
                 }
 
+                let ret_span = name.start as u32;
                 if self.ctx.func.ret.is_some() {
-                    self.block_mut(self.ctx.block).term = Some(Terminator::Return(last));
+                    self.block_mut(self.ctx.block).term = Some(Terminator::Return {
+                        value: last,
+                        span: ret_span,
+                    });
                 } else {
-                    self.block_mut(self.ctx.block).term = Some(Terminator::Return(None));
+                    self.block_mut(self.ctx.block).term = Some(Terminator::Return {
+                        value: None,
+                        span: ret_span,
+                    });
                 }
 
                 self.functions.push(std::mem::take(&mut self.ctx.func));
@@ -341,6 +353,7 @@ impl<'lower> Lower<'lower> {
                             path: pkg_name,
                             func: fun,
                             args: a,
+                            span: name.start as u32,
                         });
                     }
                     // user defined function
@@ -366,6 +379,7 @@ impl<'lower> Lower<'lower> {
                             dst,
                             func: target_id,
                             args: a,
+                            span: name.start as u32,
                         });
                     }
                     _ => unreachable!(),
@@ -392,7 +406,7 @@ impl<'lower> Lower<'lower> {
                 }
                 None
             }
-            Node::Cast { lhs, rhs, .. } => {
+            Node::Cast { lhs, rhs, src, .. } => {
                 let src_ty = id_from_node(lhs)
                     .and_then(|aid| self.types.get(aid).cloned().flatten())
                     .expect("typechecker should have typed the cast's lhs");
@@ -413,6 +427,7 @@ impl<'lower> Lower<'lower> {
                         id: from_id,
                         ty: src_ty,
                     },
+                    span: src.start as u32,
                 });
                 Some(dst)
             }
@@ -443,7 +458,8 @@ impl<'lower> Lower<'lower> {
                 // the single join block, merging all value results into a single branch
                 let join = self.new_block();
 
-                for (i, ((_, condition), body)) in cases.iter().enumerate() {
+                for (i, ((case_tok, condition), body)) in cases.iter().enumerate() {
+                    let case_span = case_tok.start as u32;
                     self.switch_to_block(check_blocks[i]);
                     let Some(cond) = self.lower_node(condition)? else {
                         unreachable!(
@@ -462,6 +478,7 @@ impl<'lower> Lower<'lower> {
                         cond,
                         yes: (body_blocks[i], params.clone()),
                         no: (no_target, params.clone()),
+                        span: case_span,
                     });
                     check_block_mut.params = params.clone();
 
@@ -476,11 +493,13 @@ impl<'lower> Lower<'lower> {
                     self.block_mut(body_blocks[i]).term = Some(Terminator::Jump {
                         id: join,
                         params: vec![value],
+                        span: case_span,
                     });
                 }
 
                 // the typechecker checked we have a default case, so this is safe
-                let (_, body) = default;
+                let (default_tok, body) = default;
+                let default_span = default_tok.start as u32;
                 self.switch_to_block(default_block);
                 let mut last = None;
                 for node in body.iter() {
@@ -493,6 +512,7 @@ impl<'lower> Lower<'lower> {
                 default_block.term = Some(Terminator::Jump {
                     id: join,
                     params: vec![last],
+                    span: default_span,
                 });
 
                 self.switch_to_block(join);

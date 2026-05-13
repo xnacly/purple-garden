@@ -73,45 +73,85 @@ pub enum Instr<'i> {
         dst: TypeId,
         lhs: Id,
         rhs: Id,
+        /// Byte offset into the source of the originating AST node. Threaded
+        /// through to `bc::Cc::pc_to_span` so runtime traps render with the
+        /// right `file:line:col`. See `Vm::pc_to_span`.
+        span: u32,
     },
     LoadConst {
         dst: TypeId,
         value: Const<'i>,
+        span: u32,
     },
     Call {
         dst: TypeId,
         func: Id,
         args: Vec<Id>,
+        span: u32,
     },
     Sys {
         dst: TypeId,
         path: &'i str,
         func: &'i pstd::Fn,
         args: Vec<Id>,
+        span: u32,
     },
     Cast {
         dst: TypeId,
         from: TypeId,
+        span: u32,
     },
     Noop,
 }
 
+impl Instr<'_> {
+    /// Source byte offset for this instruction, or 0 for synthetic Noops
+    /// (which never trap, so the missing span doesn't matter).
+    pub fn span(&self) -> u32 {
+        match self {
+            Instr::Bin { span, .. }
+            | Instr::LoadConst { span, .. }
+            | Instr::Call { span, .. }
+            | Instr::Sys { span, .. }
+            | Instr::Cast { span, .. } => *span,
+            Instr::Noop => 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Terminator {
-    Return(Option<Id>),
+    Return {
+        value: Option<Id>,
+        span: u32,
+    },
     Jump {
         id: Id,
         params: Vec<Id>,
+        span: u32,
     },
     Branch {
         cond: Id,
         yes: (Id, Vec<Id>),
         no: (Id, Vec<Id>),
+        span: u32,
     },
     Tail {
         func: Id,
         args: Vec<Id>,
+        span: u32,
     },
+}
+
+impl Terminator {
+    pub fn span(&self) -> u32 {
+        match self {
+            Terminator::Return { span, .. }
+            | Terminator::Jump { span, .. }
+            | Terminator::Branch { span, .. }
+            | Terminator::Tail { span, .. } => *span,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -158,14 +198,15 @@ impl Func<'_> {
 
     fn uses_of_term(term: &Terminator) -> Vec<Id> {
         match term {
-            Terminator::Return(Some(id)) => vec![*id],
-            Terminator::Return(None) => vec![],
+            Terminator::Return { value: Some(id), .. } => vec![*id],
+            Terminator::Return { value: None, .. } => vec![],
             Terminator::Jump { params, .. } => params.clone(),
             Terminator::Tail { args, .. } => args.clone(),
             Terminator::Branch {
                 cond,
                 yes: (_, yes_params),
                 no: (_, no_params),
+                ..
             } => {
                 let mut uses = Vec::with_capacity(1 + yes_params.len() + no_params.len());
                 uses.push(*cond);
@@ -459,18 +500,21 @@ mod tests {
                         Instr::LoadConst {
                             dst: type_id(1),
                             value: Const::Int(1),
+                            span: 0,
                         },
                         Instr::Bin {
                             op: BinOp::IAdd,
                             dst: type_id(2),
                             lhs: Id(0),
                             rhs: Id(1),
+                            span: 0,
                         },
                     ],
                     term: Some(Terminator::Branch {
                         cond: Id(2),
                         yes: (Id(1), vec![Id(0)]),
                         no: (Id(2), vec![Id(1)]),
+                        span: 0,
                     }),
                 },
                 Block {
@@ -478,7 +522,10 @@ mod tests {
                     id: Id(1),
                     params: vec![Id(3)],
                     instructions: vec![],
-                    term: Some(Terminator::Return(Some(Id(3)))),
+                    term: Some(Terminator::Return {
+                        value: Some(Id(3)),
+                        span: 0,
+                    }),
                 },
                 Block {
                     tombstone: false,
@@ -487,8 +534,12 @@ mod tests {
                     instructions: vec![Instr::Cast {
                         dst: type_id(5),
                         from: type_id(4),
+                        span: 0,
                     }],
-                    term: Some(Terminator::Return(Some(Id(5)))),
+                    term: Some(Terminator::Return {
+                        value: Some(Id(5)),
+                        span: 0,
+                    }),
                 },
             ],
         };
