@@ -23,6 +23,13 @@ opt-level = 3
 panic = "abort"
 debug = true
 
+[profile.profiling]
+inherits = "release"
+lto = false
+codegen-units = 16
+debug = true
+strip = false
+
 [[bench]]
 name = "dispatch"
 harness = false
