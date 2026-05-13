@@ -18,6 +18,28 @@ pub struct BcFunc<'fun> {
     pub pc: usize,
 }
 
+/// Decoupled debug info; necessary to render runtime errors with
+/// source locations. Lives separately from [`Vm`] so the runtime hot
+/// path doesn't carry a field it never touches; the cost of supporting
+/// `file:line:col` on traps is paid only at trap-rendering time, in
+/// whoever holds the `DebugInfo` (currently `main.rs`).
+#[derive(Debug)]
+pub struct DebugInfo {
+    /// `pc_to_span[pc]` is the byte offset into the source of the AST
+    /// node that produced the op at `pc`. Boxed slice (16 bytes) because
+    /// it never grows after `Cc::finalize` hands it over.
+    pc_to_span: Box<[u32]>,
+}
+
+impl DebugInfo {
+    /// Source byte offset for `pc`, or 0 if `pc` is out of range (e.g.
+    /// a test that hand-rolls a Vm and never compiled through `Cc`).
+    #[inline]
+    pub fn span_at(&self, pc: usize) -> u32 {
+        self.pc_to_span.get(pc).copied().unwrap_or(0)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Cc<'cc> {
     pub buf: Vec<Op>,
@@ -327,7 +349,11 @@ impl<'cc> Cc<'cc> {
         match i {
             ir::Instr::Cast {
                 dst: TypeId { id, ty: dst_ty },
-                from: TypeId { id: src_id, ty: src_ty },
+                from:
+                    TypeId {
+                        id: src_id,
+                        ty: src_ty,
+                    },
                 ..
             } => {
                 let dst = self.ensure_register(*id);
@@ -357,7 +383,9 @@ impl<'cc> Cc<'cc> {
                     self.emit(Op::LoadG { dst, idx });
                 }
             }
-            ir::Instr::Call { dst, func, args, .. } => {
+            ir::Instr::Call {
+                dst, func, args, ..
+            } => {
                 let Some(func) = self.functions.get(func) else {
                     unreachable!();
                 };
@@ -435,7 +463,9 @@ impl<'cc> Cc<'cc> {
                 }
             }
             ir::Instr::Noop {} => {}
-            ir::Instr::Bin { op, dst, lhs, rhs, .. } => {
+            ir::Instr::Bin {
+                op, dst, lhs, rhs, ..
+            } => {
                 let dst = self.ensure_register(dst.id);
                 let lhs = self.ensure_register(*lhs);
                 let rhs = self.ensure_register(*rhs);
@@ -529,7 +559,7 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    pub fn finalize(self, config: &'cc Config) -> Vm<'cc> {
+    pub fn finalize(self, config: &'cc Config) -> (Vm<'cc>, DebugInfo) {
         let mut v = Vm::new(config);
         v.pc = self
             .functions
@@ -538,11 +568,14 @@ impl<'cc> Cc<'cc> {
             .unwrap_or_default();
 
         v.bytecode = self.buf;
-        v.pc_to_span = self.pc_to_span;
         v.globals = self.globals.into_vec_fn(Value::from);
         v.strings = self.strings.into_vec_fn(|s| s.to_owned().into_boxed_str());
         v.syscalls = self.std_fns.into_vec();
-        v
+
+        let debug = DebugInfo {
+            pc_to_span: self.pc_to_span.into_boxed_slice(),
+        };
+        (v, debug)
     }
 
     /// map pc's to function definitions

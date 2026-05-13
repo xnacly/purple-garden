@@ -180,7 +180,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    let mut vm = cc.finalize(&conf);
+    let (mut vm, debug) = cc.finalize(&conf);
 
     if conf.disassemble {
         bc::dis::Disassembler::new(&vm.bytecode, ctx.unwrap()).disassemble();
@@ -193,7 +193,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = vm.run() {
         println!(
             "{}",
-            Into::<PgError>::into(e).render(input_source, input.as_bytes())
+            PgError::from_anomaly(e, &debug).render(input_source, input.as_bytes())
         );
 
         if conf.backtrace {

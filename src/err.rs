@@ -1,4 +1,4 @@
-use crate::{ast::TypeExpr, lex::Token, vm::Anomaly};
+use crate::{ast::TypeExpr, bc::DebugInfo, lex::Token, vm::Anomaly};
 use std::fmt::Write;
 
 #[derive(Debug)]
@@ -28,11 +28,15 @@ impl From<&TypeExpr<'_>> for PgError {
     }
 }
 
-impl From<Anomaly> for PgError {
-    fn from(value: Anomaly) -> Self {
+impl PgError {
+    /// Build a `PgError` from a VM trap. The runtime hands back the trap
+    /// `pc` only; the source byte offset is resolved here by consulting
+    /// the compile-time `DebugInfo`. Keeps `Vm` free of source-info
+    /// bookkeeping (the runtime hot path never reads `DebugInfo`).
+    pub fn from_anomaly(anomaly: Anomaly, debug: &DebugInfo) -> Self {
         PgError {
-            msg: value.as_str().to_string(),
-            start: value.span() as usize,
+            msg: anomaly.as_str().to_string(),
+            start: debug.span_at(anomaly.pc()) as usize,
             len: 0,
         }
     }

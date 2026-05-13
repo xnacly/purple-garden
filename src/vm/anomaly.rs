@@ -1,9 +1,13 @@
-/// Anomaly is a user error bubbling up in the virtual machine
+/// Anomaly is a user error bubbling up in the virtual machine.
+///
+/// Variants carry the trap `pc` only. Source-location resolution
+/// happens at error-rendering time via `bc::DebugInfo::span_at(pc)`,
+/// keeping the runtime hot path free of source-info bookkeeping.
 #[derive(Debug)]
 pub enum Anomaly {
-    DivisionByZero { pc: usize, span: u32 },
-    InvalidSyscall { pc: usize, span: u32 },
-    Msg { msg: &'static str, pc: usize, span: u32 },
+    DivisionByZero { pc: usize },
+    InvalidSyscall { pc: usize },
+    Msg { msg: &'static str, pc: usize },
 }
 
 impl Anomaly {
@@ -15,13 +19,13 @@ impl Anomaly {
         }
     }
 
-    /// Source byte offset of the originating AST node; threaded by
-    /// `bc::Cc::pc_to_span` and stamped onto the anomaly at raise time.
-    pub fn span(&self) -> u32 {
+    /// PC at which the trap fired. Pair with `bc::DebugInfo::span_at`
+    /// to recover the source byte offset.
+    pub fn pc(&self) -> usize {
         match self {
-            Anomaly::DivisionByZero { span, .. }
-            | Anomaly::InvalidSyscall { span, .. }
-            | Anomaly::Msg { span, .. } => *span,
+            Anomaly::DivisionByZero { pc }
+            | Anomaly::InvalidSyscall { pc }
+            | Anomaly::Msg { pc, .. } => *pc,
         }
     }
 }
