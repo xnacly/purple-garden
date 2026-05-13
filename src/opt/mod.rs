@@ -43,5 +43,6 @@ pub fn bc(bc: &mut [Op]) {
         let window = &mut bc[i..i + WINDOW_SIZE];
         bc::self_move(window);
         bc::mov_merge(window);
+        bc::jmp_next(i, window);
     }
 }
