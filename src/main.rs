@@ -166,6 +166,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     if conf.opt >= 1 {
         opt::bc(&mut cc.buf);
+        cc.compact_nops();
     }
 
     let function_table = if conf.backtrace {
