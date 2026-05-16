@@ -1,0 +1,12 @@
+# Tail-recursive factorial. After opt::ir's tailcall pass this becomes
+# a hot loop that exercises arg-shuffle + the i64 overflow point.
+import "testing"
+
+fn factorial(n:int a:int) int {
+    match {
+        n == 0 { a }
+        { factorial(n-1 n*a) }
+    }
+}
+
+testing.assert(factorial(20 1) == 2432902008176640000)

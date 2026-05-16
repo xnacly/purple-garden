@@ -1,7 +1,6 @@
 //! copied and applied from https://github.com/xnacly/stinkarm/blob/master/src/mem/mmap.rs
 
 const MMAP_SYSCALL: i64 = 9;
-const MPROTECT_SYSCALL: i64 = 10;
 const MUNMAP_SYSCALL: i64 = 11;
 
 // Not an enum, since NONE, READ, WRITE and EXEC arent mutually exclusive

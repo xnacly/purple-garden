@@ -1,0 +1,26 @@
+# Mandelbrot escape counter along a horizontal slice.
+# Mixed double arithmetic + integer loop + branchy comparisons.
+# Each pixel iterates until |z|^2 > 4 or `max` reached, then we sum.
+import "testing"
+
+fn mandel_iter(zr:double zi:double cr:double ci:double i:int max:int) int {
+    match {
+        i == max { max }
+        zr*zr + zi*zi > 4.0 { i }
+        { mandel_iter(zr*zr - zi*zi + cr  2.0*zr*zi + ci  cr  ci  i+1  max) }
+    }
+}
+
+fn x_to_cr(i:int) double {
+    (i as double) / 100.0 - 1.5
+}
+
+fn slice_sum(i:int n:int max:int acc:int) int {
+    match {
+        i == n { acc }
+        { slice_sum(i+1 n max acc + mandel_iter(0.0 0.0 x_to_cr(i) 0.0 0 max)) }
+    }
+}
+
+# 300 samples across the real axis from -1.5 to 1.5, 50 iters max.
+testing.assert(slice_sum(0 300 50 0) > 0)

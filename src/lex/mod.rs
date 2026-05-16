@@ -1,61 +1,94 @@
+mod byte_search;
 mod tok;
 
 use crate::err::PgError;
+use byte_search::find_byte;
 
 pub use tok::{Token, Type};
+
+const IDENT_CONT: u8 = 1 << 0;
+const IDENT_START: u8 = 1 << 1;
+const DIGIT: u8 = 1 << 2;
+const NUM_CONT: u8 = 1 << 3;
+const WS: u8 = 1 << 4;
+
+const fn build_class_table() -> [u8; 256] {
+    let mut t = [0u8; 256];
+    let mut c: usize = 0;
+    while c < 256 {
+        let b = c as u8;
+        let mut v: u8 = 0;
+        let alpha = (b >= b'a' && b <= b'z') || (b >= b'A' && b <= b'Z');
+        let digit = b >= b'0' && b <= b'9';
+        if alpha || digit || b == b'_' {
+            v |= IDENT_CONT;
+        }
+        if alpha || b == b'_' {
+            v |= IDENT_START;
+        }
+        if digit {
+            v |= DIGIT;
+        }
+        if digit || b == b'.' {
+            v |= NUM_CONT;
+        }
+        if b == b' ' || b == b'\t' || b == b'\r' || b == b'\n' {
+            v |= WS;
+        }
+        t[c] = v;
+        c += 1;
+    }
+    t
+}
+
+const CLASS: [u8; 256] = build_class_table();
+
+#[inline(always)]
+fn class_of(b: u8) -> u8 {
+    CLASS[b as usize]
+}
 
 #[derive(Debug)]
 pub struct Lexer<'l> {
     input: &'l [u8],
     pos: usize,
-    line: usize,
-    col: usize,
+}
+
+#[inline]
+fn as_keyword_type(inner: &str) -> Option<Type<'_>> {
+    Some(match inner {
+        "import" => Type::Import,
+        "as" => Type::As,
+        "true" => Type::True,
+        "false" => Type::False,
+        "let" => Type::Let,
+        "fn" => Type::Fn,
+        "match" => Type::Match,
+        "str" => Type::Str,
+        "int" => Type::Int,
+        "double" => Type::Double,
+        "bool" => Type::Bool,
+        "void" => Type::Void,
+        _ => return None,
+    })
 }
 
 impl<'l> Lexer<'l> {
     pub fn new(input: &'l [u8]) -> Self {
-        Self {
-            input,
-            pos: 0,
-            line: 0,
-            col: 0,
-        }
+        Self { input, pos: 0 }
     }
 
     #[inline]
-    fn make_tok(&self, t: Type<'l>) -> Token<'l> {
-        Token {
-            line: self.line,
-            col: self.col,
-            t,
-        }
+    fn make_tok(start: usize, t: Type<'l>) -> Token<'l> {
+        Token { start, t }
     }
 
     fn make_err(&self, msg: impl Into<String>, start: usize) -> PgError {
         PgError {
             msg: msg.into(),
-            line: self.line,
             start,
-            len: self.col.saturating_sub(start),
+            len: self.pos.saturating_sub(start),
         }
-    }
-
-    #[inline]
-    fn advance(&mut self) {
-        if let Some(b) = self.cur() {
-            self.pos += 1;
-            if b == b'\n' {
-                self.line += 1;
-                self.col = 0;
-            } else {
-                self.col += 1;
-            }
-        }
-    }
-
-    #[inline]
-    fn cur(&self) -> Option<u8> {
-        self.input.get(self.pos).copied()
     }
 
     #[inline]
@@ -63,147 +96,130 @@ impl<'l> Lexer<'l> {
         self.input.get(self.pos + 1).copied()
     }
 
-    #[inline]
-    fn at_end(&mut self) -> bool {
-        self.pos >= self.input.len()
-    }
-
-    #[inline]
-    fn as_keyword(&self, inner: &'l str) -> Option<Token<'l>> {
-        let as_type = Some(match inner {
-            "import" => Type::Import,
-            "as" => Type::As,
-            "true" => Type::True,
-            "false" => Type::False,
-            "let" => Type::Let,
-            "fn" => Type::Fn,
-            "match" => Type::Match,
-            "str" => Type::Str,
-            "int" => Type::Int,
-            "double" => Type::Double,
-            "bool" => Type::Bool,
-            "void" => Type::Void,
-            _ => return None,
-        })?;
-
-        Some(self.make_tok(as_type))
-    }
-
     /// skip whitespace and comments
     fn skip_whitespace(&mut self) {
+        let bytes = self.input;
+        let mut p = self.pos;
         loop {
-            while matches!(self.cur(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
-                self.advance();
+            while p < bytes.len() && class_of(bytes[p]) & WS != 0 {
+                p += 1;
             }
-
-            if self.cur() == Some(b'#') {
-                self.advance();
-                while !self.at_end() && self.cur() != Some(b'\n') {
-                    self.advance();
-                }
+            if p < bytes.len() && bytes[p] == b'#' {
+                let end = find_byte(b'\n', &bytes[p..]).map_or(bytes.len(), |i| p + i);
+                p = end;
                 continue;
             }
-
             break;
         }
+        self.pos = p;
     }
 
     pub fn one(&mut self) -> Result<Token<'l>, PgError> {
         self.skip_whitespace();
 
-        if self.at_end() {
-            return Ok(self.make_tok(Type::Eof));
+        let start = self.pos;
+
+        if start >= self.input.len() {
+            return Ok(Self::make_tok(start, Type::Eof));
         }
 
-        let t = match self
-            .cur()
-            .ok_or_else(|| self.make_err("Unexpected end of file", self.col))?
-        {
-            b'(' => self.make_tok(Type::BraceLeft),
-            b')' => self.make_tok(Type::BraceRight),
-            b'+' => self.make_tok(Type::Plus),
-            b'-' => self.make_tok(Type::Minus),
-            b'*' => self.make_tok(Type::Asteriks),
-            b'/' => self.make_tok(Type::Slash),
+        let t = match self.input[start] {
+            b'(' => Self::make_tok(start, Type::BraceLeft),
+            b')' => Self::make_tok(start, Type::BraceRight),
+            b'+' => Self::make_tok(start, Type::Plus),
+            b'-' => Self::make_tok(start, Type::Minus),
+            b'*' => Self::make_tok(start, Type::Asteriks),
+            b'/' => Self::make_tok(start, Type::Slash),
             b'=' if matches!(self.peek(), Some(b'=')) => {
-                self.advance();
-                self.make_tok(Type::DoubleEqual)
+                self.pos += 1;
+                Self::make_tok(start, Type::DoubleEqual)
             }
-            b'=' => self.make_tok(Type::Equal),
-            b'<' => self.make_tok(Type::LessThan),
-            b'>' => self.make_tok(Type::GreaterThan),
+            b'=' => Self::make_tok(start, Type::Equal),
+            b'<' => Self::make_tok(start, Type::LessThan),
+            b'>' => Self::make_tok(start, Type::GreaterThan),
             b'!' if matches!(self.peek(), Some(b'=')) => {
-                self.advance();
-                self.make_tok(Type::NotEqual)
+                self.pos += 1;
+                Self::make_tok(start, Type::NotEqual)
             }
-            b'!' => self.make_tok(Type::Exclaim),
-            b'?' => self.make_tok(Type::Question),
-            b'.' => self.make_tok(Type::Dot),
-            b':' => self.make_tok(Type::Colon),
-            b'[' => self.make_tok(Type::BraketLeft),
-            b']' => self.make_tok(Type::BraketRight),
-            b'{' => self.make_tok(Type::CurlyLeft),
-            b'}' => self.make_tok(Type::CurlyRight),
+            b'!' => Self::make_tok(start, Type::Exclaim),
+            b'?' => Self::make_tok(start, Type::Question),
+            b'.' => Self::make_tok(start, Type::Dot),
+            b':' => Self::make_tok(start, Type::Colon),
+            b'[' => Self::make_tok(start, Type::BraketLeft),
+            b']' => Self::make_tok(start, Type::BraketRight),
+            b'{' => Self::make_tok(start, Type::CurlyLeft),
+            b'}' => Self::make_tok(start, Type::CurlyRight),
             b'"' => {
-                self.advance();
-                let start = self.pos;
+                self.pos += 1;
+                let body_start = self.pos;
+                let bytes = self.input;
 
-                while !self.at_end() && !matches!(self.cur(), Some(b'"')) {
-                    // TODO: deal with escapes here
-                    self.advance();
-                }
+                let end = match find_byte(b'"', &bytes[body_start..]) {
+                    Some(i) => body_start + i,
+                    None => {
+                        self.pos = bytes.len();
+                        return Err(self.make_err("Unterminated string", start));
+                    }
+                };
 
-                if self.cur() != Some(b'"') {
-                    return Err(self.make_err("Unterminated string", self.col));
-                }
+                self.pos = end;
 
-                self.make_tok(Type::S(
-                    str::from_utf8(&self.input[start..self.pos])
-                        .map_err(|_| self.make_err("Invalid ut8 input", self.col))?,
-                ))
+                Self::make_tok(
+                    start,
+                    Type::S(
+                        str::from_utf8(&bytes[body_start..end])
+                            .map_err(|_| self.make_err("Invalid ut8 input", start))?,
+                    ),
+                )
             }
-            c if c.is_ascii_alphabetic() || c == b'_' => {
-                let start = self.pos;
-                self.advance();
-                while self
-                    .cur()
-                    .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
-                {
-                    self.advance();
+            c if class_of(c) & IDENT_START != 0 => {
+                let bytes = self.input;
+                let mut p = start + 1;
+                while p < bytes.len() && class_of(bytes[p]) & IDENT_CONT != 0 {
+                    p += 1;
                 }
+                self.pos = p;
 
-                let inner = str::from_utf8(&self.input[start..self.pos])
-                    .map_err(|_| self.make_err("Invalid ut8 input", self.col))?;
+                // SAFETY: only bytes accepted by IDENT_START/IDENT_CONT are
+                // included, all of which are ASCII (< 128) and therefore valid
+                // UTF-8 on their own.
+                let inner = unsafe { str::from_utf8_unchecked(&bytes[start..p]) };
 
-                return Ok(match self.as_keyword(inner) {
-                    Some(as_keyword) => as_keyword,
-                    None => self.make_tok(Type::Ident(inner)),
-                });
+                let t = as_keyword_type(inner).unwrap_or(Type::Ident(inner));
+                return Ok(Self::make_tok(start, t));
             }
-            c if c.is_ascii_digit() => {
-                let start = self.pos;
+            c if class_of(c) & DIGIT != 0 => {
+                let bytes = self.input;
+                let mut p = start + 1;
                 let mut is_double = false;
-                while self.cur().is_some_and(|b| b.is_ascii_digit() || b == b'.') {
-                    is_double = is_double || self.cur() == Some(b'.');
-                    self.advance();
+                while p < bytes.len() {
+                    let b = bytes[p];
+                    if class_of(b) & NUM_CONT == 0 {
+                        break;
+                    }
+                    is_double |= b == b'.';
+                    p += 1;
                 }
+                self.pos = p;
 
-                let inner = str::from_utf8(&self.input[start..self.pos])
-                    .map_err(|_| self.make_err("Invalid ut8 input", self.col))?;
+                // SAFETY: only ASCII digits and '.' are accepted, valid UTF-8.
+                let inner = unsafe { str::from_utf8_unchecked(&bytes[start..p]) };
 
-                return Ok(if is_double {
-                    self.make_tok(Type::D(inner))
-                } else {
-                    self.make_tok(Type::I(inner))
-                });
+                return Ok(Self::make_tok(
+                    start,
+                    if is_double {
+                        Type::D(inner)
+                    } else {
+                        Type::I(inner)
+                    },
+                ));
             }
             c => {
-                return Err(self.make_err(format!("Unknown character `{}`", c as char), self.col));
+                return Err(self.make_err(format!("Unknown character `{}`", c as char), start));
             }
         };
 
-        self.advance();
-
+        self.pos += 1;
         Ok(t)
     }
 
@@ -401,14 +417,13 @@ mod tests {
     fn unknown_character_error_carries_position() {
         let mut l = Lexer::new(b"  $");
         let err = l.one().expect_err("expected lexer error on `$`");
-        assert_eq!(err.line, 0);
-        assert_eq!(err.start, 2, "column of the offending character");
+        assert_eq!(err.start, 2, "byte offset of the offending character");
     }
 
     #[test]
     fn error_after_newline_does_not_underflow() {
         let mut l = Lexer::new(b"\n$");
         let err = l.one().expect_err("expected lexer error on `$`");
-        assert_eq!(err.line, 1);
+        assert_eq!(err.start, 1, "byte offset of the offending character");
     }
 }

@@ -19,8 +19,15 @@ pub mod parser;
 pub mod std;
 pub mod vm;
 
-/// Create the purple garden vm from the given input.
-pub fn new<'e>(config: &'e config::Config, input: &'e [u8]) -> Result<Vm<'e>, PgError> {
+/// Create the purple garden vm from the given input. Returns the Vm
+/// alongside the compile-time `DebugInfo` needed to render runtime
+/// traps with `file:line:col`. Callers that don't care about
+/// diagnostics (benches, internal tests) can ignore the second tuple
+/// element.
+pub fn new<'e>(
+    config: &'e config::Config,
+    input: &'e [u8],
+) -> Result<(Vm<'e>, bc::DebugInfo), PgError> {
     let lexer = lex::Lexer::new(input);
     let ast = parser::Parser::new(lexer)?.parse()?;
 
@@ -30,9 +37,10 @@ pub fn new<'e>(config: &'e config::Config, input: &'e [u8]) -> Result<Vm<'e>, Pg
     }
 
     let mut cc = bc::Cc::new();
-    cc.compile(&config, &ir)?;
+    cc.compile(config, &ir)?;
     if config.opt >= 1 {
         opt::bc(&mut cc.buf);
+        cc.compact_nops();
     }
 
     Ok(cc.finalize(config))

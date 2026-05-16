@@ -1,8 +1,10 @@
-use crate::{ir::Id, vm};
-use std::collections::HashMap;
+use crate::vm;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Location {
+    /// Slot has no interval (id is unused, e.g., a tombstoned block's
+    /// param). Reading these from `Ralloc::map` is a compiler bug.
+    Unassigned,
     Reg(u8),
     Stack,
 }
@@ -13,6 +15,10 @@ struct Interval {
     start: u32,
     end: u32,
     reg: Option<u8>,
+    /// Soft hint from `ir::Func::arg_hints`: pick this register when
+    /// allocating this interval *if* it's currently free. Never blocks
+    /// correctness; falls back to standard LIFO if denied.
+    preferred: Option<u8>,
 }
 
 /// Ralloc is a dumb linear scan register allocator for the purple garden virtual machine.
@@ -28,55 +34,123 @@ struct Interval {
 #[derive(Clone, Debug, Default)]
 pub struct Ralloc {
     intervals: Vec<Interval>,
-    pub map: HashMap<u32, Location>,
+    /// Per-SSA location, indexed by id. Entries for ids without a live
+    /// interval stay [`Location::Unassigned`].
+    pub map: Vec<Location>,
+    /// Running active-set scratch buffer for [`Ralloc::allocate`]. Hoisted
+    /// onto the struct so consecutive function compiles reuse the same
+    /// allocation.
+    ///
+    /// Stores `(end, reg)` only — those are the two fields `retain`
+    /// reads. Cuts per-allocation clones from 24 bytes (full `Interval`)
+    /// to 5 bytes and skips the `interval.clone()` previously needed on
+    /// every successful allocation.
+    active: Vec<(u32, u8)>,
 }
 
 impl Ralloc {
-    pub fn new(live_set: HashMap<Id, (Id, Id)>) -> Self {
-        let mut intervals: Vec<Interval> = live_set
-            .into_iter()
-            .map(|(Id(v), (Id(start), Id(end)))| Interval {
-                v,
-                start,
-                end,
-                reg: None,
-            })
-            .collect();
+    /// Refill `intervals`/`map` for a new function and run the linear scan.
+    /// Reuses the existing Vec capacities — no allocation when the new
+    /// function fits within the previous high-water mark.
+    ///
+    /// `live_set[id]` is the (def_pos, last_use_pos) for SSA id; entries
+    /// with `def_pos == u32::MAX` are unused. `hints[id]` is the optional
+    /// preferred register from [`ir::Func::arg_hints_into`].
+    pub fn rebuild(&mut self, live_set: &[(u32, u32)], hints: &[Option<u8>]) {
+        self.intervals.clear();
+        self.intervals.extend(
+            live_set
+                .iter()
+                .enumerate()
+                .filter_map(|(v, &(start, end))| {
+                    if start == u32::MAX {
+                        return None;
+                    }
+                    let v = v as u32;
+                    Some(Interval {
+                        v,
+                        start,
+                        end,
+                        reg: None,
+                        preferred: hints.get(v as usize).copied().flatten(),
+                    })
+                }),
+        );
+        self.intervals.sort_by_key(|i| (i.start, i.v));
 
-        intervals.sort_by_key(|i| (i.start, i.v));
+        self.map.clear();
+        self.map.resize(live_set.len(), Location::Unassigned);
 
-        let mut ralloc = Self {
-            intervals,
-            map: HashMap::new(),
-        };
-
-        ralloc.allocate();
-        ralloc
+        self.allocate();
     }
 
     fn allocate(&mut self) {
-        let mut active: Vec<Interval> = Vec::new();
+        // Free-register set as a u64 bitmap: bit `i` set means r{i} is free.
+        // Replaces the prior `Vec<u8>`: zero heap allocation, all ops are
+        // single-instruction bit-twiddling, hint-availability check is O(1)
+        // instead of O(REGISTER_COUNT).
+        const _: () = assert!(
+            vm::REGISTER_COUNT <= 64,
+            "free-reg bitmap fits 64 regs; bump to u128 if REGISTER_COUNT grows"
+        );
 
-        let mut free_regs: Vec<u8> = (0..vm::REGISTER_COUNT as u8).rev().collect();
+        // All REGISTER_COUNT low bits set. For REGISTER_COUNT == 64 this
+        // is `!0u64`; the shift handles smaller counts cleanly.
+        let mut free: u64 = if vm::REGISTER_COUNT == 64 {
+            !0u64
+        } else {
+            (1u64 << vm::REGISTER_COUNT) - 1
+        };
 
-        for interval in &mut self.intervals {
-            active.retain(|i| {
-                if i.end < interval.start {
-                    if let Some(r) = i.reg {
-                        free_regs.push(r);
-                    }
+        // Split-borrow so we can iterate `intervals` while also mutating
+        // `map` and `active` — they're disjoint fields of self.
+        let Self {
+            intervals,
+            map,
+            active,
+        } = self;
+        active.clear();
+
+        for interval in intervals.iter_mut() {
+            active.retain(|&(end, reg)| {
+                if end < interval.start {
+                    free |= 1u64 << reg;
                     false
                 } else {
                     true
                 }
             });
 
-            if let Some(reg) = free_regs.pop() {
+            // Soft hint: take the preferred reg iff its bit is set; else
+            // grab the lowest-numbered free reg (preserves the LIFO order
+            // the old Vec gave us. top of stack was r0).
+            let reg = interval
+                .preferred
+                .and_then(|p| {
+                    let mask = 1u64 << p;
+                    if free & mask != 0 {
+                        free &= !mask;
+                        Some(p)
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    let r = free.trailing_zeros();
+                    if (r as usize) < vm::REGISTER_COUNT {
+                        free &= !(1u64 << r);
+                        Some(r as u8)
+                    } else {
+                        None
+                    }
+                });
+
+            if let Some(reg) = reg {
                 interval.reg = Some(reg);
-                active.push(interval.clone());
-                self.map.insert(interval.v, Location::Reg(reg));
+                active.push((interval.end, reg));
+                map[interval.v as usize] = Location::Reg(reg);
             } else {
-                self.map.insert(interval.v, Location::Stack);
+                map[interval.v as usize] = Location::Stack;
             }
         }
     }
@@ -84,26 +158,25 @@ impl Ralloc {
 
 #[cfg(test)]
 mod regalloc_test {
-    use crate::{
-        bc::regalloc::{Location, Ralloc},
-        ir::Id,
-    };
+    use crate::bc::regalloc::{Location, Ralloc};
+
+    fn build(intervals: &[(u32, (u32, u32))]) -> Vec<(u32, u32)> {
+        let max = intervals.iter().map(|(i, _)| *i).max().unwrap_or(0);
+        let mut v = vec![(u32::MAX, 0); (max + 1) as usize];
+        for (id, range) in intervals {
+            v[*id as usize] = *range;
+        }
+        v
+    }
 
     #[test]
     fn non_overlapping_reuses_registers() {
-        let mut live_set = std::collections::HashMap::new();
+        let live_set = build(&[(0, (0, 2)), (1, (3, 5))]);
 
-        // v0: [0, 2]
-        live_set.insert(Id(0), (Id(0), Id(2)));
-        // v1: [3, 5]
-        live_set.insert(Id(1), (Id(3), Id(5)));
+        let mut ralloc = Ralloc::default();
+        ralloc.rebuild(&live_set, &[]);
 
-        let ralloc = Ralloc::new(live_set);
-
-        let loc0 = ralloc.map.get(&0).unwrap();
-        let loc1 = ralloc.map.get(&1).unwrap();
-
-        match (loc0, loc1) {
+        match (ralloc.map[0], ralloc.map[1]) {
             (Location::Reg(r0), Location::Reg(r1)) => {
                 // should reuse same register
                 assert_eq!(r0, r1);
@@ -114,19 +187,13 @@ mod regalloc_test {
 
     #[test]
     fn overlapping_requires_different_registers() {
-        let mut live_set = std::collections::HashMap::new();
+        // v0: [0, 5], v1: [2, 6] overlaps with v0
+        let live_set = build(&[(0, (0, 5)), (1, (2, 6))]);
 
-        // v0: [0, 5]
-        live_set.insert(Id(0), (Id(0), Id(5)));
-        // v1: [2, 6] overlaps with v0
-        live_set.insert(Id(1), (Id(2), Id(6)));
+        let mut ralloc = Ralloc::default();
+        ralloc.rebuild(&live_set, &[]);
 
-        let ralloc = Ralloc::new(live_set);
-
-        let loc0 = ralloc.map.get(&0).unwrap();
-        let loc1 = ralloc.map.get(&1).unwrap();
-
-        match (loc0, loc1) {
+        match (ralloc.map[0], ralloc.map[1]) {
             (Location::Reg(r0), Location::Reg(r1)) => {
                 assert_ne!(r0, r1, "overlapping intervals must use different registers");
             }
@@ -136,24 +203,22 @@ mod regalloc_test {
 
     #[test]
     fn spilling_when_registers_exhausted() {
-        let mut live_set = std::collections::HashMap::new();
-
         let reg_count = crate::vm::REGISTER_COUNT;
 
         // Create more intervals than registers
-        for i in 0..reg_count + 2 {
-            live_set.insert(Id(i as u32), (Id(0), Id(10)));
-        }
+        let live_set: Vec<(u32, u32)> = (0..reg_count + 2).map(|_| (0u32, 10u32)).collect();
 
-        let ralloc = Ralloc::new(live_set);
+        let mut ralloc = Ralloc::default();
+        ralloc.rebuild(&live_set, &[]);
 
         let mut reg_assigned = 0;
         let mut spilled = 0;
 
         for v in 0..(reg_count + 2) {
-            match ralloc.map.get(&(v as u32)).unwrap() {
+            match ralloc.map[v] {
                 Location::Reg(_) => reg_assigned += 1,
                 Location::Stack => spilled += 1,
+                Location::Unassigned => panic!("missing allocation for value {v}"),
             }
         }
 
@@ -166,41 +231,32 @@ mod regalloc_test {
 
     #[test]
     fn all_values_assigned() {
-        let mut live_set = std::collections::HashMap::new();
+        let live_set: Vec<(u32, u32)> = (0..10u32).map(|i| (i, i + 1)).collect();
 
-        for i in 0..10 {
-            live_set.insert(Id(i), (Id(i), Id(i + 1)));
-        }
-
-        let ralloc = Ralloc::new(live_set);
+        let mut ralloc = Ralloc::default();
+        ralloc.rebuild(&live_set, &[]);
 
         for i in 0..10 {
             assert!(
-                ralloc.map.contains_key(&i),
-                "missing allocation for value {}",
-                i
+                !matches!(ralloc.map[i], Location::Unassigned),
+                "missing allocation for value {i}"
             );
         }
     }
 
     #[test]
     fn no_register_conflicts() {
-        let mut live_set = std::collections::HashMap::new();
-
         // overlapping chain
-        live_set.insert(Id(0), (Id(0), Id(10)));
-        live_set.insert(Id(1), (Id(1), Id(9)));
-        live_set.insert(Id(2), (Id(2), Id(8)));
-        live_set.insert(Id(3), (Id(3), Id(7)));
+        let live_set = build(&[(0, (0, 10)), (1, (1, 9)), (2, (2, 8)), (3, (3, 7))]);
 
-        let ralloc = Ralloc::new(live_set);
+        let mut ralloc = Ralloc::default();
+        ralloc.rebuild(&live_set, &[]);
 
         let mut active: Vec<(u32, u32, u8)> = vec![];
 
         for (v, (start, end)) in &[(0u32, (0u32, 10u32)), (1, (1, 9)), (2, (2, 8)), (3, (3, 7))] {
-            let loc = ralloc.map.get(v).unwrap();
-            if let Location::Reg(r) = loc {
-                active.push((*start, *end, *r));
+            if let Location::Reg(r) = ralloc.map[*v as usize] {
+                active.push((*start, *end, r));
             }
         }
 

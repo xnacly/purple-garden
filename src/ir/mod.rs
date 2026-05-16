@@ -24,8 +24,6 @@ pub mod lower;
 pub mod ptype;
 pub mod typecheck;
 
-use std::collections::{HashMap, HashSet};
-
 use crate::ir::ptype::Type;
 use crate::std as pstd;
 
@@ -43,6 +41,22 @@ pub enum Const<'c> {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Id(pub u32);
+
+/// Index into [`Func::params_pool`]. Stands in wherever a block-param
+/// list used to live by value (`Vec<Id>`): in `Block.params` and in
+/// every `Terminator` arm that carries successor params.
+///
+/// `Copy + 4 bytes`, so sharing a list across many sites (e.g. the four
+/// sinks per match case in `Lower::lower_node`'s `Node::Match` arm) is
+/// a `u32` copy. The actual `[Id]` data lives once in the function-level
+/// pool; see [`Func::params_pool`] for the full discipline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ParamsId(pub u32);
+
+/// Sentinel for "this block has no params yet". Always slot 0 of every
+/// function's pool, seeded by [`Func::new`]. Lets `Lower::new_block`
+/// hand out a valid id at construction time before real params are known.
+pub const EMPTY_PARAMS: ParamsId = ParamsId(0);
 
 #[derive(Debug, Clone)]
 pub struct TypeId {
@@ -75,45 +89,90 @@ pub enum Instr<'i> {
         dst: TypeId,
         lhs: Id,
         rhs: Id,
+        /// Byte offset into the source of the originating AST node. Threaded
+        /// through to `bc::Cc::pc_to_span` so runtime traps render with the
+        /// right `file:line:col`. See `Vm::pc_to_span`.
+        span: u32,
     },
     LoadConst {
         dst: TypeId,
         value: Const<'i>,
+        span: u32,
     },
     Call {
         dst: TypeId,
         func: Id,
         args: Vec<Id>,
+        span: u32,
     },
     Sys {
         dst: TypeId,
         path: &'i str,
         func: &'i pstd::Fn,
         args: Vec<Id>,
+        span: u32,
     },
     Cast {
         dst: TypeId,
-        from: Id,
+        from: TypeId,
+        span: u32,
     },
     Noop,
 }
 
+impl Instr<'_> {
+    /// Source byte offset for this instruction, or 0 for synthetic Noops
+    /// (which never trap, so the missing span doesn't matter).
+    pub fn span(&self) -> u32 {
+        match self {
+            Instr::Bin { span, .. }
+            | Instr::LoadConst { span, .. }
+            | Instr::Call { span, .. }
+            | Instr::Sys { span, .. }
+            | Instr::Cast { span, .. } => *span,
+            Instr::Noop => 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Terminator {
-    Return(Option<Id>),
+    Return {
+        value: Option<Id>,
+        span: u32,
+    },
     Jump {
         id: Id,
-        params: Vec<Id>,
+        /// Index into the enclosing [`Func::params_pool`] holding the
+        /// successor-block param values passed by this jump. `Copy`, so
+        /// the match lowering can hand the same `ParamsId` to every
+        /// case's Branch + body Block without cloning the underlying
+        /// `[Id]`. Dereference with `func.params(self.params)`.
+        params: ParamsId,
+        span: u32,
     },
     Branch {
         cond: Id,
-        yes: (Id, Vec<Id>),
-        no: (Id, Vec<Id>),
+        yes: (Id, ParamsId),
+        no: (Id, ParamsId),
+        span: u32,
     },
     Tail {
         func: Id,
         args: Vec<Id>,
+        span: u32,
     },
+}
+
+impl Terminator {
+    pub fn span(&self) -> u32 {
+        match self {
+            Terminator::Return { span, .. }
+            | Terminator::Jump { span, .. }
+            | Terminator::Branch { span, .. }
+            | Terminator::Tail { span, .. } => *span,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -122,7 +181,11 @@ pub struct Block<'b> {
     pub tombstone: bool,
     pub id: Id,
     pub instructions: Vec<Instr<'b>>,
-    pub params: Vec<Id>,
+    /// Index into the enclosing [`Func::params_pool`] holding this
+    /// block's SSA params (the values defined on entry, used as
+    /// phi-equivalents). 4-byte `Copy`. Dereference with
+    /// `func.params(block.params)`.
+    pub params: ParamsId,
     /// each block has a term, but a block starts without one in the lowering process, thus this
     /// field has to be optional
     pub term: Option<Terminator>,
@@ -135,12 +198,53 @@ pub struct Func<'f> {
     pub params: Vec<Id>,
     pub ret: Option<Type>,
     pub blocks: Vec<Block<'f>>,
+    /// Owning storage for every block-param / Branch-arg / Jump-arg
+    /// `[Id]` list this function references. Together with [`ParamsId`]
+    /// this is the static (no-Rc, no-Arc) equivalent of shared-by-handle
+    /// param lists:
+    ///
+    /// - `Block.params: ParamsId` and the `params` / `yes.1` / `no.1`
+    ///   fields of [`Terminator`] are all 4-byte indices into this Vec.
+    /// - Multiple sites can hold the same `ParamsId`; they all read the
+    ///   same `[Id]` via `func.params(id)`. No deduplication; two
+    ///   `intern_params` calls with the same `Vec<Id>` get two slots.
+    ///   Sharing happens only because the same `ParamsId` is handed to
+    ///   multiple sinks at the intern site.
+    /// - Slot 0 is always the empty slice (seeded by [`Func::new`]),
+    ///   referenced by [`EMPTY_PARAMS`]. New blocks start with that and
+    ///   get rewritten when their actual params are known.
+    ///
+    /// This is the same discipline as `bc::Cc::block_map` and
+    /// `Ralloc.map`: data hangs off a long-lived owner, handles are
+    /// `Copy` `u32`
+    pub params_pool: Vec<Box<[Id]>>,
 }
 
-#[derive(Debug, Clone)]
-struct Edge {
-    to: Id,
-    args: Vec<Id>,
+impl<'f> Func<'f> {
+    /// Build a new `Func` with `params_pool[0]` already seeded with the
+    /// empty slice (the [`EMPTY_PARAMS`] sentinel). Always go through
+    /// this — a `Func` whose pool is empty would make `EMPTY_PARAMS` an
+    /// out-of-bounds lookup.
+    pub fn new(name: &'f str, id: Id, params: Vec<Id>, ret: Option<Type>) -> Self {
+        Self {
+            name,
+            id,
+            params,
+            ret,
+            blocks: Vec::new(),
+            params_pool: vec![Box::new([]) as Box<[Id]>],
+        }
+    }
+
+    pub fn intern_params(&mut self, params: Vec<Id>) -> ParamsId {
+        let id = ParamsId(self.params_pool.len() as u32);
+        self.params_pool.push(params.into_boxed_slice());
+        id
+    }
+
+    pub fn params(&self, id: ParamsId) -> &[Id] {
+        &self.params_pool[id.0 as usize]
+    }
 }
 
 impl Func<'_> {
@@ -155,90 +259,95 @@ impl Func<'_> {
         }
     }
 
-    fn uses_of_instr(instr: &Instr<'_>) -> Vec<Id> {
+    fn for_each_use_of_instr(instr: &Instr<'_>, mut f: impl FnMut(Id)) {
         match instr {
-            Instr::Bin { lhs, rhs, .. } => vec![*lhs, *rhs],
-            Instr::Call { args, .. } | Instr::Sys { args, .. } => args.clone(),
-            Instr::Cast { from, .. } => vec![*from],
-            Instr::LoadConst { .. } | Instr::Noop => vec![],
+            Instr::Bin { lhs, rhs, .. } => {
+                f(*lhs);
+                f(*rhs);
+            }
+            Instr::Call { args, .. } | Instr::Sys { args, .. } => {
+                for &a in args {
+                    f(a);
+                }
+            }
+            Instr::Cast { from, .. } => f(from.id),
+            Instr::LoadConst { .. } | Instr::Noop => {}
         }
     }
 
-    fn uses_of_term(term: &Terminator) -> Vec<Id> {
+    fn for_each_use_of_term(&self, term: &Terminator, mut f: impl FnMut(Id)) {
         match term {
-            Terminator::Return(Some(id)) => vec![*id],
-            Terminator::Return(None) => vec![],
-            Terminator::Jump { params, .. } => params.clone(),
-            Terminator::Tail { args, .. } => args.clone(),
+            Terminator::Return {
+                value: Some(id), ..
+            } => f(*id),
+            Terminator::Return { value: None, .. } => {}
+            Terminator::Jump { params, .. } => {
+                for &p in self.params(*params) {
+                    f(p);
+                }
+            }
+            Terminator::Tail { args, .. } => {
+                for &a in args {
+                    f(a);
+                }
+            }
             Terminator::Branch {
                 cond,
                 yes: (_, yes_params),
                 no: (_, no_params),
+                ..
             } => {
-                let mut uses = Vec::with_capacity(1 + yes_params.len() + no_params.len());
-                uses.push(*cond);
-                uses.extend(yes_params.iter().copied());
-                uses.extend(no_params.iter().copied());
-                uses
+                f(*cond);
+                for &p in self.params(*yes_params) {
+                    f(p);
+                }
+                for &p in self.params(*no_params) {
+                    f(p);
+                }
             }
         }
     }
 
-    fn local_term_uses(term: &Terminator) -> Vec<Id> {
-        match term {
-            Terminator::Return(Some(id)) => vec![*id],
-            Terminator::Return(None) | Terminator::Jump { .. } => vec![],
-            Terminator::Tail { args, .. } => args.clone(),
-            Terminator::Branch { cond, .. } => vec![*cond],
-        }
-    }
+    /// Per-SSA live interval, indexed by id. `(u32::MAX, 0)` marks a slot with no def; only happens
+    /// for params of tombstoned blocks since SSA ids are otherwise dense.
+    ///
+    /// Writes into `out`, clearing first. Lets the caller reuse a buffer across function compiles
+    /// so we don't allocate fresh per `cc()`.
+    pub fn live_set_into(&self, out: &mut Vec<(u32, u32)>) {
+        const UNSET: (u32, u32) = (u32::MAX, 0);
+        out.clear();
 
-    fn successors(term: Option<&Terminator>) -> Vec<Edge> {
-        match term {
-            Some(Terminator::Jump { id, params }) => vec![Edge {
-                to: *id,
-                args: params.clone(),
-            }],
-            Some(Terminator::Branch { yes, no, .. }) => vec![
-                Edge {
-                    to: yes.0,
-                    args: yes.1.clone(),
-                },
-                Edge {
-                    to: no.0,
-                    args: no.1.clone(),
-                },
-            ],
-            Some(Terminator::Return(_) | Terminator::Tail { .. }) | None => vec![],
-        }
-    }
-
-    pub fn live_set(&self) -> HashMap<Id, (Id, Id)> {
-        // PERF: this whole process should be a set theory based bit set, since we have at most 64
-        // registers (i think?), thus a BitSet(u64) should be a perfect abstraction
-
-        fn define(intervals: &mut HashMap<Id, (Id, Id)>, id: Id, pos: u32, reason: String) {
-            crate::trace!("[ir::Func::live_set] def %v{} @{} ({})", id.0, pos, reason);
-            intervals
-                .entry(id)
-                .and_modify(|(def, last_use)| {
-                    def.0 = def.0.min(pos);
-                    last_use.0 = last_use.0.max(pos);
-                })
-                .or_insert((Id(pos), Id(pos)));
+        fn ensure(v: &mut Vec<(u32, u32)>, id: u32) {
+            let idx = id as usize;
+            if idx >= v.len() {
+                v.resize(idx + 1, UNSET);
+            }
         }
 
-        fn use_value(intervals: &mut HashMap<Id, (Id, Id)>, id: Id, pos: u32, reason: String) {
-            crate::trace!("[ir::Func::live_set] use %v{} @{} ({})", id.0, pos, reason);
-            intervals
-                .entry(id)
-                .and_modify(|(_, last_use)| last_use.0 = last_use.0.max(pos))
-                .or_insert((Id(pos), Id(pos)));
+        fn define(intervals: &mut Vec<(u32, u32)>, id: Id, pos: u32) {
+            ensure(intervals, id.0);
+            let e = &mut intervals[id.0 as usize];
+            if e.0 == u32::MAX {
+                *e = (pos, pos);
+            } else {
+                e.0 = e.0.min(pos);
+                e.1 = e.1.max(pos);
+            }
+        }
+
+        fn use_value(intervals: &mut Vec<(u32, u32)>, id: Id, pos: u32) {
+            ensure(intervals, id.0);
+            let e = &mut intervals[id.0 as usize];
+            if e.0 == u32::MAX {
+                *e = (pos, pos);
+            } else {
+                e.1 = e.1.max(pos);
+            }
         }
 
         crate::trace!("[ir::Func::live_set][{}] start", self.name);
 
-        let mut intervals = HashMap::new();
+        let intervals = &mut *out;
         let mut pos = 0;
 
         for block in &self.blocks {
@@ -257,13 +366,14 @@ impl Func<'_> {
                 block.id.0,
                 pos
             );
-            for param in &block.params {
-                define(
-                    &mut intervals,
-                    *param,
+            for param in self.params(block.params) {
+                crate::trace!(
+                    "[ir::Func::live_set] def %v{} @{} (b{} param)",
+                    param.0,
                     pos,
-                    format!("b{} param", block.id.0),
+                    block.id.0
                 );
+                define(intervals, *param, pos);
             }
             pos += 1;
 
@@ -276,22 +386,26 @@ impl Func<'_> {
                     instr
                 );
 
-                for use_id in Self::uses_of_instr(instr) {
-                    use_value(
-                        &mut intervals,
-                        use_id,
+                Self::for_each_use_of_instr(instr, |use_id| {
+                    crate::trace!(
+                        "[ir::Func::live_set] use %v{} @{} (b{} instr {})",
+                        use_id.0,
                         pos,
-                        format!("b{} instr {}", block.id.0, instr),
+                        block.id.0,
+                        instr
                     );
-                }
+                    use_value(intervals, use_id, pos);
+                });
 
                 if let Some(def_id) = Self::def_of(instr) {
-                    define(
-                        &mut intervals,
-                        def_id,
+                    crate::trace!(
+                        "[ir::Func::live_set] def %v{} @{} (b{} instr {})",
+                        def_id.0,
                         pos,
-                        format!("b{} instr {}", block.id.0, instr),
+                        block.id.0,
+                        instr
                     );
+                    define(intervals, def_id, pos);
                 }
                 pos += 1;
             }
@@ -305,19 +419,21 @@ impl Func<'_> {
                     term
                 );
 
-                for use_id in Self::uses_of_term(term) {
-                    use_value(
-                        &mut intervals,
-                        use_id,
+                self.for_each_use_of_term(term, |use_id| {
+                    crate::trace!(
+                        "[ir::Func::live_set] use %v{} @{} (b{} term {})",
+                        use_id.0,
                         pos,
-                        format!("b{} term {}", block.id.0, term),
+                        block.id.0,
+                        term
                     );
-                }
+                    use_value(intervals, use_id, pos);
+                });
 
                 // The bc emitter writes outgoing param values into the
                 // successor's param registers right before the terminator
                 // op. For a Branch this means the yes-target shuffle can
-                // clobber cond before JmpF reads it (cond appears dead to
+                // clobber cond before JmpT reads it (cond appears dead to
                 // the regalloc at the terminator, so its register is
                 // reusable as a shuffle dst). Marking the successor params
                 // as defined here forces the regalloc to keep them out of
@@ -329,21 +445,25 @@ impl Func<'_> {
                 // dst[i] == src[j] for j > i clobbers a not-yet-read
                 // source).
                 if let Terminator::Branch { yes, no, .. } = term {
-                    for &target_param in &self.blocks[yes.0.0 as usize].params {
-                        define(
-                            &mut intervals,
-                            target_param,
+                    let yes_target_params = self.params(self.blocks[yes.0.0 as usize].params);
+                    for &target_param in yes_target_params {
+                        crate::trace!(
+                            "[ir::Func::live_set] def %v{} @{} (b{} branch yes shuffle dst)",
+                            target_param.0,
                             pos,
-                            format!("b{} branch yes shuffle dst", block.id.0),
+                            block.id.0
                         );
+                        define(intervals, target_param, pos);
                     }
-                    for &target_param in &self.blocks[no.0.0 as usize].params {
-                        define(
-                            &mut intervals,
-                            target_param,
+                    let no_target_params = self.params(self.blocks[no.0.0 as usize].params);
+                    for &target_param in no_target_params {
+                        crate::trace!(
+                            "[ir::Func::live_set] def %v{} @{} (b{} branch no shuffle dst)",
+                            target_param.0,
                             pos,
-                            format!("b{} branch no shuffle dst", block.id.0),
+                            block.id.0
                         );
+                        define(intervals, target_param, pos);
                     }
                 }
             } else {
@@ -358,28 +478,98 @@ impl Func<'_> {
         }
 
         #[cfg(feature = "trace")]
-        {
-            let mut ordered: Vec<_> = intervals.iter().collect();
-            ordered.sort_by_key(|(id, _)| id.0);
-            for (id, (def, last_use)) in ordered {
-                crate::trace!(
-                    "[ir::Func::live_set][{}] interval %v{} = ({}..{})",
-                    self.name,
-                    id.0,
-                    def.0,
-                    last_use.0
-                );
+        for (id, &(def, last_use)) in intervals.iter().enumerate() {
+            if def == u32::MAX {
+                continue;
+            }
+            crate::trace!(
+                "[ir::Func::live_set][{}] interval %v{} = ({}..{})",
+                self.name,
+                id,
+                def,
+                last_use
+            );
+        }
+    }
+
+    /// Per-SSA register hints for `Ralloc`. Walks every call-shaped
+    /// instruction/terminator in this function and records that:
+    /// - `args[i]` would prefer `r_i` (the arg-passing register)
+    /// - the result of a `Call`/`Sys` would prefer `r0` (the return
+    ///   register, so the post-call `Mov dst, r0` becomes a self-mov that
+    ///   peephole + `compact_nops` will erase).
+    ///
+    /// Soft: the allocator honors the hint only if the preferred register
+    /// is free when this interval is allocated. If multiple call sites
+    /// hint the same SSA id to different registers, first hint wins.
+    pub fn arg_hints_into(&self, hints: &mut Vec<Option<u8>>) {
+        hints.clear();
+
+        fn ensure(v: &mut Vec<Option<u8>>, id: u32) {
+            let idx = id as usize;
+            if idx >= v.len() {
+                v.resize(idx + 1, None);
             }
         }
 
-        intervals
+        // First-hint-wins: skip if already set.
+        fn put(v: &mut Vec<Option<u8>>, id: Id, reg: u8) {
+            ensure(v, id.0);
+            let e = &mut v[id.0 as usize];
+            if e.is_none() {
+                *e = Some(reg);
+            }
+        }
+
+        // Overwrite unconditionally; used for entry-block params so they
+        // beat any subsequent inner-call hint and stay pinned to the
+        // calling convention's r0..r{N-1}.
+        fn put_force(v: &mut Vec<Option<u8>>, id: Id, reg: u8) {
+            ensure(v, id.0);
+            v[id.0 as usize] = Some(reg);
+        }
+
+        // Entry block params arrive in r0..r{N-1} per the calling convention.
+        // Pin them first so they take priority over inner-call hints;
+        // otherwise an inner call that uses the function's first param as
+        // its arg-2 would hint it to r2, the regalloc would place it in
+        // r2, and the caller still writes the arg to r0 → the function
+        // reads garbage.
+        if let Some(entry) = self.blocks.first()
+            && !entry.tombstone
+        {
+            for (i, param) in self.params(entry.params).iter().enumerate() {
+                put_force(hints, *param, i as u8);
+            }
+        }
+
+        for block in &self.blocks {
+            if block.tombstone {
+                continue;
+            }
+            for instr in &block.instructions {
+                match instr {
+                    Instr::Call { dst, args, .. } | Instr::Sys { dst, args, .. } => {
+                        for (i, arg) in args.iter().enumerate() {
+                            put(hints, *arg, i as u8);
+                        }
+                        put(hints, dst.id, 0u8);
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(Terminator::Tail { args, .. }) = &block.term {
+                for (i, arg) in args.iter().enumerate() {
+                    put(hints, *arg, i as u8);
+                }
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{ptype::Type, *};
-    use std::collections::HashSet;
 
     fn type_id(id: u32) -> TypeId {
         TypeId {
@@ -388,81 +578,74 @@ mod tests {
         }
     }
 
-    fn ids(ids: &[u32]) -> HashSet<Id> {
-        ids.iter().copied().map(Id).collect()
-    }
-
-    fn empty_block(id: u32, params: Vec<Id>, term: Terminator) -> Block<'static> {
-        Block {
-            tombstone: false,
-            id: Id(id),
-            params,
-            instructions: vec![],
-            term: Some(term),
-        }
-    }
-
     #[test]
     fn live_set_tracks_block_params_instructions_and_terminators() {
-        let fun = Func {
-            name: "live",
-            id: Id(0),
-            params: vec![Id(0)],
-            ret: Some(Type::Int),
-            blocks: vec![
-                Block {
-                    tombstone: false,
-                    id: Id(0),
-                    params: vec![Id(0)],
-                    instructions: vec![
-                        Instr::LoadConst {
-                            dst: type_id(1),
-                            value: Const::Int(1),
-                        },
-                        Instr::Bin {
-                            op: BinOp::IAdd,
-                            dst: type_id(2),
-                            lhs: Id(0),
-                            rhs: Id(1),
-                        },
-                    ],
-                    term: Some(Terminator::Branch {
-                        cond: Id(2),
-                        yes: (Id(1), vec![Id(0)]),
-                        no: (Id(2), vec![Id(1)]),
-                    }),
-                },
-                Block {
-                    tombstone: false,
-                    id: Id(1),
-                    params: vec![Id(3)],
-                    instructions: vec![],
-                    term: Some(Terminator::Return(Some(Id(3)))),
-                },
-                Block {
-                    tombstone: false,
-                    id: Id(2),
-                    params: vec![Id(4)],
-                    instructions: vec![Instr::Cast {
-                        dst: type_id(5),
-                        from: Id(4),
-                    }],
-                    term: Some(Terminator::Return(Some(Id(5)))),
-                },
-            ],
-        };
+        let mut fun = Func::new("live", Id(0), vec![Id(0)], Some(Type::Int));
+        let b0_params = fun.intern_params(vec![Id(0)]);
+        let b1_params = fun.intern_params(vec![Id(3)]);
+        let b2_params = fun.intern_params(vec![Id(4)]);
+        let branch_yes = fun.intern_params(vec![Id(0)]);
+        let branch_no = fun.intern_params(vec![Id(1)]);
+        fun.blocks = vec![
+            Block {
+                tombstone: false,
+                id: Id(0),
+                params: b0_params,
+                instructions: vec![
+                    Instr::LoadConst {
+                        dst: type_id(1),
+                        value: Const::Int(1),
+                        span: 0,
+                    },
+                    Instr::Bin {
+                        op: BinOp::IAdd,
+                        dst: type_id(2),
+                        lhs: Id(0),
+                        rhs: Id(1),
+                        span: 0,
+                    },
+                ],
+                term: Some(Terminator::Branch {
+                    cond: Id(2),
+                    yes: (Id(1), branch_yes),
+                    no: (Id(2), branch_no),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(1),
+                params: b1_params,
+                instructions: vec![],
+                term: Some(Terminator::Return {
+                    value: Some(Id(3)),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(2),
+                params: b2_params,
+                instructions: vec![Instr::Cast {
+                    dst: type_id(5),
+                    from: type_id(4),
+                    span: 0,
+                }],
+                term: Some(Terminator::Return {
+                    value: Some(Id(5)),
+                    span: 0,
+                }),
+            },
+        ];
 
-        let live_set = fun.live_set();
+        let mut live_set = Vec::new();
+        fun.live_set_into(&mut live_set);
 
-        assert_eq!(live_set.get(&Id(0)), Some(&(Id(0), Id(3))));
-        assert_eq!(live_set.get(&Id(1)), Some(&(Id(1), Id(3))));
-        assert_eq!(live_set.get(&Id(2)), Some(&(Id(2), Id(3))));
-        // %v3 and %v4 are successor block params of the Branch in block 0
-        // and so are extra-defined at the branch position (pos=3) — see
-        // live_set: this is what keeps them out of cond's register at the
-        // shuffle.
-        assert_eq!(live_set.get(&Id(3)), Some(&(Id(3), Id(5))));
-        assert_eq!(live_set.get(&Id(4)), Some(&(Id(3), Id(7))));
-        assert_eq!(live_set.get(&Id(5)), Some(&(Id(7), Id(8))));
+        assert_eq!(live_set[0], (0, 3));
+        assert_eq!(live_set[1], (1, 3));
+        assert_eq!(live_set[2], (2, 3));
+        assert_eq!(live_set[3], (3, 5));
+        assert_eq!(live_set[4], (3, 7));
+        assert_eq!(live_set[5], (7, 8));
     }
 }

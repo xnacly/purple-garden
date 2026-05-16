@@ -17,12 +17,12 @@ impl Display for Id {
 impl Display for Instr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Instr::Bin { op, dst, lhs, rhs } => {
+            Instr::Bin { op, dst, lhs, rhs, .. } => {
                 write!(f, "%v{} = {:?} %v{}, %v{}", dst, op, lhs.0, rhs.0)?
             }
-            Instr::LoadConst { dst, value } => write!(f, "%v{} = {}", dst, value)?,
+            Instr::LoadConst { dst, value, .. } => write!(f, "%v{} = {}", dst, value)?,
             Instr::Noop => write!(f, "Nop")?,
-            Instr::Call { dst, func, args } => {
+            Instr::Call { dst, func, args, .. } => {
                 write!(f, "%v{} = ", dst)?;
                 write!(f, "Call f{}(", func.0)?;
                 for (i, arg) in args.iter().enumerate() {
@@ -39,6 +39,7 @@ impl Display for Instr<'_> {
                 path,
                 func,
                 args,
+                ..
             } => {
                 write!(f, "%v{} = ", dst)?;
                 write!(f, "Sys {path}.{}(", func.name)?;
@@ -51,52 +52,35 @@ impl Display for Instr<'_> {
                 }
                 write!(f, ")")?;
             }
-            Instr::Cast { dst: value, from } => {
-                write!(f, "%v{} = Cast_to_{} %v{}", value, value.ty, from.0)?
+            Instr::Cast { dst: value, from, .. } => {
+                write!(
+                    f,
+                    "%v{} = Cast<{}->{}> %v{}",
+                    value, from.ty, value.ty, from.id.0
+                )?
             }
         }
         Ok(())
     }
 }
 
+/// Display for a `Terminator` standalone (trace logs). Can't resolve
+/// `ParamsId` without a `Func`, so we print the raw pool index as `#N`.
+/// The pretty IR dump in `Func`'s Display below resolves it properly.
 impl Display for Terminator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Terminator::Return(Some(id)) => write!(f, "ret %v{}", id.0)?,
-            Terminator::Return(None) => write!(f, "ret")?,
-            Terminator::Jump { id, params } => {
-                if params.is_empty() {
-                    write!(f, "jmp b{}", id.0)?
-                } else {
-                    write!(
-                        f,
-                        "jmp b{}({})",
-                        id.0,
-                        params
-                            .iter()
-                            .map(|p| format!("%v{}", p.0))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?
-                }
+            Terminator::Return { value: Some(id), .. } => write!(f, "ret %v{}", id.0)?,
+            Terminator::Return { value: None, .. } => write!(f, "ret")?,
+            Terminator::Jump { id, params, .. } => {
+                write!(f, "jmp b{}(params#{})", id.0, params.0)?
             }
-            Terminator::Branch { cond, yes, no } => write!(
+            Terminator::Branch { cond, yes, no, .. } => write!(
                 f,
-                "br %v{}, b{}({}), b{}({})",
-                cond.0,
-                yes.0,
-                yes.1
-                    .iter()
-                    .map(|p| format!("%v{}", p.0))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                no.0,
-                no.1.iter()
-                    .map(|p| format!("%v{}", p.0))
-                    .collect::<Vec<_>>()
-                    .join(", "),
+                "br %v{}, b{}(params#{}), b{}(params#{})",
+                cond.0, yes.0, yes.1.0, no.0, no.1.0,
             )?,
-            Terminator::Tail { func, args } => {
+            Terminator::Tail { func, args, .. } => {
                 write!(f, "tail f{}(", func.0)?;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {
@@ -112,13 +96,15 @@ impl Display for Terminator {
     }
 }
 
+fn format_ids(ids: &[crate::ir::Id]) -> String {
+    ids.iter()
+        .map(|p| format!("%v{}", p.0))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 impl Display for Func<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let entry_block = self
-            .blocks
-            .first()
-            .expect("Func.entry does not reference a valid block");
-
         write!(f, "// {}\nfn f{}(", self.name, self.id.0)?;
         for (i, arg) in self.params.iter().enumerate() {
             if i + 1 == self.params.len() {
@@ -138,17 +124,7 @@ impl Display for Func<'_> {
         )?;
 
         for block in self.blocks.iter() {
-            writeln!(
-                f,
-                "b{}({}):",
-                block.id.0,
-                block
-                    .params
-                    .iter()
-                    .map(|p| format!("%v{}", p))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )?;
+            writeln!(f, "b{}({}):", block.id.0, format_ids(self.params(block.params)))?;
 
             if block.tombstone {
                 writeln!(f, "\t<tombstone>")?;
@@ -160,7 +136,21 @@ impl Display for Func<'_> {
             }
 
             if let Some(term) = &block.term {
-                writeln!(f, "\t{term}")?;
+                match term {
+                    Terminator::Jump { id, params, .. } => {
+                        writeln!(f, "\tjmp b{}({})", id.0, format_ids(self.params(*params)))?
+                    }
+                    Terminator::Branch { cond, yes, no, .. } => writeln!(
+                        f,
+                        "\tbr %v{}, b{}({}), b{}({})",
+                        cond.0,
+                        yes.0,
+                        format_ids(self.params(yes.1)),
+                        no.0,
+                        format_ids(self.params(no.1)),
+                    )?,
+                    _ => writeln!(f, "\t{term}")?,
+                }
             }
         }
 

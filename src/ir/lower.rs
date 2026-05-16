@@ -37,7 +37,7 @@ pub struct Lower<'lower> {
     ctx: LowerCtx<'lower>,
     functions: Vec<Func<'lower>>,
     func_name_to_id: HashMap<&'lower str, (ir::Id, Option<ptype::Type>)>,
-    types: HashMap<usize, ptype::Type>,
+    types: Vec<Option<ptype::Type>>,
     packages: HashMap<&'lower str, (&'lower pstd::Pkg, HashMap<&'lower str, &'lower pstd::Fn>)>,
 }
 
@@ -63,7 +63,7 @@ impl<'lower> Lower<'lower> {
             id,
             tombstone: false,
             instructions: vec![],
-            params: vec![],
+            params: ir::EMPTY_PARAMS,
             term: None,
         });
         id
@@ -106,6 +106,7 @@ impl<'lower> Lower<'lower> {
                         ty: value.into(),
                     },
                     value,
+                    span: raw.start as u32,
                 });
 
                 Some(id)
@@ -124,11 +125,8 @@ impl<'lower> Lower<'lower> {
                 }
             }
             Node::Bin { op, lhs, rhs, id } => {
-                let src_type = self
-                    .types
-                    .get(&id_from_node(lhs).unwrap())
-                    .cloned()
-                    .unwrap();
+                let src_type = self.types[id_from_node(lhs).unwrap()].clone().unwrap();
+                let span = op.start as u32;
 
                 let Some(lhs) = self.lower_node(lhs)? else {
                     unreachable!()
@@ -140,7 +138,7 @@ impl<'lower> Lower<'lower> {
                 let dst_id = self.ctx.id_store.new_value();
                 let dst = TypeId {
                     id: dst_id,
-                    ty: self.types.get(id).unwrap().clone(),
+                    ty: self.types[*id].clone().unwrap(),
                 };
 
                 use BinOp::*;
@@ -171,9 +169,50 @@ impl<'lower> Lower<'lower> {
                     _ => todo!("{:#?}", src_type),
                 };
 
-                self.emit(Instr::Bin { op, dst, lhs, rhs });
+                self.emit(Instr::Bin { op, dst, lhs, rhs, span });
 
                 Some(dst_id)
+            }
+            Node::Unary { op, rhs, .. } => {
+                let inner_ty = self.types[id_from_node(rhs).unwrap()].clone().unwrap();
+                let span = op.start as u32;
+                let Some(rhs_id) = self.lower_node(rhs)? else {
+                    unreachable!()
+                };
+
+                match op.t {
+                    Type::Plus => Some(rhs_id),
+                    Type::Minus => {
+                        let (zero_const, bin_op) = match inner_ty {
+                            ptype::Type::Int => (Const::Int(0), BinOp::ISub),
+                            ptype::Type::Double => (Const::Double(0u64), BinOp::DSub),
+                            _ => unreachable!(),
+                        };
+                        let zero_id = self.ctx.id_store.new_value();
+                        self.emit(Instr::LoadConst {
+                            dst: TypeId {
+                                id: zero_id,
+                                ty: inner_ty.clone(),
+                            },
+                            value: zero_const,
+                            span,
+                        });
+
+                        let dst_id = self.ctx.id_store.new_value();
+                        self.emit(Instr::Bin {
+                            op: bin_op,
+                            dst: TypeId {
+                                id: dst_id,
+                                ty: inner_ty,
+                            },
+                            lhs: zero_id,
+                            rhs: rhs_id,
+                            span,
+                        });
+                        Some(dst_id)
+                    }
+                    _ => unreachable!(),
+                }
             }
             Node::Let { name, rhs, .. } => {
                 let Type::Ident(i) = name.t else {
@@ -213,29 +252,25 @@ impl<'lower> Lower<'lower> {
                 };
 
                 self.func_name_to_id.insert(ident_name, (id, ret.clone()));
-                let func = Func {
-                    name: ident_name,
-                    id,
-                    params: args
-                        .iter()
-                        .map(|(token, _)| {
-                            let id = self.ctx.id_store.new_value();
-                            let Type::Ident(ident) = token.t else {
-                                unreachable!();
-                            };
-                            self.ctx.env.insert(ident, id);
-                            id
-                        })
-                        .collect(),
-                    blocks: vec![],
-                    ret,
-                };
+                let func_params: Vec<Id> = args
+                    .iter()
+                    .map(|(token, _)| {
+                        let id = self.ctx.id_store.new_value();
+                        let Type::Ident(ident) = token.t else {
+                            unreachable!();
+                        };
+                        self.ctx.env.insert(ident, id);
+                        id
+                    })
+                    .collect();
+                let func = Func::new(ident_name, id, func_params, ret);
 
                 // TODO:deal with b0
 
                 self.ctx.func = func;
                 let entry = self.new_block();
-                self.block_mut(entry).params = self.ctx.func.params.clone();
+                let entry_params = self.ctx.func.intern_params(self.ctx.func.params.clone());
+                self.block_mut(entry).params = entry_params;
 
                 let mut last = None;
                 for node in body {
@@ -243,10 +278,17 @@ impl<'lower> Lower<'lower> {
                     last = self.lower_node(node)?;
                 }
 
+                let ret_span = name.start as u32;
                 if self.ctx.func.ret.is_some() {
-                    self.block_mut(self.ctx.block).term = Some(Terminator::Return(last));
+                    self.block_mut(self.ctx.block).term = Some(Terminator::Return {
+                        value: last,
+                        span: ret_span,
+                    });
                 } else {
-                    self.block_mut(self.ctx.block).term = Some(Terminator::Return(None));
+                    self.block_mut(self.ctx.block).term = Some(Terminator::Return {
+                        value: None,
+                        span: ret_span,
+                    });
                 }
 
                 self.functions.push(std::mem::take(&mut self.ctx.func));
@@ -307,6 +349,7 @@ impl<'lower> Lower<'lower> {
                             path: pkg_name,
                             func: fun,
                             args: a,
+                            span: name.start as u32,
                         });
                     }
                     // user defined function
@@ -332,6 +375,7 @@ impl<'lower> Lower<'lower> {
                             dst,
                             func: target_id,
                             args: a,
+                            span: name.start as u32,
                         });
                     }
                     _ => unreachable!(),
@@ -339,7 +383,7 @@ impl<'lower> Lower<'lower> {
 
                 Some(dst_id)
             }
-            Node::Import { src, pkgs, .. } => {
+            Node::Import { pkgs, .. } => {
                 for pkg_tok in pkgs {
                     let Token {
                         t: Type::S(as_str), ..
@@ -358,8 +402,12 @@ impl<'lower> Lower<'lower> {
                 }
                 None
             }
-            Node::Cast { lhs, rhs, .. } => {
-                let Some(from) = self.lower_node(lhs)? else {
+            Node::Cast { lhs, rhs, src, .. } => {
+                let src_ty = id_from_node(lhs)
+                    .and_then(|aid| self.types.get(aid).cloned().flatten())
+                    .expect("typechecker should have typed the cast's lhs");
+
+                let Some(from_id) = self.lower_node(lhs)? else {
                     unreachable!()
                 };
 
@@ -369,7 +417,14 @@ impl<'lower> Lower<'lower> {
                     ty: rhs.into(),
                 };
 
-                self.emit(Instr::Cast { dst: value, from });
+                self.emit(Instr::Cast {
+                    dst: value,
+                    from: TypeId {
+                        id: from_id,
+                        ty: src_ty,
+                    },
+                    span: src.start as u32,
+                });
                 Some(dst)
             }
             Node::Match { cases, default, .. } => {
@@ -382,7 +437,16 @@ impl<'lower> Lower<'lower> {
                     body_blocks.push(self.new_block());
                 }
 
-                let params = self.cur().params.clone();
+                // All check/body/default blocks of this match inherit the
+                // enclosing block's params verbatim. Intern that list once
+                // and hand the same ParamsId to every sink — 4 × per case,
+                // plus the default block, plus the two Branch arms. Each
+                // assignment is a u32 copy, no allocation.
+                let case_params = {
+                    let entry_params = self.cur().params;
+                    let cloned: Vec<Id> = self.ctx.func.params(entry_params).to_vec();
+                    self.ctx.func.intern_params(cloned)
+                };
 
                 // INFO:
                 // this is only for correctness to jump into the match statements first check, we
@@ -390,7 +454,7 @@ impl<'lower> Lower<'lower> {
                 // skipped fully
                 // self.block_mut(self.block).term = Some(Terminator::Jump {
                 //     id: *check_blocks.first().unwrap(),
-                //     params: params.clone(),
+                //     params: case_params,
                 // });
 
                 // the default block
@@ -399,7 +463,8 @@ impl<'lower> Lower<'lower> {
                 // the single join block, merging all value results into a single branch
                 let join = self.new_block();
 
-                for (i, ((_, condition), body)) in cases.iter().enumerate() {
+                for (i, ((case_tok, condition), body)) in cases.iter().enumerate() {
+                    let case_span = case_tok.start as u32;
                     self.switch_to_block(check_blocks[i]);
                     let Some(cond) = self.lower_node(condition)? else {
                         unreachable!(
@@ -416,43 +481,50 @@ impl<'lower> Lower<'lower> {
                     let check_block_mut = self.block_mut(check_blocks[i]);
                     check_block_mut.term = Some(Terminator::Branch {
                         cond,
-                        yes: (body_blocks[i], params.clone()),
-                        no: (no_target, params.clone()),
+                        yes: (body_blocks[i], case_params),
+                        no: (no_target, case_params),
+                        span: case_span,
                     });
-                    check_block_mut.params = params.clone();
+                    check_block_mut.params = case_params;
 
                     self.switch_to_block(body_blocks[i]);
-                    self.block_mut(body_blocks[i]).params = params.clone();
+                    self.block_mut(body_blocks[i]).params = case_params;
                     let mut last = None;
                     for node in body {
                         last = self.lower_node(node)?;
                     }
                     let value = last.expect("match body must produce value");
 
+                    let body_jump_params = self.ctx.func.intern_params(vec![value]);
                     self.block_mut(body_blocks[i]).term = Some(Terminator::Jump {
                         id: join,
-                        params: vec![value],
+                        params: body_jump_params,
+                        span: case_span,
                     });
                 }
 
                 // the typechecker checked we have a default case, so this is safe
-                let (_, body) = default;
+                let (default_tok, body) = default;
+                let default_span = default_tok.start as u32;
                 self.switch_to_block(default_block);
                 let mut last = None;
                 for node in body.iter() {
                     last = self.lower_node(node)?;
                 }
 
-                let default_block = self.block_mut(default_block);
-                default_block.params = params;
                 let last = last.expect("match default must produce value");
-                default_block.term = Some(Terminator::Jump {
+                let default_jump_params = self.ctx.func.intern_params(vec![last]);
+                let join_params = self.ctx.func.intern_params(vec![last]);
+                let default_block_mut = self.block_mut(default_block);
+                default_block_mut.params = case_params;
+                default_block_mut.term = Some(Terminator::Jump {
                     id: join,
-                    params: vec![last],
+                    params: default_jump_params,
+                    span: default_span,
                 });
 
                 self.switch_to_block(join);
-                self.block_mut(join).params = vec![last];
+                self.block_mut(join).params = join_params;
                 Some(last)
             }
             _ => todo!("{:?}", node),
@@ -468,13 +540,7 @@ impl<'lower> Lower<'lower> {
         crate::trace!("[ir::lower::Lower::ir_from] Finished type checking");
         self.types = typechecker.finalise();
 
-        self.ctx.func = Func {
-            id: Id(0),
-            name: "entry",
-            ret: None,
-            blocks: vec![],
-            params: vec![],
-        };
+        self.ctx.func = Func::new("entry", Id(0), Vec::new(), None);
         let entry = self.new_block();
         self.switch_to_block(entry);
 

@@ -5,7 +5,7 @@ use crate::{
     err::PgError,
     ir::ptype::Type,
     lex::{self, Token},
-    std::{self as pstd, Pkg, STD},
+    std::{self as pstd},
 };
 
 pub fn id_from_node(node: &Node) -> Option<usize> {
@@ -48,8 +48,9 @@ impl Display for FunctionType {
 
 #[derive(Default, Debug)]
 pub struct Typechecker<'t> {
-    /// maps each Node id to its computed type
-    map: HashMap<usize, Type>,
+    // TODO: HashMap here could be replaced by a faster implementation
+    /// Node id -> Type. Indexed by id; Node ids are dense from the parser.
+    map: Vec<Option<Type>>,
     /// assign a variables name in the current scope to its type
     env: HashMap<&'t str, Type>,
     /// map a function name to its type(s)
@@ -63,12 +64,19 @@ impl<'t> Typechecker<'t> {
         Self::default()
     }
 
-    pub fn finalise(self) -> HashMap<usize, Type> {
+    pub fn finalise(self) -> Vec<Option<Type>> {
         self.map
     }
 
+    fn set_type(&mut self, id: usize, t: Type) {
+        if id >= self.map.len() {
+            self.map.resize(id + 1, None);
+        }
+        self.map[id] = Some(t);
+    }
+
     fn already_checked(&'t self, node: &Node) -> Option<&'t Type> {
-        self.map.get(&id_from_node(node)?)
+        self.map.get(id_from_node(node)?).and_then(|o| o.as_ref())
     }
 
     fn fuse(op: &lex::Token, lhs: &Type, rhs: &Type) -> Result<Type, PgError> {
@@ -101,14 +109,14 @@ impl<'t> Typechecker<'t> {
                     }
                 }
             }
-            // comparing ints
             lex::Type::DoubleEqual | lex::Type::NotEqual => {
                 match (lhs, rhs) {
                     (Type::Int, Type::Int) => {}
+                    (Type::Bool, Type::Bool) => {}
                     (_, _) if lhs == rhs => {
                         return Err(PgError::with_msg(
                             format!(
-                                "Unsupported type {} for {:?}, want Int or Double",
+                                "Unsupported type {} for {:?}, want Int or Bool",
                                 lhs,
                                 op.t.as_str()
                             ),
@@ -118,7 +126,7 @@ impl<'t> Typechecker<'t> {
                     (_, _) => {
                         return Err(PgError::with_msg(
                             format!(
-                                "Incompatible types {} and {} for {:?}, want Int",
+                                "Incompatible types {} and {} for {:?}, want both sides Int or both sides Bool",
                                 lhs,
                                 rhs,
                                 op.t.as_str()
@@ -129,7 +137,6 @@ impl<'t> Typechecker<'t> {
                 };
                 Type::Bool
             }
-            // comparing doubles
             lex::Type::LessThan | lex::Type::GreaterThan => {
                 match (lhs, rhs) {
                     (Type::Double, Type::Double) => {}
@@ -170,6 +177,7 @@ impl<'t> Typechecker<'t> {
             (Type::Int, Type::Double) => Type::Double,
             (Type::Double, Type::Int) => Type::Int,
             (Type::Int, Type::Bool) => Type::Bool,
+            (Type::Bool, Type::Int) => Type::Int,
             (_, _) => {
                 return Err(PgError::with_msg(
                     format!("Can not cast {} to {}", i, o),
@@ -180,10 +188,12 @@ impl<'t> Typechecker<'t> {
     }
 
     fn block_type(&mut self, nodes: &'t [Node]) -> Result<Type, PgError> {
+        let saved_env = self.env.clone();
         let mut last_type = Type::Void;
         for node in nodes {
             last_type = self.node(node)?;
         }
+        self.env = saved_env;
         Ok(last_type)
     }
 
@@ -195,7 +205,7 @@ impl<'t> Typechecker<'t> {
         Ok(match node {
             Node::Atom { id, raw } => {
                 let t = Type::from_atom_token_type(&raw.t);
-                self.map.insert(*id, t.clone());
+                self.set_type(*id, t.clone());
                 t
             }
             Node::Ident { id, name } => {
@@ -207,26 +217,46 @@ impl<'t> Typechecker<'t> {
                     unreachable!()
                 };
 
-                let t = self.env.get(inner_name).ok_or_else(|| {
-                    PgError::with_msg(format!("binding `{inner_name}` not found"), name)
-                })?;
+                let t = self
+                    .env
+                    .get(inner_name)
+                    .ok_or_else(|| {
+                        PgError::with_msg(format!("binding `{inner_name}` not found"), name)
+                    })?
+                    .clone();
 
-                self.map.insert(*id, t.clone());
-                t.clone()
+                self.set_type(*id, t.clone());
+                t
             }
             Node::Bin { id, op, lhs, rhs } => {
                 let lhs = self.node(lhs)?;
                 let rhs = self.node(rhs)?;
                 let res = Self::fuse(op, &lhs, &rhs)?;
-                self.map.insert(*id, res.clone());
+                self.set_type(*id, res.clone());
                 res
             }
-            Node::Unary { .. } => {
-                todo!("{:?}", node);
+            Node::Unary { id, op, rhs } => {
+                let inner = self.node(rhs)?;
+                let t = match (&op.t, &inner) {
+                    (lex::Type::Plus | lex::Type::Minus, Type::Int) => Type::Int,
+                    (lex::Type::Plus | lex::Type::Minus, Type::Double) => Type::Double,
+                    _ => {
+                        return Err(PgError::with_msg(
+                            format!(
+                                "Unary {:?} requires Int or Double, got {}",
+                                op.t.as_str(),
+                                inner
+                            ),
+                            op,
+                        ));
+                    }
+                };
+                self.set_type(*id, t.clone());
+                t
             }
             Node::Let { id, name, rhs } => {
                 let inner = self.node(rhs)?;
-                self.map.insert(*id, inner.clone());
+                self.set_type(*id, inner.clone());
                 let lex::Token {
                     t: lex::Type::Ident(inner_name),
                     ..
@@ -303,13 +333,13 @@ impl<'t> Typechecker<'t> {
             }
             Node::Cast { id, lhs, rhs, src } => {
                 let cast = Self::cast(src, &self.node(lhs)?, &rhs.into())?;
-                self.map.insert(*id, cast.clone());
+                self.set_type(*id, cast.clone());
                 cast
             }
             Node::Field { .. } => todo!(),
             Node::Call { id, target, args } => {
                 let (tok, inner_name, fun) = match target.as_ref() {
-                    Node::Field { id, target, name } => {
+                    Node::Field { target, name, .. } => {
                         let Node::Ident {
                             name:
                                 lex::Token {
@@ -346,7 +376,7 @@ impl<'t> Typechecker<'t> {
                         };
                         let mut s = String::from(*pkg_name);
                         s.push('.');
-                        s.push_str(*inner_name);
+                        s.push_str(inner_name);
                         (name, s, fun)
                     }
                     Node::Ident { name, .. } => {
@@ -380,7 +410,7 @@ impl<'t> Typechecker<'t> {
                     ));
                 }
 
-                self.map.insert(*id, fun.ret.clone());
+                self.set_type(*id, fun.ret.clone());
 
                 for (i, provided_node) in args.iter().enumerate() {
                     let provided_type = self.node(provided_node)?;
@@ -446,10 +476,10 @@ impl<'t> Typechecker<'t> {
                     };
                 }
 
-                self.map.insert(*id, first_type.clone());
+                self.set_type(*id, first_type.clone());
                 first_type
             }
-            Node::Import { id, pkgs, src } => {
+            Node::Import { pkgs, src, .. } => {
                 if pkgs.is_empty() {
                     return Err(PgError::with_msg(
                         "Import without any paths to import is considered invalid",
@@ -491,8 +521,8 @@ impl<'t> Typechecker<'t> {
 
                 Type::Void
             }
-            Node::Array { id, members } => todo!(),
-            Node::Object { id, pairs } => todo!(),
+            Node::Array { .. } => todo!(),
+            Node::Object { .. } => todo!(),
         })
     }
 }

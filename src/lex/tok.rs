@@ -49,9 +49,10 @@ pub enum Type<'t> {
 
 #[derive(Debug, Clone, Eq)]
 pub struct Token<'t> {
-    pub line: usize,
-    // TODO: This is buggy asf and not at all correct
-    pub col: usize,
+    /// Byte offset into the source where this token starts. Line/column
+    /// numbers are computed lazily on the error path from this offset; see
+    /// `PgError::render`.
+    pub start: usize,
     pub t: Type<'t>,
 }
 
@@ -65,7 +66,7 @@ impl PartialEq for Token<'_> {
 #[cfg(not(test))]
 impl PartialEq for Token<'_> {
     fn eq(&self, other: &Self) -> bool {
-        self.line == other.line && self.col == other.col && self.t == other.t
+        self.start == other.start && self.t == other.t
     }
 }
 
