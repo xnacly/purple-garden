@@ -1,6 +1,8 @@
+mod byte_search;
 mod tok;
 
 use crate::err::PgError;
+use byte_search::find_byte;
 
 pub use tok::{Token, Type};
 
@@ -103,11 +105,7 @@ impl<'l> Lexer<'l> {
                 p += 1;
             }
             if p < bytes.len() && bytes[p] == b'#' {
-                let end = bytes[p..]
-                    .iter()
-                    .position(|&b| b == b'\n')
-                    .map(|i| p + i)
-                    .unwrap_or(bytes.len());
+                let end = find_byte(b'\n', &bytes[p..]).map_or(bytes.len(), |i| p + i);
                 p = end;
                 continue;
             }
@@ -156,8 +154,7 @@ impl<'l> Lexer<'l> {
                 let body_start = self.pos;
                 let bytes = self.input;
 
-                // this autovectorizes nicely; at least on my machine :)
-                let end = match bytes[body_start..].iter().position(|&b| b == b'"') {
+                let end = match find_byte(b'"', &bytes[body_start..]) {
                     Some(i) => body_start + i,
                     None => {
                         self.pos = bytes.len();
