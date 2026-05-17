@@ -11,14 +11,10 @@ fn mandel_iter(zr:double zi:double cr:double ci:double i:int max:int) int {
     }
 }
 
-fn x_to_cr(i:int) double {
-    (i as double) / 100.0 - 1.5
-}
-
 fn slice_sum(i:int n:int max:int acc:int) int {
     match {
         i == n { acc }
-        { slice_sum(i+1 n max acc + mandel_iter(0.0 0.0 x_to_cr(i) 0.0 0 max)) }
+        { slice_sum(i+1 n max acc + mandel_iter(0.0 0.0 ((i as double) / 100.0 - 1.5) 0.0 0 max)) }
     }
 }
 
