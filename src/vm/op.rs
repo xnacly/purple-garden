@@ -35,6 +35,25 @@ pub enum Op {
         lhs: u8,
         rhs: u8,
     },
+    IEqI {
+        dst: u8,
+        lhs: u8,
+        imm: i32,
+    },
+    /// `r[dst] = r[lhs] > imm`. Peephole-folded from a `LoadI` + `IGt`
+    /// (or a swapped `LoadI` + `ILt`); see [crate::opt::bc::cmp_imm].
+    IGtI {
+        dst: u8,
+        lhs: u8,
+        imm: i32,
+    },
+    /// `r[dst] = r[lhs] < imm`. Peephole-folded from a `LoadI` + `ILt`
+    /// (or a swapped `LoadI` + `IGt`); see [crate::opt::bc::cmp_imm].
+    ILtI {
+        dst: u8,
+        lhs: u8,
+        imm: i32,
+    },
     DAdd {
         dst: u8,
         lhs: u8,

@@ -163,15 +163,27 @@ impl<'vm> Vm<'vm> {
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l == r)
                 },
+                Op::IEqI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l == imm as i64)
+                },
                 Op::IGt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l > r)
                 },
+                Op::IGtI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l > imm as i64)
+                },
                 Op::ILt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l < r)
+                },
+                Op::ILtI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l < imm as i64)
                 },
                 Op::DAdd { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
@@ -496,6 +508,29 @@ mod ops {
         assert!(!vm.r(2).as_bool());
         assert!(vm.r(3).as_bool());
         assert!(!vm.r(4).as_bool());
+    }
+
+    #[test]
+    fn int_compare_immediate() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 42 },
+                Op::IEqI {
+                    dst: 1,
+                    lhs: 0,
+                    imm: 42,
+                },
+                Op::IEqI {
+                    dst: 2,
+                    lhs: 0,
+                    imm: 7,
+                },
+            ],
+            &cfg,
+        );
+        assert!(vm.r(1).as_bool());
+        assert!(!vm.r(2).as_bool());
     }
 
     #[test]

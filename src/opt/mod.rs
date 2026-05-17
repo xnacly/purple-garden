@@ -48,6 +48,7 @@ pub fn bc(bc: &mut [Op]) {
         let window = &mut bc[i..end];
         bc::self_move(window);
         if window.len() == WINDOW_SIZE {
+            bc::cmp_imm(window);
             bc::mov_merge(window);
             bc::jmp_next(i, window);
         }
