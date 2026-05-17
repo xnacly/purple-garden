@@ -134,10 +134,28 @@ pub enum Op {
     Push {
         src: u8,
     },
+    Push2 {
+        a: u8,
+        b: u8,
+    },
+    Push3 {
+        a: u8,
+        b: u8,
+        c: u8,
+    },
     /// Pop the top of [Vm::spilled] into `dst`. See [Op::Push] for the
     /// stack-balance invariant.
     Pop {
         dst: u8,
+    },
+    Pop2 {
+        a: u8,
+        b: u8,
+    },
+    Pop3 {
+        a: u8,
+        b: u8,
+        c: u8,
     },
 
     CastToInt {

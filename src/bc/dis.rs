@@ -147,7 +147,11 @@ impl<'dis> Disassembler<'dis> {
                         std_fns[*idx as usize] as usize,
                     ),
                     Op::Push { src } => format!("push r{src}"),
+                    Op::Push2 { a, b } => format!("push2 r{a}, r{b}"),
+                    Op::Push3 { a, b, c } => format!("push3 r{a}, r{b}, r{c}"),
                     Op::Pop { dst } => format!("pop r{dst}"),
+                    Op::Pop2 { a, b } => format!("pop2 r{a}, r{b}"),
+                    Op::Pop3 { a, b, c } => format!("pop3 r{a}, r{b}, r{c}"),
                     Op::Ret => "ret".into(),
                     Op::CastToBool { dst, src } => {
                         format!("cast_to_bool r{dst}, r{src}")

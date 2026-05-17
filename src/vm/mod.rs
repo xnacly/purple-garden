@@ -287,8 +287,26 @@ impl<'vm> Vm<'vm> {
                 Op::Push { src } => unsafe {
                     self.spilled.push(*r!(src));
                 },
+                Op::Push2 { a, b } => unsafe {
+                    self.spilled.push(*r!(a));
+                    self.spilled.push(*r!(b));
+                },
+                Op::Push3 { a, b, c } => unsafe {
+                    self.spilled.push(*r!(a));
+                    self.spilled.push(*r!(b));
+                    self.spilled.push(*r!(c));
+                },
                 Op::Pop { dst } => unsafe {
                     r_mut!(dst) = self.spilled.pop().unwrap();
+                },
+                Op::Pop2 { a, b } => unsafe {
+                    r_mut!(a) = self.spilled.pop().unwrap();
+                    r_mut!(b) = self.spilled.pop().unwrap();
+                },
+                Op::Pop3 { a, b, c } => unsafe {
+                    r_mut!(a) = self.spilled.pop().unwrap();
+                    r_mut!(b) = self.spilled.pop().unwrap();
+                    r_mut!(c) = self.spilled.pop().unwrap();
                 },
                 Op::CastToDouble { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_f64();
@@ -594,6 +612,35 @@ mod ops {
         );
         assert_eq!(vm.r(0).as_int(), 10);
         assert_eq!(vm.r(1).as_int(), 20);
+    }
+
+    #[test]
+    fn packed_push_pop_roundtrip() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 10 },
+                Op::LoadI { dst: 1, value: 20 },
+                Op::LoadI { dst: 2, value: 30 },
+                Op::LoadI { dst: 3, value: 40 },
+                Op::LoadI { dst: 4, value: 50 },
+                Op::Push3 { a: 0, b: 1, c: 2 },
+                Op::Push2 { a: 3, b: 4 },
+                Op::LoadI { dst: 0, value: 0 },
+                Op::LoadI { dst: 1, value: 0 },
+                Op::LoadI { dst: 2, value: 0 },
+                Op::LoadI { dst: 3, value: 0 },
+                Op::LoadI { dst: 4, value: 0 },
+                Op::Pop3 { a: 4, b: 3, c: 2 },
+                Op::Pop2 { a: 1, b: 0 },
+            ],
+            &cfg,
+        );
+        assert_eq!(vm.r(0).as_int(), 10);
+        assert_eq!(vm.r(1).as_int(), 20);
+        assert_eq!(vm.r(2).as_int(), 30);
+        assert_eq!(vm.r(3).as_int(), 40);
+        assert_eq!(vm.r(4).as_int(), 50);
     }
 
     #[test]

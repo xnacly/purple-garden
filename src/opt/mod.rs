@@ -35,14 +35,21 @@ const WINDOW_SIZE: usize = 2;
 /// - [Peephole optimization - wikipedia](https://en.wikipedia.org/wiki/Peephole_optimization)
 /// - [W. M. McKeeman "Peephole Optimization"](https://dl.acm.org/doi/epdf/10.1145/364995.365000)
 pub fn bc(bc: &mut [Op]) {
-    if bc.len() < WINDOW_SIZE {
+    if bc.is_empty() {
         return;
     }
 
-    for i in 0..=bc.len().saturating_sub(WINDOW_SIZE) {
-        let window = &mut bc[i..i + WINDOW_SIZE];
+    for i in 0..bc.len() {
+        if i + 3 <= bc.len() {
+            bc::pack_spills(&mut bc[i..i + 3]);
+        }
+
+        let end = (i + WINDOW_SIZE).min(bc.len());
+        let window = &mut bc[i..end];
         bc::self_move(window);
-        bc::mov_merge(window);
-        bc::jmp_next(i, window);
+        if window.len() == WINDOW_SIZE {
+            bc::mov_merge(window);
+            bc::jmp_next(i, window);
+        }
     }
 }

@@ -27,14 +27,11 @@ pub fn jmp_next(pos: usize, window: &mut [Op]) {
 ///
 /// where both dst == src
 pub fn self_move(window: &mut [Op]) {
-    // PERF: remove the loop here and replace it with two branches
-    for op in window.iter_mut() {
-        if let Op::Mov { dst, src } = op
-            && dst == src
-        {
-            *op = Op::Nop;
-            opt_trace!("self_move", "removed self_moving Mov");
-        }
+    if let [Op::Mov { dst, src }, ..] = window
+        && dst == src
+    {
+        window[0] = Op::Nop;
+        opt_trace!("self_move", "removed self_moving Mov");
     }
 }
 
@@ -49,6 +46,7 @@ pub fn self_move(window: &mut [Op]) {
 ///
 /// ```text
 /// Mov { dst: 2, src: 0 }
+/// Nop
 /// ```
 ///
 /// This is a fallback for the copy propagation missing some movs between blocks
@@ -72,9 +70,72 @@ pub fn mov_merge(window: &mut [Op]) {
 
     let (dst, src) = (*m1dst, *m0src);
 
-    window[0] = Op::Nop;
-    window[1] = Op::Mov { dst, src };
+    window[0] = Op::Mov { dst, src };
+    window[1] = Op::Nop;
     opt_trace!("mov_merge", "merged two movs");
+}
+
+/// pack_spills merges adjacent spill-stack ops into fixed-width variants:
+///
+/// ```text
+/// Push { src: 1 }
+/// Push { src: 2 }
+/// Push { src: 3 }
+/// ```
+///
+/// Into
+///
+/// ```text
+/// Push3 { a: 1, b: 2, c: 3 }
+/// Nop
+/// Nop
+/// ```
+///
+/// same for 2 pushes and for pops.
+pub fn pack_spills(bc: &mut [Op]) {
+    match bc {
+        [
+            Op::Push { src: a },
+            Op::Push { src: b },
+            Op::Push { src: c },
+            ..,
+        ] => {
+            bc[0] = Op::Push3 {
+                a: *a,
+                b: *b,
+                c: *c,
+            };
+            bc[1] = Op::Nop;
+            bc[2] = Op::Nop;
+            opt_trace!("pack_spills", "packed three pushes");
+        }
+        [Op::Push { src: a }, Op::Push { src: b }, ..] => {
+            bc[0] = Op::Push2 { a: *a, b: *b };
+            bc[1] = Op::Nop;
+            opt_trace!("pack_spills", "packed two pushes");
+        }
+        [
+            Op::Pop { dst: a },
+            Op::Pop { dst: b },
+            Op::Pop { dst: c },
+            ..,
+        ] => {
+            bc[0] = Op::Pop3 {
+                a: *a,
+                b: *b,
+                c: *c,
+            };
+            bc[1] = Op::Nop;
+            bc[2] = Op::Nop;
+            opt_trace!("pack_spills", "packed three pops");
+        }
+        [Op::Pop { dst: a }, Op::Pop { dst: b }, ..] => {
+            bc[0] = Op::Pop2 { a: *a, b: *b };
+            bc[1] = Op::Nop;
+            opt_trace!("pack_spills", "packed two pops");
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -83,20 +144,23 @@ mod bc_test {
 
     #[test]
     fn self_move() {
-        let mut bc = vec![
-            Op::Mov { src: 64, dst: 64 },
-            Op::Mov { src: 64, dst: 64 },
-            Op::Mov { src: 64, dst: 64 },
-        ];
+        let mut bc = vec![Op::Mov { src: 64, dst: 64 }, Op::Ret];
         crate::opt::bc::self_move(&mut bc);
-        assert_eq!(bc, vec![Op::Nop, Op::Nop, Op::Nop])
+        assert_eq!(bc, vec![Op::Nop, Op::Ret])
+    }
+
+    #[test]
+    fn self_move_handles_single_instruction_window() {
+        let mut bc = vec![Op::Mov { src: 64, dst: 64 }];
+        crate::opt::bc::self_move(&mut bc);
+        assert_eq!(bc, vec![Op::Nop])
     }
 
     #[test]
     fn mov_merge() {
         let mut bc = vec![Op::Mov { dst: 8, src: 0 }, Op::Mov { dst: 2, src: 8 }];
         crate::opt::bc::mov_merge(&mut bc);
-        assert_eq!(bc, vec![Op::Nop, Op::Mov { dst: 2, src: 0 }])
+        assert_eq!(bc, vec![Op::Mov { dst: 2, src: 0 }, Op::Nop])
     }
 
     #[test]
@@ -163,5 +227,20 @@ mod bc_test {
         let mut bc = vec![Op::Mov { dst: 0, src: 1 }, Op::Ret];
         crate::opt::bc::jmp_next(0, &mut bc);
         assert_eq!(bc, vec![Op::Mov { dst: 0, src: 1 }, Op::Ret]);
+    }
+
+    #[test]
+    fn pack_spills_merges_three_pushes_and_pops() {
+        let mut bc = vec![
+            Op::Push { src: 1 },
+            Op::Push { src: 2 },
+            Op::Push { src: 3 },
+        ];
+
+        crate::opt::bc::pack_spills(&mut bc);
+        assert_eq!(bc, vec![Op::Push3 { a: 1, b: 2, c: 3 }, Op::Nop, Op::Nop,]);
+        let mut bc = vec![Op::Pop { dst: 4 }, Op::Pop { dst: 3 }, Op::Pop { dst: 2 }];
+        crate::opt::bc::pack_spills(&mut bc);
+        assert_eq!(bc, vec![Op::Pop3 { a: 4, b: 3, c: 2 }, Op::Nop, Op::Nop,]);
     }
 }
