@@ -142,21 +142,39 @@ impl<'vm> Vm<'vm> {
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l + r);
                 },
+                Op::IAddI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l + imm as i64);
+                },
                 Op::ISub { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l - r);
+                },
+                Op::ISubI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l - imm as i64);
                 },
                 Op::IMul { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l * r);
                 },
+                Op::IMulI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l * imm as i64);
+                },
                 Op::IDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     trap_if!(r == 0, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l / r);
+                },
+                Op::IDivI { dst, lhs, imm } => unsafe {
+                    let imm = imm as i64;
+                    trap_if!(imm == 0, Anomaly::DivisionByZero { pc });
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l / imm);
                 },
                 Op::IEq { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();

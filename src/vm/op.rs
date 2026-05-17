@@ -5,20 +5,52 @@ pub enum Op {
         lhs: u8,
         rhs: u8,
     },
+    /// `r[dst] = r[lhs] + imm`. Peephole-folded from `LoadI` + `IAdd`
+    /// (commutative; either side of the IAdd can be the loaded register).
+    IAddI {
+        dst: u8,
+        lhs: u8,
+        imm: i32,
+    },
     ISub {
         dst: u8,
         lhs: u8,
         rhs: u8,
+    },
+    /// `r[dst] = r[lhs] - imm`. Peephole-folded from `LoadI` + `ISub`,
+    /// but only when the loaded register sat on the `ISub`'s rhs side
+    /// (subtraction isn't commutative and we don't currently emit an
+    /// `imm - r[x]` form).
+    ISubI {
+        dst: u8,
+        lhs: u8,
+        imm: i32,
     },
     IMul {
         dst: u8,
         lhs: u8,
         rhs: u8,
     },
+    /// `r[dst] = r[lhs] * imm`. Peephole-folded from `LoadI` + `IMul`
+    /// (commutative).
+    IMulI {
+        dst: u8,
+        lhs: u8,
+        imm: i32,
+    },
     IDiv {
         dst: u8,
         lhs: u8,
         rhs: u8,
+    },
+    /// `r[dst] = r[lhs] / imm`. Peephole-folded from `LoadI` + `IDiv`
+    /// when the loaded register was the divisor (rhs). Still traps on
+    /// `imm == 0` to preserve `IDiv` semantics for code that statically
+    /// divides by zero.
+    IDivI {
+        dst: u8,
+        lhs: u8,
+        imm: i32,
     },
     ILt {
         dst: u8,

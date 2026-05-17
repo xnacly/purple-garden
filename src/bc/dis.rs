@@ -92,9 +92,13 @@ impl<'dis> Disassembler<'dis> {
                 pc,
                 match instr {
                     Op::IAdd { dst, lhs, rhs } => format!("iadd r{dst}, r{lhs}, r{rhs}"),
+                    Op::IAddI { dst, lhs, imm } => format!("iadd_imm r{dst}, r{lhs}, #{imm}"),
                     Op::ISub { dst, lhs, rhs } => format!("isub r{dst}, r{lhs}, r{rhs}"),
+                    Op::ISubI { dst, lhs, imm } => format!("isub_imm r{dst}, r{lhs}, #{imm}"),
                     Op::IMul { dst, lhs, rhs } => format!("imul r{dst}, r{lhs}, r{rhs}"),
+                    Op::IMulI { dst, lhs, imm } => format!("imul_imm r{dst}, r{lhs}, #{imm}"),
                     Op::IDiv { dst, lhs, rhs } => format!("idiv r{dst}, r{lhs}, r{rhs}"),
+                    Op::IDivI { dst, lhs, imm } => format!("idiv_imm r{dst}, r{lhs}, #{imm}"),
                     Op::IEq { dst, lhs, rhs } => format!("ieq r{dst}, r{lhs}, r{rhs}"),
                     Op::IEqI { dst, lhs, imm } => format!("ieq_imm r{dst}, r{lhs}, #{imm}"),
                     Op::ILt { dst, lhs, rhs } => format!("ilt r{dst}, r{lhs}, r{rhs}"),
