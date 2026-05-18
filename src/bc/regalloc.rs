@@ -103,7 +103,7 @@ impl Ralloc {
         };
 
         // Split-borrow so we can iterate `intervals` while also mutating
-        // `map` and `active` — they're disjoint fields of self.
+        // `map` and `active`; they're disjoint fields of self.
         let Self {
             intervals,
             map,
@@ -113,7 +113,10 @@ impl Ralloc {
 
         for interval in intervals.iter_mut() {
             active.retain(|&(end, reg)| {
-                if end < interval.start {
+                // end-inclusive (<=, not <): live_set encodes each pos as
+                // early + late, so a dying source and a newborn dst at the
+                // same logical pos can share a register.
+                if end <= interval.start {
                     free |= 1u64 << reg;
                     false
                 } else {

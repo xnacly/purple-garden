@@ -347,6 +347,12 @@ impl Func<'_> {
 
         crate::trace!("[ir::Func::live_set][{}] start", self.name);
 
+        // Each event takes two slots: early (pos) and late (pos+1). Instr
+        // sources land on early, dst on late, so a source dying at pos P
+        // and a dst born at pos P can share a register. Branch yes-shuffle
+        // is early, cond and no-shuffle are late, so yes_movs (which run
+        // before JmpT) can't clobber cond. bc::Cc::cc steps pos by 2 in
+        // lockstep so its call-site spill checks see the same units.
         let intervals = &mut *out;
         let mut pos = 0;
 
@@ -375,7 +381,7 @@ impl Func<'_> {
                 );
                 define(intervals, *param, pos);
             }
-            pos += 1;
+            pos += 2;
 
             for instr in &block.instructions {
                 crate::trace!(
@@ -401,13 +407,13 @@ impl Func<'_> {
                     crate::trace!(
                         "[ir::Func::live_set] def %v{} @{} (b{} instr {})",
                         def_id.0,
-                        pos,
+                        pos + 1,
                         block.id.0,
                         instr
                     );
-                    define(intervals, def_id, pos);
+                    define(intervals, def_id, pos + 1);
                 }
-                pos += 1;
+                pos += 2;
             }
 
             if let Some(term) = &block.term {
@@ -419,51 +425,79 @@ impl Func<'_> {
                     term
                 );
 
-                self.for_each_use_of_term(term, |use_id| {
-                    crate::trace!(
-                        "[ir::Func::live_set] use %v{} @{} (b{} term {})",
-                        use_id.0,
-                        pos,
-                        block.id.0,
-                        term
-                    );
-                    use_value(intervals, use_id, pos);
-                });
-
-                // The bc emitter writes outgoing param values into the
-                // successor's param registers right before the terminator
-                // op. For a Branch this means the yes-target shuffle can
-                // clobber cond before JmpT reads it (cond appears dead to
-                // the regalloc at the terminator, so its register is
-                // reusable as a shuffle dst). Marking the successor params
-                // as defined here forces the regalloc to keep them out of
-                // cond's register.
-                //
-                // TODO: a parallel-move resolver in the bc emitter would
-                // be the more general fix — it would also close the
-                // analogous parallel-move hazards on Jump/Tail (where
-                // dst[i] == src[j] for j > i clobbers a not-yet-read
-                // source).
-                if let Terminator::Branch { yes, no, .. } = term {
-                    let yes_target_params = self.params(self.blocks[yes.0.0 as usize].params);
-                    for &target_param in yes_target_params {
+                match term {
+                    Terminator::Branch {
+                        cond,
+                        yes: (yes_id, yes_params),
+                        no: (no_id, no_params),
+                        ..
+                    } => {
+                        // yes-shuffle runs before JmpT.
+                        for &p in self.params(*yes_params) {
+                            crate::trace!(
+                                "[ir::Func::live_set] use %v{} @{} (b{} branch yes src)",
+                                p.0,
+                                pos,
+                                block.id.0
+                            );
+                            use_value(intervals, p, pos);
+                        }
+                        for &p in self.params(self.blocks[yes_id.0 as usize].params) {
+                            crate::trace!(
+                                "[ir::Func::live_set] def %v{} @{} (b{} branch yes shuffle dst)",
+                                p.0,
+                                pos,
+                                block.id.0
+                            );
+                            define(intervals, p, pos);
+                        }
+                        // JmpT reads cond after yes_movs; the phase gap
+                        // keeps cond's reg out of yes_dst's reach.
                         crate::trace!(
-                            "[ir::Func::live_set] def %v{} @{} (b{} branch yes shuffle dst)",
-                            target_param.0,
-                            pos,
+                            "[ir::Func::live_set] use %v{} @{} (b{} branch cond)",
+                            cond.0,
+                            pos + 1,
                             block.id.0
                         );
-                        define(intervals, target_param, pos);
+                        use_value(intervals, *cond, pos + 1);
+                        // no-shuffle runs after JmpT.
+                        for &p in self.params(*no_params) {
+                            crate::trace!(
+                                "[ir::Func::live_set] use %v{} @{} (b{} branch no src)",
+                                p.0,
+                                pos + 1,
+                                block.id.0
+                            );
+                            use_value(intervals, p, pos + 1);
+                        }
+                        for &p in self.params(self.blocks[no_id.0 as usize].params) {
+                            crate::trace!(
+                                "[ir::Func::live_set] def %v{} @{} (b{} branch no shuffle dst)",
+                                p.0,
+                                pos + 1,
+                                block.id.0
+                            );
+                            define(intervals, p, pos + 1);
+                        }
                     }
-                    let no_target_params = self.params(self.blocks[no.0.0 as usize].params);
-                    for &target_param in no_target_params {
-                        crate::trace!(
-                            "[ir::Func::live_set] def %v{} @{} (b{} branch no shuffle dst)",
-                            target_param.0,
-                            pos,
-                            block.id.0
-                        );
-                        define(intervals, target_param, pos);
+                    // Jump/Tail shuffle dsts are NOT recorded: doing so
+                    // would extend a join-block param back through every
+                    // predecessor, making the call-site spill check
+                    // spill (and pop-overwrite) the very value the call
+                    // is computing. The IR mostly threads matching SSA
+                    // ids so jump shuffles elide; the residual hazard is
+                    // a known TODO (parallel-move resolver).
+                    _ => {
+                        self.for_each_use_of_term(term, |use_id| {
+                            crate::trace!(
+                                "[ir::Func::live_set] use %v{} @{} (b{} term {})",
+                                use_id.0,
+                                pos,
+                                block.id.0,
+                                term
+                            );
+                            use_value(intervals, use_id, pos);
+                        });
                     }
                 }
             } else {
@@ -474,7 +508,7 @@ impl Func<'_> {
                     pos
                 );
             }
-            pos += 1;
+            pos += 2;
         }
 
         #[cfg(feature = "trace")]
@@ -564,6 +598,59 @@ impl Func<'_> {
                 }
             }
         }
+
+        // Back-propagate r0 from Return through Jump/Branch params, in
+        // reverse so each pass picks up the prior block's hint. Lands the
+        // return value directly in r0 when regalloc can honor it.
+        for block in self.blocks.iter().rev() {
+            if block.tombstone {
+                continue;
+            }
+            match &block.term {
+                Some(Terminator::Return {
+                    value: Some(id), ..
+                }) => {
+                    put(hints, *id, 0u8);
+                }
+                Some(Terminator::Jump {
+                    id: target_id,
+                    params,
+                    ..
+                }) => {
+                    let target = &self.blocks[target_id.0 as usize];
+                    if target.tombstone {
+                        continue;
+                    }
+                    let src_params = self.params(*params);
+                    let dst_params = self.params(target.params);
+                    for (i, &src) in src_params.iter().enumerate() {
+                        if let Some(&dst) = dst_params.get(i)
+                            && let Some(Some(reg)) = hints.get(dst.0 as usize).copied()
+                        {
+                            put(hints, src, reg);
+                        }
+                    }
+                }
+                Some(Terminator::Branch { yes, no, .. }) => {
+                    for (target_id, params) in [yes, no] {
+                        let target = &self.blocks[target_id.0 as usize];
+                        if target.tombstone {
+                            continue;
+                        }
+                        let src_params = self.params(*params);
+                        let dst_params = self.params(target.params);
+                        for (i, &src) in src_params.iter().enumerate() {
+                            if let Some(&dst) = dst_params.get(i)
+                                && let Some(Some(reg)) = hints.get(dst.0 as usize).copied()
+                            {
+                                put(hints, src, reg);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -641,11 +728,14 @@ mod tests {
         let mut live_set = Vec::new();
         fun.live_set_into(&mut live_set);
 
-        assert_eq!(live_set[0], (0, 3));
-        assert_eq!(live_set[1], (1, 3));
-        assert_eq!(live_set[2], (2, 3));
-        assert_eq!(live_set[3], (3, 5));
-        assert_eq!(live_set[4], (3, 7));
-        assert_eq!(live_set[5], (7, 8));
+        // Each logical event consumes two pos slots (early + late). Within
+        // an instruction, src use lands on early, dst def on late. Within
+        // a Branch term, yes-shuffle is early, cond + no-shuffle are late.
+        assert_eq!(live_set[0], (0, 6)); // %v0: b0 param, used by IAdd and yes-shuffle
+        assert_eq!(live_set[1], (3, 7)); // %v1: defined by LoadConst (late), used by IAdd, no-shuffle
+        assert_eq!(live_set[2], (5, 7)); // %v2: defined by IAdd (late), used by Branch cond (late)
+        assert_eq!(live_set[3], (6, 10)); // %v3: yes-shuffle dst + b1 param, used by Return
+        assert_eq!(live_set[4], (7, 14)); // %v4: no-shuffle dst + b2 param, used by Cast
+        assert_eq!(live_set[5], (15, 16)); // %v5: Cast dst (late), used by Return
     }
 }

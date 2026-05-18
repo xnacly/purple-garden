@@ -167,12 +167,9 @@ impl<'cc> Cc<'cc> {
         self.block_map.clear();
         self.block_map.resize(fun.blocks.len(), u16::MAX);
 
-        // pos must mirror the global position counter used by Func::live_set:
-        // +1 for the block's params row, +1 per instruction, +1 for the
-        // terminator.
-        //
-        // The caller save spill check around call uses pos to idx into (def, last_use) intervals
-        // from live_set.
+        // Two slots per event (early then late), in lockstep with
+        // Func::live_set_into. pos points at the early slot; the
+        // call-site spill check compares last_use against it.
         let mut pos: u32 = 0;
         for (idx, block) in fun.blocks.iter().enumerate() {
             if block.tombstone {
@@ -181,25 +178,25 @@ impl<'cc> Cc<'cc> {
 
             self.block_map[block.id.0 as usize] = self.buf.len() as u16;
 
-            pos += 1; // block params row
+            pos += 2; // block params row
             for instruction in &block.instructions {
                 self.cur_span = instruction.span();
                 self.instr(&live_set, pos, instruction);
-                pos += 1;
+                pos += 2;
             }
 
             if let Some(term) = block.term.as_ref() {
                 self.cur_span = term.span();
             }
-            // The next emitted block is the next non-tombstoned block. The
-            // Branch lowering uses this to fuse `JmpT yes; Jmp no` into a
-            // single `JmpF cond, no` when `yes` is the fall-through.
+            // The next emitted block; the Branch lowering uses it to fuse
+            // JmpT yes + Jmp no into a single JmpF when yes is the
+            // fall-through.
             let next_block = fun.blocks[idx + 1..]
                 .iter()
                 .find(|b| !b.tombstone)
                 .map(|b| b.id);
             self.term(fun, block.term.as_ref(), next_block);
-            pos += 1; // terminator row
+            pos += 2; // terminator row
         }
 
         for i in pc..self.buf.len() {
@@ -315,8 +312,8 @@ impl<'cc> Cc<'cc> {
                 let no_src = fun.params(*no_params);
                 let no_dst = fun.params(no_target.params);
 
-                // Yes-side movs always run unconditionally;Regalloc guarantees their dst regs are
-                // safe on the no-path.
+                // yes_movs run unconditionally; regalloc guarantees their
+                // dst regs are safe on the no-path.
                 for (i, &param) in yes_src.iter().enumerate() {
                     let src = self.ensure_register(param);
                     let dst = self.ensure_register(yes_dst[i]);
@@ -328,14 +325,11 @@ impl<'cc> Cc<'cc> {
 
                 let cond_reg = self.ensure_register(*cond);
 
-                // Fuse `JmpT yes; <no_movs>; Jmp no` into a single
-                // `JmpF cond, no` when (a) yes is the fall-through block
-                // and (b) the no-side shuffle would be empty. Condition
-                // (b) is required because there is no place to put
-                // non-empty no_movs once the unconditional Jmp is gone.
-                //
-                // The no==next case (trailing `Jmp no` redundant) is
-                // already handled by the jmp_next peephole.
+                // Fuse JmpT yes + Jmp no into a single JmpF when yes is
+                // the fall-through AND no-side shuffle is empty. With
+                // non-empty no_movs there is nowhere left to put them
+                // once the unconditional Jmp is dropped. The no==next
+                // case is already handled by the jmp_next peephole.
                 let no_movs_empty = no_src
                     .iter()
                     .zip(no_dst)

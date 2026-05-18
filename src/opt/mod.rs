@@ -20,6 +20,9 @@ pub fn ir(ir: &mut [crate::ir::Func]) {
         }
 
         ir::indirect_jump(fun);
+        // Order: before tailcall, so a Call-then-Jump-to-Ret-join pattern
+        // becomes a direct Return that tailcall then picks up as Pattern A.
+        ir::ret_inline(fun);
         ir::tailcall(fun);
     }
 }
@@ -43,8 +46,8 @@ pub fn bc(bc: &mut [Op]) {
         if i + 3 <= bc.len() {
             bc::pack_spills(&mut bc[i..i + 3]);
         } else if i + 2 <= bc.len() {
-            // Trailing Push/Pop pair (no 3rd slot to inspect) — the existing
-            // 2-arm patterns match a 2-slice via their `..`.
+            // Trailing pair at end of buffer; the 2-arm patterns match a
+            // 2-slice via their .. tail.
             bc::pack_spills(&mut bc[i..i + 2]);
         }
 
