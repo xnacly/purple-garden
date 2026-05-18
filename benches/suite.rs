@@ -11,8 +11,10 @@
 
 use std::path::PathBuf;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::Criterion;
 use purple_garden::config::Config;
+
+mod common;
 
 fn programs() -> Vec<(String, Vec<u8>)> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/programs");
@@ -23,8 +25,7 @@ fn programs() -> Vec<(String, Vec<u8>)> {
         .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("garden"))
         .map(|p| {
             let name = p.file_stem().unwrap().to_string_lossy().into_owned();
-            let bytes = std::fs::read(&p)
-                .unwrap_or_else(|e| panic!("read {}: {}", p.display(), e));
+            let bytes = std::fs::read(&p).unwrap_or_else(|e| panic!("read {}: {}", p.display(), e));
             (name, bytes)
         })
         .collect();
@@ -78,5 +79,8 @@ pub fn suite(c: &mut Criterion) {
     }
 }
 
-criterion_group!(suite_group, suite);
-criterion_main!(suite_group);
+fn main() {
+    let mut criterion = common::criterion();
+    suite(&mut criterion);
+    criterion.final_summary();
+}

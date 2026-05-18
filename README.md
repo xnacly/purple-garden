@@ -44,3 +44,12 @@ cargo run -- --help
 ```bash
 cargo bench
 ```
+
+For a fast run with less statistical confidence:
+
+```bash
+PG_BENCH_QUICK=1 cargo bench
+```
+
+`PG_BENCH_QUICK=1` uses 10 samples, a 100ms warm-up, and a 300ms measurement
+window per benchmark.
