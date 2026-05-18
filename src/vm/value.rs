@@ -7,6 +7,8 @@ use crate::ir::Const;
 pub struct Value(pub u64);
 
 impl Value {
+    pub const UNDEF: Self = Self(0);
+
     #[inline(always)]
     pub fn as_int(&self) -> i64 {
         self.0 as i64
