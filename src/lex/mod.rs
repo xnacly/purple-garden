@@ -2,7 +2,7 @@ mod byte_search;
 mod tok;
 
 use crate::err::PgError;
-use byte_search::find_byte;
+use byte_search::{find_byte, skip_ident_cont, skip_num_cont};
 
 pub use tok::{Token, Type};
 
@@ -174,10 +174,7 @@ impl<'l> Lexer<'l> {
             }
             c if class_of(c) & IDENT_START != 0 => {
                 let bytes = self.input;
-                let mut p = start + 1;
-                while p < bytes.len() && class_of(bytes[p]) & IDENT_CONT != 0 {
-                    p += 1;
-                }
+                let p = start + 1 + skip_ident_cont(&self.input[start + 1..]);
                 self.pos = p;
 
                 // SAFETY: only bytes accepted by IDENT_START/IDENT_CONT are
@@ -190,17 +187,10 @@ impl<'l> Lexer<'l> {
             }
             c if class_of(c) & DIGIT != 0 => {
                 let bytes = self.input;
-                let mut p = start + 1;
-                let mut is_double = false;
-                while p < bytes.len() {
-                    let b = bytes[p];
-                    if class_of(b) & NUM_CONT == 0 {
-                        break;
-                    }
-                    is_double |= b == b'.';
-                    p += 1;
-                }
+                let p = start + 1 + skip_num_cont(&self.input[start + 1..]);
                 self.pos = p;
+
+                let is_double = find_byte(b'.', &bytes[start + 1..p]).is_some();
 
                 // SAFETY: only ASCII digits and '.' are accepted, valid UTF-8.
                 let inner = unsafe { str::from_utf8_unchecked(&bytes[start..p]) };

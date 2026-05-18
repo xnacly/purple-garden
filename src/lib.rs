@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "nightly", feature(likely_unlikely))]
+#![feature(likely_unlikely, portable_simd)]
 
 use crate::{err::PgError, vm::Vm};
 

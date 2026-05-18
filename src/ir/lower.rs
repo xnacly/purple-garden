@@ -439,7 +439,7 @@ impl<'lower> Lower<'lower> {
 
                 // All check/body/default blocks of this match inherit the
                 // enclosing block's params verbatim. Intern that list once
-                // and hand the same ParamsId to every sink — 4 × per case,
+                // and hand the same ParamsId to every sink; 4 * per case,
                 // plus the default block, plus the two Branch arms. Each
                 // assignment is a u32 copy, no allocation.
                 let case_params = {

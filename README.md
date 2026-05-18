@@ -26,11 +26,14 @@ For an intro to purple garden see [help/intro.txt](./help/intro.txt) or run
 
 ## Local Setup
 
-> Nightly Rust is required due to branch prediction optimisations in the VM.
+> Nightly Rust is required due to:
+>
+> - branch prediction hints in the vm
+> - simd in the lexer
 
 ```bash
 git clone git@github.com:xnacly/purple-garden.git
-cargo +nightly run -- --help
+cargo run -- --help
 ```
 
 ### Benchmarks
@@ -38,5 +41,5 @@ cargo +nightly run -- --help
 > These may take a while
 
 ```bash
-cargo +nightly bench --features nightly
+cargo bench
 ```

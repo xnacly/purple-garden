@@ -64,21 +64,9 @@ pub struct Vm<'vm> {
 
 /// trap in the vm; return Err(<anomaly>) if expr == true
 #[allow(unused)]
-#[cfg(feature = "nightly")]
 macro_rules! trap_if {
     ($condition:expr, $anomaly:expr) => {
         if std::hint::unlikely($condition) {
-            return Err($anomaly);
-        }
-    };
-}
-
-/// non-nightly fallback for trap_if
-#[allow(unused)]
-#[cfg(not(feature = "nightly"))]
-macro_rules! trap_if {
-    ($condition:expr, $anomaly:expr) => {
-        if $condition {
             return Err($anomaly);
         }
     };
