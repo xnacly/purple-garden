@@ -518,11 +518,34 @@ impl<'cc> Cc<'cc> {
                     BEq
                 });
             }
+            ir::Instr::BinImm {
+                op, dst, lhs, imm, ..
+            } => {
+                let dst = self.ensure_register(dst.id);
+                let lhs = self.ensure_register(*lhs);
+                let imm = *imm;
+
+                macro_rules! emit_bin_imms {
+                    ($($ir:ident => $op:ident),* $(,)?) => {
+                        match op {
+                            $(ir::BinOp::$ir => Op::$op { dst, lhs, imm },)*
+                            _ => unreachable!("only integer immediate binops are represented as BinImm"),
+                        }
+                    };
+                }
+
+                self.emit(emit_bin_imms! {
+                    IAdd => IAddI,
+                    ISub => ISubI,
+                    IMul => IMulI,
+                    IDiv => IDivI,
+                    IEq  => IEqI,
+                    IGt  => IGtI,
+                    ILt  => ILtI,
+                });
+            }
         };
     }
-
-    // PERF: i have no idea how this impacts the compilation cost, but its better for runtime, since
-    // peephole now no longer leaves artifacts behind inflicting dispatch cost
 
     /// Strip [Op::Nop]s left behind by [opt::bc] and patch every absolute pc
     /// (jump targets, call/tail targets, function entry pcs in

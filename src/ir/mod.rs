@@ -94,6 +94,13 @@ pub enum Instr<'i> {
         /// right `file:line:col`. See `Vm::pc_to_span`.
         span: u32,
     },
+    BinImm {
+        op: BinOp,
+        dst: TypeId,
+        lhs: Id,
+        imm: i32,
+        span: u32,
+    },
     LoadConst {
         dst: TypeId,
         value: Const<'i>,
@@ -126,6 +133,7 @@ impl Instr<'_> {
     pub fn span(&self) -> u32 {
         match self {
             Instr::Bin { span, .. }
+            | Instr::BinImm { span, .. }
             | Instr::LoadConst { span, .. }
             | Instr::Call { span, .. }
             | Instr::Sys { span, .. }
@@ -248,9 +256,10 @@ impl<'f> Func<'f> {
 }
 
 impl Func<'_> {
-    fn def_of(instr: &Instr<'_>) -> Option<Id> {
+    pub(crate) fn def_of(instr: &Instr<'_>) -> Option<Id> {
         match instr {
             Instr::Bin { dst, .. }
+            | Instr::BinImm { dst, .. }
             | Instr::LoadConst { dst, .. }
             | Instr::Call { dst, .. }
             | Instr::Sys { dst, .. }
@@ -259,12 +268,13 @@ impl Func<'_> {
         }
     }
 
-    fn for_each_use_of_instr(instr: &Instr<'_>, mut f: impl FnMut(Id)) {
+    pub(crate) fn for_each_use_of_instr(instr: &Instr<'_>, mut f: impl FnMut(Id)) {
         match instr {
             Instr::Bin { lhs, rhs, .. } => {
                 f(*lhs);
                 f(*rhs);
             }
+            Instr::BinImm { lhs, .. } => f(*lhs),
             Instr::Call { args, .. } | Instr::Sys { args, .. } => {
                 for &a in args {
                     f(a);
@@ -275,7 +285,7 @@ impl Func<'_> {
         }
     }
 
-    fn for_each_use_of_term(&self, term: &Terminator, mut f: impl FnMut(Id)) {
+    pub(crate) fn for_each_use_of_term(&self, term: &Terminator, mut f: impl FnMut(Id)) {
         match term {
             Terminator::Return {
                 value: Some(id), ..

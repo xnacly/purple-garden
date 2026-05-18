@@ -13,12 +13,15 @@ mod ir;
 mod bc;
 
 pub fn ir(ir: &mut [crate::ir::Func]) {
+    let mut imm_fold_scratch = ir::ImmFoldScratch::default();
+
     for fun in ir {
         // so all other blocks.last() are valid
         if fun.blocks.is_empty() {
             continue;
         }
 
+        ir::imm_fold(fun, &mut imm_fold_scratch);
         ir::indirect_jump(fun);
         // Order: before tailcall, so a Call-then-Jump-to-Ret-join pattern
         // becomes a direct Return that tailcall then picks up as Pattern A.
@@ -55,7 +58,6 @@ pub fn bc(bc: &mut [Op]) {
         let window = &mut bc[i..end];
         bc::self_move(window);
         if window.len() == WINDOW_SIZE {
-            bc::imm_fold(window);
             bc::mov_merge(window);
             bc::jmp_next(i, window);
         }

@@ -5,8 +5,8 @@ pub enum Op {
         lhs: u8,
         rhs: u8,
     },
-    /// `r[dst] = r[lhs] + imm`. Peephole-folded from `LoadI` + `IAdd`
-    /// (commutative; either side of the IAdd can be the loaded register).
+    /// `r[dst] = r[lhs] + imm`. Lowered from IR `BinImm`
+    /// (commutative; either side of the original IAdd can be the constant).
     IAddI {
         dst: u8,
         lhs: u8,
@@ -17,8 +17,8 @@ pub enum Op {
         lhs: u8,
         rhs: u8,
     },
-    /// `r[dst] = r[lhs] - imm`. Peephole-folded from `LoadI` + `ISub`,
-    /// but only when the loaded register sat on the `ISub`'s rhs side
+    /// `r[dst] = r[lhs] - imm`. Lowered from IR `BinImm`, but only when
+    /// the constant sat on the `ISub`'s rhs side
     /// (subtraction isn't commutative and we don't currently emit an
     /// `imm - r[x]` form).
     ISubI {
@@ -31,7 +31,7 @@ pub enum Op {
         lhs: u8,
         rhs: u8,
     },
-    /// `r[dst] = r[lhs] * imm`. Peephole-folded from `LoadI` + `IMul`
+    /// `r[dst] = r[lhs] * imm`. Lowered from IR `BinImm`
     /// (commutative).
     IMulI {
         dst: u8,
@@ -43,8 +43,8 @@ pub enum Op {
         lhs: u8,
         rhs: u8,
     },
-    /// `r[dst] = r[lhs] / imm`. Peephole-folded from `LoadI` + `IDiv`
-    /// when the loaded register was the divisor (rhs). Still traps on
+    /// `r[dst] = r[lhs] / imm`. Lowered from IR `BinImm` when the
+    /// constant was the divisor (rhs). Still traps on
     /// `imm == 0` to preserve `IDiv` semantics for code that statically
     /// divides by zero.
     IDivI {
@@ -72,15 +72,15 @@ pub enum Op {
         lhs: u8,
         imm: i32,
     },
-    /// `r[dst] = r[lhs] > imm`. Peephole-folded from a `LoadI` + `IGt`
-    /// (or a swapped `LoadI` + `ILt`); see [crate::opt::bc::cmp_imm].
+    /// `r[dst] = r[lhs] > imm`. Lowered from IR `BinImm`, including
+    /// swapped constant-lhs comparisons.
     IGtI {
         dst: u8,
         lhs: u8,
         imm: i32,
     },
-    /// `r[dst] = r[lhs] < imm`. Peephole-folded from a `LoadI` + `ILt`
-    /// (or a swapped `LoadI` + `IGt`); see [crate::opt::bc::cmp_imm].
+    /// `r[dst] = r[lhs] < imm`. Lowered from IR `BinImm`, including
+    /// swapped constant-lhs comparisons.
     ILtI {
         dst: u8,
         lhs: u8,

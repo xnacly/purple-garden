@@ -17,12 +17,17 @@ impl Display for Id {
 impl Display for Instr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Instr::Bin { op, dst, lhs, rhs, .. } => {
-                write!(f, "%v{} = {:?} %v{}, %v{}", dst, op, lhs.0, rhs.0)?
-            }
+            Instr::Bin {
+                op, dst, lhs, rhs, ..
+            } => write!(f, "%v{} = {:?} %v{}, %v{}", dst, op, lhs.0, rhs.0)?,
+            Instr::BinImm {
+                op, dst, lhs, imm, ..
+            } => write!(f, "%v{} = {:?} %v{}, {}", dst, op, lhs.0, imm)?,
             Instr::LoadConst { dst, value, .. } => write!(f, "%v{} = {}", dst, value)?,
             Instr::Noop => write!(f, "Nop")?,
-            Instr::Call { dst, func, args, .. } => {
+            Instr::Call {
+                dst, func, args, ..
+            } => {
                 write!(f, "%v{} = ", dst)?;
                 write!(f, "Call f{}(", func.0)?;
                 for (i, arg) in args.iter().enumerate() {
@@ -52,13 +57,13 @@ impl Display for Instr<'_> {
                 }
                 write!(f, ")")?;
             }
-            Instr::Cast { dst: value, from, .. } => {
-                write!(
-                    f,
-                    "%v{} = Cast<{}->{}> %v{}",
-                    value, from.ty, value.ty, from.id.0
-                )?
-            }
+            Instr::Cast {
+                dst: value, from, ..
+            } => write!(
+                f,
+                "%v{} = Cast<{}->{}> %v{}",
+                value, from.ty, value.ty, from.id.0
+            )?,
         }
         Ok(())
     }
@@ -70,11 +75,11 @@ impl Display for Instr<'_> {
 impl Display for Terminator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Terminator::Return { value: Some(id), .. } => write!(f, "ret %v{}", id.0)?,
+            Terminator::Return {
+                value: Some(id), ..
+            } => write!(f, "ret %v{}", id.0)?,
             Terminator::Return { value: None, .. } => write!(f, "ret")?,
-            Terminator::Jump { id, params, .. } => {
-                write!(f, "jmp b{}(params#{})", id.0, params.0)?
-            }
+            Terminator::Jump { id, params, .. } => write!(f, "jmp b{}(params#{})", id.0, params.0)?,
             Terminator::Branch { cond, yes, no, .. } => write!(
                 f,
                 "br %v{}, b{}(params#{}), b{}(params#{})",
@@ -124,7 +129,12 @@ impl Display for Func<'_> {
         )?;
 
         for block in self.blocks.iter() {
-            writeln!(f, "b{}({}):", block.id.0, format_ids(self.params(block.params)))?;
+            writeln!(
+                f,
+                "b{}({}):",
+                block.id.0,
+                format_ids(self.params(block.params))
+            )?;
 
             if block.tombstone {
                 writeln!(f, "\t<tombstone>")?;
