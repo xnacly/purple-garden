@@ -169,7 +169,13 @@ impl<'lower> Lower<'lower> {
                     _ => todo!("{:#?}", src_type),
                 };
 
-                self.emit(Instr::Bin { op, dst, lhs, rhs, span });
+                self.emit(Instr::Bin {
+                    op,
+                    dst,
+                    lhs,
+                    rhs,
+                    span,
+                });
 
                 Some(dst_id)
             }

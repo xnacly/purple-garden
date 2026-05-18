@@ -146,6 +146,11 @@ impl<'dis> Disassembler<'dis> {
                         cur_func.name,
                         *target as usize - cur_func.pc
                     ),
+                    Op::JmpF { cond, target } => format!(
+                        "jmpf r{cond}, {target} <{}+0x{:0x}>",
+                        cur_func.name,
+                        *target as usize - cur_func.pc
+                    ),
                     Op::Call { func } =>
                         format!("call {func} <{}>", funcs_by_pc.get(func).unwrap().name),
                     Op::Sys { idx } => format!(

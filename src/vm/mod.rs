@@ -247,6 +247,12 @@ impl<'vm> Vm<'vm> {
                         continue;
                     }
                 },
+                Op::JmpF { target, cond } => unsafe {
+                    if !r!(cond).as_bool() {
+                        pc = target as usize;
+                        continue;
+                    }
+                },
                 Op::Call { func } => {
                     if self.config.backtrace {
                         self.backtrace.push(func as usize);

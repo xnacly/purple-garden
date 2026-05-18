@@ -145,6 +145,14 @@ pub enum Op {
         cond: u8,
         target: u16,
     },
+    /// Conditional jump: branch to `target` when `cond` is *falsy*.
+    /// Falls through when `cond` is truthy. Lets a two-armed branch
+    /// fuse its `JmpT yes; Jmp no` pair into a single op when `yes` is
+    /// the fall-through block.
+    JmpF {
+        cond: u8,
+        target: u16,
+    },
     /// Tail call: jump to `func` (an absolute pc) without growing the
     /// callstack. Same calling convention as [Op::Call].
     Tail {

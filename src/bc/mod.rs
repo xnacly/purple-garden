@@ -174,7 +174,7 @@ impl<'cc> Cc<'cc> {
         // The caller save spill check around call uses pos to idx into (def, last_use) intervals
         // from live_set.
         let mut pos: u32 = 0;
-        for block in &fun.blocks {
+        for (idx, block) in fun.blocks.iter().enumerate() {
             if block.tombstone {
                 continue;
             }
@@ -191,13 +191,24 @@ impl<'cc> Cc<'cc> {
             if let Some(term) = block.term.as_ref() {
                 self.cur_span = term.span();
             }
-            self.term(fun, block.term.as_ref());
+            // The next emitted block is the next non-tombstoned block. The
+            // Branch lowering uses this to fuse `JmpT yes; Jmp no` into a
+            // single `JmpF cond, no` when `yes` is the fall-through.
+            let next_block = fun.blocks[idx + 1..]
+                .iter()
+                .find(|b| !b.tombstone)
+                .map(|b| b.id);
+            self.term(fun, block.term.as_ref(), next_block);
             pos += 1; // terminator row
         }
 
         for i in pc..self.buf.len() {
             self.buf[i] = match self.buf[i] {
                 Op::JmpT { cond, target } => Op::JmpT {
+                    cond,
+                    target: self.block_map[target as usize],
+                },
+                Op::JmpF { cond, target } => Op::JmpF {
                     cond,
                     target: self.block_map[target as usize],
                 },
@@ -258,7 +269,7 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn term(&mut self, fun: &Func<'cc>, t: Option<&ir::Terminator>) {
+    fn term(&mut self, fun: &Func<'cc>, t: Option<&ir::Terminator>, next_block: Option<ir::Id>) {
         let Some(term) = t else {
             return;
         };
@@ -299,38 +310,59 @@ impl<'cc> Cc<'cc> {
                 let yes_target = &fun.blocks.get(yes.0 as usize).unwrap();
                 let yes_src = fun.params(*yes_params);
                 let yes_dst = fun.params(yes_target.params);
-                for (i, &param) in yes_src.iter().enumerate() {
-                    let src = self.ensure_register(param);
-                    let dst = self.ensure_register(yes_dst[i]);
-
-                    if src == dst {
-                        continue;
-                    }
-                    self.emit(Op::Mov { dst, src });
-                }
-
-                let cond = self.ensure_register(*cond);
-                self.emit(Op::JmpT {
-                    cond,
-                    target: yes.0 as u16,
-                });
 
                 let no_target = &fun.blocks.get(no.0 as usize).unwrap();
                 let no_src = fun.params(*no_params);
                 let no_dst = fun.params(no_target.params);
-                for (i, &param) in no_src.iter().enumerate() {
-                    let src = self.ensure_register(param);
-                    let dst = self.ensure_register(no_dst[i]);
 
+                // Yes-side movs always run unconditionally;Regalloc guarantees their dst regs are
+                // safe on the no-path.
+                for (i, &param) in yes_src.iter().enumerate() {
+                    let src = self.ensure_register(param);
+                    let dst = self.ensure_register(yes_dst[i]);
                     if src == dst {
                         continue;
                     }
                     self.emit(Op::Mov { dst, src });
                 }
 
-                self.emit(Op::Jmp {
-                    target: no.0 as u16,
-                });
+                let cond_reg = self.ensure_register(*cond);
+
+                // Fuse `JmpT yes; <no_movs>; Jmp no` into a single
+                // `JmpF cond, no` when (a) yes is the fall-through block
+                // and (b) the no-side shuffle would be empty. Condition
+                // (b) is required because there is no place to put
+                // non-empty no_movs once the unconditional Jmp is gone.
+                //
+                // The no==next case (trailing `Jmp no` redundant) is
+                // already handled by the jmp_next peephole.
+                let no_movs_empty = no_src
+                    .iter()
+                    .zip(no_dst)
+                    .all(|(&s, &d)| self.ensure_register(s) == self.ensure_register(d));
+
+                if Some(*yes) == next_block && no_movs_empty {
+                    self.emit(Op::JmpF {
+                        cond: cond_reg,
+                        target: no.0 as u16,
+                    });
+                } else {
+                    self.emit(Op::JmpT {
+                        cond: cond_reg,
+                        target: yes.0 as u16,
+                    });
+                    for (i, &param) in no_src.iter().enumerate() {
+                        let src = self.ensure_register(param);
+                        let dst = self.ensure_register(no_dst[i]);
+                        if src == dst {
+                            continue;
+                        }
+                        self.emit(Op::Mov { dst, src });
+                    }
+                    self.emit(Op::Jmp {
+                        target: no.0 as u16,
+                    });
+                }
             }
             ir::Terminator::Tail { func, args, .. } => {
                 let Some(func) = self.functions.get(func) else {
@@ -535,6 +567,9 @@ impl<'cc> Cc<'cc> {
                     *target = old_to_new[*target as usize];
                 }
                 Op::JmpT { target, .. } => {
+                    *target = old_to_new[*target as usize];
+                }
+                Op::JmpF { target, .. } => {
                     *target = old_to_new[*target as usize];
                 }
                 Op::Call { func } => {
