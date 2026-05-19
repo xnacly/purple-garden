@@ -1,21 +1,11 @@
-use crate::ir::{self, BinOp, Const, Id, Instr, TypeId};
-
-#[derive(Default)]
-pub struct Scratch {
-    uses: Vec<u32>,
-    consts: Vec<Option<ConstDef>>,
-}
-
-#[derive(Clone, Copy)]
-struct ConstDef {
-    value: i32,
-    block: u32,
-    instr: u32,
-}
+use crate::{
+    ir::{self, BinOp, Const, Id, Instr, TypeId},
+    opt::ir::{ConstDef, Scratch},
+};
 
 /// Fold single-use integer constants into integer binops while the IR
 /// still knows SSA use counts.
-pub fn imm_fold(fun: &mut ir::Func, scratch: &mut Scratch) {
+pub fn imm_fold(fun: &mut ir::Func, scratch: &mut super::Scratch) {
     scratch.uses.clear();
     scratch.consts.clear();
 
@@ -30,14 +20,12 @@ pub fn imm_fold(fun: &mut ir::Func, scratch: &mut Scratch) {
                 ..
             } = instr
             {
-                if let Ok(value) = i32::try_from(*v) {
-                    scratch.ensure(dst.id);
-                    scratch.consts[dst.id.0 as usize] = Some(ConstDef {
-                        value,
-                        block: bi as u32,
-                        instr: ii as u32,
-                    });
-                }
+                scratch.ensure(dst.id);
+                scratch.consts[dst.id.0 as usize] = Some(ConstDef {
+                    value: *v,
+                    block: bi as u32,
+                    instr: ii as u32,
+                });
             }
             ir::Func::for_each_use_of_instr(instr, |id| scratch.bump(id));
         }
@@ -51,21 +39,22 @@ pub fn imm_fold(fun: &mut ir::Func, scratch: &mut Scratch) {
             continue;
         }
         for ii in 0..fun.blocks[bi].instructions.len() {
-            let Some((op, lhs, def, dst, span)) = try_fold(&fun.blocks[bi].instructions[ii], scratch)
+            let Some((op, lhs, def, imm, dst, span)) =
+                try_fold(&fun.blocks[bi].instructions[ii], scratch)
             else {
                 continue;
             };
 
             opt_trace!(
                 "ir::imm_fold",
-                format!("folded constant {} into immediate {:?}", def.value, op)
+                format!("folded constant {} into immediate {:?}", imm, op)
             );
 
             fun.blocks[bi].instructions[ii] = Instr::BinImm {
                 op,
                 dst,
                 lhs,
-                imm: def.value,
+                imm,
                 span,
             };
             fun.blocks[def.block as usize].instructions[def.instr as usize] = Instr::Noop;
@@ -73,33 +62,10 @@ pub fn imm_fold(fun: &mut ir::Func, scratch: &mut Scratch) {
     }
 }
 
-impl Scratch {
-    fn ensure(&mut self, id: Id) {
-        let len = id.0 as usize + 1;
-        if self.uses.len() < len {
-            self.uses.resize(len, 0);
-            self.consts.resize(len, None);
-        }
-    }
-
-    fn bump(&mut self, id: Id) {
-        self.ensure(id);
-        self.uses[id.0 as usize] += 1;
-    }
-
-    fn single_use_const(&self, id: Id) -> Option<ConstDef> {
-        let idx = id.0 as usize;
-        if self.uses.get(idx).copied() != Some(1) {
-            return None;
-        }
-        self.consts[idx]
-    }
-}
-
 fn try_fold(
     instr: &Instr<'_>,
     scratch: &Scratch,
-) -> Option<(BinOp, Id, ConstDef, TypeId, u32)> {
+) -> Option<(BinOp, Id, ConstDef, i32, TypeId, u32)> {
     let Instr::Bin {
         op,
         dst,
@@ -135,13 +101,18 @@ fn try_fold(
         _ => return None,
     };
 
-    Some((new_op, new_lhs, def, dst.clone(), *span))
+    // Bytecode immediate ops carry an i32; bail if the constant doesn't
+    // fit; the original Bin + LoadConst stay intact and run as-is.
+    let imm = i32::try_from(def.value).ok()?;
+
+    Some((new_op, new_lhs, def, imm, dst.clone(), *span))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{imm_fold, Scratch};
-    use crate::ir::{self, ptype::Type, BinOp, Block, Const, Id, Instr, Terminator, TypeId};
+    use super::imm_fold;
+    use crate::ir::{self, BinOp, Block, Const, Id, Instr, Terminator, TypeId, ptype::Type};
+    use crate::opt::ir::Scratch;
 
     fn int(id: u32) -> TypeId {
         TypeId {

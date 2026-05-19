@@ -13,7 +13,8 @@ mod ir;
 mod bc;
 
 pub fn ir(ir: &mut [crate::ir::Func]) {
-    let mut imm_fold_scratch = ir::ImmFoldScratch::default();
+    let mut imm_fold_scratch = ir::Scratch::default();
+    let mut const_fold_scratch = ir::Scratch::default();
 
     for fun in ir {
         // so all other blocks.last() are valid
@@ -21,6 +22,9 @@ pub fn ir(ir: &mut [crate::ir::Func]) {
             continue;
         }
 
+        // Order: we constant fold before imm_folding, otherwise we have fragmented half optimised
+        // constant operations, we could have fully merged together at compiletime
+        ir::const_fold(fun, &mut const_fold_scratch);
         ir::imm_fold(fun, &mut imm_fold_scratch);
         ir::indirect_jump(fun);
         // Order: before tailcall, so a Call-then-Jump-to-Ret-join pattern
