@@ -132,7 +132,10 @@ mod tests {
             ),
             "predecessor must now return %v0 directly"
         );
-        assert!(fun.blocks[1].tombstone, "join with no preds must be tombstoned");
+        assert!(
+            fun.blocks[1].tombstone,
+            "join with no preds must be tombstoned"
+        );
     }
 
     /// All-predecessors-inlined case: two arms both jump to a trivial
@@ -170,7 +173,7 @@ mod tests {
                         id: Id(1),
                         ty: Type::Int,
                     },
-                    value: ir::Const::Int(7),
+                    value: ir::constant::Const::Int(7),
                     span: 0,
                 }],
                 term: Some(Terminator::Jump {
@@ -188,7 +191,7 @@ mod tests {
                         id: Id(2),
                         ty: Type::Int,
                     },
-                    value: ir::Const::Int(8),
+                    value: ir::constant::Const::Int(8),
                     span: 0,
                 }],
                 term: Some(Terminator::Jump {
@@ -217,7 +220,10 @@ mod tests {
         assert!(
             matches!(&fun.blocks[2].term, Some(Terminator::Return { value: Some(v), .. }) if v.0 == 2)
         );
-        assert!(fun.blocks[3].tombstone, "join is dead after both arms inline");
+        assert!(
+            fun.blocks[3].tombstone,
+            "join is dead after both arms inline"
+        );
     }
 
     /// A join block that returns a value NOT equal to its first param
@@ -294,7 +300,7 @@ mod tests {
                         id: Id(2),
                         ty: Type::Int,
                     },
-                    value: ir::Const::Int(0),
+                    value: ir::constant::Const::Int(0),
                     span: 0,
                 }],
                 term: Some(Terminator::Return {
@@ -306,10 +312,7 @@ mod tests {
 
         ret_inline(&mut fun);
 
-        assert!(matches!(
-            &fun.blocks[0].term,
-            Some(Terminator::Jump { .. })
-        ));
+        assert!(matches!(&fun.blocks[0].term, Some(Terminator::Jump { .. })));
         assert!(!fun.blocks[1].tombstone);
     }
 }

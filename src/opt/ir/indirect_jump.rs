@@ -187,7 +187,7 @@ mod tests {
                         id: Id(7),
                         ty: Type::Int,
                     },
-                    value: ir::Const::Int(0),
+                    value: ir::constant::Const::Int(0),
                     span: 0,
                 }],
                 term: Some(Terminator::Jump {

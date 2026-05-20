@@ -9,7 +9,7 @@ mod indirect_jump;
 mod ret_inline;
 mod tailcall;
 
-use crate::ir::Id;
+use crate::ir::{Id, constant::Const};
 
 /// A `LoadConst { dst, Int(value) }` recorded for possible folding.
 /// `block`/`instr` are a backpointer to the original `LoadConst` so a
@@ -18,8 +18,8 @@ use crate::ir::Id;
 /// need a narrower form (e.g. `imm_fold` lowering to `i32` bytecode
 /// immediates) narrow at fold time and skip the fold on overflow.
 #[derive(Clone, Copy)]
-pub struct ConstDef {
-    value: i64,
+pub struct ConstDef<'def> {
+    value: Const<'def>,
     block: u32,
     instr: u32,
 }
@@ -34,12 +34,24 @@ pub struct ConstDef {
 /// and they grow together so callers can index either side without
 /// bounds-checking the other.
 #[derive(Default)]
-pub struct Scratch {
+pub struct Scratch<'scratch> {
     uses: Vec<u32>,
-    consts: Vec<Option<ConstDef>>,
+    consts: Vec<Option<ConstDef<'scratch>>>,
 }
 
-impl Scratch {
+impl<'scratch> Scratch<'scratch> {
+    pub fn reset(&mut self) {
+        self.uses.clear();
+        self.consts.clear();
+    }
+
+    /// Returns the recorded `ConstDef` for `id`, no use-count gate.
+    /// const_fold uses this; imm_fold uses `single_use_const` instead
+    /// because it noops the LoadConst and needs single-use safety.
+    pub fn const_def(&self, id: Id) -> Option<ConstDef<'_>> {
+        self.consts.get(id.0 as usize).copied().flatten()
+    }
+
     /// Grow both vecs to cover `id`, preserving the parallel-length
     /// invariant.
     pub fn ensure(&mut self, id: Id) {
@@ -61,7 +73,7 @@ impl Scratch {
     /// `LoadConst` AND has exactly one use. The single-use check is the
     /// fold-safety gate: with >1 uses the `LoadConst` is still needed
     /// elsewhere and noop'ing it would corrupt those uses.
-    pub fn single_use_const(&self, id: Id) -> Option<ConstDef> {
+    pub fn single_use_const(&self, id: Id) -> Option<ConstDef<'_>> {
         let idx = id.0 as usize;
         if self.uses.get(idx).copied() != Some(1) {
             return None;

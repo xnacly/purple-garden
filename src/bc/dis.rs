@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     bc,
-    ir::{Const, Id},
+    ir::{Id, constant::Const},
     std as pstd,
     vm::{BuiltinFn, op::Op},
 };

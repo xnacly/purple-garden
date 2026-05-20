@@ -1,36 +1,38 @@
 use crate::{
-    ir::{self, BinOp, Const, Id, Instr, TypeId},
+    ir::{self, BinOp, Id, Instr, TypeId, constant::Const},
     opt::ir::{ConstDef, Scratch},
 };
 
 /// Fold single-use integer constants into integer binops while the IR
 /// still knows SSA use counts.
-pub fn imm_fold(fun: &mut ir::Func, scratch: &mut super::Scratch) {
-    scratch.uses.clear();
-    scratch.consts.clear();
+pub fn imm_fold<'fold, 's>(fun: &'fold mut ir::Func<'s>, scratch: &'fold mut super::Scratch<'s>) {
+    scratch.reset();
 
     for (bi, block) in fun.blocks.iter().enumerate() {
         if block.tombstone {
             continue;
         }
         for (ii, instr) in block.instructions.iter().enumerate() {
-            if let Instr::LoadConst {
-                dst,
-                value: Const::Int(v),
-                ..
-            } = instr
-            {
+            if let Instr::LoadConst { dst, value, .. } = instr {
                 scratch.ensure(dst.id);
                 scratch.consts[dst.id.0 as usize] = Some(ConstDef {
-                    value: *v,
+                    value: *value,
                     block: bi as u32,
                     instr: ii as u32,
                 });
             }
-            ir::Func::for_each_use_of_instr(instr, |id| scratch.bump(id));
+        }
+    }
+
+    for block in &fun.blocks {
+        if block.tombstone {
+            continue;
+        }
+        for instr in &block.instructions {
+            ir::Func::for_each_use_of_instr(instr, |id| bump_if_const(scratch, id));
         }
         if let Some(term) = &block.term {
-            fun.for_each_use_of_term(term, |id| scratch.bump(id));
+            fun.for_each_use_of_term(term, |id| bump_if_const(scratch, id));
         }
     }
 
@@ -62,10 +64,17 @@ pub fn imm_fold(fun: &mut ir::Func, scratch: &mut super::Scratch) {
     }
 }
 
-fn try_fold(
+fn bump_if_const(scratch: &mut Scratch<'_>, id: Id) {
+    let idx = id.0 as usize;
+    if scratch.consts.get(idx).copied().flatten().is_some() {
+        scratch.uses[idx] += 1;
+    }
+}
+
+fn try_fold<'scratch>(
     instr: &Instr<'_>,
-    scratch: &Scratch,
-) -> Option<(BinOp, Id, ConstDef, i32, TypeId, u32)> {
+    scratch: &'scratch Scratch<'_>,
+) -> Option<(BinOp, Id, ConstDef<'scratch>, i32, TypeId, u32)> {
     let Instr::Bin {
         op,
         dst,
@@ -101,9 +110,13 @@ fn try_fold(
         _ => return None,
     };
 
+    let Const::Int(value) = def.value else {
+        return None;
+    };
+
     // Bytecode immediate ops carry an i32; bail if the constant doesn't
     // fit; the original Bin + LoadConst stay intact and run as-is.
-    let imm = i32::try_from(def.value).ok()?;
+    let imm = i32::try_from(value).ok()?;
 
     Some((new_op, new_lhs, def, imm, dst.clone(), *span))
 }
@@ -111,7 +124,9 @@ fn try_fold(
 #[cfg(test)]
 mod tests {
     use super::imm_fold;
-    use crate::ir::{self, BinOp, Block, Const, Id, Instr, Terminator, TypeId, ptype::Type};
+    use crate::ir::{
+        self, BinOp, Block, Id, Instr, Terminator, TypeId, constant::Const, ptype::Type,
+    };
     use crate::opt::ir::Scratch;
 
     fn int(id: u32) -> TypeId {

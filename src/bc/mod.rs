@@ -8,7 +8,7 @@ use crate::{
     bc::{intern::Interner, regalloc::Ralloc},
     config::{self, Config},
     err::PgError,
-    ir::{self, Const, Func, Id, TypeId, ptype},
+    ir::{self, Func, Id, TypeId, constant::Const, ptype},
     vm::{BuiltinFn, Value, Vm, op::Op},
 };
 

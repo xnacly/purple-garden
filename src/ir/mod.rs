@@ -19,25 +19,15 @@
 //! - tail call optimisation
 //! - jump threading
 
+pub mod constant;
 mod display;
 pub mod lower;
 pub mod ptype;
 pub mod typecheck;
 
+use crate::ir::constant::Const;
 use crate::ir::ptype::Type;
 use crate::std as pstd;
-
-/// Compile time Value representation, used for interning and constant propagation
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Default)]
-pub enum Const<'c> {
-    #[default]
-    Undefined,
-    False,
-    True,
-    Int(i64),
-    Double(u64),
-    Str(&'c str),
-}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Id(pub u32);
