@@ -63,8 +63,8 @@ impl Input {
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             Input::Str(s) => s.as_bytes(),
-            Input::File(buf) => &buf,
-            Input::MmapedFile { file, len, ptr } => unsafe {
+            Input::File(buf) => buf,
+            Input::MmapedFile { len, ptr, .. } => unsafe {
                 std::slice::from_raw_parts(ptr.as_ptr(), *len)
             },
         }
@@ -72,9 +72,9 @@ impl Input {
 
     pub fn as_str(&self) -> &str {
         match self {
-            Input::Str(s) => &s,
-            Input::File(buf) => str::from_utf8(&buf).unwrap(),
-            Input::MmapedFile { file, len, ptr } => unsafe {
+            Input::Str(s) => s,
+            Input::File(buf) => str::from_utf8(buf).unwrap(),
+            Input::MmapedFile { len, ptr, .. } => unsafe {
                 str::from_utf8(std::slice::from_raw_parts(ptr.as_ptr(), *len)).unwrap()
             },
         }
@@ -95,12 +95,9 @@ impl Input {
 
 impl Drop for Input {
     fn drop(&mut self) {
-        match self {
-            Input::MmapedFile { file, len, ptr } => {
-                let cpy = *ptr;
-                mmap::munmap(cpy, *len).expect("Failed to unmap file");
-            }
-            _ => (),
+        if let Input::MmapedFile { len, ptr, .. } = self {
+            let cpy = *ptr;
+            mmap::munmap(cpy, *len).expect("Failed to unmap file");
         }
     }
 }

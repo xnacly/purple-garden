@@ -10,6 +10,18 @@ pub use crate::vm::anomaly::Anomaly;
 pub use crate::vm::value::Value;
 use op::Op;
 
+/// Signature for a purple garden syscall
+///
+/// Calling convention
+/// - Args are passed in `r0..r{argcount-1}`. Read them via `vm.r(i)`.
+/// - The returned [Value] is written to `r0` by the dispatcher; do not
+///   write `r0` yourself.
+/// - Do not modify any register other than (implicitly) r0. The bytecode
+///   emitter only spills caller-save values that land in
+///   `r0..r{argcount-1}`, relying on this convention to leave `r{argcount}+`
+///   untouched. A violation silently corrupts live values in release;
+///   debug builds catch it via the `debug_assert_eq!` in [Vm::run]'s
+///   `Op::Sys` arm.
 pub type BuiltinFn = fn(&mut Vm) -> Result<Value, Anomaly>;
 pub fn syscall_unimplemented<'vm>(vm: &mut Vm<'vm>) -> Result<Value, Anomaly> {
     Err(Anomaly::InvalidSyscall { pc: vm.pc })
@@ -18,6 +30,11 @@ pub fn syscall_unimplemented<'vm>(vm: &mut Vm<'vm>) -> Result<Value, Anomaly> {
 #[derive(Default, Debug)]
 pub struct CallFrame {
     pub return_to: usize,
+    /// Snapshot of [Vm::spilled].len() at call entry. Used by the debug
+    /// check on [Op::Ret] to catch bytecode that leaves the spill stack
+    /// unbalanced across a call.
+    #[cfg(debug_assertions)]
+    pub spilled_depth: usize,
 }
 
 #[repr(C)]
@@ -47,21 +64,9 @@ pub struct Vm<'vm> {
 
 /// trap in the vm; return Err(<anomaly>) if expr == true
 #[allow(unused)]
-#[cfg(feature = "nightly")]
 macro_rules! trap_if {
     ($condition:expr, $anomaly:expr) => {
         if std::hint::unlikely($condition) {
-            return Err($anomaly);
-        }
-    };
-}
-
-/// non-nightly fallback for trap_if
-#[allow(unused)]
-#[cfg(not(feature = "nightly"))]
-macro_rules! trap_if {
-    ($condition:expr, $anomaly:expr) => {
-        if $condition {
             return Err($anomaly);
         }
     };
@@ -77,7 +82,7 @@ impl<'vm> Vm<'vm> {
             globals: Vec::new(),
             strings: Vec::new(),
             backtrace: Vec::new(),
-            spilled: Vec::with_capacity(REGISTER_COUNT),
+            spilled: Vec::with_capacity(4096),
             syscalls: Vec::new(),
             config,
         }
@@ -125,15 +130,27 @@ impl<'vm> Vm<'vm> {
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l + r);
                 },
+                Op::IAddI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l + imm as i64);
+                },
                 Op::ISub { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l - r);
                 },
+                Op::ISubI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l - imm as i64);
+                },
                 Op::IMul { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l * r);
+                },
+                Op::IMulI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l * imm as i64);
                 },
                 Op::IDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
@@ -141,20 +158,38 @@ impl<'vm> Vm<'vm> {
                     trap_if!(r == 0, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l / r);
                 },
+                Op::IDivI { dst, lhs, imm } => unsafe {
+                    let imm = imm as i64;
+                    trap_if!(imm == 0, Anomaly::DivisionByZero { pc });
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l / imm);
+                },
                 Op::IEq { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l == r)
+                },
+                Op::IEqI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l == imm as i64)
                 },
                 Op::IGt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l > r)
                 },
+                Op::IGtI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l > imm as i64)
+                },
                 Op::ILt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l < r)
+                },
+                Op::ILtI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l < imm as i64)
                 },
                 Op::DAdd { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
@@ -206,8 +241,14 @@ impl<'vm> Vm<'vm> {
                     pc = func as usize;
                     continue;
                 }
-                Op::JmpF { target, cond } => unsafe {
+                Op::JmpT { target, cond } => unsafe {
                     if r!(cond).as_bool() {
+                        pc = target as usize;
+                        continue;
+                    }
+                },
+                Op::JmpF { target, cond } => unsafe {
+                    if !r!(cond).as_bool() {
                         pc = target as usize;
                         continue;
                     }
@@ -217,12 +258,33 @@ impl<'vm> Vm<'vm> {
                         self.backtrace.push(func as usize);
                     }
 
-                    self.frames.push(CallFrame { return_to: pc });
+                    self.frames.push(CallFrame {
+                        return_to: pc,
+                        #[cfg(debug_assertions)]
+                        spilled_depth: self.spilled.len(),
+                    });
                     pc = func as usize;
                     continue;
                 }
                 Op::Sys { idx } => unsafe {
+                    // Codegen assumes the syscall calling convention: a
+                    // syscall body reads its args from r0..r{argcount-1} and
+                    // writes only r0 (the result). If a syscall ever touches
+                    // r1+, the bc emitter's caller-save spill (bc::Cc::instr,
+                    // Instr::Sys) will silently corrupt a live value.
+                    #[cfg(debug_assertions)]
+                    let pre_sys: [Value; REGISTER_COUNT] = self.r;
+
                     r_mut!(0) = (*syscalls.add(idx as usize))(self)?;
+
+                    #[cfg(debug_assertions)]
+                    for i in 1..REGISTER_COUNT {
+                        debug_assert_eq!(
+                            pre_sys[i].0, self.r[i].0,
+                            "syscall idx={} wrote r{} — convention only permits writes to r0",
+                            idx, i
+                        );
+                    }
                 },
                 Op::Ret => {
                     if self.config.backtrace {
@@ -231,13 +293,44 @@ impl<'vm> Vm<'vm> {
                     let Some(frame) = self.frames.pop() else {
                         unreachable!("Op::Ret had no frame to drop, this is a compiler bug");
                     };
+                    // See Op::Push: every function must leave the spill
+                    // stack at the depth it found it. Catches arg-shuffle
+                    // cycle paths or caller-save spills that forgot to
+                    // pair their Pops.
+                    #[cfg(debug_assertions)]
+                    debug_assert_eq!(
+                        frame.spilled_depth,
+                        self.spilled.len(),
+                        "function returning to pc={} left vm.spilled unbalanced (entered at depth {}, exiting at depth {})",
+                        frame.return_to,
+                        frame.spilled_depth,
+                        self.spilled.len(),
+                    );
                     pc = frame.return_to;
                 }
                 Op::Push { src } => unsafe {
                     self.spilled.push(*r!(src));
                 },
+                Op::Push2 { a, b } => unsafe {
+                    self.spilled.push(*r!(a));
+                    self.spilled.push(*r!(b));
+                },
+                Op::Push3 { a, b, c } => unsafe {
+                    self.spilled.push(*r!(a));
+                    self.spilled.push(*r!(b));
+                    self.spilled.push(*r!(c));
+                },
                 Op::Pop { dst } => unsafe {
                     r_mut!(dst) = self.spilled.pop().unwrap();
+                },
+                Op::Pop2 { a, b } => unsafe {
+                    r_mut!(a) = self.spilled.pop().unwrap();
+                    r_mut!(b) = self.spilled.pop().unwrap();
+                },
+                Op::Pop3 { a, b, c } => unsafe {
+                    r_mut!(a) = self.spilled.pop().unwrap();
+                    r_mut!(b) = self.spilled.pop().unwrap();
+                    r_mut!(c) = self.spilled.pop().unwrap();
                 },
                 Op::CastToDouble { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_f64();
@@ -430,6 +523,29 @@ mod ops {
     }
 
     #[test]
+    fn int_compare_immediate() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 42 },
+                Op::IEqI {
+                    dst: 1,
+                    lhs: 0,
+                    imm: 42,
+                },
+                Op::IEqI {
+                    dst: 2,
+                    lhs: 0,
+                    imm: 7,
+                },
+            ],
+            &cfg,
+        );
+        assert!(vm.r(1).as_bool());
+        assert!(!vm.r(2).as_bool());
+    }
+
+    #[test]
     fn double_arith() {
         let cfg = Config::default();
         let mut vm = Vm::new(&cfg);
@@ -493,14 +609,13 @@ mod ops {
         assert_eq!(vm.r(1).as_int(), 2);
     }
 
-    /// Op::JmpF is misnamed — semantically it is "jump if true". Pin that down.
     #[test]
-    fn jmpf_jumps_when_cond_is_true() {
+    fn jmpt_jumps_when_cond_is_true() {
         let cfg = Config::default();
         let vm = run(
             vec![
                 Op::LoadI { dst: 0, value: 1 }, // truthy
-                Op::JmpF { cond: 0, target: 3 },
+                Op::JmpT { cond: 0, target: 3 },
                 Op::LoadI { dst: 1, value: 999 }, // skipped
                 Op::LoadI { dst: 2, value: 7 },
             ],
@@ -511,12 +626,12 @@ mod ops {
     }
 
     #[test]
-    fn jmpf_falls_through_when_cond_is_false() {
+    fn jmpt_falls_through_when_cond_is_false() {
         let cfg = Config::default();
         let vm = run(
             vec![
                 Op::LoadI { dst: 0, value: 0 },
-                Op::JmpF { cond: 0, target: 3 },
+                Op::JmpT { cond: 0, target: 3 },
                 Op::LoadI { dst: 1, value: 11 },
                 Op::LoadI { dst: 2, value: 22 },
             ],
@@ -544,6 +659,35 @@ mod ops {
         );
         assert_eq!(vm.r(0).as_int(), 10);
         assert_eq!(vm.r(1).as_int(), 20);
+    }
+
+    #[test]
+    fn packed_push_pop_roundtrip() {
+        let cfg = Config::default();
+        let vm = run(
+            vec![
+                Op::LoadI { dst: 0, value: 10 },
+                Op::LoadI { dst: 1, value: 20 },
+                Op::LoadI { dst: 2, value: 30 },
+                Op::LoadI { dst: 3, value: 40 },
+                Op::LoadI { dst: 4, value: 50 },
+                Op::Push3 { a: 0, b: 1, c: 2 },
+                Op::Push2 { a: 3, b: 4 },
+                Op::LoadI { dst: 0, value: 0 },
+                Op::LoadI { dst: 1, value: 0 },
+                Op::LoadI { dst: 2, value: 0 },
+                Op::LoadI { dst: 3, value: 0 },
+                Op::LoadI { dst: 4, value: 0 },
+                Op::Pop3 { a: 4, b: 3, c: 2 },
+                Op::Pop2 { a: 1, b: 0 },
+            ],
+            &cfg,
+        );
+        assert_eq!(vm.r(0).as_int(), 10);
+        assert_eq!(vm.r(1).as_int(), 20);
+        assert_eq!(vm.r(2).as_int(), 30);
+        assert_eq!(vm.r(3).as_int(), 40);
+        assert_eq!(vm.r(4).as_int(), 50);
     }
 
     #[test]

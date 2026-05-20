@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     bc,
-    ir::{Const, Id},
+    ir::{Id, constant::Const},
     std as pstd,
     vm::{BuiltinFn, op::Op},
 };
@@ -92,12 +92,19 @@ impl<'dis> Disassembler<'dis> {
                 pc,
                 match instr {
                     Op::IAdd { dst, lhs, rhs } => format!("iadd r{dst}, r{lhs}, r{rhs}"),
+                    Op::IAddI { dst, lhs, imm } => format!("iadd_imm r{dst}, r{lhs}, #{imm}"),
                     Op::ISub { dst, lhs, rhs } => format!("isub r{dst}, r{lhs}, r{rhs}"),
+                    Op::ISubI { dst, lhs, imm } => format!("isub_imm r{dst}, r{lhs}, #{imm}"),
                     Op::IMul { dst, lhs, rhs } => format!("imul r{dst}, r{lhs}, r{rhs}"),
+                    Op::IMulI { dst, lhs, imm } => format!("imul_imm r{dst}, r{lhs}, #{imm}"),
                     Op::IDiv { dst, lhs, rhs } => format!("idiv r{dst}, r{lhs}, r{rhs}"),
+                    Op::IDivI { dst, lhs, imm } => format!("idiv_imm r{dst}, r{lhs}, #{imm}"),
                     Op::IEq { dst, lhs, rhs } => format!("ieq r{dst}, r{lhs}, r{rhs}"),
+                    Op::IEqI { dst, lhs, imm } => format!("ieq_imm r{dst}, r{lhs}, #{imm}"),
                     Op::ILt { dst, lhs, rhs } => format!("ilt r{dst}, r{lhs}, r{rhs}"),
+                    Op::ILtI { dst, lhs, imm } => format!("ilt_imm r{dst}, r{lhs}, #{imm}"),
                     Op::IGt { dst, lhs, rhs } => format!("igt r{dst}, r{lhs}, r{rhs}"),
+                    Op::IGtI { dst, lhs, imm } => format!("igt_imm r{dst}, r{lhs}, #{imm}"),
                     Op::DAdd { dst, lhs, rhs } => format!("dadd r{dst}, r{lhs}, r{rhs}"),
                     Op::DSub { dst, lhs, rhs } => format!("dsub r{dst}, r{lhs}, r{rhs}"),
                     Op::DMul { dst, lhs, rhs } => format!("dmul r{dst}, r{lhs}, r{rhs}"),
@@ -134,6 +141,11 @@ impl<'dis> Disassembler<'dis> {
                     Op::Tail { func } => {
                         format!("tail {func} <{}>", funcs_by_pc.get(func).unwrap().name)
                     }
+                    Op::JmpT { cond, target } => format!(
+                        "jmpt r{cond}, {target} <{}+0x{:0x}>",
+                        cur_func.name,
+                        *target as usize - cur_func.pc
+                    ),
                     Op::JmpF { cond, target } => format!(
                         "jmpf r{cond}, {target} <{}+0x{:0x}>",
                         cur_func.name,
@@ -147,7 +159,11 @@ impl<'dis> Disassembler<'dis> {
                         std_fns[*idx as usize] as usize,
                     ),
                     Op::Push { src } => format!("push r{src}"),
+                    Op::Push2 { a, b } => format!("push2 r{a}, r{b}"),
+                    Op::Push3 { a, b, c } => format!("push3 r{a}, r{b}, r{c}"),
                     Op::Pop { dst } => format!("pop r{dst}"),
+                    Op::Pop2 { a, b } => format!("pop2 r{a}, r{b}"),
+                    Op::Pop3 { a, b, c } => format!("pop3 r{a}, r{b}, r{c}"),
                     Op::Ret => "ret".into(),
                     Op::CastToBool { dst, src } => {
                         format!("cast_to_bool r{dst}, r{src}")

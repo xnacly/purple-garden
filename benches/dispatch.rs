@@ -1,9 +1,11 @@
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion};
 use purple_garden::{
     self, config,
-    vm::{Vm, op::Op},
+    vm::{op::Op, Vm},
 };
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use rand::{rngs::StdRng, RngExt, SeedableRng};
+
+mod common;
 
 const OP_CODE_SIZE: usize = 10_000_000;
 static CONFIG: config::Config = config::Config::default();
@@ -117,5 +119,9 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
     });
 }
 
-criterion_group!(dispatch, bench_uniform_dispatch, bench_random_dispatch);
-criterion_main!(dispatch);
+fn main() {
+    let mut criterion = common::criterion();
+    bench_uniform_dispatch(&mut criterion);
+    bench_random_dispatch(&mut criterion);
+    criterion.final_summary();
+}

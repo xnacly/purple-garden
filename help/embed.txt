@@ -1,9 +1,12 @@
 Purple garden was created to be fast, but also to be embeddable and to be used
 in embedding contexts like scripting for game engines, http servers and the
-likes. 
+likes.
+
+
+Defining the Rust type
+----------------------
 
 Lets consider a simple counter, we will make it thread safe via AtomicI64:
-
 
     use crate::vm::{Anomaly, Value, Vm};
     use std::sync::atomic::{AtomicI64, Ordering};
@@ -28,8 +31,11 @@ Lets consider a simple counter, we will make it thread safe via AtomicI64:
         }
     }
 
-The next step is to create wrappers for Counter::{new, inc, get}:
 
+Wrapping for the VM
+-------------------
+
+The next step is to create wrappers for Counter::{new, inc, get}:
 
     pub fn new(vm: &mut Vm) -> Result<Value, Anomaly> {
         let counter = Box::new(Counter::new());
@@ -66,6 +72,10 @@ The next step is to create wrappers for Counter::{new, inc, get}:
         Ok(Value::from(counter.get()))
     }
 
+
+Registering as a package
+------------------------
+
 This counter now needs these methods registered in the vm as the "counter"
 package:
 
@@ -100,6 +110,10 @@ package:
         ],
     },
 
+
+Calling from purple garden
+--------------------------
+
 These registered functions can now be used in the purple garden language:
 
     import ("counter" "testing")
@@ -109,6 +123,10 @@ These registered functions can now be used in the purple garden language:
     counter.increment(c)
     counter.increment(c)
     testing.assert(counter.get(c) == 3)
+
+
+Foreign type isolation
+----------------------
 
 The 'Type::Foreign("counter")' is used to distinguish different foreign
 interactions in the typechecker, thus making things like the following

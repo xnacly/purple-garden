@@ -7,7 +7,6 @@ default-run = "purple-garden"
 
 [features]
 trace = []
-nightly = []
 
 [dependencies]
 clap = { version = "4.5.54", features = ["derive"] }
@@ -23,14 +22,17 @@ opt-level = 3
 panic = "abort"
 debug = true
 
+[profile.profiling]
+inherits = "release"
+lto = false
+codegen-units = 16
+debug = true
+strip = false
+
 [[bench]]
 name = "dispatch"
 harness = false
 
 [[bench]]
-name = "factorial"
-harness = false
-
-[[bench]]
-name = "compilation"
+name = "suite"
 harness = false

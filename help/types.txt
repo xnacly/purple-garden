@@ -12,3 +12,41 @@ Furthermore, there are four non primitive types:
     Array
     Struct
     Foreign
+
+
+Binary operators
+----------------
+
+Both sides of a binary operator must have the same type. There is no
+implicit promotion - cast explicitly with `as` if you need to mix types.
+
+    +  -  *  /              Int      -> Int
+                            Double   -> Double
+
+    ==  !=                  Int      -> Bool
+                            Bool     -> Bool
+
+    <  >                    Int      -> Bool
+                            Double   -> Bool
+
+Equality (== / !=) is not defined on Double on purpose: comparing floats
+for exact equality is almost always a bug. Use `<` / `>` to check
+ordering, or wrap the comparison yourself when you really mean it.
+
+
+Casts
+-----
+
+The `as` keyword converts between primitive types. Only these
+directions are permitted:
+
+    int    as double        widens to f64
+    double as int           truncates toward zero
+    int    as bool          0 becomes false, anything else true
+    bool   as int           false becomes 0, true becomes 1
+
+Bool and Double cannot be cast in either direction. Going from Bool to
+Double has no useful purpose (write `1.0` / `0.0` directly), and Double
+to Bool has no clean semantics (-0.0 and NaN have non-zero bit
+patterns), so the typechecker rejects both. Cast through Int if you
+really need the conversion.

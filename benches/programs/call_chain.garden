@@ -1,0 +1,25 @@
+# A chain of 10 single-op functions called in sequence.
+# Stresses the arg-shuffle + result-Mov pattern on simple calls,
+# and exercises the soft-hint placement of single-arg/single-result
+# values into r0.
+import "testing"
+
+fn s0(x:int) int { x + 1 }
+fn s1(x:int) int { s0(x) + 1 }
+fn s2(x:int) int { s1(x) + 1 }
+fn s3(x:int) int { s2(x) + 1 }
+fn s4(x:int) int { s3(x) + 1 }
+fn s5(x:int) int { s4(x) + 1 }
+fn s6(x:int) int { s5(x) + 1 }
+fn s7(x:int) int { s6(x) + 1 }
+fn s8(x:int) int { s7(x) + 1 }
+fn s9(x:int) int { s8(x) + 1 }
+
+fn drive(i:int n:int acc:int) int {
+    match {
+        i == n { acc }
+        { drive(i + 1  n  acc + s9(0)) }
+    }
+}
+
+testing.assert(drive(0 5000 0) == 50000)

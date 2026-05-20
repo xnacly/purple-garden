@@ -1,18 +1,16 @@
 use std::fmt::Debug;
 
-use crate::{
-    ir::{Const, ptype},
-    vm,
-};
+use crate::ir::constant::Const;
 
 #[derive(PartialEq, Clone, Default, Copy, Debug)]
 #[repr(transparent)]
 pub struct Value(pub u64);
 
 impl Value {
+    pub const UNDEF: Self = Self(0);
+
     #[inline(always)]
     pub fn as_int(&self) -> i64 {
-        debug_assert!(self.0 < i64::MAX as u64);
         self.0 as i64
     }
 

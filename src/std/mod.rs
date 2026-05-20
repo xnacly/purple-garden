@@ -61,7 +61,7 @@ impl fmt::Display for Fn {
 
 impl fmt::Display for Pkg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "import ({})\n", self.name)?;
+        writeln!(f, "import (\"{}\")\n", self.name)?;
         writeln!(f, "{}", self.doc)?;
 
         if !self.pkgs.is_empty() {
@@ -115,7 +115,7 @@ like writing and reading from file descriptors",
                 doc: "reports whether arg 1 is in arg 0",
                 ptr: crate::std::strings::contains,
                 args: &[Type::Str, Type::Str],
-                ret: Type::Int,
+                ret: Type::Bool,
             },
             Fn {
                 name: "repeat",

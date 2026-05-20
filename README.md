@@ -12,10 +12,11 @@ io.println("Hello World")
 ## Features / Design Goals
 
 - Extremely fast execution with a register-based VM and aggressive compile-time
-  optimisations (both IR and peephole), see the [ir](./src/ir/) and
-  [opt](./src/opt) modules
+  optimisations (both IR and peephole), see the [ir](./src/opt/ir/mod.rs) and
+  [opt](./src/opt/bc/mod.rs) modules
 - JIT compilation for runtime hotspots, or for everything with `--native`
-- Embeddable with minimal friction for Rust interop via `vm::BuiltinFn`
+- Embeddable with minimal friction for Rust interop via `vm::BuiltinFn`, see
+  [help/embed](./help/embed.txt)
 - Memory efficient, with an optional garbage collector and a minimal standard
   library, see [std](./src/std/)
 
@@ -26,11 +27,14 @@ For an intro to purple garden see [help/intro.txt](./help/intro.txt) or run
 
 ## Local Setup
 
-> Nightly Rust is required due to branch prediction optimisations in the VM.
+> Nightly Rust is required due to:
+>
+> - branch prediction hints in the vm
+> - simd in the lexer
 
 ```bash
 git clone git@github.com:xnacly/purple-garden.git
-cargo +nightly run -- --help
+cargo run -- --help
 ```
 
 ### Benchmarks
@@ -38,5 +42,14 @@ cargo +nightly run -- --help
 > These may take a while
 
 ```bash
-cargo +nightly bench --features nightly
+cargo bench
 ```
+
+For a fast run with less statistical confidence:
+
+```bash
+PG_BENCH_QUICK=1 cargo bench
+```
+
+`PG_BENCH_QUICK=1` uses 10 samples, a 100ms warm-up, and a 300ms measurement
+window per benchmark.

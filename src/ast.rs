@@ -205,7 +205,7 @@ impl<'a> Node<'a> {
                     write!(f, "{}", t.as_str())?;
                 } else {
                     writeln!(f)?;
-                    target.fmt_sexpr(f, indent + 1);
+                    target.fmt_sexpr(f, indent + 1)?;
                 }
                 if !args.is_empty() {
                     for arg in args {
@@ -248,7 +248,7 @@ impl<'a> Node<'a> {
                 }
                 writeln!(f, ")")
             }
-            Node::Field { id, target, name } => {
+            Node::Field { target, name, .. } => {
                 writeln!(f, "{}(get", pad)?;
                 target.fmt_sexpr(f, indent + 1)?;
                 // hack for pretty printing field idxing

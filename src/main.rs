@@ -106,7 +106,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let (input, input_source) = match conf.run {
         Some(ref i) => (Input::Str(i.clone()), "stdio"),
         None => {
-            let Some(file_name) = conf.target.as_ref().map(|f| f.as_str()) else {
+            let Some(file_name) = conf.target.as_deref() else {
                 return err!("No file or `-r` specified");
             };
             (Input::from_file(file_name)?, file_name)
@@ -121,8 +121,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let ast = match Parser::new(lexer).and_then(|n| n.parse()) {
         Ok(a) => a,
         Err(e) => {
-            let lines = input.as_str().lines().collect::<Vec<&str>>();
-            return err!(e.render(input_source, &lines));
+            return err!(e.render(input_source, input.as_bytes()));
         }
     };
 
@@ -142,8 +141,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let mut ir = match lower.ir_from(&ast) {
         Ok(ir) => ir,
         Err(e) => {
-            let lines = input.as_str().lines().collect::<Vec<&str>>();
-            return err!(e.render(input_source, &lines));
+            return err!(e.render(input_source, input.as_bytes()));
         }
     };
 
@@ -161,14 +159,14 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut cc = bc::Cc::new();
     if let Err(e) = cc.compile(&conf, &ir) {
-        let lines = input.as_str().lines().collect::<Vec<&str>>();
-        return err!(e.render(input_source, &lines));
+        return err!(e.render(input_source, input.as_bytes()));
     };
 
     trace!("[main] Lowered IR to bytecode");
 
     if conf.opt >= 1 {
         opt::bc(&mut cc.buf);
+        cc.compact_nops();
     }
 
     let function_table = if conf.backtrace {
@@ -182,7 +180,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    let mut vm = cc.finalize(&conf);
+    let (mut vm, debug) = cc.finalize(&conf);
 
     if conf.disassemble {
         bc::dis::Disassembler::new(&vm.bytecode, ctx.unwrap()).disassemble();
@@ -193,8 +191,10 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Err(e) = vm.run() {
-        let lines = input.as_str().lines().collect::<Vec<&str>>();
-        println!("{}", Into::<PgError>::into(e).render(input_source, &lines));
+        println!(
+            "{}",
+            PgError::from_anomaly(e, &debug).render(input_source, input.as_bytes())
+        );
 
         if conf.backtrace {
             let entry_point_pc = function_table

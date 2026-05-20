@@ -1,23 +1,5 @@
 use crate::vm::op::Op;
 
-/// self_move removes patterns conforming to
-///
-/// ```text
-/// Mov { dst: x, src: x },
-/// ```
-///
-/// where both dst == src
-pub fn self_move(window: &mut [Op]) {
-    for op in window.iter_mut() {
-        if let Op::Mov { dst, src } = op
-            && dst == src
-        {
-            *op = Op::Nop;
-            opt_trace!("self_move", "removed self_moving Mov");
-        }
-    }
-}
-
 /// mov_merge merges two movs which can be represented as a single mov:
 ///
 /// ```text
@@ -29,6 +11,7 @@ pub fn self_move(window: &mut [Op]) {
 ///
 /// ```text
 /// Mov { dst: 2, src: 0 }
+/// Nop
 /// ```
 ///
 /// This is a fallback for the copy propagation missing some movs between blocks
@@ -52,37 +35,27 @@ pub fn mov_merge(window: &mut [Op]) {
 
     let (dst, src) = (*m1dst, *m0src);
 
-    window[0] = Op::Nop;
-    window[1] = Op::Mov { dst, src };
+    window[0] = Op::Mov { dst, src };
+    window[1] = Op::Nop;
     opt_trace!("mov_merge", "merged two movs");
 }
 
 #[cfg(test)]
-mod bc_test {
+mod tests {
+    use super::mov_merge;
     use crate::vm::op::Op;
 
     #[test]
-    fn self_move() {
-        let mut bc = vec![
-            Op::Mov { src: 64, dst: 64 },
-            Op::Mov { src: 64, dst: 64 },
-            Op::Mov { src: 64, dst: 64 },
-        ];
-        crate::opt::bc::self_move(&mut bc);
-        assert_eq!(bc, vec![Op::Nop, Op::Nop, Op::Nop])
-    }
-
-    #[test]
-    fn mov_merge() {
+    fn merges_chained_movs() {
         let mut bc = vec![Op::Mov { dst: 8, src: 0 }, Op::Mov { dst: 2, src: 8 }];
-        crate::opt::bc::mov_merge(&mut bc);
-        assert_eq!(bc, vec![Op::Nop, Op::Mov { dst: 2, src: 0 }])
+        mov_merge(&mut bc);
+        assert_eq!(bc, vec![Op::Mov { dst: 2, src: 0 }, Op::Nop])
     }
 
     #[test]
-    fn mov_merge_non_mergable() {
+    fn leaves_non_mergable() {
         let mut bc = vec![Op::Mov { dst: 7, src: 0 }, Op::Mov { dst: 2, src: 8 }];
-        crate::opt::bc::mov_merge(&mut bc);
+        mov_merge(&mut bc);
         assert_eq!(
             bc,
             vec![Op::Mov { dst: 7, src: 0 }, Op::Mov { dst: 2, src: 8 }]

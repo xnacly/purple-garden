@@ -59,7 +59,7 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ir::Const;
+    use crate::ir::constant::Const;
 
     use super::*;
 

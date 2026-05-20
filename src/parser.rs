@@ -276,6 +276,10 @@ impl<'p> Parser<'p> {
                 }
 
                 Type::BraceLeft => {
+                    if !Self::is_callable_target(&lhs) {
+                        break;
+                    }
+
                     self.advance()?;
                     let mut args = vec![];
 
@@ -340,6 +344,10 @@ impl<'p> Parser<'p> {
         Ok(lhs)
     }
 
+    fn is_callable_target(node: &Node<'p>) -> bool {
+        matches!(node, Node::Ident { .. } | Node::Field { .. })
+    }
+
     fn prefix_binding_power(op: &Type) -> u8 {
         // TODO: add !<expr>,?<expr>, the latter being the try operator
         match op {
@@ -399,8 +407,7 @@ mod tests {
     macro_rules! mk_tok {
         ($type:expr) => {
             Token {
-                line: 0,
-                col: 0,
+                start: 0,
                 t: $type,
             }
         };
@@ -529,6 +536,42 @@ mod tests {
                 }
             ]
         )
+    }
+
+    #[test]
+    fn adjacent_parenthesized_arg_after_atom_is_not_postfix_call() {
+        let l = Lexer::new(b"f(0.0 (1.0 + 2.0))");
+        let p = Parser::new(l).unwrap();
+        let tt = p.parse().unwrap();
+
+        assert_eq!(
+            tt,
+            vec![Node::Call {
+                id: 5,
+                target: Box::new(Node::Ident {
+                    id: 0,
+                    name: mk_tok!(Type::Ident("f")),
+                }),
+                args: vec![
+                    Node::Atom {
+                        id: 1,
+                        raw: mk_tok!(Type::D("0.0")),
+                    },
+                    Node::Bin {
+                        id: 4,
+                        op: mk_tok!(Type::Plus),
+                        lhs: Box::new(Node::Atom {
+                            id: 2,
+                            raw: mk_tok!(Type::D("1.0")),
+                        }),
+                        rhs: Box::new(Node::Atom {
+                            id: 3,
+                            raw: mk_tok!(Type::D("2.0")),
+                        }),
+                    },
+                ],
+            }]
+        );
     }
 
     #[test]

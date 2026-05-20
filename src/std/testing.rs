@@ -7,6 +7,6 @@ pub fn assert(vm: &mut Vm) -> Result<Value, Anomaly> {
             pc: vm.pc,
         })
     } else {
-        Ok(Value(0))
+        Ok(Value::UNDEF)
     }
 }
