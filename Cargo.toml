@@ -1,19 +1,7 @@
-[package]
-name = "purple-garden"
-version = "0.1.0"
-description = "Lean scripting language, designed and implemented with a focus on performance and a low memory profile "
-edition = "2024"
-default-run = "purple-garden"
-
-[features]
-trace = []
-
-[dependencies]
-clap = { version = "4.5.54", features = ["derive"] }
-
-[dev-dependencies]
-criterion = "0.5"
-rand = "0.10.0"
+[workspace]
+members = ["purple-garden", "purple-garden-ir", "purple-garden-jit", "purple-garden-macros", "purple-garden-runtime", "purple-garden-std", "purple-garden-opt", "purple-garden-bc", "purple-garden-frontend"]
+default-members = ["purple-garden"]
+resolver = "3"
 
 [profile.release]
 lto = "fat"
@@ -28,11 +16,3 @@ lto = false
 codegen-units = 16
 debug = true
 strip = false
-
-[[bench]]
-name = "dispatch"
-harness = false
-
-[[bench]]
-name = "suite"
-harness = false

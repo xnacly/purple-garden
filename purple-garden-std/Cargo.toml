@@ -1,0 +1,8 @@
+[package]
+name = "purple-garden-std"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+purple-garden-ir = { path = "../purple-garden-ir" }
+purple-garden-runtime = { path = "../purple-garden-runtime" }

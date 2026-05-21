@@ -1,0 +1,13 @@
+[package]
+name = "purple-garden-frontend"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+trace = []
+
+[dependencies]
+purple-garden-bc = { path = "../purple-garden-bc" }
+purple-garden-ir = { path = "../purple-garden-ir" }
+purple-garden-runtime = { path = "../purple-garden-runtime" }
+purple-garden-std = { path = "../purple-garden-std" }

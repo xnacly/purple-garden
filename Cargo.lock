@@ -497,7 +497,71 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "criterion",
+ "purple-garden-bc",
+ "purple-garden-frontend",
+ "purple-garden-ir",
+ "purple-garden-jit",
+ "purple-garden-opt",
+ "purple-garden-runtime",
+ "purple-garden-std",
  "rand",
+]
+
+[[package]]
+name = "purple-garden-bc"
+version = "0.1.0"
+dependencies = [
+ "purple-garden-ir",
+ "purple-garden-runtime",
+ "purple-garden-std",
+]
+
+[[package]]
+name = "purple-garden-frontend"
+version = "0.1.0"
+dependencies = [
+ "purple-garden-bc",
+ "purple-garden-ir",
+ "purple-garden-runtime",
+ "purple-garden-std",
+]
+
+[[package]]
+name = "purple-garden-ir"
+version = "0.1.0"
+
+[[package]]
+name = "purple-garden-jit"
+version = "0.1.0"
+dependencies = [
+ "purple-garden-ir",
+]
+
+[[package]]
+name = "purple-garden-macros"
+version = "0.1.0"
+
+[[package]]
+name = "purple-garden-opt"
+version = "0.1.0"
+dependencies = [
+ "purple-garden-ir",
+ "purple-garden-runtime",
+]
+
+[[package]]
+name = "purple-garden-runtime"
+version = "0.1.0"
+dependencies = [
+ "purple-garden-ir",
+]
+
+[[package]]
+name = "purple-garden-std"
+version = "0.1.0"
+dependencies = [
+ "purple-garden-ir",
+ "purple-garden-runtime",
 ]
 
 [[package]]

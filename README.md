@@ -12,17 +12,19 @@ io.println("Hello World")
 ## Features / Design Goals
 
 - Extremely fast execution with a register-based VM and aggressive compile-time
-  optimisations (both IR and peephole), see the [ir](./src/opt/ir/mod.rs) and
-  [opt](./src/opt/bc/mod.rs) modules
+  optimisations (both IR and peephole), see the
+  [ir](./purple-garden/src/opt/ir/mod.rs) and
+  [opt](./purple-garden/src/opt/bc/mod.rs) modules
 - JIT compilation for runtime hotspots, or for everything with `--native`
 - Embeddable with minimal friction for Rust interop via `vm::BuiltinFn`, see
-  [help/embed](./help/embed.txt)
+  [help/embed](./purple-garden/help/embed.txt)
 - Memory efficient, with an optional garbage collector and a minimal standard
-  library, see [std](./src/std/)
+  library, see [std](./purple-garden/src/std/)
 
 ## Documentation
 
-For an intro to purple garden see [help/intro.txt](./help/intro.txt) or run
+For an intro to purple garden see
+[help/intro.txt](./purple-garden/help/intro.txt) or run
 `purple-garden intro` after installing the binary.
 
 ## Local Setup
