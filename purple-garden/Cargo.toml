@@ -17,6 +17,7 @@ purple-garden-std = { path = "../purple-garden-std" }
 purple-garden-opt = { path = "../purple-garden-opt" }
 purple-garden-bc = { path = "../purple-garden-bc" }
 purple-garden-frontend = { path = "../purple-garden-frontend" }
+purple-garden-shared = { path = "../purple-garden-shared" }
 
 [dev-dependencies]
 criterion = "0.5"
