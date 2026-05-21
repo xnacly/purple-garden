@@ -1,12 +1,10 @@
-use purple_garden_runtime::{Anomaly, Value, Vm};
+use purple_garden_runtime::{Anomaly, Vm};
 
-pub fn assert(vm: &mut Vm) -> Result<Value, Anomaly> {
-    if vm.r(0).as_bool() {
-        Ok(Value::UNDEF)
-    } else {
-        Err(Anomaly::Msg {
+pub fn assert(vm: &mut Vm) {
+    if !vm.r(0).as_bool() {
+        vm.trap(Anomaly::Msg {
             msg: "test.assert: assertion failed",
             pc: vm.pc,
-        })
+        });
     }
 }

@@ -13,17 +13,15 @@ use op::Op;
 
 /// Signature for a purple garden syscall
 ///
-/// Calling convention
+/// Calling convention:
 /// - Args are passed in `r0..r{argcount-1}`. Read them via `vm.r(i)`.
-/// - The returned [Value] is written to `r0` by the dispatcher; do not
-///   write `r0` yourself.
-/// - Do not modify any register other than (implicitly) r0. The bytecode
-///   emitter only spills caller-save values that land in
-///   `r0..r{argcount-1}`, relying on this convention to leave `r{argcount}+`
-///   untouched. A violation silently corrupts live values in release;
-///   debug builds catch it via the `debug_assert_eq!` in [`Vm::run`]'s
-///   `Op::Sys` arm.
-pub type BuiltinFn = fn(&mut Vm) -> Result<Value, Anomaly>;
+/// - Write the result to `r0` via `*vm.r_mut(0) = value`. Void functions leave `r0` untouched.
+/// - Do not modify any register other than `r0`. The bytecode emitter only spills
+///   caller-save values in `r0..r{argcount-1}`, relying on this convention to leave
+///   `r{argcount}+` untouched. A violation silently corrupts live values in release;
+///   debug builds catch it via the `debug_assert_eq!` in [`Vm::run`]'s `Op::Sys` arm.
+/// - Signal errors via [`Vm::trap`]; traps are checked at the next [`Op::Ret`].
+pub type BuiltinFn = fn(&mut Vm);
 pub fn syscall_unimplemented(vm: &mut Vm) -> Result<Value, Anomaly> {
     Err(Anomaly::InvalidSyscall { pc: vm.pc })
 }
@@ -62,6 +60,10 @@ pub struct Vm {
     /// --backtrace was passed as an option to the interpreter
     pub backtrace: Vec<usize>,
 
+    /// A trap raised by a syscall via [`Vm::trap`]. Checked at each [`Op::Ret`]
+    /// so the `Op::Sys` hot path stays branch-free.
+    pub pending_trap: Option<Anomaly>,
+
     // TODO: replace this with an array
     pub syscalls: Vec<BuiltinFn>,
 
@@ -91,6 +93,7 @@ impl Vm {
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(4096),
             syscalls: Vec::new(),
+            pending_trap: None,
             config,
         }
     }
@@ -274,15 +277,10 @@ impl Vm {
                     continue;
                 }
                 Op::Sys { idx } => unsafe {
-                    // Codegen assumes the syscall calling convention: a
-                    // syscall body reads its args from r0..r{argcount-1} and
-                    // writes only r0 (the result). If a syscall ever touches
-                    // r1+, the bc emitter's caller-save spill (bc::Cc::instr,
-                    // Instr::Sys) will silently corrupt a live value.
                     #[cfg(debug_assertions)]
                     let pre_sys: [Value; REGISTER_COUNT] = self.r;
 
-                    r_mut!(0) = (*syscalls.add(idx as usize))(self)?;
+                    (*syscalls.add(idx as usize))(self);
 
                     #[cfg(debug_assertions)]
                     for (i, pre) in pre_sys.iter().enumerate().skip(1) {
@@ -312,6 +310,9 @@ impl Vm {
                         frame.spilled_depth,
                         self.spilled.len(),
                     );
+                    if let Some(trap) = self.pending_trap.take() {
+                        return Err(trap);
+                    }
                     pc = frame.return_to;
                 }
                 Op::Push { src } => unsafe {
@@ -356,6 +357,12 @@ impl Vm {
         self.pc = pc;
 
         Ok(())
+    }
+
+    /// Raise a trap from a syscall body. Checked at the next [`Op::Ret`].
+    #[inline(always)]
+    pub fn trap(&mut self, anomaly: Anomaly) {
+        self.pending_trap = Some(anomaly);
     }
 
     #[inline(always)]
