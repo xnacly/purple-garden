@@ -1,0 +1,11 @@
+[package]
+name = "purple-garden-opt"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+trace = []
+
+[dependencies]
+purple-garden-ir = { path = "../purple-garden-ir" }
+purple-garden-runtime = { path = "../purple-garden-runtime" }
