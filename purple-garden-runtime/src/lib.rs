@@ -245,7 +245,7 @@ impl Vm {
                     continue;
                 }
                 Op::Tail { func } => {
-                    if self.config.backtrace {
+                    if std::hint::unlikely(self.config.backtrace) {
                         self.backtrace.push(func as usize);
                     }
                     pc = func as usize;
@@ -264,7 +264,7 @@ impl Vm {
                     }
                 },
                 Op::Call { func } => {
-                    if self.config.backtrace {
+                    if std::hint::unlikely(self.config.backtrace) {
                         self.backtrace.push(func as usize);
                     }
 
@@ -291,7 +291,7 @@ impl Vm {
                     }
                 },
                 Op::Ret => {
-                    if self.config.backtrace {
+                    if std::hint::unlikely(self.config.backtrace) {
                         self.backtrace.pop();
                     }
                     let Some(frame) = self.frames.pop() else {
