@@ -310,8 +310,8 @@ impl Vm {
                         frame.spilled_depth,
                         self.spilled.len(),
                     );
-                    if let Some(trap) = self.pending_trap.take() {
-                        return Err(trap);
+                    if std::hint::unlikely(self.pending_trap.is_some()) {
+                        return Err(self.pending_trap.take().unwrap());
                     }
                     pc = frame.return_to;
                 }
