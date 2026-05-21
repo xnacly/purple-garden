@@ -81,7 +81,7 @@ mod tests {
     use purple_garden_ir::{self as ir, Block, Id, Terminator, ptype::Type};
 
     /// Build a function where b0 branches to b1 (which jumps to b3) and
-    /// b2 (which does real work). After indirect_jump, b0 should branch
+    /// b2 (which does real work). After `indirect_jump`, b0 should branch
     /// directly to b3 on the yes edge and b1 should be tombstoned.
     #[test]
     fn collapses_trivial_jump_through_yes_edge() {

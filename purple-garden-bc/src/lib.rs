@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 pub mod dis;
 mod intern;
@@ -51,6 +52,7 @@ impl DebugInfo {
     /// Source byte offset for `pc`, or 0 if `pc` is out of range (e.g.
     /// a test that hand-rolls a Vm and never compiled through `Cc`).
     #[inline]
+    #[must_use]
     pub fn span_at(&self, pc: usize) -> u32 {
         self.pc_to_span.get(pc).copied().unwrap_or(0)
     }
@@ -64,14 +66,14 @@ pub struct Cc<'cc> {
     pub std_fns: Interner<BuiltinFn>,
     pub functions: HashMap<Id, BcFunc<'cc>>,
     /// `pc_to_span[pc]` is the byte offset into the source of the AST node
-    /// that produced the op at `pc`. Threaded into Vm by Cc::finalize so
-    /// runtime traps can be rendered with file:line:col. Parallel to
+    /// that produced the op at `pc`. Threaded into Vm by `Cc::finalize` so
+    /// runtime traps can be rendered with <file:line:col>. Parallel to
     /// `self.buf`.
     pub pc_to_span: Vec<u32>,
     /// `block_map[block_id]` is the absolute pc of that block's first op,
     /// after lowering. `u16::MAX` marks blocks that weren't emitted (e.g.,
     /// tombstoned blocks). Block ids are dense per-function so a Vec
-    /// indexed by id beats a HashMap on both alloc cost and lookup speed.
+    /// indexed by id beats a `HashMap` on both alloc cost and lookup speed.
     block_map: Vec<u16>,
     regalloc: Ralloc,
     /// Set once per IR Instr / Terminator before lowering, consumed by
@@ -88,6 +90,7 @@ pub struct Cc<'cc> {
 }
 
 impl<'cc> Cc<'cc> {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             buf: Vec::with_capacity(64),
@@ -144,7 +147,7 @@ impl<'cc> Cc<'cc> {
                     if def == u32::MAX {
                         continue;
                     }
-                    out.push_str(&format!("{id}: ({def},{last_use})\n"));
+                    writeln!(out, "{id}: ({def},{last_use})").unwrap();
                 }
                 println!("{out}");
             }
@@ -395,9 +398,9 @@ impl<'cc> Cc<'cc> {
                     },
                 ..
             } => {
+                use ptype::Type::{Bool, Double, Int};
                 let dst = self.ensure_register(*id);
                 let src = self.ensure_register(*src_id);
-                use ptype::Type::*;
                 let op = match (src_ty, dst_ty) {
                     (Int, Double) => Op::CastToDouble { dst, src },
                     (Double, Int) => Op::CastToInt { dst, src },
@@ -564,12 +567,12 @@ impl<'cc> Cc<'cc> {
                     ILt  => ILtI,
                 });
             }
-        };
+        }
     }
 
-    /// Strip [Op::Nop]s left behind by [opt::bc] and patch every absolute pc
+    /// Strip [`Op::Nop`]s left behind by [`opt::bc`] and patch every absolute pc
     /// (jump targets, call/tail targets, function entry pcs in
-    /// [Cc::functions]) through an old->new pc remap. Must run after all
+    /// [`Cc::functions`]) through an old->new pc remap. Must run after all
     /// peephole passes since indices shift here.
     pub fn compact_nops(&mut self) {
         let bc = &mut self.buf;
@@ -600,19 +603,10 @@ impl<'cc> Cc<'cc> {
         for r in 0..bc.len() {
             let mut op = bc[r];
             match &mut op {
-                Op::Jmp { target } => {
+                Op::Jmp { target } | Op::JmpT { target, .. } | Op::JmpF { target, .. } => {
                     *target = old_to_new[*target as usize];
                 }
-                Op::JmpT { target, .. } => {
-                    *target = old_to_new[*target as usize];
-                }
-                Op::JmpF { target, .. } => {
-                    *target = old_to_new[*target as usize];
-                }
-                Op::Call { func } => {
-                    *func = old_to_new[*func as usize] as u32;
-                }
-                Op::Tail { func } => {
+                Op::Call { func } | Op::Tail { func } => {
                     *func = old_to_new[*func as usize] as u32;
                 }
                 _ => {}
@@ -651,6 +645,7 @@ impl<'cc> Cc<'cc> {
     }
 
     /// map pc's to function definitions
+    #[must_use]
     pub fn function_table(&self) -> HashMap<usize, String> {
         self.functions
             .values()
@@ -659,7 +654,7 @@ impl<'cc> Cc<'cc> {
     }
 }
 
-impl<'cc> Default for Cc<'cc> {
+impl Default for Cc<'_> {
     fn default() -> Self {
         Self::new()
     }

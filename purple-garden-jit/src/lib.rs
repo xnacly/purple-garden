@@ -20,12 +20,12 @@ impl Bjit {
         }
     }
 
-    /// https://c9x.me/x86/
+    /// <https://c9x.me/x86>/
     pub fn to_x86(_ir: &[ir::Func]) {
         unimplemented!()
     }
 
-    /// https://www.cs.swarthmore.edu/~kwebb/cs31/resources/ARM64_Cheat_Sheet.pdf
+    /// <https://www.cs.swarthmore.edu>/~`kwebb/cs31/resources/ARM64_Cheat_Sheet.pdf`
     pub fn to_aarch64(_ir: &[ir::Func]) {
         unimplemented!()
     }

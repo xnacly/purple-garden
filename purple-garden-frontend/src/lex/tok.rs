@@ -71,6 +71,7 @@ impl PartialEq for Token<'_> {
 }
 
 impl<'t> Type<'t> {
+    #[must_use]
     pub fn as_str(&self) -> &'t str {
         match self {
             Type::Eof => "eof",
@@ -95,8 +96,7 @@ impl<'t> Type<'t> {
             Type::CurlyRight => "}",
             Type::S(s) => s,
             Type::D(d) => d,
-            Type::I(i) => i,
-            Type::Ident(i) => i,
+            Type::I(i) | Type::Ident(i) => i,
             Type::Import => "import",
             Type::True => "true",
             Type::False => "false",

@@ -336,8 +336,6 @@ impl<'p> Parser<'p> {
                     lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
                 };
-
-                continue;
             }
         }
 
@@ -576,6 +574,6 @@ mod tests {
         let l = Lexer::new(b"(5 = 6)");
         let p = Parser::new(l).unwrap();
         let result = p.parse();
-        assert!(result.is_err(), "expected parse error, got: {:?}", result);
+        assert!(result.is_err(), "expected parse error, got: {result:?}");
     }
 }

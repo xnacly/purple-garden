@@ -7,7 +7,7 @@ use crate::{
     type_from_type_expr,
     typecheck::id_from_node,
 };
-use purple_garden_ir::*;
+use purple_garden_ir::{BinOp, Id, Func, ptype, Instr, Block, EMPTY_PARAMS, Const, TypeId, Terminator};
 use purple_garden_std as pstd;
 
 #[derive(Default)]
@@ -44,6 +44,7 @@ pub struct Lower<'lower> {
 }
 
 impl<'lower> Lower<'lower> {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -76,7 +77,7 @@ impl<'lower> Lower<'lower> {
     }
 
     fn switch_to_block(&mut self, id: Id) {
-        self.ctx.block = id
+        self.ctx.block = id;
     }
 
     fn lower_node(&mut self, node: &Node<'lower>) -> Result<Option<Id>, PgError> {
@@ -121,12 +122,13 @@ impl<'lower> Lower<'lower> {
                     Some(*id)
                 } else {
                     return Err(PgError::with_msg(
-                        format!("Undefined variable `{}`", i),
+                        format!("Undefined variable `{i}`"),
                         name,
                     ));
                 }
             }
             Node::Bin { op, lhs, rhs, id } => {
+                use BinOp::{BEq, DAdd, DDiv, DGt, DLt, DMul, DSub, IAdd, IDiv, IEq, IGt, ILt, IMul, ISub};
                 let src_type = self.types[id_from_node(lhs).unwrap()].clone().unwrap();
                 let span = op.start as u32;
 
@@ -143,7 +145,6 @@ impl<'lower> Lower<'lower> {
                     ty: self.types[*id].clone().unwrap(),
                 };
 
-                use BinOp::*;
                 let op = match src_type {
                     ptype::Type::Bool => match op.t {
                         Type::DoubleEqual => BEq,
@@ -251,12 +252,10 @@ impl<'lower> Lower<'lower> {
 
                 let ret = if let TypeExpr::Atom(Token { t: Type::Void, .. }) = return_type {
                     None
+                } else if let TypeExpr::Atom(Token { t, .. }) = return_type {
+                    Some(crate::type_from_lex_type(*t))
                 } else {
-                    if let TypeExpr::Atom(Token { t, .. }) = return_type {
-                        Some(crate::type_from_lex_type(*t))
-                    } else {
-                        None
-                    }
+                    None
                 };
 
                 self.func_name_to_id.insert(ident_name, (id, ret.clone()));
@@ -387,7 +386,7 @@ impl<'lower> Lower<'lower> {
                         });
                     }
                     _ => unreachable!(),
-                };
+                }
 
                 Some(dst_id)
             }
@@ -516,7 +515,7 @@ impl<'lower> Lower<'lower> {
                 let default_span = default_tok.start as u32;
                 self.switch_to_block(default_block);
                 let mut last = None;
-                for node in body.iter() {
+                for node in body {
                     last = self.lower_node(node)?;
                 }
 

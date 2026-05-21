@@ -36,7 +36,7 @@ pub struct Config {
     /// Readable immediate representation
     #[arg(short = 'I', long)]
     pub ir: bool,
-    /// Dump liveness as <%v>: (<def>,<last_use>)
+    /// Dump liveness as <%v>: (<def>,<`last_use`>)
     #[arg(short = 'L', long)]
     pub liveness: bool,
     /// Generate backtraces for function calls
@@ -81,6 +81,7 @@ pub enum Command {
 }
 
 impl Config {
+    #[must_use]
     pub const fn default() -> Self {
         Config {
             opt: 0,

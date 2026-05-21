@@ -39,7 +39,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                 "purple-garden version {} by xnacly and contributors",
                 env!("CARGO_PKG_VERSION")
             );
-            println!("{}", BUILD_INFO.replace(";", "\n"));
+            println!("{}", BUILD_INFO.replace(';', "\n"));
             let exe = std::env::current_exe().unwrap();
             println!("from={}", exe.display());
             return Ok(());
@@ -52,7 +52,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
             config::Command::Intro { topic } => {
                 println!(
                     "{}",
-                    help::print_help_by_topic(topic.as_ref().map(|x| x.as_str()))
+                    help::print_help_by_topic(topic.as_ref().map(std::string::String::as_str))
                 );
 
                 std::process::exit(0);
@@ -68,12 +68,12 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     println!("Purple garden standard library packages:");
                     for pkg in purple_garden_std::STD {
-                        print_pkg(pkg)
+                        print_pkg(pkg);
                     }
                     std::process::exit(0);
                 };
 
-                let (path, method) = match pkg_or_function.split_once(".") {
+                let (path, method) = match pkg_or_function.split_once('.') {
                     Some((path, method)) => (path, Some(method)),
                     None => (pkg_or_function.as_str(), None),
                 };
@@ -86,9 +86,9 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                     let Some(fun) = pkg.fns.iter().find(|f| f.name == method) else {
                         return err!(format!("function {}.{} not found", pkg.name, method));
                     };
-                    println!("{fun}",);
+                    println!("{fun}");
                 } else {
-                    println!("{}", pkg);
+                    println!("{pkg}");
                 }
 
                 std::process::exit(0);
@@ -96,14 +96,11 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let (input, input_source) = match conf.run {
-        Some(ref i) => (Input::Str(i.clone()), "stdio"),
-        None => {
-            let Some(file_name) = conf.target.as_deref() else {
-                return err!("No file or `-r` specified");
-            };
-            (Input::from_file(file_name)?, file_name)
-        }
+    let (input, input_source) = if let Some(ref i) = conf.run { (Input::Str(i.clone()), "stdio") } else {
+        let Some(file_name) = conf.target.as_deref() else {
+            return err!("No file or `-r` specified");
+        };
+        (Input::from_file(file_name)?, file_name)
     };
 
     if input.is_empty() {
@@ -111,7 +108,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let lexer = Lexer::new(input.as_bytes());
-    let ast = match Parser::new(lexer).and_then(|n| n.parse()) {
+    let ast = match Parser::new(lexer).and_then(purple_garden_frontend::parser::Parser::parse) {
         Ok(a) => a,
         Err(e) => {
             return err!(e.render(input_source, input.as_bytes()));
@@ -124,9 +121,8 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         print!(
             "{}",
             ast.iter()
-                .map(|n| n.to_string())
-                .collect::<Vec<_>>()
-                .join("")
+                .map(std::string::ToString::to_string)
+                .collect::<String>()
         );
     }
 
@@ -145,7 +141,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if conf.ir {
-        for func in ir.iter() {
+        for func in &ir {
             println!("{func}");
         }
     }

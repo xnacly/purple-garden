@@ -10,11 +10,13 @@ pub struct Disassembler<'dis> {
 }
 
 impl<'dis> Disassembler<'dis> {
+    #[must_use]
     pub fn new(bc: &'dis [Op], cc: crate::Cc<'dis>) -> Self {
         Self { bc, cc }
     }
 
     /// maps the pointer to any stdlib function to its <pkg>.<name>
+    #[must_use]
     pub fn build_fn_map() -> HashMap<BuiltinFn, String> {
         fn walk(
             pkgs: &'static [pstd::Pkg],
@@ -66,14 +68,14 @@ impl<'dis> Disassembler<'dis> {
         if !globals.is_empty() {
             println!("globals:");
             for (i, g) in globals.iter().enumerate() {
-                println!("  {:04}:    {}", i, g)
+                println!("  {i:04}:    {g}");
             }
         }
 
         if !strings.is_empty() {
             println!("strs:");
             for (i, s) in strings.iter().enumerate() {
-                println!("  {:04}:    \"{}\"", i, s)
+                println!("  {i:04}:    \"{s}\"");
             }
         }
 
@@ -125,7 +127,7 @@ impl<'dis> Disassembler<'dis> {
                                 strings[idx as usize]
                             )
                         } else {
-                            format!("load_global r{dst}, {idx} \t; = {}", val_str)
+                            format!("load_global r{dst}, {idx} \t; = {val_str}")
                         }
                     }
                     Op::Jmp { target } => {

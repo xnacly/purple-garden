@@ -1,6 +1,6 @@
 use purple_garden_runtime::op::Op;
 
-/// mov_merge merges two movs which can be represented as a single mov:
+/// `mov_merge` merges two movs which can be represented as a single mov:
 ///
 /// ```text
 /// Mov { dst: 8, src: 0 }
@@ -49,7 +49,7 @@ mod tests {
     fn merges_chained_movs() {
         let mut bc = vec![Op::Mov { dst: 8, src: 0 }, Op::Mov { dst: 2, src: 8 }];
         mov_merge(&mut bc);
-        assert_eq!(bc, vec![Op::Mov { dst: 2, src: 0 }, Op::Nop])
+        assert_eq!(bc, vec![Op::Mov { dst: 2, src: 0 }, Op::Nop]);
     }
 
     #[test]
@@ -59,6 +59,6 @@ mod tests {
         assert_eq!(
             bc,
             vec![Op::Mov { dst: 7, src: 0 }, Op::Mov { dst: 2, src: 8 }]
-        )
+        );
     }
 }

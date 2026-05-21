@@ -8,6 +8,7 @@ use crate::{
 use purple_garden_ir::ptype::Type;
 use purple_garden_std as pstd;
 
+#[must_use]
 pub fn id_from_node(node: &Node) -> Option<usize> {
     Some(match node {
         Node::Atom { id, .. }
@@ -60,10 +61,12 @@ pub struct Typechecker<'t> {
 }
 
 impl<'t> Typechecker<'t> {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn finalise(self) -> Vec<Option<Type>> {
         self.map
     }
@@ -111,8 +114,7 @@ impl<'t> Typechecker<'t> {
             }
             lex::Type::DoubleEqual | lex::Type::NotEqual => {
                 match (lhs, rhs) {
-                    (Type::Int, Type::Int) => {}
-                    (Type::Bool, Type::Bool) => {}
+                    (Type::Int, Type::Int) | (Type::Bool, Type::Bool) => {}
                     (_, _) if lhs == rhs => {
                         return Err(PgError::with_msg(
                             format!(
@@ -134,13 +136,12 @@ impl<'t> Typechecker<'t> {
                             op,
                         ));
                     }
-                };
+                }
                 Type::Bool
             }
             lex::Type::LessThan | lex::Type::GreaterThan => {
                 match (lhs, rhs) {
-                    (Type::Double, Type::Double) => {}
-                    (Type::Int, Type::Int) => {}
+                    (Type::Double, Type::Double) | (Type::Int, Type::Int) => {}
                     (_, _) if lhs == rhs => {
                         return Err(PgError::with_msg(
                             format!(
@@ -162,7 +163,7 @@ impl<'t> Typechecker<'t> {
                             op,
                         ));
                     }
-                };
+                }
                 Type::Bool
             }
 
@@ -175,12 +176,11 @@ impl<'t> Typechecker<'t> {
     fn cast(at: &lex::Token, i: &Type, o: &Type) -> Result<Type, PgError> {
         Ok(match (i, o) {
             (Type::Int, Type::Double) => Type::Double,
-            (Type::Double, Type::Int) => Type::Int,
+            (Type::Double | Type::Bool, Type::Int) => Type::Int,
             (Type::Int, Type::Bool) => Type::Bool,
-            (Type::Bool, Type::Int) => Type::Int,
             (_, _) => {
                 return Err(PgError::with_msg(
-                    format!("Can not cast {} to {}", i, o),
+                    format!("Can not cast {i} to {o}"),
                     at,
                 ));
             }
@@ -284,7 +284,7 @@ impl<'t> Typechecker<'t> {
 
                 if self.functions.contains_key(inner_name) {
                     return Err(PgError::with_msg(
-                        format!("`{}` is already defined", inner_name),
+                        format!("`{inner_name}` is already defined"),
                         name,
                     ));
                 }
@@ -316,8 +316,7 @@ impl<'t> Typechecker<'t> {
                 if ret != computed_ret {
                     return Err(PgError::with_msg(
                         format!(
-                            "`{}` should return {}, but returns {}",
-                            inner_name, ret, computed_ret
+                            "`{inner_name}` should return {ret}, but returns {computed_ret}"
                         ),
                         return_type,
                     ));
@@ -364,14 +363,14 @@ impl<'t> Typechecker<'t> {
 
                         let Some(pkg) = self.packages.get(pkg_name) else {
                             return Err(PgError::with_msg(
-                                format!("Can't find package `{}`", pkg_name),
+                                format!("Can't find package `{pkg_name}`"),
                                 name,
                             ));
                         };
 
                         let Some(fun) = pkg.get(inner_name).cloned() else {
                             return Err(PgError::with_msg(
-                                format!("Call to undefined function `{}.{}`", pkg_name, inner_name),
+                                format!("Call to undefined function `{pkg_name}.{inner_name}`"),
                                 name,
                             ));
                         };
@@ -390,7 +389,7 @@ impl<'t> Typechecker<'t> {
                         };
                         let Some(fun) = self.functions.get(inner_name).cloned() else {
                             return Err(PgError::with_msg(
-                                format!("Call to undefined function `{}`", inner_name),
+                                format!("Call to undefined function `{inner_name}`"),
                                 name,
                             ));
                         };
@@ -420,8 +419,7 @@ impl<'t> Typechecker<'t> {
                     if expected_type != &provided_type {
                         return Err(PgError::with_msg(
                             format!(
-                                "`{}` arg{} expected {}, got {} instead",
-                                inner_name, i, expected_type, provided_type,
+                                "`{inner_name}` arg{i} expected {expected_type}, got {provided_type} instead",
                             ),
                             // TODO: extract this token from provided_node
                             tok,
@@ -449,8 +447,7 @@ impl<'t> Typechecker<'t> {
                     if condition_type != Type::Bool {
                         return Err(PgError::with_msg(
                             format!(
-                                "Match conditions must be Bool, got {} instead",
-                                condition_type
+                                "Match conditions must be Bool, got {condition_type} instead"
                             ),
                             condition_token,
                         ));
@@ -470,12 +467,11 @@ impl<'t> Typechecker<'t> {
                     if ty != &first_type {
                         return Err(PgError::with_msg(
                             format!(
-                                "Match cases must resolve to the same type, but got {} and {}",
-                                first_type, ty
+                                "Match cases must resolve to the same type, but got {first_type} and {ty}"
                             ),
                             *tok,
                         ));
-                    };
+                    }
                 }
 
                 self.set_type(*id, first_type.clone());

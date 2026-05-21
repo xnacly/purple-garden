@@ -1,4 +1,4 @@
-//! copied and applied from https://github.com/xnacly/stinkarm/blob/master/src/mem/mmap.rs
+//! copied and applied from <https://github.com/xnacly/stinkarm/blob/master/src/mem/mmap.rs>
 
 const MMAP_SYSCALL: i64 = 9;
 const MUNMAP_SYSCALL: i64 = 11;
@@ -14,6 +14,7 @@ impl MmapProt {
     pub const WRITE: MmapProt = MmapProt(0x02);
     /// pages can be executed
     pub const EXEC: MmapProt = MmapProt(0x04);
+    #[must_use]
     pub fn bits(self) -> i32 {
         self.0
     }
@@ -37,7 +38,7 @@ impl MmapFlags {
     pub const FIXED: MmapFlags = MmapFlags(0x0010);
 
     // MAP_FIXED_NOREPLACE (Linux ≥ 5.4)
-    pub const NOREPLACE: MmapFlags = MmapFlags(0x100000);
+    pub const NOREPLACE: MmapFlags = MmapFlags(0x0010_0000);
 
     /// allocated from memory, swap space
     pub const ANONYMOUS: MmapFlags = MmapFlags(0x20);
@@ -48,6 +49,7 @@ impl MmapFlags {
     /// omit from dumps
     pub const CONCEAL: MmapFlags = MmapFlags(0x8000);
 
+    #[must_use]
     pub fn bits(self) -> i32 {
         self.0
     }
@@ -75,7 +77,7 @@ pub fn mmap(
         core::arch::asm!(
             "syscall",
             in("rax") MMAP_SYSCALL,
-            in("rdi") ptr.map(|nn| nn.as_ptr()).unwrap_or(std::ptr::null_mut()),
+            in("rdi") ptr.map_or(std::ptr::null_mut(), std::ptr::NonNull::as_ptr),
             in("rsi") length,
             in("rdx") prot.bits(),
             in("r10") flags.bits(),

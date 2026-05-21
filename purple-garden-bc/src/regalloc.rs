@@ -26,7 +26,7 @@ struct Interval {
 /// purple garden virtual machine registers.
 ///
 /// It works by:
-/// 1. Sorting virtual register (v) live_set by each start
+/// 1. Sorting virtual register (v) `live_set` by each start
 /// 2. Maintaining a list of currently active intervals
 /// 3. For each interval:
 ///     - Remove active.end lt current.start
@@ -53,7 +53,7 @@ impl Ralloc {
     /// Reuses the existing Vec capacities — no allocation when the new
     /// function fits within the previous high-water mark.
     ///
-    /// `live_set[id]` is the (def_pos, last_use_pos) for SSA id; entries
+    /// `live_set[id]` is the (`def_pos`, `last_use_pos`) for SSA id; entries
     /// with `def_pos == u32::MAX` are unused. `hints[id]` is the optional
     /// preferred register from [`ir::Func::arg_hints_into`].
     pub fn rebuild(&mut self, live_set: &[(u32, u32)], hints: &[Option<u8>]) {

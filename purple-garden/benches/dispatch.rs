@@ -22,7 +22,7 @@ pub fn bench_uniform_dispatch(c: &mut Criterion) {
             },
             |mut vm| vm.run(),
             BatchSize::LargeInput,
-        )
+        );
     });
 }
 
@@ -112,7 +112,7 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
             },
             |mut vm| vm.run(),
             BatchSize::LargeInput,
-        )
+        );
     });
 }
 

@@ -6,7 +6,7 @@ pub enum Op {
         rhs: u8,
     },
     /// `r[dst] = r[lhs] + imm`. Lowered from IR `BinImm`
-    /// (commutative; either side of the original IAdd can be the constant).
+    /// (commutative; either side of the original `IAdd` can be the constant).
     IAddI {
         dst: u8,
         lhs: u8,
@@ -154,7 +154,7 @@ pub enum Op {
         target: u16,
     },
     /// Tail call: jump to `func` (an absolute pc) without growing the
-    /// callstack. Same calling convention as [Op::Call].
+    /// callstack. Same calling convention as [`Op::Call`].
     Tail {
         func: u32,
     },
@@ -163,33 +163,33 @@ pub enum Op {
     ///
     /// Calling convention (codegen relies on this):
     /// - Args are passed in `r0..r{argcount-1}`, set up by the parallel-move
-    ///   resolver in `bc::Cc::emit_arg_shuffle` before the [Op::Call] op.
+    ///   resolver in `bc::Cc::emit_arg_shuffle` before the [`Op::Call`] op.
     /// - The result is returned in `r0`; the caller copies it to its real
     ///   destination via a subsequent `Mov`.
     /// - All registers are caller-save. The callee may freely overwrite
     ///   any register, so the bc emitter spills every value that's alive
     ///   across this call (see the `alive_after_call_spill` loop in
     ///   `bc::Cc::instr`, `Instr::Call`) and restores them after the call
-    ///   via [Op::Pop].
-    /// - The dispatcher pushes a [CallFrame] containing the return pc; the
-    ///   matching [Op::Ret] pops it and resumes.
+    ///   via [`Op::Pop`].
+    /// - The dispatcher pushes a [`CallFrame`] containing the return pc; the
+    ///   matching [`Op::Ret`] pops it and resumes.
     Call {
         func: u32,
     },
-    /// Invoke syscall. `idx` (is the index into [Vm::syscalls]). See
-    /// [crate::BuiltinFn] for the syscall calling convention. It's
-    /// stricter than [Op::Call] (only r0 is clobbered by the body itself).
+    /// Invoke syscall. `idx` (is the index into [`Vm::syscalls`]). See
+    /// [`crate::BuiltinFn`] for the syscall calling convention. It's
+    /// stricter than [`Op::Call`] (only r0 is clobbered by the body itself).
     Sys {
         idx: u16,
     },
-    /// Push `src` onto [Vm::spilled]. Used both for caller-save spill
-    /// around [Op::Call] / [Op::Sys] and for cycle-breaking inside
+    /// Push `src` onto [`Vm::spilled`]. Used both for caller-save spill
+    /// around [`Op::Call`] / [`Op::Sys`] and for cycle-breaking inside
     /// `bc::Cc::emit_arg_shuffle`.
     ///
-    /// Invariant: every function's bytecode must leave [Vm::spilled] at
-    /// the same depth on [Op::Ret] as on entry. Unbalanced push/pop pairs
+    /// Invariant: every function's bytecode must leave [`Vm::spilled`] at
+    /// the same depth on [`Op::Ret`] as on entry. Unbalanced push/pop pairs
     /// silently corrupt the caller's spilled values; the debug check on
-    /// [Op::Ret] catches this in dev builds.
+    /// [`Op::Ret`] catches this in dev builds.
     Push {
         src: u8,
     },
@@ -202,7 +202,7 @@ pub enum Op {
         b: u8,
         c: u8,
     },
-    /// Pop the top of [Vm::spilled] into `dst`. See [Op::Push] for the
+    /// Pop the top of [`Vm::spilled`] into `dst`. See [`Op::Push`] for the
     /// stack-balance invariant.
     Pop {
         dst: u8,

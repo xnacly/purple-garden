@@ -1,6 +1,6 @@
 use purple_garden_runtime::op::Op;
 
-/// pack_spills merges adjacent spill-stack ops into fixed-width variants:
+/// `pack_spills` merges adjacent spill-stack ops into fixed-width variants:
 ///
 /// ```text
 /// Push { src: 1 }

@@ -30,6 +30,7 @@ macro_rules! frontend_trace {
     };
 }
 
+#[must_use]
 pub fn type_from_atom_token_type(t: &lex::Type<'_>) -> ptype::Type {
     match t {
         lex::Type::S(_) => ptype::Type::Str,
@@ -40,6 +41,7 @@ pub fn type_from_atom_token_type(t: &lex::Type<'_>) -> ptype::Type {
     }
 }
 
+#[must_use]
 pub fn type_from_lex_type(t: lex::Type<'_>) -> ptype::Type {
     match t {
         lex::Type::Int => ptype::Type::Int,
@@ -51,6 +53,7 @@ pub fn type_from_lex_type(t: lex::Type<'_>) -> ptype::Type {
     }
 }
 
+#[must_use]
 pub fn type_from_type_expr(value: &TypeExpr<'_>) -> ptype::Type {
     match value {
         TypeExpr::Atom(token) => type_from_lex_type(token.t),

@@ -74,6 +74,7 @@ fn as_keyword_type(inner: &str) -> Option<Type<'_>> {
 }
 
 impl<'l> Lexer<'l> {
+    #[must_use]
     pub fn new(input: &'l [u8]) -> Self {
         Self { input, pos: 0 }
     }
@@ -154,12 +155,9 @@ impl<'l> Lexer<'l> {
                 let body_start = self.pos;
                 let bytes = self.input;
 
-                let end = match find_byte(b'"', &bytes[body_start..]) {
-                    Some(i) => body_start + i,
-                    None => {
-                        self.pos = bytes.len();
-                        return Err(self.make_err("Unterminated string", start));
-                    }
+                let end = if let Some(i) = find_byte(b'"', &bytes[body_start..]) { body_start + i } else {
+                    self.pos = bytes.len();
+                    return Err(self.make_err("Unterminated string", start));
                 };
 
                 self.pos = end;
@@ -220,9 +218,8 @@ impl<'l> Lexer<'l> {
             let t = self.one()?;
             if t.t == Type::Eof {
                 break;
-            } else {
-                raindrain.push(t);
             }
+            raindrain.push(t);
         }
         Ok(raindrain)
     }
@@ -331,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "called `Result::unwrap()` on an `Err` value")]
     fn unknown_character_errors() {
         let mut l = Lexer::new(b"$");
         l.one().unwrap();
@@ -366,11 +363,11 @@ mod tests {
                 Type::Bool,
                 Type::Void,
             ]
-        )
+        );
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "called `Result::unwrap()` on an `Err` value")]
     fn unterminated_string() {
         let mut l = Lexer::new(b"\"hello");
         l.one().unwrap();

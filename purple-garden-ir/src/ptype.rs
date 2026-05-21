@@ -31,8 +31,8 @@ impl Display for Type {
             Type::Double => write!(f, "Double"),
             Type::Str => write!(f, "Str"),
             Type::Foreign(id) => write!(f, "Foreign<{id}>"),
-            Type::Option(inner) => write!(f, "Option<{}>", inner),
-            Type::Array(inner) => write!(f, "Array<{}>", inner),
+            Type::Option(inner) => write!(f, "Option<{inner}>"),
+            Type::Array(inner) => write!(f, "Array<{inner}>"),
         }
     }
 }
@@ -44,7 +44,7 @@ impl From<Const<'_>> for Type {
             Const::Int(_) => Self::Int,
             Const::Double(_) => Self::Double,
             Const::Str(_) => Self::Str,
-            _ => unreachable!(),
+            Const::Undefined => unreachable!(),
         }
     }
 }

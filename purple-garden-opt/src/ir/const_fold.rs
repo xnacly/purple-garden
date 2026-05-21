@@ -41,7 +41,7 @@ pub fn const_fold<'fold, 's>(fun: &'fold mut ir::Func<'s>, scratch: &'fold mut S
                     value,
                     block,
                     instr,
-                })
+                });
             }
         }
     }
@@ -241,7 +241,6 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch) -> bool {
         }
         // we specifically dont care about BinImm, since imm_fold produces them and runs AFTER this
         // pass
-        Instr::BinImm { .. } => false,
         _ => false,
     }
 }
@@ -276,7 +275,7 @@ mod tests {
                 value: Const::Int(v),
                 ..
             } => *v,
-            other => panic!("expected LoadConst Int(_), got {:?}", other),
+            other => panic!("expected LoadConst Int(_), got {other:?}"),
         }
     }
 
@@ -286,7 +285,7 @@ mod tests {
                 value: Const::Double(v),
                 ..
             } => f64::from_bits(*v),
-            other => panic!("expected LoadConst Double(_), got {:?}", other),
+            other => panic!("expected LoadConst Double(_), got {other:?}"),
         }
     }
 
@@ -299,7 +298,7 @@ mod tests {
                 value: Const::False,
                 ..
             } => false,
-            other => panic!("expected LoadConst Bool, got {:?}", other),
+            other => panic!("expected LoadConst Bool, got {other:?}"),
         }
     }
 
@@ -353,7 +352,7 @@ mod tests {
             instructions: vec![
                 Instr::LoadConst {
                     dst: double(0),
-                    value: Const::Double(3.1415f64.to_bits()),
+                    value: Const::Double(3.5f64.to_bits()),
                     span: 0,
                 },
                 Instr::Cast {
@@ -645,12 +644,12 @@ mod tests {
             instructions: vec![
                 Instr::LoadConst {
                     dst: int(0),
-                    value: Const::Int(1829182),
+                    value: Const::Int(1_829_182),
                     span: 0,
                 },
                 Instr::LoadConst {
                     dst: int(1),
-                    value: Const::Int(3183192),
+                    value: Const::Int(3_183_192),
                     span: 0,
                 },
                 Instr::Bin {
@@ -679,7 +678,7 @@ mod tests {
                 },
                 Instr::LoadConst {
                     dst: int(6),
-                    value: Const::Int(3819289),
+                    value: Const::Int(3_819_289),
                     span: 0,
                 },
                 Instr::Bin {
@@ -705,7 +704,7 @@ mod tests {
 
         const_fold(&mut fun, &mut Scratch::default());
 
-        assert_eq!(loaded_int(&fun.blocks[0].instructions[8]), -10264782);
+        assert_eq!(loaded_int(&fun.blocks[0].instructions[8]), -10_264_782);
     }
 
     #[test]

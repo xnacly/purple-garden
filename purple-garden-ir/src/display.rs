@@ -23,12 +23,12 @@ impl Display for Instr<'_> {
             Instr::BinImm {
                 op, dst, lhs, imm, ..
             } => write!(f, "%v{} = {:?} %v{}, {}", dst, op, lhs.0, imm)?,
-            Instr::LoadConst { dst, value, .. } => write!(f, "%v{} = {}", dst, value)?,
+            Instr::LoadConst { dst, value, .. } => write!(f, "%v{dst} = {value}")?,
             Instr::Noop => write!(f, "Nop")?,
             Instr::Call {
                 dst, func, args, ..
             } => {
-                write!(f, "%v{} = ", dst)?;
+                write!(f, "%v{dst} = ")?;
                 write!(f, "Call f{}(", func.0)?;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {
@@ -46,7 +46,7 @@ impl Display for Instr<'_> {
                 args,
                 ..
             } => {
-                write!(f, "%v{} = ", dst)?;
+                write!(f, "%v{dst} = ")?;
                 write!(f, "Sys {path}.{name}(")?;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {
@@ -113,9 +113,9 @@ impl Display for Func<'_> {
         write!(f, "// {}\nfn f{}(", self.name, self.id.0)?;
         for (i, arg) in self.params.iter().enumerate() {
             if i + 1 == self.params.len() {
-                write!(f, "%v{}", arg)?;
+                write!(f, "%v{arg}")?;
             } else {
-                write!(f, "%v{}, ", arg)?;
+                write!(f, "%v{arg}, ")?;
             }
         }
 
@@ -123,12 +123,10 @@ impl Display for Func<'_> {
             f,
             ") -> {} {{",
             self.ret
-                .as_ref()
-                .map(|t| t.to_string())
-                .unwrap_or_else(|| "void".to_string())
+                .as_ref().map_or_else(|| "void".to_string(), std::string::ToString::to_string)
         )?;
 
-        for block in self.blocks.iter() {
+        for block in &self.blocks {
             writeln!(
                 f,
                 "b{}({}):",
@@ -148,7 +146,7 @@ impl Display for Func<'_> {
             if let Some(term) = &block.term {
                 match term {
                     Terminator::Jump { id, params, .. } => {
-                        writeln!(f, "\tjmp b{}({})", id.0, format_ids(self.params(*params)))?
+                        writeln!(f, "\tjmp b{}({})", id.0, format_ids(self.params(*params)))?;
                     }
                     Terminator::Branch { cond, yes, no, .. } => writeln!(
                         f,
@@ -176,7 +174,7 @@ impl Display for Const<'_> {
             Const::Int(int) => write!(f, "{int}"),
             Const::Double(bits) => write!(f, "{}", f64::from_bits(*bits)),
             Const::Str(str) => write!(f, "`{str}`"),
-            _ => unreachable!(),
+            Const::Undefined => unreachable!(),
         }
     }
 }

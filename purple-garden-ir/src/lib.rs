@@ -123,6 +123,7 @@ pub enum Instr<'i> {
 impl Instr<'_> {
     /// Source byte offset for this instruction, or 0 for synthetic Noops
     /// (which never trap, so the missing span doesn't matter).
+    #[must_use]
     pub fn span(&self) -> u32 {
         match self {
             Instr::Bin { span, .. }
@@ -166,6 +167,7 @@ pub enum Terminator {
 }
 
 impl Terminator {
+    #[must_use]
     pub fn span(&self) -> u32 {
         match self {
             Terminator::Return { span, .. }
@@ -226,6 +228,7 @@ impl<'f> Func<'f> {
     /// empty slice (the [`EMPTY_PARAMS`] sentinel). Always go through
     /// this — a `Func` whose pool is empty would make `EMPTY_PARAMS` an
     /// out-of-bounds lookup.
+    #[must_use]
     pub fn new(name: &'f str, id: Id, params: Vec<Id>, ret: Option<Type>) -> Self {
         Self {
             name,
@@ -243,12 +246,14 @@ impl<'f> Func<'f> {
         id
     }
 
+    #[must_use]
     pub fn params(&self, id: ParamsId) -> &[Id] {
         &self.params_pool[id.0 as usize]
     }
 }
 
 impl Func<'_> {
+    #[must_use]
     pub fn def_of(instr: &Instr<'_>) -> Option<Id> {
         match instr {
             Instr::Bin { dst, .. }
@@ -318,7 +323,6 @@ impl Func<'_> {
     /// so we don't allocate fresh per `cc()`.
     pub fn live_set_into(&self, out: &mut Vec<(u32, u32)>) {
         const UNSET: (u32, u32) = (u32::MAX, 0);
-        out.clear();
 
         fn ensure(v: &mut Vec<(u32, u32)>, id: u32) {
             let idx = id as usize;
@@ -347,6 +351,8 @@ impl Func<'_> {
                 e.1 = e.1.max(pos);
             }
         }
+
+        out.clear();
 
         // Each event takes two slots: early (pos) and late (pos+1). Instr
         // sources land on early, dst on late, so a source dying at pos P
@@ -538,8 +544,6 @@ impl Func<'_> {
     /// is free when this interval is allocated. If multiple call sites
     /// hint the same SSA id to different registers, first hint wins.
     pub fn arg_hints_into(&self, hints: &mut Vec<Option<u8>>) {
-        hints.clear();
-
         fn ensure(v: &mut Vec<Option<u8>>, id: u32) {
             let idx = id as usize;
             if idx >= v.len() {
@@ -563,6 +567,8 @@ impl Func<'_> {
             ensure(v, id.0);
             v[id.0 as usize] = Some(reg);
         }
+
+        hints.clear();
 
         // Entry block params arrive in r0..r{N-1} per the calling convention.
         // Pin them first so they take priority over inner-call hints;

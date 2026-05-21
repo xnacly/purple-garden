@@ -1,6 +1,6 @@
 use purple_garden_runtime::op::Op;
 
-/// jmp_next removes the pattern of jmps to the next instruction,
+/// `jmp_next` removes the pattern of jmps to the next instruction,
 /// which can just be a falltrough
 ///
 /// ```text

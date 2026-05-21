@@ -1,6 +1,6 @@
 use purple_garden_runtime::op::Op;
 
-/// self_move removes patterns conforming to
+/// `self_move` removes patterns conforming to
 ///
 /// ```text
 /// Mov { dst: x, src: x },
@@ -25,13 +25,13 @@ mod tests {
     fn removes_self_move() {
         let mut bc = vec![Op::Mov { src: 64, dst: 64 }, Op::Ret];
         self_move(&mut bc);
-        assert_eq!(bc, vec![Op::Nop, Op::Ret])
+        assert_eq!(bc, vec![Op::Nop, Op::Ret]);
     }
 
     #[test]
     fn handles_single_instruction_window() {
         let mut bc = vec![Op::Mov { src: 64, dst: 64 }];
         self_move(&mut bc);
-        assert_eq!(bc, vec![Op::Nop])
+        assert_eq!(bc, vec![Op::Nop]);
     }
 }

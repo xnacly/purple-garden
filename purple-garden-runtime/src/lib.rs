@@ -21,7 +21,7 @@ use op::Op;
 ///   emitter only spills caller-save values that land in
 ///   `r0..r{argcount-1}`, relying on this convention to leave `r{argcount}+`
 ///   untouched. A violation silently corrupts live values in release;
-///   debug builds catch it via the `debug_assert_eq!` in [Vm::run]'s
+///   debug builds catch it via the `debug_assert_eq!` in [`Vm::run`]'s
 ///   `Op::Sys` arm.
 pub type BuiltinFn = fn(&mut Vm) -> Result<Value, Anomaly>;
 pub fn syscall_unimplemented(vm: &mut Vm) -> Result<Value, Anomaly> {
@@ -36,8 +36,8 @@ pub struct VmConfig {
 #[derive(Default, Debug)]
 pub struct CallFrame {
     pub return_to: usize,
-    /// Snapshot of [Vm::spilled].len() at call entry. Used by the debug
-    /// check on [Op::Ret] to catch bytecode that leaves the spill stack
+    /// Snapshot of [`Vm::spilled`].`len()` at call entry. Used by the debug
+    /// check on [`Op::Ret`] to catch bytecode that leaves the spill stack
     /// unbalanced across a call.
     #[cfg(debug_assertions)]
     pub spilled_depth: usize,
@@ -79,6 +79,7 @@ macro_rules! trap_if {
 }
 
 impl Vm {
+    #[must_use]
     pub fn new(config: VmConfig) -> Self {
         Self {
             r: [const { Value(0) }; REGISTER_COUNT],
@@ -94,7 +95,7 @@ impl Vm {
         }
     }
 
-    /// creates a new string in [vm::heap_strings], a reference to it into [vm::strings] and
+    /// creates a new string in [`vm::heap_strings`], a reference to it into [`vm::strings`] and
     /// returns the index into the latter
     pub fn new_string(&mut self, s: String) -> usize {
         let idx = self.strings.len();
@@ -173,29 +174,29 @@ impl Vm {
                 Op::IEq { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
-                    r_mut!(dst) = Value::from(l == r)
+                    r_mut!(dst) = Value::from(l == r);
                 },
                 Op::IEqI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
-                    r_mut!(dst) = Value::from(l == imm as i64)
+                    r_mut!(dst) = Value::from(l == imm as i64);
                 },
                 Op::IGt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
-                    r_mut!(dst) = Value::from(l > r)
+                    r_mut!(dst) = Value::from(l > r);
                 },
                 Op::IGtI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
-                    r_mut!(dst) = Value::from(l > imm as i64)
+                    r_mut!(dst) = Value::from(l > imm as i64);
                 },
                 Op::ILt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
-                    r_mut!(dst) = Value::from(l < r)
+                    r_mut!(dst) = Value::from(l < r);
                 },
                 Op::ILtI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
-                    r_mut!(dst) = Value::from(l < imm as i64)
+                    r_mut!(dst) = Value::from(l < imm as i64);
                 },
                 Op::DAdd { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
@@ -284,11 +285,10 @@ impl Vm {
                     r_mut!(0) = (*syscalls.add(idx as usize))(self)?;
 
                     #[cfg(debug_assertions)]
-                    for i in 1..REGISTER_COUNT {
+                    for (i, pre) in pre_sys.iter().enumerate().skip(1) {
                         debug_assert_eq!(
-                            pre_sys[i].0, self.r[i].0,
-                            "syscall idx={} wrote r{} — convention only permits writes to r0",
-                            idx, i
+                            pre.0, self.r[i].0,
+                            "syscall idx={idx} wrote r{i} — convention only permits writes to r0"
                         );
                     }
                 },
@@ -359,13 +359,14 @@ impl Vm {
     }
 
     #[inline(always)]
-    /// access register [idx] by indexing [vm::r]
+    /// access register [idx] by indexing [`vm::r`]
+    #[must_use]
     pub fn r(&self, idx: usize) -> &Value {
         unsafe { &*self.r.as_ptr().add(idx) }
     }
 
     #[inline(always)]
-    /// access register [idx] mutably by indexing [vm::r]
+    /// access register [idx] mutably by indexing [`vm::r`]
     pub fn r_mut(&mut self, idx: usize) -> &mut Value {
         unsafe { &mut *self.r.as_mut_ptr().add(idx) }
     }

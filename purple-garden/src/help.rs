@@ -1,3 +1,4 @@
+#[must_use]
 pub fn print_help_by_topic(topic: Option<&str>) -> &str {
     if let Some(topic) = topic {
         match topic {

@@ -20,7 +20,7 @@ fn programs() -> Vec<(String, Vec<u8>)> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/programs");
     let mut out: Vec<(String, Vec<u8>)> = std::fs::read_dir(&dir)
         .expect("benches/programs dir missing")
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .map(|e| e.path())
         .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("garden"))
         .map(|p| {
@@ -53,12 +53,12 @@ pub fn suite(c: &mut Criterion) {
         c.bench_function(&format!("{name}_compile"), |b| {
             b.iter(|| {
                 purple_garden::new(CFG, &source).unwrap();
-            })
+            });
         });
         c.bench_function(&format!("{name}_compile_opt"), |b| {
             b.iter(|| {
                 purple_garden::new(CFG_OPT, &source).unwrap();
-            })
+            });
         });
         c.bench_function(&format!("{name}_run"), |b| {
             let (mut vm, _debug) = purple_garden::new(CFG, &source).unwrap();
@@ -66,7 +66,7 @@ pub fn suite(c: &mut Criterion) {
             b.iter(|| {
                 vm.pc = entry;
                 vm.run()
-            })
+            });
         });
         c.bench_function(&format!("{name}_run_opt"), |b| {
             let (mut vm, _debug) = purple_garden::new(CFG_OPT, &source).unwrap();
@@ -74,7 +74,7 @@ pub fn suite(c: &mut Criterion) {
             b.iter(|| {
                 vm.pc = entry;
                 vm.run()
-            })
+            });
         });
     }
 }

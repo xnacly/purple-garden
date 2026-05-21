@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -62,10 +63,10 @@ fn generate_example_tests() {
 
     let mut entries: Vec<_> = std::fs::read_dir(&examples_dir)
         .unwrap_or_else(|e| panic!("read examples/: {e}"))
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("garden"))
         .collect();
-    entries.sort_by_key(|e| e.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
 
     let mut out = String::new();
     for entry in entries {
@@ -76,11 +77,14 @@ fn generate_example_tests() {
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
             .collect();
         let abs = path.to_string_lossy();
-        out.push_str(&format!(
+        write!(
+            out,
             "#[test]\nfn {fn_name}() {{\n    run_source(include_bytes!(r\"{abs}\"));\n}}\n\n\
              #[test]\nfn {fn_name}_opt() {{\n    run_source_opt(include_bytes!(r\"{abs}\"));\n}}\n\n"
-        ));
+        )
+        .unwrap();
     }
 
-    std::fs::write(&out_path, out).unwrap_or_else(|e| panic!("write {out_path:?}: {e}"));
+    let out_display = out_path.display();
+    std::fs::write(&out_path, out).unwrap_or_else(|e| panic!("write {out_display}: {e}"));
 }

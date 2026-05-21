@@ -10,26 +10,31 @@ impl Value {
     pub const UNDEF: Self = Self(0);
 
     #[inline(always)]
+    #[must_use]
     pub fn as_int(&self) -> i64 {
         self.0 as i64
     }
 
     #[inline(always)]
+    #[must_use]
     pub fn as_bool(&self) -> bool {
         self.0 != 0
     }
 
     #[inline(always)]
+    #[must_use]
     pub fn as_f64(&self) -> f64 {
         f64::from_bits(self.0)
     }
 
     #[inline(always)]
+    #[must_use]
     pub fn as_str<'t>(&self, pool: &'t [Box<str>]) -> &'t str {
         pool[self.0 as usize].as_ref()
     }
 
     #[inline(always)]
+    #[must_use]
     pub fn as_ptr<T>(&self) -> *mut T {
         self.0 as *mut T
     }
@@ -40,16 +45,19 @@ impl Value {
     }
 
     #[inline(always)]
+    #[must_use]
     pub fn int_to_bool(&self) -> Self {
         Value::from(self.0 != 0)
     }
 
     #[inline(always)]
+    #[must_use]
     pub fn int_to_f64(&self) -> Self {
         Value::from(self.as_int() as f64)
     }
 
     #[inline(always)]
+    #[must_use]
     pub fn f64_to_int(&self) -> Self {
         Value::from(self.as_f64() as i64)
     }
@@ -69,7 +77,7 @@ impl<'c> From<Const<'c>> for Value {
 
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
-        Self(if value { 1 } else { 0 })
+        Self(u64::from(value))
     }
 }
 

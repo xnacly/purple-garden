@@ -35,6 +35,7 @@ impl PgError {
     /// `pc` only; the source byte offset is resolved here by consulting
     /// the compile-time `DebugInfo`. Keeps `Vm` free of source-info
     /// bookkeeping (the runtime hot path never reads `DebugInfo`).
+    #[must_use]
     pub fn from_anomaly(anomaly: Anomaly, debug: &DebugInfo) -> Self {
         PgError {
             msg: anomaly.as_str().to_string(),
@@ -45,6 +46,7 @@ impl PgError {
 }
 
 impl PgError {
+    #[must_use]
     pub fn render(self, file: &str, source: &[u8]) -> String {
         // TODO: replace this with a proper SourceMap that prebuilds a sorted
         // Vec<usize> of newline byte offsets at parse start, then maps a

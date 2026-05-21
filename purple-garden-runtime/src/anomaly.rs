@@ -11,6 +11,7 @@ pub enum Anomaly {
 }
 
 impl Anomaly {
+    #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
             Anomaly::DivisionByZero { .. } => "Division by zero",
@@ -21,6 +22,7 @@ impl Anomaly {
 
     /// PC at which the trap fired. Pair with `bc::DebugInfo::span_at`
     /// to recover the source byte offset.
+    #[must_use]
     pub fn pc(&self) -> usize {
         match self {
             Anomaly::DivisionByZero { pc }

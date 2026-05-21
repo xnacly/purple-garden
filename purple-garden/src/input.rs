@@ -60,6 +60,7 @@ impl Input {
         }
     }
 
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             Input::Str(s) => s.as_bytes(),
@@ -70,6 +71,7 @@ impl Input {
         }
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
             Input::Str(s) => s,
@@ -80,6 +82,7 @@ impl Input {
         }
     }
 
+    #[must_use]
     pub fn size(&self) -> usize {
         match self {
             Input::Str(s) => s.len(),
@@ -88,6 +91,7 @@ impl Input {
         }
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.size() == 0
     }

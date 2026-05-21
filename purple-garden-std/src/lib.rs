@@ -28,8 +28,9 @@ pub struct Fn {
 // TODO: replace this with a tri or some kind of compile time perfect hashing so the repeated
 // lookup in lowering and typechecking is a bit better
 
-/// resolve_pkg searches for a package in the standard library by its name, for instance "io/fs",
+/// `resolve_pkg` searches for a package in the standard library by its name, for instance "io/fs",
 /// "runtime/gc" or "encoding/json"
+#[must_use]
 pub fn resolve_pkg(query: &str) -> Option<&Pkg> {
     let mut segments = query.split('/');
 
@@ -45,9 +46,9 @@ fn print_function_head(fun: &Fn, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "fn {}(", fun.name)?;
     for (i, a) in fun.args.iter().enumerate() {
         if i + 1 < fun.args.len() {
-            write!(f, "{} ", a)?;
+            write!(f, "{a} ")?;
         } else {
-            write!(f, "{}", a)?;
+            write!(f, "{a}")?;
         }
     }
     writeln!(f, ") {}", fun.ret)

@@ -39,15 +39,15 @@ pub struct Scratch<'scratch> {
     consts: Vec<Option<ConstDef<'scratch>>>,
 }
 
-impl<'scratch> Scratch<'scratch> {
+impl Scratch<'_> {
     pub fn reset(&mut self) {
         self.uses.clear();
         self.consts.clear();
     }
 
     /// Returns the recorded `ConstDef` for `id`, no use-count gate.
-    /// const_fold uses this; imm_fold uses `single_use_const` instead
-    /// because it noops the LoadConst and needs single-use safety.
+    /// `const_fold` uses this; `imm_fold` uses `single_use_const` instead
+    /// because it noops the `LoadConst` and needs single-use safety.
     pub fn const_def(&self, id: Id) -> Option<ConstDef<'_>> {
         self.consts.get(id.0 as usize).copied().flatten()
     }
