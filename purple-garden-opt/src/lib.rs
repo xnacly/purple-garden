@@ -57,14 +57,6 @@ pub fn bc(bc: &mut [Op]) {
     }
 
     for i in 0..bc.len() {
-        if i + 3 <= bc.len() {
-            bc::pack_spills(&mut bc[i..i + 3]);
-        } else if i + 2 <= bc.len() {
-            // Trailing pair at end of buffer; the 2-arm patterns match a
-            // 2-slice via their .. tail.
-            bc::pack_spills(&mut bc[i..i + 2]);
-        }
-
         let end = (i + WINDOW_SIZE).min(bc.len());
         let window = &mut bc[i..end];
         bc::self_move(window);

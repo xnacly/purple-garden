@@ -570,12 +570,12 @@ impl Func<'_> {
 
         hints.clear();
 
-        // Entry block params arrive in r0..r{N-1} per the calling convention.
-        // Pin them first so they take priority over inner-call hints;
-        // otherwise an inner call that uses the function's first param as
-        // its arg-2 would hint it to r2, the regalloc would place it in
-        // r2, and the caller still writes the arg to r0 → the function
-        // reads garbage.
+        // Entry block params arrive in r0..r{N-1} per the calling convention
+        // (ARM-like: r0 is both the first arg and the return-value slot).
+        // Pin them first so they take priority over inner-call hints; otherwise
+        // an inner call that uses the function's first param as its arg-2 would
+        // hint it to r1, the regalloc would place it in r1, and the caller still
+        // writes the arg to r0 → the function reads garbage.
         if let Some(entry) = self.blocks.first()
             && !entry.tombstone
         {

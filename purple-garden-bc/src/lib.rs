@@ -87,6 +87,99 @@ pub struct Cc<'cc> {
     /// `cc()` calls never re-allocate.
     live_set: Vec<(u32, u32)>,
     arg_hints: Vec<Option<u8>>,
+    /// General-purpose `u8` scratch used by prologue/epilogue and call-site
+    /// spills. Callers fill it, then immediately consume it via the
+    /// `pack_push`/`pack_pop` free functions; it is never live across a
+    /// call to another `Cc` method.
+    scratch: Vec<u8>,
+    /// Reusable `(src, dst)` buffer for the parallel-move resolver in
+    /// [`Cc::emit_arg_shuffle`]. Replaces the per-call `todo: Vec<(u8,u8)>`
+    /// allocation; taken out of `self` for the duration of each shuffle
+    /// and restored on exit so the capacity survives across calls.
+    scratch_pairs: Vec<(u8, u8)>,
+}
+
+/// Emit batched Push ops for `regs` in order, packing into Push3/Push2/Push.
+/// Free function so callers can pass `&self.scratch` alongside `&mut self.buf`
+/// without a whole-struct borrow.
+fn pack_push(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
+    let mut i = 0;
+    while i + 3 <= regs.len() {
+        buf.push(Op::Push3 { a: regs[i], b: regs[i + 1], c: regs[i + 2] });
+        spans.push(span);
+        i += 3;
+    }
+    if i + 2 <= regs.len() {
+        buf.push(Op::Push2 { a: regs[i], b: regs[i + 1] });
+        spans.push(span);
+        i += 2;
+    }
+    if i < regs.len() {
+        buf.push(Op::Push { src: regs[i] });
+        spans.push(span);
+    }
+}
+
+/// Emit batched Pop ops for `regs` in order, packing into Pop3/Pop2/Pop.
+fn pack_pop(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
+    let mut i = 0;
+    while i + 3 <= regs.len() {
+        buf.push(Op::Pop3 { a: regs[i], b: regs[i + 1], c: regs[i + 2] });
+        spans.push(span);
+        i += 3;
+    }
+    if i + 2 <= regs.len() {
+        buf.push(Op::Pop2 { a: regs[i], b: regs[i + 1] });
+        spans.push(span);
+        i += 2;
+    }
+    if i < regs.len() {
+        buf.push(Op::Pop { dst: regs[i] });
+        spans.push(span);
+    }
+}
+
+/// Like `pack_push` but sources are `pairs[i].0` — avoids collecting srcs into
+/// a separate `Vec<u8>` when the caller already has a `Vec<(u8,u8)>`.
+fn pack_push_pairs(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs: &[(u8, u8)]) {
+    let mut i = 0;
+    while i + 3 <= pairs.len() {
+        buf.push(Op::Push3 { a: pairs[i].0, b: pairs[i + 1].0, c: pairs[i + 2].0 });
+        spans.push(span);
+        i += 3;
+    }
+    if i + 2 <= pairs.len() {
+        buf.push(Op::Push2 { a: pairs[i].0, b: pairs[i + 1].0 });
+        spans.push(span);
+        i += 2;
+    }
+    if i < pairs.len() {
+        buf.push(Op::Push { src: pairs[i].0 });
+        spans.push(span);
+    }
+}
+
+/// Like `pack_pop` but dsts are `pairs[n-1-i].1` (reversed) — avoids collecting
+/// into a separate `Vec<u8>`.
+fn pack_pop_pairs_rev(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs: &[(u8, u8)]) {
+    let n = pairs.len();
+    let mut i = 0;
+    while i + 3 <= n {
+        let j = n - 1 - i;
+        buf.push(Op::Pop3 { a: pairs[j].1, b: pairs[j - 1].1, c: pairs[j - 2].1 });
+        spans.push(span);
+        i += 3;
+    }
+    if i + 2 <= n {
+        let j = n - 1 - i;
+        buf.push(Op::Pop2 { a: pairs[j].1, b: pairs[j - 1].1 });
+        spans.push(span);
+        i += 2;
+    }
+    if i < n {
+        buf.push(Op::Pop { dst: pairs[n - 1 - i].1 });
+        spans.push(span);
+    }
 }
 
 impl<'cc> Cc<'cc> {
@@ -104,6 +197,8 @@ impl<'cc> Cc<'cc> {
             cur_span: 0,
             live_set: Vec::new(),
             arg_hints: Vec::new(),
+            scratch: Vec::new(),
+            scratch_pairs: Vec::new(),
         }
     }
 
@@ -168,6 +263,14 @@ impl<'cc> Cc<'cc> {
         fun.live_set_into(&mut live_set);
         fun.arg_hints_into(&mut arg_hints);
         self.regalloc.rebuild(&live_set, &arg_hints);
+        let max_reg = self.regalloc.max_reg();
+        // lo = first callee-saved register: skip r0..r{nparams-1} (arg zone) and
+        // always skip r0 (return slot). So lo = max(nparams, 1).
+        let nparams = fun.blocks.iter()
+            .find(|b| !b.tombstone)
+            .map(|b| fun.params(b.params).len())
+            .unwrap_or(0) as u8;
+        let lo = nparams.max(1);
         bc_trace!(
             "[bc::Cc::cc][{}] regalloc map: {:#?}",
             fun.name,
@@ -184,6 +287,10 @@ impl<'cc> Cc<'cc> {
         // tombstoned/unemitted blocks.
         self.block_map.clear();
         self.block_map.resize(fun.blocks.len(), u16::MAX);
+
+        // Callee-saved prologue: push r{lo}..r{max_reg} before the first block.
+        // The matching epilogue is emitted before every Op::Ret and Op::Tail.
+        self.emit_prologue(lo, max_reg);
 
         // Two slots per event (early then late), in lockstep with
         // Func::live_set_into. pos points at the early slot; the
@@ -213,7 +320,7 @@ impl<'cc> Cc<'cc> {
                 .iter()
                 .find(|b| !b.tombstone)
                 .map(|b| b.id);
-            self.term(fun, block.term.as_ref(), next_block);
+            self.term(fun, block.term.as_ref(), next_block, lo, max_reg);
             pos += 2; // terminator row
         }
 
@@ -241,24 +348,26 @@ impl<'cc> Cc<'cc> {
         self.arg_hints = arg_hints;
     }
 
-    /// Move `args[i]` into the i argument register (`r0..rN`) for a call
-    /// or tail.
+    /// Move `args[i]` into the i-th argument register (`r0..r{N-1}`) for a call
+    /// or tail. `r0` is both the first argument and the return-value slot.
     ///
     /// Parallel-move: emit a direct Mov for any pending pair whose
     /// dst isn't another pending move's src. When all that remains is one
     /// or more cycles (e.g. swap r0,r1), fall back to push and pop for those
     /// leftovers only.
     fn emit_arg_shuffle(&mut self, args: &[Id]) {
-        let mut todo: Vec<(u8, u8)> = args
-            .iter()
-            .enumerate()
-            .map(|(i, a)| (self.ensure_register(*a), i as u8))
-            .filter(|(s, d)| s != d)
-            .collect();
+        let mut todo = std::mem::take(&mut self.scratch_pairs);
+        todo.clear();
+        todo.extend(
+            args.iter()
+                .enumerate()
+                .map(|(i, a)| (self.ensure_register(*a), i as u8))
+                .filter(|(s, d)| s != d),
+        );
 
         'outer: loop {
             if todo.is_empty() {
-                return;
+                break;
             }
             for i in 0..todo.len() {
                 let (src, dst) = todo[i];
@@ -272,17 +381,38 @@ impl<'cc> Cc<'cc> {
             // Remaining moves form one or more cycles; break them via the
             // spill stack. Push all sources, then pop into dsts in reverse
             // so the LIFO order lines up.
-            for &(src, _) in &todo {
-                self.emit(Op::Push { src });
-            }
-            for &(_, dst) in todo.iter().rev() {
-                self.emit(Op::Pop { dst });
-            }
-            return;
+            pack_push_pairs(&mut self.buf, &mut self.pc_to_span, self.cur_span, &todo);
+            pack_pop_pairs_rev(&mut self.buf, &mut self.pc_to_span, self.cur_span, &todo);
+            break;
         }
+
+        self.scratch_pairs = todo;
     }
 
-    fn term(&mut self, fun: &Func<'cc>, t: Option<&ir::Terminator>, next_block: Option<ir::Id>) {
+    /// Push r{lo}..r{max_reg} onto the spill stack (callee-saved prologue).
+    /// `lo = max(nparams, 1)` — skips the arg zone (r0..r{nparams-1}) and r0
+    /// (the return slot), which are never callee-saved.
+    fn emit_prologue(&mut self, lo: u8, max_reg: u8) {
+        if lo > max_reg {
+            return;
+        }
+        self.scratch.clear();
+        self.scratch.extend(lo..=max_reg);
+        pack_push(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
+    }
+
+    /// Pop r{max_reg}..r{lo} from the spill stack (callee-saved epilogue).
+    /// Must mirror emit_prologue exactly (LIFO order).
+    fn emit_epilogue(&mut self, lo: u8, max_reg: u8) {
+        if lo > max_reg {
+            return;
+        }
+        self.scratch.clear();
+        self.scratch.extend((lo..=max_reg).rev());
+        pack_pop(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
+    }
+
+    fn term(&mut self, fun: &Func<'cc>, t: Option<&ir::Terminator>, next_block: Option<ir::Id>, lo: u8, max_reg: u8) {
         let Some(term) = t else {
             return;
         };
@@ -293,6 +423,7 @@ impl<'cc> Cc<'cc> {
                     let src = self.ensure_register(*src_id);
                     self.emit(Op::Mov { dst: 0, src });
                 }
+                self.emit_epilogue(lo, max_reg);
                 self.emit(Op::Ret);
             }
             ir::Terminator::Jump { id, params, .. } => {
@@ -380,7 +511,11 @@ impl<'cc> Cc<'cc> {
                 };
 
                 let pc = func.pc;
+                // Arg shuffle first (reads computed values from callee-saved regs),
+                // then epilogue (restores r{lo}..r{max_reg}, which is above the arg
+                // zone r0..r{nparams-1} — no overlap for ta <= nparams, the common case).
                 self.emit_arg_shuffle(args);
+                self.emit_epilogue(lo, max_reg);
 
                 self.emit(Op::Tail { func: pc as u32 });
             }
@@ -434,38 +569,37 @@ impl<'cc> Cc<'cc> {
 
                 let pc = func.pc;
 
-                let mut alive_after_call_spill = vec![];
+                // Callee-saved convention: the callee's prologue preserves r1..r{max_reg_callee}.
+                // The caller only needs to spill live values in r0..r{clobber_end-1} —
+                // the arg-shuffle zone. r{clobber_end}+ are untouched from the caller's view.
+                let clobber_end = args.len().max(1) as u8;
+                self.scratch.clear();
                 for (v, &(def, last_use)) in live_set.iter().enumerate() {
                     if def == u32::MAX {
                         continue;
                     }
-                    // the value is defined before the call and used after the call, thus must be
-                    // spilled
                     if def < pos && pos < last_use {
-                        bc_trace!(
-                            "[bc] spilled r{} at call_idx={};def={};last_use={}",
-                            v,
-                            pos,
-                            def,
-                            last_use
-                        );
                         let regalloc::Location::Reg(src) = self.regalloc.map[v] else {
                             unreachable!();
                         };
-
-                        alive_after_call_spill.push(src);
-                        self.emit(Op::Push { src });
+                        if src < clobber_end {
+                            bc_trace!(
+                                "[bc] spilled r{} at call_idx={};def={};last_use={}",
+                                src, pos, def, last_use
+                            );
+                            self.scratch.push(src);
+                        }
                     }
                 }
+                pack_push(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
 
                 self.emit_arg_shuffle(args);
 
                 let dst = self.ensure_register(dst.id);
                 self.emit(Op::Call { func: pc as u32 });
                 self.emit(Op::Mov { dst, src: 0 });
-                for dst in alive_after_call_spill.iter().rev() {
-                    self.emit(Op::Pop { dst: *dst });
-                }
+                self.scratch.reverse();
+                pack_pop(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
             }
             ir::Instr::Sys {
                 dst,
@@ -479,14 +613,12 @@ impl<'cc> Cc<'cc> {
                     .expect("typechecker should have validated std function");
                 let idx = self.std_fns.intern(func.ptr);
 
-                // Syscall calling convention: only r0 is clobbered by the
-                // syscall body (it gets the result). The shuffle additionally
-                // writes r0..r{argcount-1}. Combined clobber range is
-                // r0..max(argcount, 1). Spill only alive-across values whose
-                // register falls in that range; everything else is preserved
-                // by the convention.
+                // Syscall convention: shuffle writes r0..r{argcount-1}, syscall
+                // body writes r0 (return slot). Clobber range is r0..r{clobber_end-1}
+                // (clobber_end = args.len().max(1)). Builtins never touch higher
+                // registers, so only spill alive-across values inside that range.
                 let clobber_end = args.len().max(1) as u8;
-                let mut alive_across_spill = vec![];
+                self.scratch.clear();
                 for (v, &(def, last_use)) in live_set.iter().enumerate() {
                     if def == u32::MAX {
                         continue;
@@ -496,20 +628,19 @@ impl<'cc> Cc<'cc> {
                             unreachable!();
                         };
                         if src < clobber_end {
-                            alive_across_spill.push(src);
-                            self.emit(Op::Push { src });
+                            self.scratch.push(src);
                         }
                     }
                 }
+                pack_push(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
 
                 self.emit_arg_shuffle(args);
 
                 let dst = self.ensure_register(dst.id);
                 self.emit(Op::Sys { idx: idx as u16 });
                 self.emit(Op::Mov { dst, src: 0 });
-                for dst in alive_across_spill.into_iter().rev() {
-                    self.emit(Op::Pop { dst });
-                }
+                self.scratch.reverse();
+                pack_pop(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
             }
             ir::Instr::Noop {} => {}
             ir::Instr::Bin {

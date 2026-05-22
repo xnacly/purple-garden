@@ -14,9 +14,10 @@ use op::Op;
 /// Signature for a purple garden syscall
 ///
 /// Calling convention:
-/// - Args are passed in `r0..r{argcount-1}`. Read them via `vm.r(i)`.
-/// - Write the result to `r0` via `*vm.r_mut(0) = value`. Void functions leave `r0` untouched.
-/// - Do not modify any register other than `r0`. The bytecode emitter only spills
+/// - Args are passed in `r0..r{argcount-1}`. Read them via `vm.r(i)` starting at 0.
+/// - `r0` is also the return-value slot. Write the result via `*vm.r_mut(0) = value`.
+///   Void functions leave `r0` untouched.
+/// - Do not modify any register above r{argcount-1}. The bytecode emitter only spills
 ///   caller-save values in `r0..r{argcount-1}`, relying on this convention to leave
 ///   `r{argcount}+` untouched. A violation silently corrupts live values in release;
 ///   debug builds catch it via the `debug_assert_eq!` in [`Vm::run`]'s `Op::Sys` arm.
