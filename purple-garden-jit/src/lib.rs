@@ -49,4 +49,28 @@ mod tests {
         unsafe { f(regs.as_mut_ptr()) };
         assert_eq!(regs, [187, 0xdead, 0xaffe]);
     }
+
+    /// Full dispatch path: JIT page injected into vm.syscalls,
+    /// Call replaced by Sys, result readable from r0 after vm.run().
+    ///
+    /// Vm is repr(C) with r as its first field and Value is repr(transparent)
+    /// over u64, so rdi is &vm.r[0] the native fn receives &mut Vm
+    ///
+    /// The page pointer transmutes directly to BuiltinFn therefore we dont need a second native
+    /// call mechanism
+    #[test]
+    fn jit_fn_injected_as_syscall_and_dispatched() {
+        use purple_garden_runtime::{BuiltinFn, Vm, VmConfig, op::Op};
+
+        // same instructions as in roundtrip
+        let code: &[u8] = &[0x48, 0x8b, 0x07, 0x48, 0x89, 0x07, 0xc3];
+        let page = ExecPage::new(code).expect("mmap");
+        let jit_fn: BuiltinFn = unsafe { std::mem::transmute(page.as_ptr()) };
+
+        let mut vm = Vm::new(VmConfig::default());
+        vm.syscalls.push(jit_fn);
+        vm.bytecode = vec![Op::LoadI { dst: 0, value: 187 }, Op::Sys { idx: 0 }];
+        vm.run().expect("vm run");
+        assert_eq!(vm.r(0).as_int(), 187);
+    }
 }

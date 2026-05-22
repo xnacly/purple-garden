@@ -536,6 +536,7 @@ name = "purple-garden-jit"
 version = "0.1.0"
 dependencies = [
  "purple-garden-ir",
+ "purple-garden-runtime",
  "purple-garden-shared",
 ]
 
