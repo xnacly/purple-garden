@@ -17,7 +17,7 @@ use purple_garden::config::Config;
 mod common;
 
 fn programs() -> Vec<(String, Vec<u8>)> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/programs");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples");
     let mut out: Vec<(String, Vec<u8>)> = std::fs::read_dir(&dir)
         .expect("benches/programs dir missing")
         .filter_map(std::result::Result::ok)
