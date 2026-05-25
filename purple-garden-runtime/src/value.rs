@@ -29,8 +29,9 @@ impl Value {
 
     #[inline(always)]
     #[must_use]
-    pub fn as_str<'t>(&self, pool: &'t [Box<str>]) -> &'t str {
-        pool[self.0 as usize].as_ref()
+    pub fn as_str<'t>(&self, pool: &'t [(u32, u32)], data: &'t str) -> &'t str {
+        let (off, len) = pool[self.0 as usize];
+        &data[off as usize..off as usize + len as usize]
     }
 
     #[inline(always)]

@@ -60,9 +60,9 @@ impl<'dis> Disassembler<'dis> {
             .map(|f| (f.pc as u32, f))
             .collect();
 
-        let globals = self.cc.globals.clone().into_vec();
-        let strings = self.cc.strings.clone().into_vec();
-        let std_fns = self.cc.std_fns.clone().into_vec();
+        let globals = self.cc.globals.to_vec();
+        let (str_data, str_spans) = self.cc.strings.into_arena();
+        let std_fns = self.cc.std_fns.to_vec();
         let std_mapping = Self::build_fn_map();
 
         if !globals.is_empty() {
@@ -72,10 +72,10 @@ impl<'dis> Disassembler<'dis> {
             }
         }
 
-        if !strings.is_empty() {
+        if !str_spans.is_empty() {
             println!("strs:");
-            for (i, s) in strings.iter().enumerate() {
-                println!("  {i:04}:    \"{s}\"");
+            for (i, &(off, len)) in str_spans.iter().enumerate() {
+                println!("  {i:04}:    \"{}\"", &str_data[off as usize..off as usize + len as usize]);
             }
         }
 
@@ -122,9 +122,10 @@ impl<'dis> Disassembler<'dis> {
                         if let Const::Int(idx) = val_str
                             && idx < i32::MAX as i64
                         {
+                            let (off, len) = str_spans[idx as usize];
                             format!(
                                 "load_global r{dst}, {idx} \t; = \"{}\"",
-                                strings[idx as usize]
+                                &str_data[off as usize..off as usize + len as usize]
                             )
                         } else {
                             format!("load_global r{dst}, {idx} \t; = {val_str}")

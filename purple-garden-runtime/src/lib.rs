@@ -54,7 +54,14 @@ pub struct Vm {
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
-    pub strings: Vec<Box<str>>,
+    /// `(offset, len)` spans into [`Vm::string_data`]. Indexed by the u64 stored in a [`Value`].
+    /// Compile-time literals are laid out at finalize; runtime strings (e.g. `conv.from_int`)
+    /// are appended via [`Vm::new_string`]. Offsets remain valid across appends because
+    /// they are byte indices, not pointers.
+    pub strings: Vec<(u32, u32)>,
+    /// Flat backing buffer for all string data — one allocation for all literals,
+    /// avoids per-string heap overhead and keeps frequently accessed strings in the same cache lines.
+    pub string_data: String,
 
     /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
     /// function the virtual machine currently executes in, this behaviour only occurs if
@@ -91,6 +98,7 @@ impl Vm {
             bytecode: Vec::new(),
             globals: Vec::new(),
             strings: Vec::new(),
+            string_data: String::new(),
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(4096),
             syscalls: Vec::new(),
@@ -99,11 +107,12 @@ impl Vm {
         }
     }
 
-    /// creates a new string in [`vm::heap_strings`], a reference to it into [`vm::strings`] and
-    /// returns the index into the latter
     pub fn new_string(&mut self, s: String) -> usize {
         let idx = self.strings.len();
-        self.strings.push(s.into_boxed_str());
+        let off = self.string_data.len() as u32;
+        let len = s.len() as u32;
+        self.string_data.push_str(&s);
+        self.strings.push((off, len));
         idx
     }
 
