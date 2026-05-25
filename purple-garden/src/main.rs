@@ -127,8 +127,8 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let lower = Lower::new();
-    let mut ir = match lower.ir_from(&ast) {
-        Ok(ir) => ir,
+    let (mut ir, pkg_fns) = match lower.ir_from(&ast) {
+        Ok(v) => v,
         Err(e) => {
             return err!(e.render(input_source, input.as_bytes()));
         }
@@ -147,7 +147,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut cc = bc::Cc::new();
-    cc.compile(conf.liveness, &ir);
+    cc.compile(conf.liveness, &ir, &pkg_fns);
 
     trace!("[main] Lowered IR to bytecode");
 

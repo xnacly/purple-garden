@@ -22,13 +22,13 @@ pub fn new<'e>(
     let lexer = lex::Lexer::new(input);
     let ast = parser::Parser::new(lexer)?.parse()?;
 
-    let mut ir = lower::Lower::new().ir_from(&ast)?;
+    let (mut ir, pkg_fns) = lower::Lower::new().ir_from(&ast)?;
     if config.opt >= 1 {
         purple_garden_opt::ir(&mut ir);
     }
 
     let mut cc = bc::Cc::new();
-    cc.compile(config.liveness, &ir);
+    cc.compile(config.liveness, &ir, &pkg_fns);
     if config.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);
         cc.compact_nops();

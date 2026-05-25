@@ -8,7 +8,6 @@ mod regalloc;
 use crate::{intern::Interner, regalloc::Ralloc};
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
 use purple_garden_runtime::{BuiltinFn, Value, Vm, VmConfig, op::Op};
-use purple_garden_std as pstd;
 
 macro_rules! bc_trace {
     ($fmt:literal, $($value:expr),*) => {
@@ -232,7 +231,12 @@ impl<'cc> Cc<'cc> {
     }
 
     /// Compile a list of ir functions to bytecode instructions
-    pub fn compile(&mut self, liveness: bool, ir: &[Func<'cc>]) {
+    pub fn compile(
+        &mut self,
+        liveness: bool,
+        ir: &[Func<'cc>],
+        pkg_fns: &HashMap<&str, HashMap<&str, BuiltinFn>>,
+    ) {
         for func in ir {
             if liveness {
                 let mut intervals = Vec::new();
@@ -246,11 +250,11 @@ impl<'cc> Cc<'cc> {
                 }
                 println!("{out}");
             }
-            self.cc(func);
+            self.cc(func, pkg_fns);
         }
     }
 
-    fn cc(&mut self, fun: &Func<'cc>) {
+    fn cc(&mut self, fun: &Func<'cc>, pkg_fns: &HashMap<&str, HashMap<&str, BuiltinFn>>) {
         // Take the reusable scratch buffers out of self so we can hold an
         // immutable borrow of `live_set` across calls to `&mut self`
         // helpers (e.g. `self.instr`) without tripping the borrow checker.
@@ -306,7 +310,7 @@ impl<'cc> Cc<'cc> {
             pos += 2; // block params row
             for instruction in &block.instructions {
                 self.cur_span = instruction.span();
-                self.instr(&live_set, pos, instruction);
+                self.instr(&live_set, pos, instruction, pkg_fns);
                 pos += 2;
             }
 
@@ -522,7 +526,13 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn instr(&mut self, live_set: &[(u32, u32)], pos: u32, i: &ir::Instr<'cc>) {
+    fn instr(
+        &mut self,
+        live_set: &[(u32, u32)],
+        pos: u32,
+        i: &ir::Instr<'cc>,
+        pkg_fns: &HashMap<&str, HashMap<&str, BuiltinFn>>,
+    ) {
         match i {
             ir::Instr::Cast {
                 dst: TypeId { id, ty: dst_ty },
@@ -608,10 +618,8 @@ impl<'cc> Cc<'cc> {
                 args,
                 ..
             } => {
-                let func = pstd::resolve_pkg(path)
-                    .and_then(|pkg| pkg.fns.iter().find(|func| func.name == *name))
-                    .expect("typechecker should have validated std function");
-                let idx = self.std_fns.intern(func.ptr);
+                let ptr = pkg_fns[path][name];
+                let idx = self.std_fns.intern(ptr);
 
                 // Syscall convention: shuffle writes r0..r{argcount-1}, syscall
                 // body writes r0 (return slot). Clobber range is r0..r{clobber_end-1}
