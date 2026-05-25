@@ -57,7 +57,7 @@ pub struct TypeId {
     pub ty: Type,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum BinOp {
     IAdd,
     ISub,
