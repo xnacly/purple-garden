@@ -7,7 +7,7 @@ mod regalloc;
 
 use crate::{intern::Interner, regalloc::Ralloc};
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
-use purple_garden_runtime::{BuiltinFn, Value, Vm, VmConfig, op::Op};
+use purple_garden_runtime::{BuiltinFn, DebugInfo, Value, Vm, VmConfig, op::Op};
 
 macro_rules! bc_trace {
     ($fmt:literal, $($value:expr),*) => {
@@ -32,29 +32,6 @@ macro_rules! bc_trace {
 pub struct BcFunc<'fun> {
     pub name: &'fun str,
     pub pc: usize,
-}
-
-/// Decoupled debug info; necessary to render runtime errors with
-/// source locations. Lives separately from [`Vm`] so the runtime hot
-/// path doesn't carry a field it never touches; the cost of supporting
-/// `file:line:col` on traps is paid only at trap-rendering time, in
-/// whoever holds the `DebugInfo` (currently `main.rs`).
-#[derive(Debug)]
-pub struct DebugInfo {
-    /// `pc_to_span[pc]` is the byte offset into the source of the AST
-    /// node that produced the op at `pc`. Boxed slice (16 bytes) because
-    /// it never grows after `Cc::finalize` hands it over.
-    pc_to_span: Box<[u32]>,
-}
-
-impl DebugInfo {
-    /// Source byte offset for `pc`, or 0 if `pc` is out of range (e.g.
-    /// a test that hand-rolls a Vm and never compiled through `Cc`).
-    #[inline]
-    #[must_use]
-    pub fn span_at(&self, pc: usize) -> u32 {
-        self.pc_to_span.get(pc).copied().unwrap_or(0)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -109,12 +86,19 @@ pub struct Cc<'cc> {
 fn pack_push(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
     let mut i = 0;
     while i + 3 <= regs.len() {
-        buf.push(Op::Push3 { a: regs[i], b: regs[i + 1], c: regs[i + 2] });
+        buf.push(Op::Push3 {
+            a: regs[i],
+            b: regs[i + 1],
+            c: regs[i + 2],
+        });
         spans.push(span);
         i += 3;
     }
     if i + 2 <= regs.len() {
-        buf.push(Op::Push2 { a: regs[i], b: regs[i + 1] });
+        buf.push(Op::Push2 {
+            a: regs[i],
+            b: regs[i + 1],
+        });
         spans.push(span);
         i += 2;
     }
@@ -128,12 +112,19 @@ fn pack_push(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
 fn pack_pop(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
     let mut i = 0;
     while i + 3 <= regs.len() {
-        buf.push(Op::Pop3 { a: regs[i], b: regs[i + 1], c: regs[i + 2] });
+        buf.push(Op::Pop3 {
+            a: regs[i],
+            b: regs[i + 1],
+            c: regs[i + 2],
+        });
         spans.push(span);
         i += 3;
     }
     if i + 2 <= regs.len() {
-        buf.push(Op::Pop2 { a: regs[i], b: regs[i + 1] });
+        buf.push(Op::Pop2 {
+            a: regs[i],
+            b: regs[i + 1],
+        });
         spans.push(span);
         i += 2;
     }
@@ -148,12 +139,19 @@ fn pack_pop(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
 fn pack_push_pairs(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs: &[(u8, u8)]) {
     let mut i = 0;
     while i + 3 <= pairs.len() {
-        buf.push(Op::Push3 { a: pairs[i].0, b: pairs[i + 1].0, c: pairs[i + 2].0 });
+        buf.push(Op::Push3 {
+            a: pairs[i].0,
+            b: pairs[i + 1].0,
+            c: pairs[i + 2].0,
+        });
         spans.push(span);
         i += 3;
     }
     if i + 2 <= pairs.len() {
-        buf.push(Op::Push2 { a: pairs[i].0, b: pairs[i + 1].0 });
+        buf.push(Op::Push2 {
+            a: pairs[i].0,
+            b: pairs[i + 1].0,
+        });
         spans.push(span);
         i += 2;
     }
@@ -170,18 +168,27 @@ fn pack_pop_pairs_rev(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs:
     let mut i = 0;
     while i + 3 <= n {
         let j = n - 1 - i;
-        buf.push(Op::Pop3 { a: pairs[j].1, b: pairs[j - 1].1, c: pairs[j - 2].1 });
+        buf.push(Op::Pop3 {
+            a: pairs[j].1,
+            b: pairs[j - 1].1,
+            c: pairs[j - 2].1,
+        });
         spans.push(span);
         i += 3;
     }
     if i + 2 <= n {
         let j = n - 1 - i;
-        buf.push(Op::Pop2 { a: pairs[j].1, b: pairs[j - 1].1 });
+        buf.push(Op::Pop2 {
+            a: pairs[j].1,
+            b: pairs[j - 1].1,
+        });
         spans.push(span);
         i += 2;
     }
     if i < n {
-        buf.push(Op::Pop { dst: pairs[n - 1 - i].1 });
+        buf.push(Op::Pop {
+            dst: pairs[n - 1 - i].1,
+        });
         spans.push(span);
     }
 }
@@ -277,7 +284,9 @@ impl<'cc> Cc<'cc> {
         let max_reg = self.regalloc.max_reg();
         // lo = first callee-saved register: skip r0..r{nparams-1} (arg zone) and
         // always skip r0 (return slot). So lo = max(nparams, 1).
-        let nparams = fun.blocks.iter()
+        let nparams = fun
+            .blocks
+            .iter()
             .find(|b| !b.tombstone)
             .map(|b| fun.params(b.params).len())
             .unwrap_or(0) as u8;
@@ -398,7 +407,10 @@ impl<'cc> Cc<'cc> {
                 // emit each Mov in turn, then close by writing scratch into
                 // the head's destination.
                 let (start_src, start_dst) = todo.swap_remove(0);
-                self.emit(Op::Mov { dst: scratch, src: start_src });
+                self.emit(Op::Mov {
+                    dst: scratch,
+                    src: start_src,
+                });
                 let mut cur_freed = start_src;
                 loop {
                     if let Some(idx) = todo.iter().position(|(_, d)| *d == cur_freed) {
@@ -409,7 +421,10 @@ impl<'cc> Cc<'cc> {
                         break;
                     }
                 }
-                self.emit(Op::Mov { dst: start_dst, src: scratch });
+                self.emit(Op::Mov {
+                    dst: start_dst,
+                    src: scratch,
+                });
                 // Loop back to handle any remaining cycles.
             } else {
                 // No free register available; fall back to spill stack.
@@ -431,7 +446,12 @@ impl<'cc> Cc<'cc> {
         }
         self.scratch.clear();
         self.scratch.extend(lo..=max_reg);
-        pack_push(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
+        pack_push(
+            &mut self.buf,
+            &mut self.pc_to_span,
+            self.cur_span,
+            &self.scratch,
+        );
     }
 
     /// Pop r{max_reg}..r{lo} from the spill stack (callee-saved epilogue).
@@ -442,10 +462,22 @@ impl<'cc> Cc<'cc> {
         }
         self.scratch.clear();
         self.scratch.extend((lo..=max_reg).rev());
-        pack_pop(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
+        pack_pop(
+            &mut self.buf,
+            &mut self.pc_to_span,
+            self.cur_span,
+            &self.scratch,
+        );
     }
 
-    fn term(&mut self, fun: &Func<'cc>, t: Option<&ir::Terminator>, next_block: Option<ir::Id>, lo: u8, max_reg: u8) {
+    fn term(
+        &mut self,
+        fun: &Func<'cc>,
+        t: Option<&ir::Terminator>,
+        next_block: Option<ir::Id>,
+        lo: u8,
+        max_reg: u8,
+    ) {
         let Some(term) = t else {
             return;
         };
@@ -624,13 +656,21 @@ impl<'cc> Cc<'cc> {
                         if src < clobber_end {
                             bc_trace!(
                                 "[bc] spilled r{} at call_idx={};def={};last_use={}",
-                                src, pos, def, last_use
+                                src,
+                                pos,
+                                def,
+                                last_use
                             );
                             self.scratch.push(src);
                         }
                     }
                 }
-                pack_push(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
+                pack_push(
+                    &mut self.buf,
+                    &mut self.pc_to_span,
+                    self.cur_span,
+                    &self.scratch,
+                );
 
                 self.emit_arg_shuffle(args);
 
@@ -638,7 +678,12 @@ impl<'cc> Cc<'cc> {
                 self.emit(Op::Call { func: pc as u32 });
                 self.emit(Op::Mov { dst, src: 0 });
                 self.scratch.reverse();
-                pack_pop(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
+                pack_pop(
+                    &mut self.buf,
+                    &mut self.pc_to_span,
+                    self.cur_span,
+                    &self.scratch,
+                );
             }
             ir::Instr::Sys {
                 dst,
@@ -669,7 +714,12 @@ impl<'cc> Cc<'cc> {
                         }
                     }
                 }
-                pack_push(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
+                pack_push(
+                    &mut self.buf,
+                    &mut self.pc_to_span,
+                    self.cur_span,
+                    &self.scratch,
+                );
 
                 self.emit_arg_shuffle(args);
 
@@ -677,7 +727,12 @@ impl<'cc> Cc<'cc> {
                 self.emit(Op::Sys { idx: idx as u16 });
                 self.emit(Op::Mov { dst, src: 0 });
                 self.scratch.reverse();
-                pack_pop(&mut self.buf, &mut self.pc_to_span, self.cur_span, &self.scratch);
+                pack_pop(
+                    &mut self.buf,
+                    &mut self.pc_to_span,
+                    self.cur_span,
+                    &self.scratch,
+                );
             }
             ir::Instr::Noop {} => {}
             ir::Instr::Bin {
@@ -793,23 +848,24 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    pub fn finalize(self, config: VmConfig) -> (Vm, DebugInfo) {
-        let mut v = Vm::new(config);
-        v.pc = self
+    pub fn finalize(self, config: VmConfig) -> (Vm, Vec<BuiltinFn>, DebugInfo) {
+        let mut vm = Vm::new(config);
+        vm.pc = self
             .functions
             .get(&ir::Id(0))
             .map(|n| n.pc)
             .unwrap_or_default();
 
-        v.bytecode = self.buf;
-        v.globals = self.globals.into_vec_fn(Value::from);
-        (v.string_data, v.strings) = self.strings.into_arena();
-        v.syscalls = self.std_fns.into_vec();
-
-        let debug = DebugInfo {
-            pc_to_span: self.pc_to_span.into_boxed_slice(),
-        };
-        (v, debug)
+        let (string_data, strings) = self.strings.into_arena();
+        vm.bytecode = self.buf;
+        vm.globals = self.globals.into_vec_fn(Value::from);
+        vm.strings = strings;
+        vm.string_data = string_data;
+        (
+            vm,
+            self.std_fns.into_vec(),
+            DebugInfo::new(self.pc_to_span.into_boxed_slice()),
+        )
     }
 
     /// map pc's to function definitions

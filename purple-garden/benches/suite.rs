@@ -44,7 +44,7 @@ pub fn suite(c: &mut Criterion) {
     for (name, source) in programs() {
         // Validate once at startup so codegen bugs panic loudly here, not
         // silently affect the timing.
-        let (mut probe, _debug) = purple_garden::new(CFG_OPT, &source)
+        let mut probe = purple_garden::new(CFG_OPT, &source)
             .unwrap_or_else(|e| panic!("compile failed for {name}: {e:?}"));
         probe
             .run()
@@ -61,19 +61,19 @@ pub fn suite(c: &mut Criterion) {
             });
         });
         c.bench_function(&format!("{name}_run"), |b| {
-            let (mut vm, _debug) = purple_garden::new(CFG, &source).unwrap();
-            let entry = vm.pc;
+            let mut program = purple_garden::new(CFG, &source).unwrap();
+            let entry = program.entry;
             b.iter(|| {
-                vm.pc = entry;
-                vm.run()
+                program.vm.pc = entry;
+                program.run()
             });
         });
         c.bench_function(&format!("{name}_run_opt"), |b| {
-            let (mut vm, _debug) = purple_garden::new(CFG_OPT, &source).unwrap();
-            let entry = vm.pc;
+            let mut program = purple_garden::new(CFG_OPT, &source).unwrap();
+            let entry = program.entry;
             b.iter(|| {
-                vm.pc = entry;
-                vm.run()
+                program.vm.pc = entry;
+                program.run()
             });
         });
     }

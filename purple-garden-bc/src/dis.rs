@@ -75,7 +75,10 @@ impl<'dis> Disassembler<'dis> {
         if !str_spans.is_empty() {
             println!("strs:");
             for (i, &(off, len)) in str_spans.iter().enumerate() {
-                println!("  {i:04}:    \"{}\"", &str_data[off as usize..off as usize + len as usize]);
+                println!(
+                    "  {i:04}:    \"{}\"",
+                    &str_data[off as usize..off as usize + len as usize]
+                );
             }
         }
 

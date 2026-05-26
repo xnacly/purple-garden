@@ -1,6 +1,5 @@
 use crate::{ast::TypeExpr, lex::Token};
-use purple_garden_bc::DebugInfo;
-use purple_garden_runtime::Anomaly;
+use purple_garden_runtime::{Anomaly, DebugInfo};
 use std::fmt::Write;
 
 #[derive(Debug)]

@@ -7,7 +7,9 @@ use crate::{
     type_from_type_expr,
     typecheck::id_from_node,
 };
-use purple_garden_ir::{BinOp, Id, Func, ptype, Instr, Block, EMPTY_PARAMS, Const, TypeId, Terminator};
+use purple_garden_ir::{
+    BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype,
+};
 use purple_garden_runtime::BuiltinFn;
 use purple_garden_std as pstd;
 
@@ -122,14 +124,13 @@ impl<'lower> Lower<'lower> {
                 if let Some(id) = self.ctx.env.get(i) {
                     Some(*id)
                 } else {
-                    return Err(PgError::with_msg(
-                        format!("Undefined variable `{i}`"),
-                        name,
-                    ));
+                    return Err(PgError::with_msg(format!("Undefined variable `{i}`"), name));
                 }
             }
             Node::Bin { op, lhs, rhs, id } => {
-                use BinOp::{BEq, DAdd, DDiv, DGt, DLt, DMul, DSub, IAdd, IDiv, IEq, IGt, ILt, IMul, ISub};
+                use BinOp::{
+                    BEq, DAdd, DDiv, DGt, DLt, DMul, DSub, IAdd, IDiv, IEq, IGt, ILt, IMul, ISub,
+                };
                 let src_type = self.types[id_from_node(lhs).unwrap()].clone().unwrap();
                 let span = op.start as u32;
 
@@ -543,8 +544,13 @@ impl<'lower> Lower<'lower> {
     pub fn ir_from(
         mut self,
         ast: &[Node<'lower>],
-    ) -> Result<(Vec<Func<'lower>>, HashMap<&'lower str, HashMap<&'lower str, BuiltinFn>>), PgError>
-    {
+    ) -> Result<
+        (
+            Vec<Func<'lower>>,
+            HashMap<&'lower str, HashMap<&'lower str, BuiltinFn>>,
+        ),
+        PgError,
+    > {
         let mut typechecker = crate::typecheck::Typechecker::new();
         for node in ast {
             let _t = typechecker.node(node)?;
@@ -567,7 +573,12 @@ impl<'lower> Lower<'lower> {
         let pkg_fns = self
             .packages
             .into_iter()
-            .map(|(pkg, (_, fns))| (pkg, fns.into_iter().map(|(name, f)| (name, f.ptr)).collect()))
+            .map(|(pkg, (_, fns))| {
+                (
+                    pkg,
+                    fns.into_iter().map(|(name, f)| (name, f.ptr)).collect(),
+                )
+            })
             .collect();
         Ok((self.functions, pkg_fns))
     }

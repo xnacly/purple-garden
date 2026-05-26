@@ -1,11 +1,15 @@
-pub mod asm;
-#[cfg(all(
+#[cfg(not(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
-))]
+)))]
+compile_error!("purple-garden-jit currently supports only Linux on x86_64 or aarch64");
+
+pub mod asm;
 pub mod mem;
 
 use purple_garden_ir as ir;
+
+pub use mem::JitFn;
 
 /// The baseline just in time compiler backend state.
 #[derive(Default)]
@@ -54,7 +58,7 @@ mod tests {
         assert_eq!(regs, [187, 0xdead, 0xaffe]);
     }
 
-    /// Full dispatch path: JIT page injected into vm.syscalls,
+    /// Full dispatch path: JIT page injected into syscalls,
     /// Call replaced by Sys, result readable from r0 after vm.run().
     ///
     /// Vm is repr(C) with r as its first field and Value is repr(transparent)
@@ -64,17 +68,16 @@ mod tests {
     /// call mechanism
     #[test]
     fn jit_fn_injected_as_syscall_and_dispatched() {
-        use purple_garden_runtime::{BuiltinFn, Vm, VmConfig, op::Op};
+        use purple_garden_runtime::{Vm, VmConfig, op::Op};
 
         // same instructions as in roundtrip
         let code: &[u8] = &[0x48, 0x8b, 0x07, 0x48, 0x89, 0x07, 0xc3];
-        let page = ExecPage::new(code).expect("mmap");
-        let jit_fn: BuiltinFn = unsafe { std::mem::transmute(page.as_ptr()) };
+        let jit_fn = super::JitFn::new(code).expect("jit fn");
 
+        let syscalls = vec![jit_fn.entry()];
         let mut vm = Vm::new(VmConfig::default());
-        vm.syscalls.push(jit_fn);
         vm.bytecode = vec![Op::LoadI { dst: 0, value: 187 }, Op::Sys { idx: 0 }];
-        vm.run().expect("vm run");
+        vm.run(&syscalls).expect("vm run");
         assert_eq!(vm.r(0).as_int(), 187);
     }
 }

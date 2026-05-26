@@ -189,10 +189,7 @@ impl<'t> Typechecker<'t> {
             (Type::Double | Type::Bool, Type::Int) => Type::Int,
             (Type::Int, Type::Bool) => Type::Bool,
             (_, _) => {
-                return Err(PgError::with_msg(
-                    format!("Can not cast {i} to {o}"),
-                    at,
-                ));
+                return Err(PgError::with_msg(format!("Can not cast {i} to {o}"), at));
             }
         })
     }
@@ -325,9 +322,7 @@ impl<'t> Typechecker<'t> {
                 let computed_ret = self.block_type(body)?;
                 if ret != computed_ret {
                     return Err(PgError::with_msg(
-                        format!(
-                            "`{inner_name}` should return {ret}, but returns {computed_ret}"
-                        ),
+                        format!("`{inner_name}` should return {ret}, but returns {computed_ret}"),
                         return_type,
                     ));
                 }
@@ -456,9 +451,7 @@ impl<'t> Typechecker<'t> {
 
                     if condition_type != Type::Bool {
                         return Err(PgError::with_msg(
-                            format!(
-                                "Match conditions must be Bool, got {condition_type} instead"
-                            ),
+                            format!("Match conditions must be Bool, got {condition_type} instead"),
                             condition_token,
                         ));
                     }

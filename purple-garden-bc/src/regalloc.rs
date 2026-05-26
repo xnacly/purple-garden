@@ -61,7 +61,13 @@ impl Ralloc {
     pub fn max_reg(&self) -> u8 {
         self.map
             .iter()
-            .filter_map(|loc| if let Location::Reg(r) = loc { Some(*r) } else { None })
+            .filter_map(|loc| {
+                if let Location::Reg(r) = loc {
+                    Some(*r)
+                } else {
+                    None
+                }
+            })
             .max()
             .unwrap_or(0)
     }

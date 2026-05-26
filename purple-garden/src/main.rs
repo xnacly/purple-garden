@@ -96,7 +96,9 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let (input, input_source) = if let Some(ref i) = conf.run { (Input::Str(i.clone()), "stdio") } else {
+    let (input, input_source) = if let Some(ref i) = conf.run {
+        (Input::Str(i.clone()), "stdio")
+    } else {
         let Some(file_name) = conf.target.as_deref() else {
             return err!("No file or `-r` specified");
         };
@@ -167,22 +169,23 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    let (mut vm, debug) = cc.finalize(VmConfig {
+    let (vm, syscalls, debug) = cc.finalize(VmConfig {
         backtrace: conf.backtrace,
     });
+    let mut program = purple_garden::Program::from_vm(vm, syscalls, debug);
 
     if conf.disassemble {
-        bc::dis::Disassembler::new(&vm.bytecode, ctx.unwrap()).disassemble();
+        bc::dis::Disassembler::new(&program.vm.bytecode, ctx.unwrap()).disassemble();
     }
 
     if conf.dry {
         return Ok(());
     }
 
-    if let Err(e) = vm.run() {
+    if let Err(e) = program.run() {
         println!(
             "{}",
-            PgError::from_anomaly(e, &debug).render(input_source, input.as_bytes())
+            PgError::from_anomaly(e, &program.debug).render(input_source, input.as_bytes())
         );
 
         if conf.backtrace {
@@ -191,10 +194,10 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                 .find(|(_, name)| name.as_str() == "entry")
                 .map(|(pc, _)| *pc)
                 .unwrap_or_default();
-            vm.backtrace.insert(0, entry_point_pc);
+            program.vm.backtrace.insert(0, entry_point_pc);
 
             println!("at:");
-            for (idx, trace_id) in vm.backtrace.iter().enumerate() {
+            for (idx, trace_id) in program.vm.backtrace.iter().enumerate() {
                 let Some(name) = function_table.get(trace_id) else {
                     panic!("Backtrace bug");
                 };

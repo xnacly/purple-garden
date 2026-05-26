@@ -128,11 +128,7 @@ pub fn mmap(
 }
 
 #[inline(always)]
-pub fn mprotect(
-    ptr: std::ptr::NonNull<u8>,
-    length: usize,
-    prot: MmapProt,
-) -> Result<(), String> {
+pub fn mprotect(ptr: std::ptr::NonNull<u8>, length: usize, prot: MmapProt) -> Result<(), String> {
     let ret: isize;
     #[cfg(target_arch = "x86_64")]
     unsafe {

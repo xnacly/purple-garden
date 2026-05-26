@@ -43,6 +43,28 @@ pub struct CallFrame {
     pub spilled_depth: usize,
 }
 
+/// Source-location side table for a compiled program.
+#[derive(Debug, Default)]
+pub struct DebugInfo {
+    /// `pc_to_span[pc]` is the byte offset into the source of the AST
+    /// node that produced the op at `pc`.
+    pc_to_span: Box<[u32]>,
+}
+
+impl DebugInfo {
+    #[must_use]
+    pub fn new(pc_to_span: Box<[u32]>) -> Self {
+        Self { pc_to_span }
+    }
+
+    /// Source byte offset for `pc`, or 0 if `pc` is out of range.
+    #[inline]
+    #[must_use]
+    pub fn span_at(&self, pc: usize) -> u32 {
+        self.pc_to_span.get(pc).copied().unwrap_or(0)
+    }
+}
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct Vm {
@@ -56,12 +78,11 @@ pub struct Vm {
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
     /// `(offset, len)` spans into [`Vm::string_data`]. Indexed by the u64 stored in a [`Value`].
-    /// Compile-time literals are laid out at finalize; runtime strings (e.g. `conv.from_int`)
+    /// Compile-time literals are laid out at compile finalization; runtime strings
     /// are appended via [`Vm::new_string`]. Offsets remain valid across appends because
     /// they are byte indices, not pointers.
     pub strings: Vec<(u32, u32)>,
-    /// Flat backing buffer for all string data — one allocation for all literals,
-    /// avoids per-string heap overhead and keeps frequently accessed strings in the same cache lines.
+    /// Flat backing buffer for all string data.
     pub string_data: String,
 
     /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
@@ -72,9 +93,6 @@ pub struct Vm {
     /// A trap raised by a syscall via [`Vm::trap`]. Checked at each [`Op::Ret`]
     /// so the `Op::Sys` hot path stays branch-free.
     pub pending_trap: Option<Anomaly>,
-
-    // TODO: replace this with an array
-    pub syscalls: Vec<BuiltinFn>,
 
     config: VmConfig,
 }
@@ -102,7 +120,6 @@ impl Vm {
             string_data: String::new(),
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(4096),
-            syscalls: Vec::new(),
             pending_trap: None,
             config,
         }
@@ -117,12 +134,22 @@ impl Vm {
         idx
     }
 
-    pub fn run(&mut self) -> Result<(), Anomaly> {
+    #[must_use]
+    pub fn strings(&self) -> &[(u32, u32)] {
+        &self.strings
+    }
+
+    #[must_use]
+    pub fn string_data(&self) -> &str {
+        &self.string_data
+    }
+
+    pub fn run(&mut self, syscalls: &[BuiltinFn]) -> Result<(), Anomaly> {
         let regs = self.r.as_mut_ptr();
         let instructions = self.bytecode.as_mut_ptr();
         let instructions_len = self.bytecode.len();
         let globals = self.globals.as_mut_ptr();
-        let syscalls = self.syscalls.as_mut_ptr();
+        let syscalls = syscalls.as_ptr();
 
         macro_rules! r {
             ($n:tt) => {
@@ -397,14 +424,14 @@ mod ops {
     fn run(bytecode: Vec<Op>) -> Vm {
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;
-        vm.run().expect("vm run failed");
+        vm.run(&[]).expect("vm run failed");
         vm
     }
 
     fn run_err(bytecode: Vec<Op>) -> Anomaly {
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;
-        vm.run().expect_err("vm run unexpectedly succeeded")
+        vm.run(&[]).expect_err("vm run unexpectedly succeeded")
     }
 
     #[test]
@@ -491,7 +518,7 @@ mod ops {
                 rhs: 1,
             },
         ];
-        let err = vm.run().expect_err("ddiv by zero should trap");
+        let err = vm.run(&[]).expect_err("ddiv by zero should trap");
         assert!(matches!(err, Anomaly::DivisionByZero { .. }));
     }
 
@@ -569,7 +596,7 @@ mod ops {
                 rhs: 0,
             },
         ];
-        vm.run().unwrap();
+        vm.run(&[]).unwrap();
         assert_eq!(vm.r(2).as_f64(), 4.0);
         assert_eq!(vm.r(3).as_f64(), 1.0);
         assert_eq!(vm.r(4).as_f64(), 3.75);
@@ -676,7 +703,7 @@ mod ops {
             Op::LoadI { dst: 5, value: 0 },
             Op::CastToBool { dst: 6, src: 5 },
         ];
-        vm.run().unwrap();
+        vm.run(&[]).unwrap();
         assert_eq!(vm.r(1).as_f64(), 5.0);
         assert_eq!(vm.r(3).as_int(), 3);
         assert!(vm.r(4).as_bool());

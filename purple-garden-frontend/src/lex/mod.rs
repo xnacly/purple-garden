@@ -155,7 +155,9 @@ impl<'l> Lexer<'l> {
                 let body_start = self.pos;
                 let bytes = self.input;
 
-                let end = if let Some(i) = find_byte(b'"', &bytes[body_start..]) { body_start + i } else {
+                let end = if let Some(i) = find_byte(b'"', &bytes[body_start..]) {
+                    body_start + i
+                } else {
                     self.pos = bytes.len();
                     return Err(self.make_err("Unterminated string", start));
                 };
