@@ -3,6 +3,19 @@ use std::fmt;
 use purple_garden_ir::ptype::Type;
 use purple_garden_runtime::BuiltinFn;
 
+macro_rules! builtin {
+    ($(pub fn $name:ident($vm:ident) $body:block)*) => {
+        $(
+            pub unsafe extern "C" fn $name($vm: *mut purple_garden_runtime::Vm) {
+                let $vm = unsafe { &mut *$vm };
+                $body
+            }
+        )*
+    };
+}
+
+pub(crate) use builtin;
+
 mod conv;
 mod io;
 mod strings;

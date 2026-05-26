@@ -22,8 +22,9 @@ use op::Op;
 ///   `r{argcount}+` untouched. A violation silently corrupts live values in release;
 ///   debug builds catch it via the `debug_assert_eq!` in [`Vm::run`]'s `Op::Sys` arm.
 /// - Signal errors via [`Vm::trap`]; traps are checked at the next [`Op::Ret`].
-pub type BuiltinFn = fn(&mut Vm);
-pub fn syscall_unimplemented(vm: &mut Vm) {
+pub type BuiltinFn = unsafe extern "C" fn(*mut Vm);
+pub unsafe extern "C" fn syscall_unimplemented(vm: *mut Vm) {
+    let vm = unsafe { &mut *vm };
     vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
 }
 
@@ -290,7 +291,7 @@ impl Vm {
                     #[cfg(debug_assertions)]
                     let pre_sys: [Value; REGISTER_COUNT] = self.r;
 
-                    (*syscalls.add(idx as usize))(self);
+                    (*syscalls.add(idx as usize))(self as *mut Vm);
 
                     #[cfg(debug_assertions)]
                     for (i, pre) in pre_sys.iter().enumerate().skip(1) {
