@@ -6,9 +6,6 @@ pub mod config;
 pub mod gc;
 pub mod help;
 pub mod input;
-pub mod jit;
-
-pub use purple_garden_shared::mmap;
 
 /// Create the purple garden vm from the given input. Returns the Vm
 /// alongside the compile-time `DebugInfo` needed to render runtime

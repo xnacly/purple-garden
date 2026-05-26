@@ -1,9 +1,13 @@
-use crate::mmap;
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+use purple_garden_shared::mmap;
 use std::fs::File;
 use std::os::fd::AsRawFd;
 
 /// Dealing with different input sources efficiently and in a unified way, by for instance memory
-/// mapping file inputs on x86 linux
+/// mapping file inputs on supported linux targets
 pub enum Input {
     Str(String),
     File(Vec<u8>),
@@ -17,7 +21,10 @@ pub enum Input {
 
 impl Input {
     pub fn from_file(file_name: &str) -> Result<Self, String> {
-        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        #[cfg(all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
         {
             let file = File::open(file_name)
                 .map_err(|e| format!("Failed to open file '{file_name}': {e}"))?;
@@ -42,7 +49,10 @@ impl Input {
             Ok(Self::MmapedFile { file, len, ptr })
         }
 
-        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+        #[cfg(not(all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )))]
         {
             let mut file = File::open(file_name)
                 .map_err(|e| format!("Failed to open file '{file_name}': {e}"))?;
@@ -99,6 +109,10 @@ impl Input {
 
 impl Drop for Input {
     fn drop(&mut self) {
+        #[cfg(all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
         if let Input::MmapedFile { len, ptr, .. } = self {
             let cpy = *ptr;
             mmap::munmap(cpy, *len).expect("Failed to unmap file");

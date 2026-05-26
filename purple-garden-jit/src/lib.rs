@@ -1,4 +1,8 @@
 pub mod asm;
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 pub mod mem;
 
 use purple_garden_ir as ir;
