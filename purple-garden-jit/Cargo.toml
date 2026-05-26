@@ -9,3 +9,6 @@ purple-garden-shared = { path = "../purple-garden-shared" }
 
 [dev-dependencies]
 purple-garden-runtime = { path = "../purple-garden-runtime" }
+
+[features]
+trace = []

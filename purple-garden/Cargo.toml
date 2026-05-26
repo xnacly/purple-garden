@@ -6,7 +6,16 @@ edition = "2024"
 default-run = "purple-garden"
 
 [features]
-trace = []
+trace = [
+    "purple-garden-ir/trace",
+    "purple-garden-frontend/trace",
+    "purple-garden-opt/trace",
+    "purple-garden-bc/trace",
+    "purple-garden-jit/trace",
+    "purple-garden-runtime/trace",
+    "purple-garden-shared/trace",
+    "purple-garden-std/trace",
+]
 
 [dependencies]
 clap = { version = "4.5.54", features = ["derive"] }

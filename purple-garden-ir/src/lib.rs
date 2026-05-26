@@ -365,73 +365,26 @@ impl Func<'_> {
 
         for block in &self.blocks {
             if block.tombstone {
-                crate::trace!(
-                    "[ir::Func::live_set][{}] skip tombstone b{}",
-                    self.name,
-                    block.id.0
-                );
                 continue;
             }
 
-            crate::trace!(
-                "[ir::Func::live_set][{}] b{} entry @{}",
-                self.name,
-                block.id.0,
-                pos
-            );
             for param in self.params(block.params) {
-                crate::trace!(
-                    "[ir::Func::live_set] def %v{} @{} (b{} param)",
-                    param.0,
-                    pos,
-                    block.id.0
-                );
                 define(intervals, *param, pos);
             }
             pos += 2;
 
             for instr in &block.instructions {
-                crate::trace!(
-                    "[ir::Func::live_set][{}] b{} instr @{}: {}",
-                    self.name,
-                    block.id.0,
-                    pos,
-                    instr
-                );
-
                 Self::for_each_use_of_instr(instr, |use_id| {
-                    crate::trace!(
-                        "[ir::Func::live_set] use %v{} @{} (b{} instr {})",
-                        use_id.0,
-                        pos,
-                        block.id.0,
-                        instr
-                    );
                     use_value(intervals, use_id, pos);
                 });
 
                 if let Some(def_id) = Self::def_of(instr) {
-                    crate::trace!(
-                        "[ir::Func::live_set] def %v{} @{} (b{} instr {})",
-                        def_id.0,
-                        pos + 1,
-                        block.id.0,
-                        instr
-                    );
                     define(intervals, def_id, pos + 1);
                 }
                 pos += 2;
             }
 
             if let Some(term) = &block.term {
-                crate::trace!(
-                    "[ir::Func::live_set][{}] b{} term @{}: {}",
-                    self.name,
-                    block.id.0,
-                    pos,
-                    term
-                );
-
                 match term {
                     Terminator::Branch {
                         cond,
@@ -441,49 +394,19 @@ impl Func<'_> {
                     } => {
                         // yes-shuffle runs before JmpT.
                         for &p in self.params(*yes_params) {
-                            crate::trace!(
-                                "[ir::Func::live_set] use %v{} @{} (b{} branch yes src)",
-                                p.0,
-                                pos,
-                                block.id.0
-                            );
                             use_value(intervals, p, pos);
                         }
                         for &p in self.params(self.blocks[yes_id.0 as usize].params) {
-                            crate::trace!(
-                                "[ir::Func::live_set] def %v{} @{} (b{} branch yes shuffle dst)",
-                                p.0,
-                                pos,
-                                block.id.0
-                            );
                             define(intervals, p, pos);
                         }
                         // JmpT reads cond after yes_movs; the phase gap
                         // keeps cond's reg out of yes_dst's reach.
-                        crate::trace!(
-                            "[ir::Func::live_set] use %v{} @{} (b{} branch cond)",
-                            cond.0,
-                            pos + 1,
-                            block.id.0
-                        );
                         use_value(intervals, *cond, pos + 1);
                         // no-shuffle runs after JmpT.
                         for &p in self.params(*no_params) {
-                            crate::trace!(
-                                "[ir::Func::live_set] use %v{} @{} (b{} branch no src)",
-                                p.0,
-                                pos + 1,
-                                block.id.0
-                            );
                             use_value(intervals, p, pos + 1);
                         }
                         for &p in self.params(self.blocks[no_id.0 as usize].params) {
-                            crate::trace!(
-                                "[ir::Func::live_set] def %v{} @{} (b{} branch no shuffle dst)",
-                                p.0,
-                                pos + 1,
-                                block.id.0
-                            );
                             define(intervals, p, pos + 1);
                         }
                     }
@@ -496,40 +419,12 @@ impl Func<'_> {
                     // a known TODO (parallel-move resolver).
                     _ => {
                         self.for_each_use_of_term(term, |use_id| {
-                            crate::trace!(
-                                "[ir::Func::live_set] use %v{} @{} (b{} term {})",
-                                use_id.0,
-                                pos,
-                                block.id.0,
-                                term
-                            );
                             use_value(intervals, use_id, pos);
                         });
                     }
                 }
-            } else {
-                crate::trace!(
-                    "[ir::Func::live_set][{}] b{} has no terminator @{}",
-                    self.name,
-                    block.id.0,
-                    pos
-                );
             }
             pos += 2;
-        }
-
-        #[cfg(feature = "trace")]
-        for (id, &(def, last_use)) in intervals.iter().enumerate() {
-            if def == u32::MAX {
-                continue;
-            }
-            crate::trace!(
-                "[ir::Func::live_set][{}] interval %v{} = ({}..{})",
-                self.name,
-                id,
-                def,
-                last_use
-            );
         }
     }
 

@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 purple-garden-ir = { path = "../purple-garden-ir" }
+
+[features]
+trace = []

@@ -96,6 +96,11 @@ pub struct Cc<'cc> {
     /// allocation; taken out of `self` for the duration of each shuffle
     /// and restored on exit so the capacity survives across calls.
     scratch_pairs: Vec<(u8, u8)>,
+    /// Callee-saved range for the function currently being compiled.
+    /// Set at the top of [`Cc::cc`] and read by [`Cc::emit_arg_shuffle`]
+    /// to find a free scratch register for cycle breaking.
+    cur_lo: u8,
+    cur_max_reg: u8,
 }
 
 /// Emit batched Push ops for `regs` in order, packing into Push3/Push2/Push.
@@ -198,6 +203,8 @@ impl<'cc> Cc<'cc> {
             arg_hints: Vec::new(),
             scratch: Vec::new(),
             scratch_pairs: Vec::new(),
+            cur_lo: 0,
+            cur_max_reg: 0,
         }
     }
 
@@ -275,11 +282,8 @@ impl<'cc> Cc<'cc> {
             .map(|b| fun.params(b.params).len())
             .unwrap_or(0) as u8;
         let lo = nparams.max(1);
-        bc_trace!(
-            "[bc::Cc::cc][{}] regalloc map: {:#?}",
-            fun.name,
-            &self.regalloc.map
-        );
+        self.cur_lo = lo;
+        self.cur_max_reg = max_reg;
         let pc = self.buf.len();
         let f: BcFunc<'cc> = BcFunc { pc, name: fun.name };
 
@@ -382,12 +386,37 @@ impl<'cc> Cc<'cc> {
                 }
             }
 
-            // Remaining moves form one or more cycles; break them via the
-            // spill stack. Push all sources, then pop into dsts in reverse
-            // so the LIFO order lines up.
-            pack_push_pairs(&mut self.buf, &mut self.pc_to_span, self.cur_span, &todo);
-            pack_pop_pairs_rev(&mut self.buf, &mut self.pc_to_span, self.cur_span, &todo);
-            break;
+            // All remaining moves form cycles. Find a callee-saved register
+            // that isn't a src or dst in any pending move and use it to break
+            // one cycle at a time without touching the spill stack.
+            let scratch = (self.cur_lo..=self.cur_max_reg)
+                .find(|&r| !todo.iter().any(|(s, d)| *s == r || *d == r));
+
+            if let Some(scratch) = scratch {
+                // Break the first cycle: save its head into scratch, walk
+                // the chain (find whose dst == the just-freed register),
+                // emit each Mov in turn, then close by writing scratch into
+                // the head's destination.
+                let (start_src, start_dst) = todo.swap_remove(0);
+                self.emit(Op::Mov { dst: scratch, src: start_src });
+                let mut cur_freed = start_src;
+                loop {
+                    if let Some(idx) = todo.iter().position(|(_, d)| *d == cur_freed) {
+                        let (src, dst) = todo.swap_remove(idx);
+                        self.emit(Op::Mov { dst, src });
+                        cur_freed = src;
+                    } else {
+                        break;
+                    }
+                }
+                self.emit(Op::Mov { dst: start_dst, src: scratch });
+                // Loop back to handle any remaining cycles.
+            } else {
+                // No free register available; fall back to spill stack.
+                pack_push_pairs(&mut self.buf, &mut self.pc_to_span, self.cur_span, &todo);
+                pack_pop_pairs_rev(&mut self.buf, &mut self.pc_to_span, self.cur_span, &todo);
+                break;
+            }
         }
 
         self.scratch_pairs = todo;

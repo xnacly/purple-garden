@@ -23,8 +23,8 @@ use op::Op;
 ///   debug builds catch it via the `debug_assert_eq!` in [`Vm::run`]'s `Op::Sys` arm.
 /// - Signal errors via [`Vm::trap`]; traps are checked at the next [`Op::Ret`].
 pub type BuiltinFn = fn(&mut Vm);
-pub fn syscall_unimplemented(vm: &mut Vm) -> Result<Value, Anomaly> {
-    Err(Anomaly::InvalidSyscall { pc: vm.pc })
+pub fn syscall_unimplemented(vm: &mut Vm) {
+    vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -296,7 +296,7 @@ impl Vm {
                     for (i, pre) in pre_sys.iter().enumerate().skip(1) {
                         debug_assert_eq!(
                             pre.0, self.r[i].0,
-                            "syscall idx={idx} wrote r{i} — convention only permits writes to r0"
+                            "syscall idx={idx} wrote r{i}; convention only permits writes to r0"
                         );
                     }
                 },
