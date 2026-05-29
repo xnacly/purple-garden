@@ -15,7 +15,7 @@ pub fn jmp_next(pos: usize, window: &mut [Op]) {
         && *target as usize == pos + 1
     {
         window[0] = Op::Nop;
-        opt_trace!("jmp_next", "removed next instruction jump");
+        purple_garden_shared::trace!("[opt::jmp_next] removed next instruction jump");
     }
 }
 

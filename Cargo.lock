@@ -503,6 +503,7 @@ dependencies = [
  "purple-garden-jit",
  "purple-garden-opt",
  "purple-garden-runtime",
+ "purple-garden-shared",
  "purple-garden-std",
  "rand",
 ]
@@ -512,7 +513,9 @@ name = "purple-garden-bc"
 version = "0.1.0"
 dependencies = [
  "purple-garden-ir",
+ "purple-garden-jit",
  "purple-garden-runtime",
+ "purple-garden-shared",
  "purple-garden-std",
 ]
 
@@ -523,18 +526,24 @@ dependencies = [
  "purple-garden-bc",
  "purple-garden-ir",
  "purple-garden-runtime",
+ "purple-garden-shared",
  "purple-garden-std",
 ]
 
 [[package]]
 name = "purple-garden-ir"
 version = "0.1.0"
+dependencies = [
+ "purple-garden-shared",
+]
 
 [[package]]
 name = "purple-garden-jit"
 version = "0.1.0"
 dependencies = [
  "purple-garden-ir",
+ "purple-garden-runtime",
+ "purple-garden-shared",
 ]
 
 [[package]]
@@ -547,6 +556,7 @@ version = "0.1.0"
 dependencies = [
  "purple-garden-ir",
  "purple-garden-runtime",
+ "purple-garden-shared",
 ]
 
 [[package]]
@@ -554,6 +564,13 @@ name = "purple-garden-runtime"
 version = "0.1.0"
 dependencies = [
  "purple-garden-ir",
+]
+
+[[package]]
+name = "purple-garden-shared"
+version = "0.1.0"
+dependencies = [
+ "clap",
 ]
 
 [[package]]

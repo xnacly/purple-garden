@@ -7,6 +7,24 @@ pub struct Interner<T> {
     next_id: u32,
 }
 
+impl<'a> Interner<&'a str> {
+    /// Builds a flat string arena from the interner. All interned strings are concatenated
+    /// into one `String`; the returned spans vec maps each interned index to its `(offset, len)`
+    /// in that buffer. One allocation instead of N `Box<str>` allocations.
+    pub fn into_arena(&self) -> (String, Vec<(u32, u32)>) {
+        let len = self.next_id as usize;
+        let total: usize = self.map.keys().map(|s| s.len()).sum();
+        let mut data = String::with_capacity(total);
+        let mut spans = vec![(0u32, 0u32); len];
+        for (&s, &i) in &self.map {
+            let off = data.len() as u32;
+            data.push_str(s);
+            spans[i as usize] = (off, s.len() as u32);
+        }
+        (data, spans)
+    }
+}
+
 impl<T: std::hash::Hash + Eq> Interner<T> {
     pub fn new() -> Self {
         Self {
@@ -24,6 +42,19 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
             self.next_id += 1;
             id
         }
+    }
+
+    pub fn to_vec(&self) -> Vec<T>
+    where
+        T: Copy,
+    {
+        let len = self.next_id as usize;
+        let mut vec: Vec<MaybeUninit<T>> = Vec::with_capacity(len);
+        unsafe { vec.set_len(len) };
+        for (&v, &i) in &self.map {
+            vec[i as usize].write(v);
+        }
+        unsafe { std::mem::transmute::<Vec<MaybeUninit<T>>, Vec<T>>(vec) }
     }
 
     pub fn into_vec(self) -> Vec<T> {

@@ -1,9 +1,9 @@
-use crate::mmap;
+use purple_garden_shared::mmap;
 use std::fs::File;
 use std::os::fd::AsRawFd;
 
 /// Dealing with different input sources efficiently and in a unified way, by for instance memory
-/// mapping file inputs on x86 linux
+/// mapping file inputs on supported linux targets
 pub enum Input {
     Str(String),
     File(Vec<u8>),
@@ -17,47 +17,27 @@ pub enum Input {
 
 impl Input {
     pub fn from_file(file_name: &str) -> Result<Self, String> {
-        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-        {
-            let file = File::open(file_name)
-                .map_err(|e| format!("Failed to open file '{file_name}': {e}"))?;
-            let meta = file
-                .metadata()
-                .map_err(|e| format!("Failed to read metadata for '{file_name}': {e}"))?;
-            let len = meta.len() as usize;
-            if len == 0 {
-                return Ok(Input::Str(String::new()));
-            }
-
-            let ptr = mmap::mmap(
-                None,
-                len,
-                mmap::MmapProt::READ,
-                mmap::MmapFlags::PRIVATE,
-                file.as_raw_fd(),
-                0,
-            )
-            .map_err(|e| format!("Failed to memory map '{file_name}': {e}"))?;
-            crate::trace!("[input::Input::from_file] mmaped the file");
-            Ok(Self::MmapedFile { file, len, ptr })
+        let file =
+            File::open(file_name).map_err(|e| format!("Failed to open file '{file_name}': {e}"))?;
+        let meta = file
+            .metadata()
+            .map_err(|e| format!("Failed to read metadata for '{file_name}': {e}"))?;
+        let len = meta.len() as usize;
+        if len == 0 {
+            return Ok(Input::Str(String::new()));
         }
 
-        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-        {
-            let mut file = File::open(file_name)
-                .map_err(|e| format!("Failed to open file '{file_name}': {e}"))?;
-            let meta = file
-                .metadata()
-                .map_err(|e| format!("Failed to read metadata for '{file_name}': {e}"))?;
-            let len = meta.len() as usize;
-            if len == 0 {
-                return Ok(Input::Str(String::new()));
-            }
-            let mut buf = Vec::with_capacity(len);
-            std::io::Read::read_to_end(&mut file, &mut buf)
-                .map_err(|e| format!("Failed to read file '{file_name}': {e}"))?;
-            Ok(Self::File(buf))
-        }
+        let ptr = mmap::mmap(
+            None,
+            len,
+            mmap::MmapProt::READ,
+            mmap::MmapFlags::PRIVATE,
+            file.as_raw_fd(),
+            0,
+        )
+        .map_err(|e| format!("Failed to memory map '{file_name}': {e}"))?;
+        purple_garden_shared::trace!("[input::Input::from_file] mmaped the file");
+        Ok(Self::MmapedFile { file, len, ptr })
     }
 
     #[must_use]

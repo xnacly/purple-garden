@@ -30,10 +30,10 @@ fn fib(n:int) int {
 }
 testing.assert(fib(10) == 55)
 
-# Parallel-move shuffle on Call args: io.println consumes r0 first, so
-# the regalloc places the next call's args in r1, r0 — a swap relative
-# to r0, r1. Sequential `mov` would clobber a still-needed source (and
-# mov_merge would then collapse the swap into nops).
+# Parallel-move shuffle on Call args: io.println consumes r0 first, so the
+# regalloc places the next call's args in r1, r0; a swap relative to r0, r1.
+# Sequential `mov` would clobber a still-needed source (and mov_merge would
+# then collapse the swap into nops).
 fn diff(a:int b:int) int { a - b }
 io.println("ready")
 testing.assert(diff(10 3) == 7)
@@ -76,3 +76,52 @@ testing.assert(double_neg(-5) == 10)
 testing.assert(-1.5 < 0.0)
 testing.assert(+1.5 > 0.0)
 testing.assert(- - 2.5 > 0.0)
+
+# Typechecker scope stack: function params must be visible inside match arm
+# conditions and bodies; let bindings in one arm must not leak into siblings;
+# outer let must be reachable from nested arms; inner let shadows outer binding.
+fn scope_pick(x:int y:int) int {
+    match {
+        x == 0 { y }
+        { x + y }
+    }
+}
+testing.assert(scope_pick(0 42) == 42)
+testing.assert(scope_pick(3 7) == 10)
+
+fn scope_sign(x:int) int {
+    match {
+        x > 0 {
+            let pos = x + x
+            pos
+        }
+        {
+            let neg = 0 - x
+            neg
+        }
+    }
+}
+testing.assert(scope_sign(5) == 10)
+testing.assert(scope_sign(-3) == 3)
+
+fn scope_base(x:int) int {
+    let base = 100
+    match {
+        x == 0 { base }
+        { base + x }
+    }
+}
+testing.assert(scope_base(0) == 100)
+testing.assert(scope_base(5) == 105)
+
+fn scope_shadow(x:int) int {
+    match {
+        x > 0 {
+            let x = 0 - x
+            x
+        }
+        { x }
+    }
+}
+testing.assert(scope_shadow(7) == -7)
+testing.assert(scope_shadow(-4) == -4)

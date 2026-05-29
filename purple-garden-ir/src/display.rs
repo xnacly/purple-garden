@@ -24,7 +24,7 @@ impl Display for Instr<'_> {
                 op, dst, lhs, imm, ..
             } => write!(f, "%v{} = {:?} %v{}, {}", dst, op, lhs.0, imm)?,
             Instr::LoadConst { dst, value, .. } => write!(f, "%v{dst} = {value}")?,
-            Instr::Noop => write!(f, "Nop")?,
+            Instr::Noop => (),
             Instr::Call {
                 dst, func, args, ..
             } => {
@@ -123,7 +123,8 @@ impl Display for Func<'_> {
             f,
             ") -> {} {{",
             self.ret
-                .as_ref().map_or_else(|| "void".to_string(), std::string::ToString::to_string)
+                .as_ref()
+                .map_or_else(|| "void".to_string(), std::string::ToString::to_string)
         )?;
 
         for block in &self.blocks {
@@ -140,6 +141,9 @@ impl Display for Func<'_> {
             }
 
             for ins in &block.instructions {
+                if let Instr::Noop = ins {
+                    continue;
+                };
                 writeln!(f, "\t{ins}")?;
             }
 

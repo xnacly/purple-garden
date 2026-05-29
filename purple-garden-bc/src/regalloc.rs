@@ -1,13 +1,5 @@
+pub use purple_garden_ir::Location;
 use purple_garden_runtime as vm;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Location {
-    /// Slot has no interval (id is unused, e.g., a tombstoned block's
-    /// param). Reading these from `Ralloc::map` is a compiler bug.
-    Unassigned,
-    Reg(u8),
-    Stack,
-}
 
 #[derive(Clone, Debug)]
 struct Interval {
@@ -41,7 +33,7 @@ pub struct Ralloc {
     /// onto the struct so consecutive function compiles reuse the same
     /// allocation.
     ///
-    /// Stores `(end, reg)` only — those are the two fields `retain`
+    /// Stores `(end, reg)` only; those are the two fields `retain`
     /// reads. Cuts per-allocation clones from 24 bytes (full `Interval`)
     /// to 5 bytes and skips the `interval.clone()` previously needed on
     /// every successful allocation.
@@ -50,12 +42,28 @@ pub struct Ralloc {
 
 impl Ralloc {
     /// Refill `intervals`/`map` for a new function and run the linear scan.
-    /// Reuses the existing Vec capacities — no allocation when the new
+    /// Reuses the existing Vec capacities; no allocation when the new
     /// function fits within the previous high-water mark.
     ///
     /// `live_set[id]` is the (`def_pos`, `last_use_pos`) for SSA id; entries
     /// with `def_pos == u32::MAX` are unused. `hints[id]` is the optional
     /// preferred register from [`ir::Func::arg_hints_into`].
+    /// Highest physical register assigned to any SSA value, or 0 if all values
+    /// landed in r0 (or the function has no live values).
+    pub fn max_reg(&self) -> u8 {
+        self.map
+            .iter()
+            .filter_map(|loc| {
+                if let Location::Reg(r) = loc {
+                    Some(*r)
+                } else {
+                    None
+                }
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
     pub fn rebuild(&mut self, live_set: &[(u32, u32)], hints: &[Option<u8>]) {
         self.intervals.clear();
         self.intervals.extend(

@@ -53,10 +53,7 @@ pub fn ret_inline(fun: &mut ir::Func) {
     }
 
     for (i, ret_value, span) in rewrites {
-        opt_trace!(
-            "ir::ret_inline",
-            format!("b{} inlines its jump-to-ret join", i)
-        );
+        purple_garden_shared::trace!("[opt::ir::ret_inline] b{} inlines its jump-to-ret join", i);
         fun.blocks[i].term = Some(ir::Terminator::Return {
             value: Some(ret_value),
             span,
@@ -77,9 +74,8 @@ pub fn ret_inline(fun: &mut ir::Func) {
             }
         });
         if !still_referenced {
-            opt_trace!(
-                "ir::ret_inline",
-                format!("b{target_id} is now a tombstone (no predecessors)")
+            purple_garden_shared::trace!(
+                "[opt::ir::ret_inline] b{target_id} is now a tombstone (no predecessors)"
             );
             fun.blocks[target_id as usize].tombstone = true;
         }

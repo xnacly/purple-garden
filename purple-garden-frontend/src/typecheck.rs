@@ -49,11 +49,10 @@ impl Display for FunctionType {
 
 #[derive(Default, Debug)]
 pub struct Typechecker<'t> {
-    // TODO: HashMap here could be replaced by a faster implementation
     /// Node id -> Type. Indexed by id; Node ids are dense from the parser.
     map: Vec<Option<Type>>,
-    /// assign a variables name in the current scope to its type
-    env: HashMap<&'t str, Type>,
+    /// scope stack; innermost frame last; lookups walk from top to bottom
+    env: Vec<HashMap<&'t str, Type>>,
     /// map a function name to its type(s)
     functions: HashMap<&'t str, FunctionType>,
     /// map a pkg name to a map of its methods and their types
@@ -63,7 +62,17 @@ pub struct Typechecker<'t> {
 impl<'t> Typechecker<'t> {
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        let mut s = Self::default();
+        s.env.push(HashMap::new());
+        s
+    }
+
+    fn env_get(&self, k: &str) -> Option<&Type> {
+        self.env.iter().rev().find_map(|frame| frame.get(k))
+    }
+
+    fn env_insert(&mut self, k: &'t str, v: Type) {
+        self.env.last_mut().unwrap().insert(k, v);
     }
 
     #[must_use]
@@ -179,21 +188,18 @@ impl<'t> Typechecker<'t> {
             (Type::Double | Type::Bool, Type::Int) => Type::Int,
             (Type::Int, Type::Bool) => Type::Bool,
             (_, _) => {
-                return Err(PgError::with_msg(
-                    format!("Can not cast {i} to {o}"),
-                    at,
-                ));
+                return Err(PgError::with_msg(format!("Can not cast {i} to {o}"), at));
             }
         })
     }
 
     fn block_type(&mut self, nodes: &'t [Node]) -> Result<Type, PgError> {
-        let saved_env = self.env.clone();
+        self.env.push(HashMap::new());
         let mut last_type = Type::Void;
         for node in nodes {
             last_type = self.node(node)?;
         }
-        self.env = saved_env;
+        self.env.pop();
         Ok(last_type)
     }
 
@@ -218,8 +224,7 @@ impl<'t> Typechecker<'t> {
                 };
 
                 let t = self
-                    .env
-                    .get(inner_name)
+                    .env_get(inner_name)
                     .ok_or_else(|| {
                         PgError::with_msg(format!("binding `{inner_name}` not found"), name)
                     })?
@@ -265,7 +270,7 @@ impl<'t> Typechecker<'t> {
                     unreachable!()
                 };
 
-                self.env.insert(inner_name, inner.clone());
+                self.env_insert(inner_name, inner.clone());
                 inner
             }
             Node::Fn {
@@ -290,6 +295,7 @@ impl<'t> Typechecker<'t> {
                 }
 
                 let prev_env = std::mem::take(&mut self.env);
+                self.env.push(HashMap::new());
                 let mut typed_arguments = Vec::with_capacity(args.len());
                 for (arg_name, arg_type) in args {
                     let lex::Token {
@@ -301,7 +307,7 @@ impl<'t> Typechecker<'t> {
                     };
 
                     let t = crate::type_from_type_expr(arg_type);
-                    self.env.insert(inner_name, t.clone());
+                    self.env_insert(inner_name, t.clone());
                     typed_arguments.push(t);
                 }
 
@@ -315,15 +321,13 @@ impl<'t> Typechecker<'t> {
                 let computed_ret = self.block_type(body)?;
                 if ret != computed_ret {
                     return Err(PgError::with_msg(
-                        format!(
-                            "`{inner_name}` should return {ret}, but returns {computed_ret}"
-                        ),
+                        format!("`{inner_name}` should return {ret}, but returns {computed_ret}"),
                         return_type,
                     ));
                 }
 
                 self.env = prev_env;
-                crate::frontend_trace!(
+                purple_garden_shared::trace!(
                     "[ir::typecheck::Typechecker::node][{}]: {}",
                     inner_name,
                     f_type
@@ -446,9 +450,7 @@ impl<'t> Typechecker<'t> {
 
                     if condition_type != Type::Bool {
                         return Err(PgError::with_msg(
-                            format!(
-                                "Match conditions must be Bool, got {condition_type} instead"
-                            ),
+                            format!("Match conditions must be Bool, got {condition_type} instead"),
                             condition_token,
                         ));
                     }
@@ -497,14 +499,18 @@ impl<'t> Typechecker<'t> {
                         ));
                     };
 
-                    crate::frontend_trace!("ty: resolved pkg `{}`", pkg.name);
+                    purple_garden_shared::trace!("ty: resolved pkg `{}`", pkg.name);
 
                     self.packages.insert(
                         pkg.name,
                         pkg.fns
                             .iter()
                             .map(|f| {
-                                crate::frontend_trace!("ty: registered `{}.{}`", pkg.name, f.name);
+                                purple_garden_shared::trace!(
+                                    "ty: registered `{}.{}`",
+                                    pkg.name,
+                                    f.name
+                                );
                                 (
                                     f.name,
                                     FunctionType {

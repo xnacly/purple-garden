@@ -1,12 +1,10 @@
 [package]
-name = "purple-garden-macros"
+name = "purple-garden-shared"
 version = "0.1.0"
 edition = "2024"
 
-[lib]
-proc-macro = true
-
 [dependencies]
+clap = { version = "4.5.54", features = ["derive"] }
 
 [features]
 trace = []

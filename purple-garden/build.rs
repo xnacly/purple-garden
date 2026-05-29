@@ -55,11 +55,14 @@ fn main() {
 
 fn generate_example_tests() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let examples_dir = PathBuf::from(&manifest_dir).join("examples");
+    let examples_dir = PathBuf::from(&manifest_dir)
+        .parent()
+        .unwrap()
+        .join("examples");
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let out_path = PathBuf::from(&out_dir).join("example_tests.rs");
 
-    println!("cargo:rerun-if-changed=examples");
+    println!("cargo:rerun-if-changed=../examples");
 
     let mut entries: Vec<_> = std::fs::read_dir(&examples_dir)
         .unwrap_or_else(|e| panic!("read examples/: {e}"))

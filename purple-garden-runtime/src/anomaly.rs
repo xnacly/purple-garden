@@ -1,8 +1,7 @@
 /// Anomaly is a user error bubbling up in the virtual machine.
 ///
 /// Variants carry the trap `pc` only. Source-location resolution
-/// happens at error-rendering time via `bc::DebugInfo::span_at(pc)`,
-/// keeping the runtime hot path free of source-info bookkeeping.
+/// happens at error-rendering time via `Program::debug`.
 #[derive(Debug)]
 pub enum Anomaly {
     DivisionByZero { pc: usize },
@@ -20,7 +19,7 @@ impl Anomaly {
         }
     }
 
-    /// PC at which the trap fired. Pair with `bc::DebugInfo::span_at`
+    /// PC at which the trap fired. Pair with `Program::debug.span_at`
     /// to recover the source byte offset.
     #[must_use]
     pub fn pc(&self) -> usize {

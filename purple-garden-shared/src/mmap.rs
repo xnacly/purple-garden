@@ -1,7 +1,18 @@
 //! copied and applied from <https://github.com/xnacly/stinkarm/blob/master/src/mem/mmap.rs>
 
+#[cfg(target_arch = "x86_64")]
 const MMAP_SYSCALL: i64 = 9;
+#[cfg(target_arch = "x86_64")]
+const MPROTECT_SYSCALL: i64 = 10;
+#[cfg(target_arch = "x86_64")]
 const MUNMAP_SYSCALL: i64 = 11;
+
+#[cfg(target_arch = "aarch64")]
+const MMAP_SYSCALL: i64 = 222;
+#[cfg(target_arch = "aarch64")]
+const MPROTECT_SYSCALL: i64 = 226;
+#[cfg(target_arch = "aarch64")]
+const MUNMAP_SYSCALL: i64 = 215;
 
 // Not an enum, since NONE, READ, WRITE and EXEC arent mutually exclusive
 pub struct MmapProt(i32);
@@ -73,6 +84,7 @@ pub fn mmap(
 ) -> Result<std::ptr::NonNull<u8>, String> {
     let ret: isize;
 
+    #[cfg(target_arch = "x86_64")]
     unsafe {
         core::arch::asm!(
             "syscall",
@@ -85,6 +97,21 @@ pub fn mmap(
             in("r9")  offset,
             lateout("rax") ret,
             clobber_abi("sysv64"),
+            options(nostack)
+        );
+    }
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        let addr = ptr.map_or(0, |ptr| ptr.as_ptr() as usize);
+        core::arch::asm!(
+            "svc #0",
+            in("x8") MMAP_SYSCALL,
+            inlateout("x0") addr => ret,
+            in("x1") length,
+            in("x2") prot.bits(),
+            in("x3") flags.bits(),
+            in("x4") fd as isize,
+            in("x5") offset,
             options(nostack)
         );
     }
@@ -101,8 +128,48 @@ pub fn mmap(
 }
 
 #[inline(always)]
+pub fn mprotect(ptr: std::ptr::NonNull<u8>, length: usize, prot: MmapProt) -> Result<(), String> {
+    let ret: isize;
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        core::arch::asm!(
+            "syscall",
+            in("rax") MPROTECT_SYSCALL,
+            in("rdi") ptr.as_ptr(),
+            in("rsi") length,
+            in("rdx") prot.bits(),
+            lateout("rax") ret,
+            clobber_abi("sysv64"),
+            options(nostack)
+        );
+    }
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        let addr = ptr.as_ptr() as usize;
+        core::arch::asm!(
+            "svc #0",
+            in("x8") MPROTECT_SYSCALL,
+            inlateout("x0") addr => ret,
+            in("x1") length,
+            in("x2") prot.bits(),
+            options(nostack)
+        );
+    }
+    if ret < 0 {
+        let errno = -ret;
+        return Err(format!(
+            "mprotect failed (errno {}): {}",
+            errno,
+            std::io::Error::from_raw_os_error(errno as i32)
+        ));
+    }
+    Ok(())
+}
+
+#[inline(always)]
 pub fn munmap(ptr: std::ptr::NonNull<u8>, size: usize) -> Result<(), String> {
     let ret: isize;
+    #[cfg(target_arch = "x86_64")]
     unsafe {
         core::arch::asm!(
             "syscall",
@@ -111,6 +178,17 @@ pub fn munmap(ptr: std::ptr::NonNull<u8>, size: usize) -> Result<(), String> {
             in("rsi") size,
             lateout("rax") ret,
             clobber_abi("sysv64"),
+            options(nostack)
+        );
+    }
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        let addr = ptr.as_ptr() as usize;
+        core::arch::asm!(
+            "svc #0",
+            in("x8") MUNMAP_SYSCALL,
+            inlateout("x0") addr => ret,
+            in("x1") size,
             options(nostack)
         );
     }

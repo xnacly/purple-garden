@@ -37,7 +37,7 @@ pub fn mov_merge(window: &mut [Op]) {
 
     window[0] = Op::Mov { dst, src };
     window[1] = Op::Nop;
-    opt_trace!("mov_merge", "merged two movs");
+    purple_garden_shared::trace!("[opt::mov_merge] merged two movs");
 }
 
 #[cfg(test)]

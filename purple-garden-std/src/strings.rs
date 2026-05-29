@@ -1,18 +1,20 @@
-use purple_garden_runtime::{Anomaly, Value, Vm};
+use purple_garden_runtime::Value;
 
-pub fn repeat(vm: &mut Vm) -> Result<Value, Anomaly> {
-    let arg0 = vm.r(0).as_str(&vm.strings);
-    let arg1 = vm.r(1).as_int();
-    let repeated = arg0.repeat(arg1 as usize);
-    Ok(Value::from(vm.new_string(repeated)))
-}
+crate::builtin! {
+    pub fn repeat(vm) {
+        let arg0 = vm.r(0).as_str(vm.strings(), vm.string_data());
+        let arg1 = vm.r(1).as_int();
+        let repeated = arg0.repeat(arg1 as usize);
+        *vm.r_mut(0) = Value::from(vm.new_string(repeated));
+    }
 
-pub fn contains(vm: &mut Vm) -> Result<Value, Anomaly> {
-    let arg0 = vm.r(0).as_str(&vm.strings);
-    let arg1 = vm.r(1).as_str(&vm.strings);
-    Ok(Value::from(arg0.contains(arg1)))
-}
+    pub fn contains(vm) {
+        let arg0 = vm.r(0).as_str(vm.strings(), vm.string_data());
+        let arg1 = vm.r(1).as_str(vm.strings(), vm.string_data());
+        *vm.r_mut(0) = Value::from(arg0.contains(arg1));
+    }
 
-pub fn len(vm: &mut Vm) -> Result<Value, Anomaly> {
-    Ok(Value::from(vm.r(0).as_str(&vm.strings).len()))
+    pub fn len(vm) {
+        *vm.r_mut(0) = Value::from(vm.r(0).as_str(vm.strings(), vm.string_data()).len());
+    }
 }

@@ -164,21 +164,20 @@ pub enum Op {
     /// Calling convention (codegen relies on this):
     /// - Args are passed in `r0..r{argcount-1}`, set up by the parallel-move
     ///   resolver in `bc::Cc::emit_arg_shuffle` before the [`Op::Call`] op.
+    /// - `r0` is both the first argument and the return-value slot (ARM-like).
     /// - The result is returned in `r0`; the caller copies it to its real
     ///   destination via a subsequent `Mov`.
-    /// - All registers are caller-save. The callee may freely overwrite
-    ///   any register, so the bc emitter spills every value that's alive
-    ///   across this call (see the `alive_after_call_spill` loop in
-    ///   `bc::Cc::instr`, `Instr::Call`) and restores them after the call
-    ///   via [`Op::Pop`].
+    /// - Callee-saved: the callee's prologue pushes `r1..r{max_reg}` and the
+    ///   epilogue pops them before every [`Op::Ret`] / [`Op::Tail`]. The caller
+    ///   only spills values in `r0..r{argcount-1}` (the arg-shuffle zone).
     /// - The dispatcher pushes a [`CallFrame`] containing the return pc; the
     ///   matching [`Op::Ret`] pops it and resumes.
     Call {
         func: u32,
     },
-    /// Invoke syscall. `idx` (is the index into [`Vm::syscalls`]). See
-    /// [`crate::BuiltinFn`] for the syscall calling convention. It's
-    /// stricter than [`Op::Call`] (only r0 is clobbered by the body itself).
+    /// Invoke syscall. `idx` is the index into [`Vm::syscalls`]. See
+    /// [`crate::BuiltinFn`] for the syscall calling convention. It matches
+    /// [`Op::Call`]: args in `r0..r{argcount-1}`, result written to `r0`.
     Sys {
         idx: u16,
     },

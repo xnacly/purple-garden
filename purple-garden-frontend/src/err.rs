@@ -1,6 +1,5 @@
 use crate::{ast::TypeExpr, lex::Token};
-use purple_garden_bc::DebugInfo;
-use purple_garden_runtime::Anomaly;
+use purple_garden_runtime::{Anomaly, DebugInfo};
 use std::fmt::Write;
 
 #[derive(Debug)]
@@ -55,7 +54,7 @@ impl PgError {
         // below. The scan below is fine for the rare error path but would
         // not scale to LSP-style repeated diagnostics on a large file.
         //
-        // Note: `col` here is a byte column, not a grapheme column — proper
+        // Note: `col` here is a byte column, not a grapheme column; proper
         // unicode-aware column tracking belongs in the same SourceMap.
         let (line_no, col, line_text) = locate(source, self.start);
 

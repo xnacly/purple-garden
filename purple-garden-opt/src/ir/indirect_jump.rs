@@ -58,12 +58,12 @@ pub fn indirect_jump(fun: &mut ir::Func) {
 
         #[cfg(feature = "trace")]
         if yes_edge.is_some() {
-            opt_trace!("ir::indirect_jump", format!("b{yes} is now a tombstone"));
+            purple_garden_shared::trace!("[opt::ir::indirect_jump] b{yes} is now a tombstone");
         }
 
         #[cfg(feature = "trace")]
         if no_edge.is_some() {
-            opt_trace!("ir::indirect_jump", format!("b{no} is now a tombstone"));
+            purple_garden_shared::trace!("[opt::ir::indirect_jump] b{no} is now a tombstone");
         }
 
         fun.blocks[i].term = Some(ir::Terminator::Branch {

@@ -1,13 +1,13 @@
-use purple_garden_runtime::{Anomaly, Value, Vm};
+use purple_garden_runtime::Value;
 
-pub fn from_int(vm: &mut Vm) -> Result<Value, Anomaly> {
-    let arg0 = vm.r(0).as_int();
-    let as_string = arg0.to_string();
-    Ok(Value::from(vm.new_string(as_string)))
-}
+crate::builtin! {
+    pub fn from_int(vm) {
+        let s = vm.r(0).as_int().to_string();
+        *vm.r_mut(0) = Value::from(vm.new_string(s));
+    }
 
-pub fn from_double(vm: &mut Vm) -> Result<Value, Anomaly> {
-    let arg0 = vm.r(0).as_f64();
-    let as_string = arg0.to_string();
-    Ok(Value::from(vm.new_string(as_string)))
+    pub fn from_double(vm) {
+        let s = vm.r(0).as_f64().to_string();
+        *vm.r_mut(0) = Value::from(vm.new_string(s));
+    }
 }

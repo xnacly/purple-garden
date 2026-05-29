@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn skip_non_ascii_bytes_are_class_boundary() {
         let mut input = b"abc".to_vec();
-        // é (0xC3 0xA9) — high-bit bytes must not classify as ident-cont.
+        // é (0xC3 0xA9); high-bit bytes must not classify as ident-cont.
         input.extend_from_slice(&[0xC3, 0xA9]);
         input.extend_from_slice(b"xyz0000000000000");
         assert_eq!(skip_ident_cont(&input), 3);

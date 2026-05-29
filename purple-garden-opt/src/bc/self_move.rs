@@ -12,7 +12,7 @@ pub fn self_move(window: &mut [Op]) {
         && dst == src
     {
         window[0] = Op::Nop;
-        opt_trace!("self_move", "removed self_moving Mov");
+        purple_garden_shared::trace!("[opt::self_move] removed self_moving Mov");
     }
 }
 

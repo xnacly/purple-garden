@@ -45,9 +45,10 @@ pub fn imm_fold<'fold, 's>(fun: &'fold mut ir::Func<'s>, scratch: &'fold mut sup
                 continue;
             };
 
-            opt_trace!(
-                "ir::imm_fold",
-                format!("folded constant {} into immediate {:?}", imm, op)
+            purple_garden_shared::trace!(
+                "[opt::ir::imm_fold] folded constant {} into immediate {:?}",
+                imm,
+                op
             );
 
             fun.blocks[bi].instructions[ii] = Instr::BinImm {

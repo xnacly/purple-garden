@@ -1,7 +1,8 @@
-use purple_garden::{config, help, input::Input, trace};
+use purple_garden::{help, input::Input};
 use purple_garden_bc as bc;
 use purple_garden_frontend::{err::PgError, lex::Lexer, lower::Lower, parser::Parser};
 use purple_garden_runtime::VmConfig;
+use purple_garden_shared::config;
 use purple_garden_std::{self as pstd, Pkg};
 use std::collections::HashMap;
 
@@ -96,7 +97,9 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let (input, input_source) = if let Some(ref i) = conf.run { (Input::Str(i.clone()), "stdio") } else {
+    let (input, input_source) = if let Some(ref i) = conf.run {
+        (Input::Str(i.clone()), "stdio")
+    } else {
         let Some(file_name) = conf.target.as_deref() else {
             return err!("No file or `-r` specified");
         };
@@ -115,7 +118,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    trace!("[main] Tokenisation and Parsing done");
+    purple_garden_shared::trace!("[main] Tokenisation and Parsing done");
 
     if conf.ast {
         print!(
@@ -127,14 +130,14 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let lower = Lower::new();
-    let mut ir = match lower.ir_from(&ast) {
-        Ok(ir) => ir,
+    let (mut ir, pkg_fns) = match lower.ir_from(&ast) {
+        Ok(v) => v,
         Err(e) => {
             return err!(e.render(input_source, input.as_bytes()));
         }
     };
 
-    trace!("[main] Lowered AST to IR");
+    purple_garden_shared::trace!("[main] Lowered AST to IR");
 
     if conf.opt >= 1 {
         purple_garden_opt::ir(&mut ir);
@@ -147,9 +150,9 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut cc = bc::Cc::new();
-    cc.compile(conf.liveness, &ir);
+    let native_pages = cc.compile(&conf, &ir, &pkg_fns)?;
 
-    trace!("[main] Lowered IR to bytecode");
+    purple_garden_shared::trace!("[main] Lowered IR to bytecode");
 
     if conf.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);
@@ -167,22 +170,28 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    let (mut vm, debug) = cc.finalize(VmConfig {
+    let (vm, syscalls, debug) = cc.finalize(VmConfig {
         backtrace: conf.backtrace,
     });
+    let mut program = purple_garden::Program::from_vm(vm, syscalls, debug);
+    if !conf.no_jit {
+        program.jit = native_pages;
+    }
 
     if conf.disassemble {
-        bc::dis::Disassembler::new(&vm.bytecode, ctx.unwrap()).disassemble();
+        bc::dis::Disassembler::new(&program.vm.bytecode, ctx.unwrap())
+            .with_source(input.as_bytes())
+            .disassemble();
     }
 
     if conf.dry {
         return Ok(());
     }
 
-    if let Err(e) = vm.run() {
+    if let Err(e) = program.run() {
         println!(
             "{}",
-            PgError::from_anomaly(e, &debug).render(input_source, input.as_bytes())
+            PgError::from_anomaly(e, &program.debug).render(input_source, input.as_bytes())
         );
 
         if conf.backtrace {
@@ -191,10 +200,10 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                 .find(|(_, name)| name.as_str() == "entry")
                 .map(|(pc, _)| *pc)
                 .unwrap_or_default();
-            vm.backtrace.insert(0, entry_point_pc);
+            program.vm.backtrace.insert(0, entry_point_pc);
 
             println!("at:");
-            for (idx, trace_id) in vm.backtrace.iter().enumerate() {
+            for (idx, trace_id) in program.vm.backtrace.iter().enumerate() {
                 let Some(name) = function_table.get(trace_id) else {
                     panic!("Backtrace bug");
                 };
@@ -205,7 +214,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
-    trace!("[main] Executed bytecode");
+    purple_garden_shared::trace!("[main] Executed bytecode");
     Ok(())
 }
 

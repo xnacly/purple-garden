@@ -13,19 +13,19 @@ use op::Op;
 
 /// Signature for a purple garden syscall
 ///
-/// Calling convention
-/// - Args are passed in `r0..r{argcount-1}`. Read them via `vm.r(i)`.
-/// - The returned [Value] is written to `r0` by the dispatcher; do not
-///   write `r0` yourself.
-/// - Do not modify any register other than (implicitly) r0. The bytecode
-///   emitter only spills caller-save values that land in
-///   `r0..r{argcount-1}`, relying on this convention to leave `r{argcount}+`
-///   untouched. A violation silently corrupts live values in release;
-///   debug builds catch it via the `debug_assert_eq!` in [`Vm::run`]'s
-///   `Op::Sys` arm.
-pub type BuiltinFn = fn(&mut Vm) -> Result<Value, Anomaly>;
-pub fn syscall_unimplemented(vm: &mut Vm) -> Result<Value, Anomaly> {
-    Err(Anomaly::InvalidSyscall { pc: vm.pc })
+/// Calling convention:
+/// - Args are passed in `r0..r{argcount-1}`. Read them via `vm.r(i)` starting at 0.
+/// - `r0` is also the return-value slot. Write the result via `*vm.r_mut(0) = value`.
+///   Void functions leave `r0` untouched.
+/// - Do not modify any register above r{argcount-1}. The bytecode emitter only spills
+///   caller-save values in `r0..r{argcount-1}`, relying on this convention to leave
+///   `r{argcount}+` untouched. A violation silently corrupts live values in release;
+///   debug builds catch it via the `debug_assert_eq!` in [`Vm::run`]'s `Op::Sys` arm.
+/// - Signal errors via [`Vm::trap`]; traps are checked at the next [`Op::Ret`].
+pub type BuiltinFn = unsafe extern "C" fn(*mut Vm);
+pub unsafe extern "C" fn syscall_unimplemented(vm: *mut Vm) {
+    let vm = unsafe { &mut *vm };
+    vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -43,6 +43,28 @@ pub struct CallFrame {
     pub spilled_depth: usize,
 }
 
+/// Source-location side table for a compiled program.
+#[derive(Debug, Default)]
+pub struct DebugInfo {
+    /// `pc_to_span[pc]` is the byte offset into the source of the AST
+    /// node that produced the op at `pc`.
+    pc_to_span: Box<[u32]>,
+}
+
+impl DebugInfo {
+    #[must_use]
+    pub fn new(pc_to_span: Box<[u32]>) -> Self {
+        Self { pc_to_span }
+    }
+
+    /// Source byte offset for `pc`, or 0 if `pc` is out of range.
+    #[inline]
+    #[must_use]
+    pub fn span_at(&self, pc: usize) -> u32 {
+        self.pc_to_span.get(pc).copied().unwrap_or(0)
+    }
+}
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct Vm {
@@ -55,15 +77,22 @@ pub struct Vm {
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
-    pub strings: Vec<Box<str>>,
+    /// `(offset, len)` spans into [`Vm::string_data`]. Indexed by the u64 stored in a [`Value`].
+    /// Compile-time literals are laid out at compile finalization; runtime strings
+    /// are appended via [`Vm::new_string`]. Offsets remain valid across appends because
+    /// they are byte indices, not pointers.
+    pub strings: Vec<(u32, u32)>,
+    /// Flat backing buffer for all string data.
+    pub string_data: String,
 
     /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
     /// function the virtual machine currently executes in, this behaviour only occurs if
     /// --backtrace was passed as an option to the interpreter
     pub backtrace: Vec<usize>,
 
-    // TODO: replace this with an array
-    pub syscalls: Vec<BuiltinFn>,
+    /// A trap raised by a syscall via [`Vm::trap`]. Checked at each [`Op::Ret`]
+    /// so the `Op::Sys` hot path stays branch-free.
+    pub pending_trap: Option<Anomaly>,
 
     config: VmConfig,
 }
@@ -88,27 +117,39 @@ impl Vm {
             bytecode: Vec::new(),
             globals: Vec::new(),
             strings: Vec::new(),
+            string_data: String::new(),
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(4096),
-            syscalls: Vec::new(),
+            pending_trap: None,
             config,
         }
     }
 
-    /// creates a new string in [`vm::heap_strings`], a reference to it into [`vm::strings`] and
-    /// returns the index into the latter
     pub fn new_string(&mut self, s: String) -> usize {
         let idx = self.strings.len();
-        self.strings.push(s.into_boxed_str());
+        let off = self.string_data.len() as u32;
+        let len = s.len() as u32;
+        self.string_data.push_str(&s);
+        self.strings.push((off, len));
         idx
     }
 
-    pub fn run(&mut self) -> Result<(), Anomaly> {
+    #[must_use]
+    pub fn strings(&self) -> &[(u32, u32)] {
+        &self.strings
+    }
+
+    #[must_use]
+    pub fn string_data(&self) -> &str {
+        &self.string_data
+    }
+
+    pub fn run(&mut self, syscalls: &[BuiltinFn]) -> Result<(), Anomaly> {
         let regs = self.r.as_mut_ptr();
         let instructions = self.bytecode.as_mut_ptr();
         let instructions_len = self.bytecode.len();
         let globals = self.globals.as_mut_ptr();
-        let syscalls = self.syscalls.as_mut_ptr();
+        let syscalls = syscalls.as_ptr();
 
         macro_rules! r {
             ($n:tt) => {
@@ -242,7 +283,7 @@ impl Vm {
                     continue;
                 }
                 Op::Tail { func } => {
-                    if self.config.backtrace {
+                    if std::hint::unlikely(self.config.backtrace) {
                         self.backtrace.push(func as usize);
                     }
                     pc = func as usize;
@@ -261,7 +302,7 @@ impl Vm {
                     }
                 },
                 Op::Call { func } => {
-                    if self.config.backtrace {
+                    if std::hint::unlikely(self.config.backtrace) {
                         self.backtrace.push(func as usize);
                     }
 
@@ -274,26 +315,21 @@ impl Vm {
                     continue;
                 }
                 Op::Sys { idx } => unsafe {
-                    // Codegen assumes the syscall calling convention: a
-                    // syscall body reads its args from r0..r{argcount-1} and
-                    // writes only r0 (the result). If a syscall ever touches
-                    // r1+, the bc emitter's caller-save spill (bc::Cc::instr,
-                    // Instr::Sys) will silently corrupt a live value.
                     #[cfg(debug_assertions)]
                     let pre_sys: [Value; REGISTER_COUNT] = self.r;
 
-                    r_mut!(0) = (*syscalls.add(idx as usize))(self)?;
+                    (*syscalls.add(idx as usize))(self as *mut Vm);
 
                     #[cfg(debug_assertions)]
                     for (i, pre) in pre_sys.iter().enumerate().skip(1) {
                         debug_assert_eq!(
                             pre.0, self.r[i].0,
-                            "syscall idx={idx} wrote r{i} — convention only permits writes to r0"
+                            "syscall idx={idx} wrote r{i}; convention only permits writes to r0"
                         );
                     }
                 },
                 Op::Ret => {
-                    if self.config.backtrace {
+                    if std::hint::unlikely(self.config.backtrace) {
                         self.backtrace.pop();
                     }
                     let Some(frame) = self.frames.pop() else {
@@ -312,6 +348,9 @@ impl Vm {
                         frame.spilled_depth,
                         self.spilled.len(),
                     );
+                    if std::hint::unlikely(self.pending_trap.is_some()) {
+                        return Err(self.pending_trap.take().unwrap());
+                    }
                     pc = frame.return_to;
                 }
                 Op::Push { src } => unsafe {
@@ -358,6 +397,12 @@ impl Vm {
         Ok(())
     }
 
+    /// Raise a trap from a syscall body. Checked at the next [`Op::Ret`].
+    #[inline(always)]
+    pub fn trap(&mut self, anomaly: Anomaly) {
+        self.pending_trap = Some(anomaly);
+    }
+
     #[inline(always)]
     /// access register [idx] by indexing [`vm::r`]
     #[must_use]
@@ -379,14 +424,14 @@ mod ops {
     fn run(bytecode: Vec<Op>) -> Vm {
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;
-        vm.run().expect("vm run failed");
+        vm.run(&[]).expect("vm run failed");
         vm
     }
 
     fn run_err(bytecode: Vec<Op>) -> Anomaly {
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;
-        vm.run().expect_err("vm run unexpectedly succeeded")
+        vm.run(&[]).expect_err("vm run unexpectedly succeeded")
     }
 
     #[test]
@@ -473,7 +518,7 @@ mod ops {
                 rhs: 1,
             },
         ];
-        let err = vm.run().expect_err("ddiv by zero should trap");
+        let err = vm.run(&[]).expect_err("ddiv by zero should trap");
         assert!(matches!(err, Anomaly::DivisionByZero { .. }));
     }
 
@@ -551,7 +596,7 @@ mod ops {
                 rhs: 0,
             },
         ];
-        vm.run().unwrap();
+        vm.run(&[]).unwrap();
         assert_eq!(vm.r(2).as_f64(), 4.0);
         assert_eq!(vm.r(3).as_f64(), 1.0);
         assert_eq!(vm.r(4).as_f64(), 3.75);
@@ -658,7 +703,7 @@ mod ops {
             Op::LoadI { dst: 5, value: 0 },
             Op::CastToBool { dst: 6, src: 5 },
         ];
-        vm.run().unwrap();
+        vm.run(&[]).unwrap();
         assert_eq!(vm.r(1).as_f64(), 5.0);
         assert_eq!(vm.r(3).as_int(), 3);
         assert!(vm.r(4).as_bool());

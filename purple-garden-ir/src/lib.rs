@@ -19,12 +19,6 @@
 //! - tail call optimisation
 //! - jump threading
 
-#[macro_export]
-macro_rules! trace {
-    ($fmt:literal, $($value:expr),*) => {};
-    ($fmt:literal) => {};
-}
-
 pub mod constant;
 mod display;
 pub mod ptype;
@@ -34,6 +28,19 @@ use crate::ptype::Type;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Id(pub u32);
+
+/// Where a backend placed an SSA value, indexed by [`Id`]. Produced by the
+/// bytecode backend's register allocator and consumed by every code generator
+/// (bytecode emit, JIT); hence it lives here in the shared IR vocabulary
+/// rather than in any single backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Location {
+    /// Slot has no interval (id is unused, e.g. a tombstoned block's param).
+    /// Reading these from a backend's location map is a compiler bug.
+    Unassigned,
+    Reg(u8),
+    Stack,
+}
 
 /// Index into [`Func::params_pool`]. Stands in wherever a block-param
 /// list used to live by value (`Vec<Id>`): in `Block.params` and in
@@ -57,7 +64,7 @@ pub struct TypeId {
     pub ty: Type,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum BinOp {
     IAdd,
     ISub,
@@ -198,6 +205,7 @@ pub struct Block<'b> {
 pub struct Func<'f> {
     pub name: &'f str,
     pub id: Id,
+    pub span: u32,
     pub params: Vec<Id>,
     pub ret: Option<Type>,
     pub blocks: Vec<Block<'f>>,
@@ -226,18 +234,25 @@ pub struct Func<'f> {
 impl<'f> Func<'f> {
     /// Build a new `Func` with `params_pool[0]` already seeded with the
     /// empty slice (the [`EMPTY_PARAMS`] sentinel). Always go through
-    /// this — a `Func` whose pool is empty would make `EMPTY_PARAMS` an
+    /// this; a `Func` whose pool is empty would make `EMPTY_PARAMS` an
     /// out-of-bounds lookup.
     #[must_use]
     pub fn new(name: &'f str, id: Id, params: Vec<Id>, ret: Option<Type>) -> Self {
         Self {
             name,
             id,
+            span: 0,
             params,
             ret,
             blocks: Vec::new(),
             params_pool: vec![Box::new([]) as Box<[Id]>],
         }
+    }
+
+    #[must_use]
+    pub fn with_span(mut self, span: u32) -> Self {
+        self.span = span;
+        self
     }
 
     pub fn intern_params(&mut self, params: Vec<Id>) -> ParamsId {
@@ -365,73 +380,26 @@ impl Func<'_> {
 
         for block in &self.blocks {
             if block.tombstone {
-                crate::trace!(
-                    "[ir::Func::live_set][{}] skip tombstone b{}",
-                    self.name,
-                    block.id.0
-                );
                 continue;
             }
 
-            crate::trace!(
-                "[ir::Func::live_set][{}] b{} entry @{}",
-                self.name,
-                block.id.0,
-                pos
-            );
             for param in self.params(block.params) {
-                crate::trace!(
-                    "[ir::Func::live_set] def %v{} @{} (b{} param)",
-                    param.0,
-                    pos,
-                    block.id.0
-                );
                 define(intervals, *param, pos);
             }
             pos += 2;
 
             for instr in &block.instructions {
-                crate::trace!(
-                    "[ir::Func::live_set][{}] b{} instr @{}: {}",
-                    self.name,
-                    block.id.0,
-                    pos,
-                    instr
-                );
-
                 Self::for_each_use_of_instr(instr, |use_id| {
-                    crate::trace!(
-                        "[ir::Func::live_set] use %v{} @{} (b{} instr {})",
-                        use_id.0,
-                        pos,
-                        block.id.0,
-                        instr
-                    );
                     use_value(intervals, use_id, pos);
                 });
 
                 if let Some(def_id) = Self::def_of(instr) {
-                    crate::trace!(
-                        "[ir::Func::live_set] def %v{} @{} (b{} instr {})",
-                        def_id.0,
-                        pos + 1,
-                        block.id.0,
-                        instr
-                    );
                     define(intervals, def_id, pos + 1);
                 }
                 pos += 2;
             }
 
             if let Some(term) = &block.term {
-                crate::trace!(
-                    "[ir::Func::live_set][{}] b{} term @{}: {}",
-                    self.name,
-                    block.id.0,
-                    pos,
-                    term
-                );
-
                 match term {
                     Terminator::Branch {
                         cond,
@@ -441,49 +409,19 @@ impl Func<'_> {
                     } => {
                         // yes-shuffle runs before JmpT.
                         for &p in self.params(*yes_params) {
-                            crate::trace!(
-                                "[ir::Func::live_set] use %v{} @{} (b{} branch yes src)",
-                                p.0,
-                                pos,
-                                block.id.0
-                            );
                             use_value(intervals, p, pos);
                         }
                         for &p in self.params(self.blocks[yes_id.0 as usize].params) {
-                            crate::trace!(
-                                "[ir::Func::live_set] def %v{} @{} (b{} branch yes shuffle dst)",
-                                p.0,
-                                pos,
-                                block.id.0
-                            );
                             define(intervals, p, pos);
                         }
                         // JmpT reads cond after yes_movs; the phase gap
                         // keeps cond's reg out of yes_dst's reach.
-                        crate::trace!(
-                            "[ir::Func::live_set] use %v{} @{} (b{} branch cond)",
-                            cond.0,
-                            pos + 1,
-                            block.id.0
-                        );
                         use_value(intervals, *cond, pos + 1);
                         // no-shuffle runs after JmpT.
                         for &p in self.params(*no_params) {
-                            crate::trace!(
-                                "[ir::Func::live_set] use %v{} @{} (b{} branch no src)",
-                                p.0,
-                                pos + 1,
-                                block.id.0
-                            );
                             use_value(intervals, p, pos + 1);
                         }
                         for &p in self.params(self.blocks[no_id.0 as usize].params) {
-                            crate::trace!(
-                                "[ir::Func::live_set] def %v{} @{} (b{} branch no shuffle dst)",
-                                p.0,
-                                pos + 1,
-                                block.id.0
-                            );
                             define(intervals, p, pos + 1);
                         }
                     }
@@ -496,40 +434,12 @@ impl Func<'_> {
                     // a known TODO (parallel-move resolver).
                     _ => {
                         self.for_each_use_of_term(term, |use_id| {
-                            crate::trace!(
-                                "[ir::Func::live_set] use %v{} @{} (b{} term {})",
-                                use_id.0,
-                                pos,
-                                block.id.0,
-                                term
-                            );
                             use_value(intervals, use_id, pos);
                         });
                     }
                 }
-            } else {
-                crate::trace!(
-                    "[ir::Func::live_set][{}] b{} has no terminator @{}",
-                    self.name,
-                    block.id.0,
-                    pos
-                );
             }
             pos += 2;
-        }
-
-        #[cfg(feature = "trace")]
-        for (id, &(def, last_use)) in intervals.iter().enumerate() {
-            if def == u32::MAX {
-                continue;
-            }
-            crate::trace!(
-                "[ir::Func::live_set][{}] interval %v{} = ({}..{})",
-                self.name,
-                id,
-                def,
-                last_use
-            );
         }
     }
 
@@ -570,12 +480,12 @@ impl Func<'_> {
 
         hints.clear();
 
-        // Entry block params arrive in r0..r{N-1} per the calling convention.
-        // Pin them first so they take priority over inner-call hints;
-        // otherwise an inner call that uses the function's first param as
-        // its arg-2 would hint it to r2, the regalloc would place it in
-        // r2, and the caller still writes the arg to r0 → the function
-        // reads garbage.
+        // Entry block params arrive in r0..r{N-1} per the calling convention
+        // (ARM-like: r0 is both the first arg and the return-value slot).
+        // Pin them first so they take priority over inner-call hints; otherwise
+        // an inner call that uses the function's first param as its arg-2 would
+        // hint it to r1, the regalloc would place it in r1, and the caller still
+        // writes the arg to r0 → the function reads garbage.
         if let Some(entry) = self.blocks.first()
             && !entry.tombstone
         {
