@@ -1,7 +1,8 @@
-use purple_garden::{config, help, input::Input, trace};
+use purple_garden::{help, input::Input, trace};
 use purple_garden_bc as bc;
 use purple_garden_frontend::{err::PgError, lex::Lexer, lower::Lower, parser::Parser};
 use purple_garden_runtime::VmConfig;
+use purple_garden_shared::config;
 use purple_garden_std::{self as pstd, Pkg};
 use std::collections::HashMap;
 
@@ -149,7 +150,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut cc = bc::Cc::new();
-    cc.compile(conf.liveness, &ir, &pkg_fns);
+    cc.compile(&conf, &ir, &pkg_fns);
 
     trace!("[main] Lowered IR to bytecode");
 

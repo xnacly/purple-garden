@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 
 use criterion::Criterion;
-use purple_garden::config::Config;
+use purple_garden_shared::config::Config;
 
 mod common;
 

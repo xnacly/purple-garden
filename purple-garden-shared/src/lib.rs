@@ -6,4 +6,5 @@
 )))]
 compile_error!("purple-garden-shared currently supports only Linux on x86_64 or aarch64");
 
+pub mod config;
 pub mod mmap;

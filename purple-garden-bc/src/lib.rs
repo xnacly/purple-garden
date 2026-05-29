@@ -8,6 +8,7 @@ mod regalloc;
 use crate::{intern::Interner, regalloc::Ralloc};
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
 use purple_garden_runtime::{BuiltinFn, DebugInfo, Value, Vm, VmConfig, op::Op};
+use purple_garden_shared::config::Config;
 
 macro_rules! bc_trace {
     ($fmt:literal, $($value:expr),*) => {
@@ -247,12 +248,12 @@ impl<'cc> Cc<'cc> {
     /// Compile a list of ir functions to bytecode instructions
     pub fn compile(
         &mut self,
-        liveness: bool,
+        config: &Config,
         ir: &[Func<'cc>],
         pkg_fns: &HashMap<&str, HashMap<&str, BuiltinFn>>,
     ) {
         for func in ir {
-            if liveness {
+            if config.liveness {
                 let mut intervals = Vec::new();
                 func.live_set_into(&mut intervals);
                 let mut out = String::new();

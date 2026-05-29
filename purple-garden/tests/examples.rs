@@ -1,4 +1,4 @@
-use purple_garden::config::Config;
+use purple_garden_shared::config::Config;
 
 fn run_source(input: &[u8]) {
     let config = Config::default();

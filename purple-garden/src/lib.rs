@@ -7,8 +7,8 @@ compile_error!("purple-garden currently supports only Linux on x86_64 or aarch64
 use purple_garden_bc as bc;
 use purple_garden_frontend::{err::PgError, lex, lower, parser};
 use purple_garden_runtime::{Anomaly, BuiltinFn, DebugInfo, Vm, VmConfig};
+use purple_garden_shared::config;
 
-pub mod config;
 pub mod gc;
 pub mod help;
 pub mod input;
@@ -71,7 +71,7 @@ pub fn new<'e>(config: &'e config::Config, input: &'e [u8]) -> Result<Program, P
     }
 
     let mut cc = bc::Cc::new();
-    cc.compile(config.liveness, &ir, &pkg_fns);
+    cc.compile(config, &ir, &pkg_fns);
     if config.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);
         cc.compact_nops();
