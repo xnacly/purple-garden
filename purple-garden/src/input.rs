@@ -36,7 +36,7 @@ impl Input {
             0,
         )
         .map_err(|e| format!("Failed to memory map '{file_name}': {e}"))?;
-        crate::trace!("[input::Input::from_file] mmaped the file");
+        purple_garden_shared::trace!("[input::Input::from_file] mmaped the file");
         Ok(Self::MmapedFile { file, len, ptr })
     }
 

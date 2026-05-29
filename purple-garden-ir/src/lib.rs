@@ -19,12 +19,6 @@
 //! - tail call optimisation
 //! - jump threading
 
-#[macro_export]
-macro_rules! trace {
-    ($fmt:literal, $($value:expr),*) => {};
-    ($fmt:literal) => {};
-}
-
 pub mod constant;
 mod display;
 pub mod ptype;
@@ -34,6 +28,19 @@ use crate::ptype::Type;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Id(pub u32);
+
+/// Where a backend placed an SSA value, indexed by [`Id`]. Produced by the
+/// bytecode backend's register allocator and consumed by every code generator
+/// (bytecode emit, JIT); hence it lives here in the shared IR vocabulary
+/// rather than in any single backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Location {
+    /// Slot has no interval (id is unused, e.g. a tombstoned block's param).
+    /// Reading these from a backend's location map is a compiler bug.
+    Unassigned,
+    Reg(u8),
+    Stack,
+}
 
 /// Index into [`Func::params_pool`]. Stands in wherever a block-param
 /// list used to live by value (`Vec<Id>`): in `Block.params` and in
@@ -198,6 +205,7 @@ pub struct Block<'b> {
 pub struct Func<'f> {
     pub name: &'f str,
     pub id: Id,
+    pub span: u32,
     pub params: Vec<Id>,
     pub ret: Option<Type>,
     pub blocks: Vec<Block<'f>>,
@@ -226,18 +234,25 @@ pub struct Func<'f> {
 impl<'f> Func<'f> {
     /// Build a new `Func` with `params_pool[0]` already seeded with the
     /// empty slice (the [`EMPTY_PARAMS`] sentinel). Always go through
-    /// this — a `Func` whose pool is empty would make `EMPTY_PARAMS` an
+    /// this; a `Func` whose pool is empty would make `EMPTY_PARAMS` an
     /// out-of-bounds lookup.
     #[must_use]
     pub fn new(name: &'f str, id: Id, params: Vec<Id>, ret: Option<Type>) -> Self {
         Self {
             name,
             id,
+            span: 0,
             params,
             ret,
             blocks: Vec::new(),
             params_pool: vec![Box::new([]) as Box<[Id]>],
         }
+    }
+
+    #[must_use]
+    pub fn with_span(mut self, span: u32) -> Self {
+        self.span = span;
+        self
     }
 
     pub fn intern_params(&mut self, params: Vec<Id>) -> ParamsId {

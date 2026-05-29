@@ -19,10 +19,6 @@ pub struct Config {
     #[arg(short = 'O', default_value_t = 1)]
     pub opt: usize,
 
-    /// Compile the target into native machine code and execute said code
-    #[arg(short = 'N', long)]
-    pub native: bool,
-
     /// Execute the whole pipeline but stop before execution
     #[arg(short = 'd', long)]
     pub dry: bool,
@@ -85,7 +81,6 @@ impl Config {
     pub const fn default() -> Self {
         Config {
             opt: 0,
-            native: false,
             dry: false,
             disassemble: false,
             ast: false,

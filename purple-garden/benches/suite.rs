@@ -1,8 +1,8 @@
 //! End-to-end workload suite.
 //!
 //! Walks `benches/programs/*.garden` and generates four criterion benches
-//! per program — `<name>_compile`, `<name>_compile_opt`, `<name>_run`,
-//! `<name>_run_opt` — so compile cost and run cost are separated cleanly.
+//! per program: `<name>_compile`, `<name>_compile_opt`, `<name>_run`,
+//! `<name>_run_opt`; so compile cost and run cost are separated cleanly.
 //!
 //! Each program self-asserts its result via `testing.assert`. Before the
 //! timed iteration loop we run the VM once and `expect()` success, so a

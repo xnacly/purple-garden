@@ -49,7 +49,6 @@ impl Display for FunctionType {
 
 #[derive(Default, Debug)]
 pub struct Typechecker<'t> {
-    // TODO: HashMap here could be replaced by a faster implementation
     /// Node id -> Type. Indexed by id; Node ids are dense from the parser.
     map: Vec<Option<Type>>,
     /// scope stack; innermost frame last; lookups walk from top to bottom
@@ -328,7 +327,7 @@ impl<'t> Typechecker<'t> {
                 }
 
                 self.env = prev_env;
-                crate::frontend_trace!(
+                purple_garden_shared::trace!(
                     "[ir::typecheck::Typechecker::node][{}]: {}",
                     inner_name,
                     f_type
@@ -500,14 +499,18 @@ impl<'t> Typechecker<'t> {
                         ));
                     };
 
-                    crate::frontend_trace!("ty: resolved pkg `{}`", pkg.name);
+                    purple_garden_shared::trace!("ty: resolved pkg `{}`", pkg.name);
 
                     self.packages.insert(
                         pkg.name,
                         pkg.fns
                             .iter()
                             .map(|f| {
-                                crate::frontend_trace!("ty: registered `{}.{}`", pkg.name, f.name);
+                                purple_garden_shared::trace!(
+                                    "ty: registered `{}.{}`",
+                                    pkg.name,
+                                    f.name
+                                );
                                 (
                                     f.name,
                                     FunctionType {

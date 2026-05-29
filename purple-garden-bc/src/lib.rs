@@ -10,29 +10,27 @@ use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
 use purple_garden_runtime::{BuiltinFn, DebugInfo, Value, Vm, VmConfig, op::Op};
 use purple_garden_shared::config::Config;
 
-macro_rules! bc_trace {
-    ($fmt:literal, $($value:expr),*) => {
-        #[cfg(feature = "trace")]
-        println!($fmt, $($value),*);
-        #[cfg(not(feature = "trace"))]
-        {
-            $(let _ = &$value;)*
-        }
-    };
-    ($fmt:literal) => {
-        #[cfg(feature = "trace")]
-        println!($fmt);
-        #[cfg(not(feature = "trace"))]
-        {
-            let _ = $fmt;
-        }
-    };
+#[derive(Debug, Clone)]
+pub enum CcFunc<'fun> {
+    Bc { name: &'fun str, pc: usize },
+    Native { name: &'fun str, idx: u16 },
 }
 
-#[derive(Debug, Clone)]
-pub struct BcFunc<'fun> {
-    pub name: &'fun str,
-    pub pc: usize,
+impl<'fun> CcFunc<'fun> {
+    #[must_use]
+    pub fn name(&self) -> &'fun str {
+        match self {
+            Self::Bc { name, .. } | Self::Native { name, .. } => name,
+        }
+    }
+
+    #[must_use]
+    pub fn pc(&self) -> Option<usize> {
+        match self {
+            Self::Bc { pc, .. } => Some(*pc),
+            Self::Native { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -41,7 +39,7 @@ pub struct Cc<'cc> {
     pub globals: Interner<Const<'cc>>,
     pub strings: Interner<&'cc str>,
     pub std_fns: Interner<BuiltinFn>,
-    pub functions: HashMap<Id, BcFunc<'cc>>,
+    pub functions: HashMap<Id, CcFunc<'cc>>,
     /// `pc_to_span[pc]` is the byte offset into the source of the AST node
     /// that produced the op at `pc`. Threaded into Vm by `Cc::finalize` so
     /// runtime traps can be rendered with <file:line:col>. Parallel to
@@ -59,7 +57,7 @@ pub struct Cc<'cc> {
     cur_span: u32,
     /// Scratch buffers reused across [`Cc::cc`] invocations. `live_set` and
     /// `arg_hints` are taken out of `self` via [`std::mem::take`] for the
-    /// duration of one compile, then put back with their grown capacity —
+    /// duration of one compile, then put back with their grown capacity;
     /// so after the first few functions warm the buffers, subsequent
     /// `cc()` calls never re-allocate.
     live_set: Vec<(u32, u32)>,
@@ -79,6 +77,9 @@ pub struct Cc<'cc> {
     /// to find a free scratch register for cycle breaking.
     cur_lo: u8,
     cur_max_reg: u8,
+    /// Reusable native-code buffer for the JIT, refilled per function. Empty
+    /// and untouched when `--no-jit` is set.
+    jit: purple_garden_jit::Jit,
 }
 
 /// Emit batched Push ops for `regs` in order, packing into Push3/Push2/Push.
@@ -135,7 +136,7 @@ fn pack_pop(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
     }
 }
 
-/// Like `pack_push` but sources are `pairs[i].0` — avoids collecting srcs into
+/// Like `pack_push` but sources are `pairs[i].0`; avoids collecting srcs into
 /// a separate `Vec<u8>` when the caller already has a `Vec<(u8,u8)>`.
 fn pack_push_pairs(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs: &[(u8, u8)]) {
     let mut i = 0;
@@ -162,7 +163,7 @@ fn pack_push_pairs(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs: &[
     }
 }
 
-/// Like `pack_pop` but dsts are `pairs[n-1-i].1` (reversed) — avoids collecting
+/// Like `pack_pop` but dsts are `pairs[n-1-i].1` (reversed); avoids collecting
 /// into a separate `Vec<u8>`.
 fn pack_pop_pairs_rev(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs: &[(u8, u8)]) {
     let n = pairs.len();
@@ -213,6 +214,7 @@ impl<'cc> Cc<'cc> {
             scratch_pairs: Vec::new(),
             cur_lo: 0,
             cur_max_reg: 0,
+            jit: purple_garden_jit::Jit::new(),
         }
     }
 
@@ -251,7 +253,10 @@ impl<'cc> Cc<'cc> {
         config: &Config,
         ir: &[Func<'cc>],
         pkg_fns: &HashMap<&str, HashMap<&str, BuiltinFn>>,
-    ) {
+    ) -> Result<Vec<purple_garden_jit::JitFn>, String> {
+        let mut native_pages: Option<Vec<purple_garden_jit::JitFn>> =
+            (!config.no_jit).then(Vec::new);
+
         for func in ir {
             if config.liveness {
                 let mut intervals = Vec::new();
@@ -265,23 +270,57 @@ impl<'cc> Cc<'cc> {
                 }
                 println!("{out}");
             }
-            self.cc(func, pkg_fns);
+            self.cc(func, pkg_fns, native_pages.as_mut())?;
         }
+
+        Ok(native_pages.unwrap_or_default())
     }
 
-    fn cc(&mut self, fun: &Func<'cc>, pkg_fns: &HashMap<&str, HashMap<&str, BuiltinFn>>) {
+    fn cc(
+        &mut self,
+        fun: &Func<'cc>,
+        pkg_fns: &HashMap<&str, HashMap<&str, BuiltinFn>>,
+        native: Option<&mut Vec<purple_garden_jit::JitFn>>,
+    ) -> Result<(), String> {
         // Take the reusable scratch buffers out of self so we can hold an
         // immutable borrow of `live_set` across calls to `&mut self`
         // helpers (e.g. `self.instr`) without tripping the borrow checker.
         //
-        // Put them back at the end so the next cc() reuses the same
-        // capacity — after a few warm functions, this path is alloc-free.
+        // Put them back before returning so the next cc() reuses the same
+        // capacity; after a few warm functions, this path is alloc-free.
         let mut live_set = std::mem::take(&mut self.live_set);
         let mut arg_hints = std::mem::take(&mut self.arg_hints);
-
         fun.live_set_into(&mut live_set);
         fun.arg_hints_into(&mut arg_hints);
         self.regalloc.rebuild(&live_set, &arg_hints);
+
+        // The JIT reuses the register assignment computed above instead of
+        // recomputing its own. The entry function stays bytecode-dispatched:
+        // the VM enters it directly, never through a Sys, so it can't go native.
+        let native = match native {
+            Some(_) if fun.id == ir::Id(0) => {
+                purple_garden_shared::trace!(
+                    "[bc::Cc::cc][{}] native skipped: entry must remain bytecode-dispatched",
+                    fun.name
+                );
+                None
+            }
+            other => other,
+        };
+        if let Some(native) = native
+            && self.try_compile_native(fun, native)?
+        {
+            purple_garden_shared::trace!("[bc::Cc::cc][{}] native", fun.name);
+            self.live_set = live_set;
+            self.arg_hints = arg_hints;
+            return Ok(());
+        }
+
+        // binding the id of a function to its context
+        let pc = self.buf.len();
+        self.functions
+            .insert(fun.id, CcFunc::Bc { pc, name: fun.name });
+
         let max_reg = self.regalloc.max_reg();
         // lo = first callee-saved register: skip r0..r{nparams-1} (arg zone) and
         // always skip r0 (return slot). So lo = max(nparams, 1).
@@ -294,11 +333,7 @@ impl<'cc> Cc<'cc> {
         let lo = nparams.max(1);
         self.cur_lo = lo;
         self.cur_max_reg = max_reg;
-        let pc = self.buf.len();
-        let f: BcFunc<'cc> = BcFunc { pc, name: fun.name };
-
-        // binding the id of a function to its context
-        self.functions.insert(fun.id, f);
+        self.cur_span = fun.span;
 
         // block_map is indexed by ir block id, and block ids restart at 0 per function; size it to
         // the current function's block count and fill with the u16::MAX sentinel for
@@ -359,11 +394,40 @@ impl<'cc> Cc<'cc> {
             };
         }
 
-        bc_trace!("[bc::Cc::cc][{}] size={}", fun.name, self.buf.len() - pc);
+        purple_garden_shared::trace!("[bc::Cc::cc][{}] size={}", fun.name, self.buf.len() - pc);
 
         // Hand the scratch buffers back to self with their grown capacity.
         self.live_set = live_set;
         self.arg_hints = arg_hints;
+
+        Ok(())
+    }
+
+    fn try_compile_native(
+        &mut self,
+        fun: &Func<'cc>,
+        pages: &mut Vec<purple_garden_jit::JitFn>,
+    ) -> Result<bool, String> {
+        // The JIT consumes the linear-scan result directly; spilled/unassigned
+        // values carry no register, which makes it bail. (`self.jit` and
+        // `self.regalloc` are disjoint fields, so this borrows both.)
+        let Some(code) = self.jit.compile_func(fun, &self.regalloc.map) else {
+            purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
+            return Ok(false);
+        };
+
+        let jit = purple_garden_jit::JitFn::new(code)
+            .map_err(|e| format!("native code allocation failed: {e}"))?;
+        let idx = self.std_fns.intern(jit.entry()) as u16;
+        self.functions.insert(
+            fun.id,
+            CcFunc::Native {
+                name: fun.name,
+                idx,
+            },
+        );
+        pages.push(jit);
+        Ok(true)
     }
 
     /// Move `args[i]` into the i-th argument register (`r0..r{N-1}`) for a call
@@ -438,9 +502,9 @@ impl<'cc> Cc<'cc> {
         self.scratch_pairs = todo;
     }
 
-    /// Push r{lo}..r{max_reg} onto the spill stack (callee-saved prologue).
-    /// `lo = max(nparams, 1)` — skips the arg zone (r0..r{nparams-1}) and r0
-    /// (the return slot), which are never callee-saved.
+    /// Push r{lo}..r{max_reg} onto the spill stack (callee-saved prologue). `lo = max(nparams, 1)`;
+    /// skips the arg zone (r0..r{nparams-1}) and r0 (the return slot), which are never
+    /// callee-saved.
     fn emit_prologue(&mut self, lo: u8, max_reg: u8) {
         if lo > max_reg {
             return;
@@ -576,14 +640,23 @@ impl<'cc> Cc<'cc> {
                     unreachable!();
                 };
 
-                let pc = func.pc;
+                // Clone to release the `self.functions` borrow before the emit
+                // calls below take `&mut self`.
+                let func = func.clone();
+
                 // Arg shuffle first (reads computed values from callee-saved regs),
                 // then epilogue (restores r{lo}..r{max_reg}, which is above the arg
-                // zone r0..r{nparams-1} — no overlap for ta <= nparams, the common case).
+                // zone r0..r{nparams-1}; no overlap for ta <= nparams, the common case).
                 self.emit_arg_shuffle(args);
                 self.emit_epilogue(lo, max_reg);
 
-                self.emit(Op::Tail { func: pc as u32 });
+                match func {
+                    CcFunc::Bc { pc, .. } => self.emit(Op::Tail { func: pc as u32 }),
+                    CcFunc::Native { idx, .. } => {
+                        self.emit(Op::Sys { idx });
+                        self.emit(Op::Ret)
+                    }
+                };
             }
         }
     }
@@ -638,11 +711,12 @@ impl<'cc> Cc<'cc> {
                 let Some(func) = self.functions.get(func) else {
                     unreachable!();
                 };
-
-                let pc = func.pc;
+                // Clone to release the `self.functions` borrow before the emit
+                // calls below take `&mut self`.
+                let func = func.clone();
 
                 // Callee-saved convention: the callee's prologue preserves r1..r{max_reg_callee}.
-                // The caller only needs to spill live values in r0..r{clobber_end-1} —
+                // The caller only needs to spill live values in r0..r{clobber_end-1},
                 // the arg-shuffle zone. r{clobber_end}+ are untouched from the caller's view.
                 let clobber_end = args.len().max(1) as u8;
                 self.scratch.clear();
@@ -655,7 +729,7 @@ impl<'cc> Cc<'cc> {
                             unreachable!();
                         };
                         if src < clobber_end {
-                            bc_trace!(
+                            purple_garden_shared::trace!(
                                 "[bc] spilled r{} at call_idx={};def={};last_use={}",
                                 src,
                                 pos,
@@ -676,7 +750,10 @@ impl<'cc> Cc<'cc> {
                 self.emit_arg_shuffle(args);
 
                 let dst = self.ensure_register(dst.id);
-                self.emit(Op::Call { func: pc as u32 });
+                match func {
+                    CcFunc::Bc { pc, .. } => self.emit(Op::Call { func: pc as u32 }),
+                    CcFunc::Native { idx, .. } => self.emit(Op::Sys { idx }),
+                };
                 self.emit(Op::Mov { dst, src: 0 });
                 self.scratch.reverse();
                 pack_pop(
@@ -845,7 +922,9 @@ impl<'cc> Cc<'cc> {
         self.pc_to_span.truncate(w);
 
         for f in self.functions.values_mut() {
-            f.pc = old_to_new[f.pc] as usize;
+            if let CcFunc::Bc { pc, .. } = f {
+                *pc = old_to_new[*pc] as usize;
+            }
         }
     }
 
@@ -854,7 +933,7 @@ impl<'cc> Cc<'cc> {
         vm.pc = self
             .functions
             .get(&ir::Id(0))
-            .map(|n| n.pc)
+            .and_then(CcFunc::pc)
             .unwrap_or_default();
 
         let (string_data, strings) = self.strings.into_arena();
@@ -874,7 +953,10 @@ impl<'cc> Cc<'cc> {
     pub fn function_table(&self) -> HashMap<usize, String> {
         self.functions
             .values()
-            .map(|f| (f.pc, f.name.to_string()))
+            .filter_map(|f| {
+                let pc = f.pc()?;
+                Some((pc, f.name().to_string()))
+            })
             .collect()
     }
 }

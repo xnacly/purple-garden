@@ -272,7 +272,7 @@ impl<'lower> Lower<'lower> {
                         id
                     })
                     .collect();
-                let func = Func::new(ident_name, id, func_params, ret);
+                let func = Func::new(ident_name, id, func_params, ret).with_span(name.start as u32);
 
                 // TODO:deal with b0
 
@@ -555,10 +555,11 @@ impl<'lower> Lower<'lower> {
         for node in ast {
             let _t = typechecker.node(node)?;
         }
-        crate::frontend_trace!("[ir::lower::Lower::ir_from] Finished type checking");
+        purple_garden_shared::trace!("[ir::lower::Lower::ir_from] Finished type checking");
         self.types = typechecker.finalise();
 
-        self.ctx.func = Func::new("entry", Id(0), Vec::new(), None);
+        self.ctx.func =
+            Func::new("entry", Id(0), Vec::new(), None).with_span(entry_span(ast).unwrap_or(0));
         let entry = self.new_block();
         self.switch_to_block(entry);
 
@@ -582,4 +583,28 @@ impl<'lower> Lower<'lower> {
             .collect();
         Ok((self.functions, pkg_fns))
     }
+}
+
+fn entry_span(ast: &[Node<'_>]) -> Option<u32> {
+    ast.iter()
+        .find(|node| !matches!(node, Node::Fn { .. } | Node::Import { .. }))
+        .and_then(node_start)
+}
+
+fn node_start(node: &Node<'_>) -> Option<u32> {
+    Some(match node {
+        Node::Atom { raw, .. } | Node::Ident { name: raw, .. } => raw.start,
+        Node::Bin { lhs, op, .. } => node_start(lhs).unwrap_or(op.start as u32) as usize,
+        Node::Unary { op, .. } => op.start,
+        Node::Array { members, .. } => members.first().and_then(node_start)? as usize,
+        Node::Object { pairs, .. } => pairs.first().and_then(|(key, _)| node_start(key))? as usize,
+        Node::Let { name, .. } => name.start,
+        Node::Fn { name, .. } => name.start,
+        Node::Match { cases, default, .. } => cases
+            .first()
+            .map(|((token, _), _)| token.start)
+            .unwrap_or(default.0.start),
+        Node::Call { target, .. } | Node::Field { target, .. } => node_start(target)? as usize,
+        Node::Cast { src, .. } | Node::Import { src, .. } => src.start,
+    } as u32)
 }

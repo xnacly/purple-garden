@@ -71,7 +71,11 @@ pub fn new<'e>(config: &'e config::Config, input: &'e [u8]) -> Result<Program, P
     }
 
     let mut cc = bc::Cc::new();
-    cc.compile(config, &ir, &pkg_fns);
+    let native_pages = cc.compile(config, &ir, &pkg_fns).map_err(|msg| PgError {
+        msg,
+        start: 0,
+        len: 0,
+    })?;
     if config.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);
         cc.compact_nops();
@@ -80,50 +84,9 @@ pub fn new<'e>(config: &'e config::Config, input: &'e [u8]) -> Result<Program, P
     let (vm, syscalls, debug) = cc.finalize(VmConfig {
         backtrace: config.backtrace,
     });
-    Ok(Program::from_vm(vm, syscalls, debug))
-}
-
-#[cfg(feature = "trace")]
-pub mod trace {
-    use std::sync::Once;
-    use std::time::Instant;
-
-    static START_ONCE: Once = Once::new();
-    static mut START: Option<Instant> = None;
-
-    pub fn start() -> Instant {
-        unsafe {
-            START_ONCE.call_once(|| {
-                START = Some(Instant::now());
-            });
-            START.unwrap()
-        }
+    let mut program = Program::from_vm(vm, syscalls, debug);
+    if !config.no_jit {
+        program.jit = native_pages;
     }
-
-    #[macro_export]
-    macro_rules! trace {
-        // With values
-        ($fmt:literal, $($value:expr),*) => {
-            {
-                let elapsed = $crate::trace::start().elapsed();
-                println!("[{:?}] {}", elapsed, format_args!($fmt, $($value),*));
-            }
-        };
-        // Without values
-        ($fmt:literal) => {
-            {
-                let elapsed = $crate::trace::start().elapsed();
-                println!("[{:?}] {}", elapsed, $fmt);
-            }
-        };
-    }
-}
-
-#[cfg(not(feature = "trace"))]
-pub mod trace {
-    #[macro_export]
-    macro_rules! trace {
-        ($fmt:literal, $($value:expr),*) => {};
-        ($fmt:literal) => {};
-    }
+    Ok(program)
 }

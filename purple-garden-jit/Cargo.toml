@@ -9,4 +9,4 @@ purple-garden-runtime = { path = "../purple-garden-runtime" }
 purple-garden-shared = { path = "../purple-garden-shared" }
 
 [features]
-trace = []
+trace = ["purple-garden-shared/trace"]

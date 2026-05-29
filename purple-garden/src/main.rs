@@ -1,4 +1,4 @@
-use purple_garden::{help, input::Input, trace};
+use purple_garden::{help, input::Input};
 use purple_garden_bc as bc;
 use purple_garden_frontend::{err::PgError, lex::Lexer, lower::Lower, parser::Parser};
 use purple_garden_runtime::VmConfig;
@@ -118,7 +118,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    trace!("[main] Tokenisation and Parsing done");
+    purple_garden_shared::trace!("[main] Tokenisation and Parsing done");
 
     if conf.ast {
         print!(
@@ -137,7 +137,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    trace!("[main] Lowered AST to IR");
+    purple_garden_shared::trace!("[main] Lowered AST to IR");
 
     if conf.opt >= 1 {
         purple_garden_opt::ir(&mut ir);
@@ -150,9 +150,9 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut cc = bc::Cc::new();
-    cc.compile(&conf, &ir, &pkg_fns);
+    let native_pages = cc.compile(&conf, &ir, &pkg_fns)?;
 
-    trace!("[main] Lowered IR to bytecode");
+    purple_garden_shared::trace!("[main] Lowered IR to bytecode");
 
     if conf.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);
@@ -174,9 +174,14 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         backtrace: conf.backtrace,
     });
     let mut program = purple_garden::Program::from_vm(vm, syscalls, debug);
+    if !conf.no_jit {
+        program.jit = native_pages;
+    }
 
     if conf.disassemble {
-        bc::dis::Disassembler::new(&program.vm.bytecode, ctx.unwrap()).disassemble();
+        bc::dis::Disassembler::new(&program.vm.bytecode, ctx.unwrap())
+            .with_source(input.as_bytes())
+            .disassemble();
     }
 
     if conf.dry {
@@ -209,7 +214,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
-    trace!("[main] Executed bytecode");
+    purple_garden_shared::trace!("[main] Executed bytecode");
     Ok(())
 }
 

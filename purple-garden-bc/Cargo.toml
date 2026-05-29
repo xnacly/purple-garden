@@ -4,10 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-trace = []
+trace = ["purple-garden-shared/trace"]
 
 [dependencies]
 purple-garden-ir = { path = "../purple-garden-ir" }
+purple-garden-jit = { path = "../purple-garden-jit" }
 purple-garden-runtime = { path = "../purple-garden-runtime" }
 purple-garden-shared = { path = "../purple-garden-shared" }
 purple-garden-std = { path = "../purple-garden-std" }

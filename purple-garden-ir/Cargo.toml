@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-trace = []
+trace = ["purple-garden-shared/trace"]
 
 [dependencies]
+purple-garden-shared = { path = "../purple-garden-shared" }

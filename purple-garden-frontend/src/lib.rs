@@ -10,26 +10,6 @@ pub mod typecheck;
 use ast::TypeExpr;
 use purple_garden_ir::ptype;
 
-#[macro_export]
-macro_rules! frontend_trace {
-    ($fmt:literal, $($value:expr),*) => {
-        #[cfg(feature = "trace")]
-        println!($fmt, $($value),*);
-        #[cfg(not(feature = "trace"))]
-        {
-            $(let _ = &$value;)*
-        }
-    };
-    ($fmt:literal) => {
-        #[cfg(feature = "trace")]
-        println!($fmt);
-        #[cfg(not(feature = "trace"))]
-        {
-            let _ = $fmt;
-        }
-    };
-}
-
 #[must_use]
 pub fn type_from_atom_token_type(t: &lex::Type<'_>) -> ptype::Type {
     match t {

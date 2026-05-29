@@ -95,10 +95,7 @@ pub fn tailcall(fun: &mut ir::Func) {
 
         let block = &mut fun.blocks[i];
 
-        opt_trace!(
-            "ir::tailcall",
-            format!("tailcalled b{}s last instruction", i)
-        );
+        purple_garden_shared::trace!("[opt::ir::tailcall] tailcalled b{}s last instruction", i);
 
         block.instructions.pop();
         block.term = Some(ir::Terminator::Tail { func, args, span });

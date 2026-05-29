@@ -184,7 +184,10 @@ impl<'dis> Disassembler<'dis> {
             .cc
             .functions
             .values()
-            .filter_map(|f| Some((f.native_idx()?, format!("jit_{}", f.name()))))
+            .filter_map(|f| match f {
+                crate::CcFunc::Native { idx, name } => Some((*idx, format!("jit_{name}"))),
+                crate::CcFunc::Bc { .. } => None,
+            })
             .collect();
 
         let globals = self.cc.globals.to_vec();

@@ -1,19 +1,5 @@
 use purple_garden_runtime::op::Op;
 
-macro_rules! opt_trace {
-    ($optimisation:literal, $text:expr) => {
-        #[cfg(feature = "trace")]
-        {
-            println!("[opt::{}] {}", $optimisation, $text);
-        }
-        #[cfg(not(feature = "trace"))]
-        {
-            let _ = $optimisation;
-            let _ = &$text;
-        }
-    };
-}
-
 /// ir based optimisations
 mod ir;
 

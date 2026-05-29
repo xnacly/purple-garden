@@ -513,6 +513,7 @@ name = "purple-garden-bc"
 version = "0.1.0"
 dependencies = [
  "purple-garden-ir",
+ "purple-garden-jit",
  "purple-garden-runtime",
  "purple-garden-shared",
  "purple-garden-std",
@@ -525,12 +526,16 @@ dependencies = [
  "purple-garden-bc",
  "purple-garden-ir",
  "purple-garden-runtime",
+ "purple-garden-shared",
  "purple-garden-std",
 ]
 
 [[package]]
 name = "purple-garden-ir"
 version = "0.1.0"
+dependencies = [
+ "purple-garden-shared",
+]
 
 [[package]]
 name = "purple-garden-jit"
@@ -551,6 +556,7 @@ version = "0.1.0"
 dependencies = [
  "purple-garden-ir",
  "purple-garden-runtime",
+ "purple-garden-shared",
 ]
 
 [[package]]
