@@ -26,9 +26,11 @@ pub mod trace {
 #[macro_export]
 macro_rules! trace {
     ($($arg:tt)*) => {
+        let elapsed = $crate::trace::elapsed();
         eprintln!(
-            "[{:?}] {}",
-            $crate::trace::elapsed(),
+            "[{:>12}.{:03}us] {}",
+            elapsed.as_micros(),
+            elapsed.subsec_nanos() % 1_000,
             format_args!($($arg)*)
         );
     };
