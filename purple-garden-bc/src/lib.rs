@@ -337,7 +337,12 @@ impl<'cc> Cc<'cc> {
             .find(|b| !b.tombstone)
             .map(|b| fun.params(b.params).len())
             .unwrap_or(0) as u8;
-        let lo = nparams.max(1);
+        let is_root = fun.id == ir::Id(0);
+        let lo = if is_root {
+            max_reg.saturating_add(1)
+        } else {
+            nparams.max(1)
+        };
         self.cur_lo = lo;
         self.cur_max_reg = max_reg;
         self.cur_span = fun.span;
