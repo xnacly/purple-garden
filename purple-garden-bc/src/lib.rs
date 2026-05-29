@@ -13,7 +13,14 @@ use purple_garden_shared::config::Config;
 #[derive(Debug, Clone)]
 pub enum CcFunc<'fun> {
     Bc { name: &'fun str, pc: usize },
-    Native { name: &'fun str, idx: u16 },
+    /// `idx` is the syscall slot the JIT page was injected at; `insns` is the
+    /// emitted native instruction list, owned here and kept for `-D` (the
+    /// executable bytes live only in the page).
+    Native {
+        name: &'fun str,
+        idx: u16,
+        insns: Vec<purple_garden_jit::Insn>,
+    },
 }
 
 impl<'fun> CcFunc<'fun> {
@@ -408,15 +415,14 @@ impl<'cc> Cc<'cc> {
         fun: &Func<'cc>,
         pages: &mut Vec<purple_garden_jit::JitFn>,
     ) -> Result<bool, String> {
-        // The JIT consumes the linear-scan result directly; spilled/unassigned
-        // values carry no register, which makes it bail. (`self.jit` and
-        // `self.regalloc` are disjoint fields, so this borrows both.)
-        let Some(code) = self.jit.compile_func(fun, &self.regalloc.map) else {
+        let Some(insns) = self.jit.compile_func(fun) else {
             purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
             return Ok(false);
         };
 
-        let jit = purple_garden_jit::JitFn::new(code)
+        // The page copies the bytes; we move the instruction list onto the
+        // CcFunc (single owner, no duplicate byte blob) for `-D`.
+        let jit = purple_garden_jit::JitFn::new(self.jit.code())
             .map_err(|e| format!("native code allocation failed: {e}"))?;
         let idx = self.std_fns.intern(jit.entry()) as u16;
         self.functions.insert(
@@ -424,6 +430,7 @@ impl<'cc> Cc<'cc> {
             CcFunc::Native {
                 name: fun.name,
                 idx,
+                insns,
             },
         );
         pages.push(jit);

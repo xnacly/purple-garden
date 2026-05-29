@@ -185,7 +185,7 @@ impl<'dis> Disassembler<'dis> {
             .functions
             .values()
             .filter_map(|f| match f {
-                crate::CcFunc::Native { idx, name } => Some((*idx, format!("jit_{name}"))),
+                crate::CcFunc::Native { idx, name, .. } => Some((*idx, format!("jit_{name}"))),
                 crate::CcFunc::Bc { .. } => None,
             })
             .collect();
@@ -216,7 +216,11 @@ impl<'dis> Disassembler<'dis> {
         if !globals.is_empty() {
             println!("{}", paint(color, SECTION, "globals:"));
             for (i, g) in globals.iter().enumerate() {
-                println!("  {}:    {}", paint(color, ADDR, &format!("{i:04}")), paint(color, IMM, &g.to_string()));
+                println!(
+                    "  {}:    {}",
+                    paint(color, ADDR, &format!("{i:04}")),
+                    paint(color, IMM, &g.to_string())
+                );
             }
         }
 
@@ -353,6 +357,35 @@ impl<'dis> Disassembler<'dis> {
                 last_source_line = Some((line_no, line));
             } else {
                 println!("  {addr}    {body}");
+            }
+        }
+
+        // JIT-compiled functions have no bytecode; dump their native
+        // instructions with the bytes each encodes to (objdump-style). One
+        // reporting path: the call sites above already show `sys N <jit_name>`.
+        let mut native: Vec<(&str, &[purple_garden_jit::Insn])> = self
+            .cc
+            .functions
+            .values()
+            .filter_map(|f| match f {
+                crate::CcFunc::Native { name, insns, .. } => Some((*name, &insns[..])),
+                crate::CcFunc::Bc { .. } => None,
+            })
+            .collect();
+        native.sort_by_key(|(name, _)| *name);
+        let mut bytes = Vec::new();
+        for (name, insns) in native {
+            println!("\n{}:", paint(color, FUNC, &format!("<jit_{name}>")));
+            let mut off = 0usize;
+            for insn in insns {
+                bytes.clear();
+                insn.encode(&mut bytes);
+                let addr = paint(color, ADDR, &format!("{off:04x}:"));
+                let hex: String = bytes.iter().map(|b| format!("{b:02x} ")).collect();
+                let hex = paint(color, COMMENT, &format!("{hex:<23}"));
+                let instr = paint(color, COMMENT, &format!("; {insn}"));
+                println!("  {addr}    {hex} {instr}");
+                off += bytes.len();
             }
         }
     }

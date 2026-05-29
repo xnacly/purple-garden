@@ -21,13 +21,14 @@ mod arch;
 #[path = "aarch64/mod.rs"]
 mod arch;
 pub mod mem;
+mod regalloc;
 
+pub use arch::Insn;
 pub use mem::JitFn;
 use purple_garden_ir as ir;
 
-/// Holds the native-code buffer reused across functions. Each `compile_func`
-/// refills it; [`JitFn::new`] copies the bytes into the executable page, so the
-/// buffer can be overwritten on the next call.
+/// Holds the machine-code buffer reused across functions; [`JitFn::new`] copies
+/// it into the executable page, so it can be overwritten on the next call.
 #[derive(Debug, Default, Clone)]
 pub struct Jit {
     code: Vec<u8>,
@@ -39,13 +40,24 @@ impl Jit {
         Self::default()
     }
 
-    /// Lower `func` (with the backend's register assignment `regs`) into the
-    /// reusable buffer, returning the bytes, or `None` if unsupported. The
-    /// slice is valid until the next call.
-    pub fn compile_func(&mut self, func: &ir::Func<'_>, regs: &[ir::Location]) -> Option<&[u8]> {
+    /// Lower `func` to its instruction list (the caller owns it; `None` if
+    /// unsupported) and encode it into the reusable byte buffer, readable via
+    /// [`Jit::code`] until the next call. Keeping the `Insn`s lets callers both
+    /// run the bytes and disassemble them, with no duplicate byte storage.
+    pub fn compile_func(&mut self, func: &ir::Func<'_>) -> Option<Vec<Insn>> {
+        let mut insns = Vec::new();
+        arch::compile_func(func, &mut insns)?;
         self.code.clear();
-        arch::compile_func(func, regs, &mut self.code)?;
-        Some(&self.code)
+        for insn in &insns {
+            insn.encode(&mut self.code);
+        }
+        Some(insns)
+    }
+
+    /// The machine code for the most recent [`Jit::compile_func`].
+    #[must_use]
+    pub fn code(&self) -> &[u8] {
+        &self.code
     }
 }
 
@@ -54,7 +66,7 @@ mod tests_x86 {
     use super::Jit;
     use super::mem::ExecPage;
     use purple_garden_ir::{
-        Block, Const, EMPTY_PARAMS, Func, Id, Instr, Location, Terminator, TypeId, ptype::Type,
+        Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype::Type,
     };
 
     /// Run native code that takes `*mut u64` (the VM register file) and return
@@ -66,9 +78,9 @@ mod tests_x86 {
         regs
     }
 
-    /// `fn identity(a) int { a }`: value already in r0, so just `ret`.
+    /// `fn identity(a) int { a }`: load the arg, store it back as the result.
     #[test]
-    fn identity_is_bare_ret() {
+    fn identity_returns_arg() {
         let mut func = Func::new("identity", Id(0), vec![Id(0)], Some(Type::Int));
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
@@ -82,17 +94,14 @@ mod tests_x86 {
             }),
         });
 
-        let code = Jit::new()
-            .compile_func(&func, &[Location::Reg(0)])
-            .expect("jit function")
-            .to_vec();
-        assert_eq!(code, &[0xc3]);
-        assert_eq!(run(&code, [42, 0xdead, 0xaffe]), [42, 0xdead, 0xaffe]);
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(run(jit.code(), [42, 0xdead, 0xaffe]), [42, 0xdead, 0xaffe]);
     }
 
-    /// `fn second(a b) int { b }`: return value lives in r1, must move to r0.
+    /// `fn second(a b) int { b }`: the result is the second arg (vm.r[1]).
     #[test]
-    fn returns_non_r0_param_via_move() {
+    fn returns_second_arg() {
         let mut func = Func::new("second", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
         let params = func.intern_params(vec![Id(0), Id(1)]);
         func.blocks.push(Block {
@@ -106,11 +115,9 @@ mod tests_x86 {
             }),
         });
 
-        let code = Jit::new()
-            .compile_func(&func, &[Location::Reg(0), Location::Reg(1)])
-            .expect("jit function")
-            .to_vec();
-        assert_eq!(run(&code, [10, 20, 0]), [20, 20, 0]);
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(run(jit.code(), [10, 20, 0])[0], 20);
     }
 
     #[test]
@@ -134,7 +141,7 @@ mod tests_x86 {
             }),
         });
 
-        assert!(Jit::new().compile_func(&func, &[]).is_none());
+        assert!(Jit::new().compile_func(&func).is_none());
     }
 
     #[test]
@@ -158,7 +165,7 @@ mod tests_x86 {
             }),
         });
 
-        assert!(Jit::new().compile_func(&func, &[]).is_none());
+        assert!(Jit::new().compile_func(&func).is_none());
     }
 
     /// Full dispatch path: JIT page injected into syscalls, Call replaced by
