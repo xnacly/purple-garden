@@ -9,10 +9,10 @@
 //! values stay in `Vm::r`.
 
 #[cfg(not(all(
-    target_os = "linux",
+    any(target_os = "linux", target_os = "macos"),
     any(target_arch = "x86_64", target_arch = "aarch64")
 )))]
-compile_error!("purple-garden-jit currently supports only Linux on x86_64 or aarch64");
+compile_error!("purple-garden-jit currently supports only Linux or macOS on x86_64 or aarch64");
 
 #[cfg(target_arch = "x86_64")]
 #[path = "x86/mod.rs"]
@@ -21,6 +21,7 @@ mod arch;
 #[path = "aarch64/mod.rs"]
 mod arch;
 pub mod mem;
+#[cfg(any(test, target_arch = "x86_64"))]
 mod regalloc;
 
 pub use arch::Insn;
@@ -61,7 +62,11 @@ impl Jit {
     }
 }
 
-#[cfg(all(test, target_arch = "x86_64", target_os = "linux"))]
+#[cfg(all(
+    test,
+    target_arch = "x86_64",
+    any(target_os = "linux", target_os = "macos")
+))]
 mod tests_x86 {
     use super::Jit;
     use super::mem::ExecPage;
@@ -186,5 +191,35 @@ mod tests_x86 {
         vm.bytecode = vec![Op::LoadI { dst: 0, value: 187 }, Op::Sys { idx: 0 }];
         vm.run(&syscalls).expect("vm run");
         assert_eq!(vm.r(0).as_int(), 187);
+    }
+}
+
+#[cfg(all(
+    test,
+    target_arch = "aarch64",
+    any(target_os = "linux", target_os = "macos")
+))]
+mod tests_aarch64 {
+    use super::Jit;
+    use purple_garden_ir::{Block, Func, Id, Terminator, ptype::Type};
+
+    #[test]
+    fn scaffold_falls_back_to_bytecode() {
+        let mut func = Func::new("identity", Id(0), vec![Id(0)], Some(Type::Int));
+        let params = func.intern_params(vec![Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            instructions: vec![],
+            params,
+            term: Some(Terminator::Return {
+                value: Some(Id(0)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        assert!(jit.compile_func(&func).is_none());
+        assert!(jit.code().is_empty());
     }
 }
