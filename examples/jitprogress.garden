@@ -1,0 +1,8 @@
+fn arithmetics(a:int b:int c:int d:int) int {
+    let x1 = a + b * c - d
+    let x2 = x1 + c * d - b
+    let x3 = x2 + x1 * a - c
+    let x4 = x3 + x2 * b - d
+    x4
+}
+arithmetics(2 3 4 5)

@@ -1,8 +1,9 @@
 //! End-to-end workload suite.
 //!
-//! Walks `benches/programs/*.garden` and generates four criterion benches
-//! per program: `<name>_compile`, `<name>_compile_opt`, `<name>_run`,
-//! `<name>_run_opt`; so compile cost and run cost are separated cleanly.
+//! Walks `examples/*.garden` and generates five criterion benches per program:
+//! `<name>_compile`, `<name>_compile_opt`, `<name>_compile_opt_jit`,
+//! `<name>_run`, `<name>_run_opt`; so compile cost, optimized compile cost,
+//! JIT compile cost, and run cost are separated cleanly.
 //!
 //! Each program self-asserts its result via `testing.assert`. Before the
 //! timed iteration loop we run the VM once and `expect()` success, so a
@@ -33,8 +34,18 @@ fn programs() -> Vec<(String, Vec<u8>)> {
     out
 }
 
-const CFG: &Config = &Config::default();
+const CFG: &Config = &{
+    let mut c = Config::default();
+    c.no_jit = true;
+    c
+};
 const CFG_OPT: &Config = &{
+    let mut c = Config::default();
+    c.opt = 1;
+    c.no_jit = true;
+    c
+};
+const CFG_OPT_JIT: &Config = &{
     let mut c = Config::default();
     c.opt = 1;
     c
@@ -44,7 +55,7 @@ pub fn suite(c: &mut Criterion) {
     for (name, source) in programs() {
         // Validate once at startup so codegen bugs panic loudly here, not
         // silently affect the timing.
-        let mut probe = purple_garden::new(CFG_OPT, &source)
+        let mut probe = purple_garden::new(CFG_OPT_JIT, &source)
             .unwrap_or_else(|e| panic!("compile failed for {name}: {e:?}"));
         probe
             .run()
@@ -60,6 +71,11 @@ pub fn suite(c: &mut Criterion) {
                 purple_garden::new(CFG_OPT, &source).unwrap();
             });
         });
+        c.bench_function(&format!("{name}_compile_opt_jit"), |b| {
+            b.iter(|| {
+                purple_garden::new(CFG_OPT_JIT, &source).unwrap();
+            });
+        });
         c.bench_function(&format!("{name}_run"), |b| {
             let mut program = purple_garden::new(CFG, &source).unwrap();
             let entry = program.entry;
@@ -70,6 +86,14 @@ pub fn suite(c: &mut Criterion) {
         });
         c.bench_function(&format!("{name}_run_opt"), |b| {
             let mut program = purple_garden::new(CFG_OPT, &source).unwrap();
+            let entry = program.entry;
+            b.iter(|| {
+                program.vm.pc = entry;
+                program.run()
+            });
+        });
+        c.bench_function(&format!("{name}_run_opt_jit"), |b| {
+            let mut program = purple_garden::new(CFG_OPT_JIT, &source).unwrap();
             let entry = program.entry;
             b.iter(|| {
                 program.vm.pc = entry;

@@ -1,6 +1,5 @@
 # Regressions for codegen bugs
 import "testing"
-import "io"
 
 # Branch successor-param liveness: if the param-shuffle into the join
 # block's parameter register lands on cond's register, JmpF reads the
@@ -35,7 +34,7 @@ testing.assert(fib(10) == 55)
 # Sequential `mov` would clobber a still-needed source (and mov_merge would
 # then collapse the swap into nops).
 fn diff(a:int b:int) int { a - b }
-io.println("ready")
+testing.assert(true)
 testing.assert(diff(10 3) == 7)
 testing.assert(diff(100 1) == 99)
 
