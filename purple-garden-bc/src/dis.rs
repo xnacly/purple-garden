@@ -246,6 +246,8 @@ impl<'dis> Disassembler<'dis> {
                 Op::IMulI { dst, lhs, imm } => format!("imul_imm r{dst}, r{lhs}, #{imm}"),
                 Op::IDiv { dst, lhs, rhs } => format!("idiv r{dst}, r{lhs}, r{rhs}"),
                 Op::IDivI { dst, lhs, imm } => format!("idiv_imm r{dst}, r{lhs}, #{imm}"),
+                Op::IMod { dst, lhs, rhs } => format!("imod r{dst}, r{lhs}, r{rhs}"),
+                Op::IModI { dst, lhs, imm } => format!("imod_imm r{dst}, r{lhs}, #{imm}"),
                 Op::IEq { dst, lhs, rhs } => format!("ieq r{dst}, r{lhs}, r{rhs}"),
                 Op::IEqI { dst, lhs, imm } => format!("ieq_imm r{dst}, r{lhs}, #{imm}"),
                 Op::ILt { dst, lhs, rhs } => format!("ilt r{dst}, r{lhs}, r{rhs}"),

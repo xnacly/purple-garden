@@ -849,7 +849,7 @@ impl<'cc> Cc<'cc> {
                 }
 
                 self.emit(emit_bins! {
-                    IAdd, ISub, IMul, IDiv, ILt, IGt, IEq,
+                    IAdd, ISub, IMul, IDiv, IMod, ILt, IGt, IEq,
                     DAdd, DSub, DMul, DDiv, DLt, DGt,
                     BEq
                 });
@@ -875,6 +875,7 @@ impl<'cc> Cc<'cc> {
                     ISub => ISubI,
                     IMul => IMulI,
                     IDiv => IDivI,
+                    IMod => IModI,
                     IEq  => IEqI,
                     IGt  => IGtI,
                     ILt  => ILtI,

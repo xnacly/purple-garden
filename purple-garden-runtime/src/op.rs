@@ -52,6 +52,18 @@ pub enum Op {
         lhs: u8,
         imm: i32,
     },
+    IMod {
+        dst: u8,
+        lhs: u8,
+        rhs: u8,
+    },
+    /// `r[dst] = r[lhs] % imm`. Lowered from IR `BinImm` when the
+    /// constant was the divisor (rhs). Traps on `imm == 0`, like `IDivI`.
+    IModI {
+        dst: u8,
+        lhs: u8,
+        imm: i32,
+    },
     ILt {
         dst: u8,
         lhs: u8,

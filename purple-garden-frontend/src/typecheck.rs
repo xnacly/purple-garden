@@ -121,6 +121,26 @@ impl<'t> Typechecker<'t> {
                     }
                 }
             }
+            lex::Type::Percent => match (lhs, rhs) {
+                (Type::Int, Type::Int) => Type::Int,
+                (_, _) if lhs == rhs => {
+                    return Err(PgError::with_msg(
+                        format!("Unsupported type {} for {:?}, want Int", lhs, op.t.as_str()),
+                        op,
+                    ));
+                }
+                (_, _) => {
+                    return Err(PgError::with_msg(
+                        format!(
+                            "Incompatible types {} and {} for {:?}, want both sides Int",
+                            lhs,
+                            rhs,
+                            op.t.as_str()
+                        ),
+                        op,
+                    ));
+                }
+            },
             lex::Type::DoubleEqual | lex::Type::NotEqual => {
                 match (lhs, rhs) {
                     (Type::Int, Type::Int) | (Type::Bool, Type::Bool) => {}

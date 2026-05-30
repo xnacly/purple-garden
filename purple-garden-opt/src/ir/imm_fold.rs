@@ -106,6 +106,7 @@ fn try_fold<'scratch>(
         },
         BinOp::ISub => (BinOp::ISub, *lhs, rhs_c?),
         BinOp::IDiv => (BinOp::IDiv, *lhs, rhs_c?),
+        BinOp::IMod => (BinOp::IMod, *lhs, rhs_c?),
         _ => return None,
     };
 

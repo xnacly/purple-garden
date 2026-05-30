@@ -212,6 +212,18 @@ impl Vm {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l / imm);
                 },
+                Op::IMod { dst, lhs, rhs } => unsafe {
+                    let l = r!(lhs).as_int();
+                    let r = r!(rhs).as_int();
+                    trap_if!(r == 0, Anomaly::DivisionByZero { pc });
+                    r_mut!(dst) = Value::from(l % r);
+                },
+                Op::IModI { dst, lhs, imm } => unsafe {
+                    let imm = imm as i64;
+                    trap_if!(imm == 0, Anomaly::DivisionByZero { pc });
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l % imm);
+                },
                 Op::IEq { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
@@ -496,6 +508,47 @@ mod ops {
             Op::LoadI { dst: 0, value: 1 },
             Op::LoadI { dst: 1, value: 0 },
             Op::IDiv {
+                dst: 2,
+                lhs: 0,
+                rhs: 1,
+            },
+        ]);
+        assert!(matches!(err, Anomaly::DivisionByZero { .. }));
+    }
+
+    #[test]
+    fn imod() {
+        let vm = run(vec![
+            Op::LoadI { dst: 0, value: 43 },
+            Op::LoadI { dst: 1, value: 5 },
+            Op::IMod {
+                dst: 2,
+                lhs: 0,
+                rhs: 1,
+            },
+        ]);
+        assert_eq!(vm.r(2).as_int(), 3);
+    }
+
+    #[test]
+    fn imod_i() {
+        let vm = run(vec![
+            Op::LoadI { dst: 0, value: -43 },
+            Op::IModI {
+                dst: 1,
+                lhs: 0,
+                imm: 5,
+            },
+        ]);
+        assert_eq!(vm.r(1).as_int(), -3);
+    }
+
+    #[test]
+    fn imod_by_zero_traps() {
+        let err = run_err(vec![
+            Op::LoadI { dst: 0, value: 1 },
+            Op::LoadI { dst: 1, value: 0 },
+            Op::IMod {
                 dst: 2,
                 lhs: 0,
                 rhs: 1,

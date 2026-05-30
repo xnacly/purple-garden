@@ -129,7 +129,8 @@ impl<'lower> Lower<'lower> {
             }
             Node::Bin { op, lhs, rhs, id } => {
                 use BinOp::{
-                    BEq, DAdd, DDiv, DGt, DLt, DMul, DSub, IAdd, IDiv, IEq, IGt, ILt, IMul, ISub,
+                    BEq, DAdd, DDiv, DGt, DLt, DMul, DSub, IAdd, IDiv, IEq, IGt, ILt, IMod, IMul,
+                    ISub,
                 };
                 let src_type = self.types[id_from_node(lhs).unwrap()].clone().unwrap();
                 let span = op.start as u32;
@@ -157,6 +158,7 @@ impl<'lower> Lower<'lower> {
                         Type::Minus => ISub,
                         Type::Asteriks => IMul,
                         Type::Slash => IDiv,
+                        Type::Percent => IMod,
                         Type::DoubleEqual => IEq,
                         Type::LessThan => ILt,
                         Type::GreaterThan => IGt,

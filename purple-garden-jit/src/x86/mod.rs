@@ -89,10 +89,20 @@ pub enum Insn {
         dst: u8,
         imm: i32,
     },
+    /// `and r{dst}, imm`
+    AndImm {
+        dst: u8,
+        imm: i32,
+    },
     /// `cmp r{reg}, imm`
     CmpImm {
         reg: u8,
         imm: i32,
+    },
+    /// `test r{lhs}, r{rhs}`
+    Test {
+        lhs: u8,
+        rhs: u8,
     },
     /// `sete r{dst}b`; set r{dst}'s low byte to 1 if the last compare was equal.
     Sete {
@@ -125,7 +135,9 @@ impl Insn {
             // 0x81 /0 add, /5 sub, /7 cmp; r/m, imm32.
             Insn::AddImm { dst, imm } => reg_imm(code, 0, dst, imm),
             Insn::SubImm { dst, imm } => reg_imm(code, 5, dst, imm),
+            Insn::AndImm { dst, imm } => reg_imm(code, 4, dst, imm),
             Insn::CmpImm { reg, imm } => reg_imm(code, 7, reg, imm),
+            Insn::Test { lhs, rhs } => reg_reg(code, 0x85, rhs, lhs),
             // 0xc7 /0 — mov r/m, imm32.
             Insn::MovImm { dst, imm } => {
                 code.push(rex(0, dst));
@@ -166,7 +178,9 @@ impl fmt::Display for Insn {
             Insn::Neg { reg } => write!(f, "neg {}", r(reg)),
             Insn::AddImm { dst, imm } => write!(f, "add {}, {imm}", r(dst)),
             Insn::SubImm { dst, imm } => write!(f, "sub {}, {imm}", r(dst)),
+            Insn::AndImm { dst, imm } => write!(f, "and {}, {imm}", r(dst)),
             Insn::CmpImm { reg, imm } => write!(f, "cmp {}, {imm}", r(reg)),
+            Insn::Test { lhs, rhs } => write!(f, "test {}, {}", r(lhs), r(rhs)),
             Insn::Sete { dst } => write!(f, "sete {}b", r(dst)),
         }
     }
@@ -290,9 +304,19 @@ pub fn compile_func(func: &ir::Func<'_>, out: &mut Vec<Insn>) -> Option<()> {
                     // mov (no flags) clears dst; sete writes the low byte. Safe
                     // even if dst == lhs (the cmp happens before the mov).
                     BinOp::IEq => {
-                        out.push(Insn::CmpImm { reg: l, imm });
+                        if imm == 0 {
+                            out.push(Insn::Test { lhs: l, rhs: l });
+                        } else {
+                            out.push(Insn::CmpImm { reg: l, imm });
+                        }
                         out.push(Insn::MovImm { dst: d, imm: 0 });
                         out.push(Insn::Sete { dst: d });
+                    }
+                    BinOp::IMod if imm == 2 => {
+                        if d != l {
+                            out.push(Insn::Mov { dst: d, src: l });
+                        }
+                        out.push(Insn::AndImm { dst: d, imm: 1 });
                     }
                     _ => skip!(func, "unsupported binimm op {op:?}"),
                 }
@@ -364,6 +388,7 @@ mod tests {
             enc(Insn::SubImm { dst: 0, imm: 1 }),
             [0x48, 0x81, 0xe8, 1, 0, 0, 0]
         ); // sub rax,1
+        assert_eq!(enc(Insn::Test { lhs: 0, rhs: 0 }), [0x48, 0x85, 0xc0]); // test rax,rax
         assert_eq!(enc(Insn::Ret), [0xc3]);
     }
 }

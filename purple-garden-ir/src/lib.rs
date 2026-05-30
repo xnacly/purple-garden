@@ -70,6 +70,7 @@ pub enum BinOp {
     ISub,
     IMul,
     IDiv,
+    IMod,
     ILt,
     IGt,
     IEq,

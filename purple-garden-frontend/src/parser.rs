@@ -303,6 +303,7 @@ impl<'p> Parser<'p> {
         | Type::Minus
         | Type::Asteriks
         | Type::Slash
+        | Type::Percent
         | Type::DoubleEqual
         | Type::As
         | Type::LessThan
@@ -357,7 +358,7 @@ impl<'p> Parser<'p> {
     fn infix_binding_power(op: &Type) -> Option<(u8, u8)> {
         Some(match op {
             Type::Plus | Type::Minus => (1, 2),
-            Type::Asteriks | Type::Slash => (3, 4),
+            Type::Asteriks | Type::Slash | Type::Percent => (3, 4),
             Type::DoubleEqual | Type::NotEqual | Type::GreaterThan | Type::LessThan => (0, 1),
             _ => return None,
         })

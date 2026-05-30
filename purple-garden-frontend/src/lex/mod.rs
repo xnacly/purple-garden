@@ -131,6 +131,7 @@ impl<'l> Lexer<'l> {
             b'-' => Self::make_tok(start, Type::Minus),
             b'*' => Self::make_tok(start, Type::Asteriks),
             b'/' => Self::make_tok(start, Type::Slash),
+            b'%' => Self::make_tok(start, Type::Percent),
             b'=' if matches!(self.peek(), Some(b'=')) => {
                 self.pos += 1;
                 Self::make_tok(start, Type::DoubleEqual)
@@ -242,7 +243,7 @@ mod tests {
 
     #[test]
     fn single_char_tokens() {
-        let toks = lex("()+-*/=<>![]{}.:?");
+        let toks = lex("()+-*/%=<>![]{}.:?");
         assert_eq!(
             toks,
             vec![
@@ -252,6 +253,7 @@ mod tests {
                 Type::Minus,
                 Type::Asteriks,
                 Type::Slash,
+                Type::Percent,
                 Type::Equal,
                 Type::LessThan,
                 Type::GreaterThan,

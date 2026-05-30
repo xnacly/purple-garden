@@ -163,6 +163,15 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch) -> bool {
                     }
                     (lhs / rhs).into()
                 }
+                BinOp::IMod => {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_c.value, rhs_c.value) else {
+                        unreachable!();
+                    };
+                    if rhs == 0 {
+                        return false;
+                    }
+                    (lhs % rhs).into()
+                }
                 BinOp::ILt => {
                     let (Const::Int(lhs), Const::Int(rhs)) = (lhs_c.value, rhs_c.value) else {
                         unreachable!();
