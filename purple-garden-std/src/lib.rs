@@ -1,7 +1,5 @@
-use std::fmt;
-
 use purple_garden_ir::ptype::Type;
-use purple_garden_runtime::BuiltinFn;
+pub use purple_garden_runtime::{Fn, Pkg};
 
 macro_rules! builtin {
     ($(pub fn $name:ident($vm:ident) $body:block)*) => {
@@ -21,25 +19,6 @@ mod io;
 mod strings;
 mod testing;
 
-#[derive(Debug)]
-pub struct Pkg {
-    pub name: &'static str,
-    pub doc: &'static str,
-    pub pkgs: &'static [Pkg],
-    pub fns: &'static [Fn],
-}
-
-#[derive(Debug)]
-pub struct Fn {
-    pub name: &'static str,
-    pub doc: &'static str,
-    pub ptr: BuiltinFn,
-    pub pure: bool,
-    pub arg_names: &'static [&'static str],
-    pub args: &'static [Type],
-    pub ret: Type,
-}
-
 // TODO: replace this with a tri or some kind of compile time perfect hashing so the repeated
 // lookup in lowering and typechecking is a bit better
 
@@ -55,51 +34,6 @@ pub fn resolve_pkg(query: &str) -> Option<&Pkg> {
     segments.try_fold(root, |pkg, segment| {
         pkg.pkgs.iter().find(|p| p.name == segment)
     })
-}
-
-fn print_function_head(fun: &Fn, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "fn {}(", fun.name)?;
-    for (i, a) in fun.args.iter().enumerate() {
-        if let Some(name) = fun.arg_names.get(i) {
-            write!(f, "{name} ")?;
-        }
-        if i + 1 < fun.args.len() {
-            write!(f, "{a} ")?;
-        } else {
-            write!(f, "{a}")?;
-        }
-    }
-    writeln!(f, ") {}", fun.ret)
-}
-
-impl fmt::Display for Fn {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        print_function_head(self, f)?;
-        writeln!(f, "\t{}", self.doc)
-    }
-}
-
-impl fmt::Display for Pkg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "import (\"{}\")\n", self.name)?;
-        writeln!(f, "{}", self.doc)?;
-
-        if !self.pkgs.is_empty() {
-            writeln!(f)?;
-            for p in self.pkgs {
-                writeln!(f, "{}/{}", self.name, p.name)?;
-            }
-        }
-
-        if !self.fns.is_empty() {
-            writeln!(f)?;
-            for fun in self.fns {
-                print_function_head(fun, f)?;
-            }
-        }
-
-        Ok(())
-    }
 }
 
 pub static STD: &[Pkg] = &[

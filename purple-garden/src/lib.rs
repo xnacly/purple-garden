@@ -10,7 +10,8 @@ use purple_garden_runtime::{Anomaly, BuiltinFn, DebugInfo, Vm, VmConfig};
 use purple_garden_shared::config;
 
 pub use purple_garden_macros::{pg_fn, pg_pkg};
-pub use purple_garden_std::{Fn, Pkg, STD, resolve_pkg};
+pub use purple_garden_runtime::{Fn, FromVm, IntoVm, PgType, Pkg};
+pub use purple_garden_std::{STD, resolve_pkg};
 
 pub mod gc;
 pub mod help;
