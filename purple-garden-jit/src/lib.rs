@@ -125,8 +125,10 @@ mod tests_x86 {
         assert_eq!(run(jit.code(), [10, 20, 0])[0], 20);
     }
 
+    /// `fn const_ret() int { 42 }`: LoadConst is supported, so a const-returning
+    /// function compiles and yields the constant in vm.r[0].
     #[test]
-    fn skips_non_return_only_functions() {
+    fn compiles_const_returning_function() {
         let mut func = Func::new("const_ret", Id(0), vec![], Some(Type::Int));
         func.blocks.push(Block {
             tombstone: false,
@@ -146,7 +148,9 @@ mod tests_x86 {
             }),
         });
 
-        assert!(Jit::new().compile_func(&func).is_none());
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(run(jit.code(), [0, 0, 0])[0], 42);
     }
 
     #[test]
