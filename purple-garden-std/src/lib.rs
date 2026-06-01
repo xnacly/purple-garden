@@ -34,6 +34,8 @@ pub struct Fn {
     pub name: &'static str,
     pub doc: &'static str,
     pub ptr: BuiltinFn,
+    pub pure: bool,
+    pub arg_names: &'static [&'static str],
     pub args: &'static [Type],
     pub ret: Type,
 }
@@ -58,6 +60,9 @@ pub fn resolve_pkg(query: &str) -> Option<&Pkg> {
 fn print_function_head(fun: &Fn, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "fn {}(", fun.name)?;
     for (i, a) in fun.args.iter().enumerate() {
+        if let Some(name) = fun.arg_names.get(i) {
+            write!(f, "{name} ")?;
+        }
         if i + 1 < fun.args.len() {
             write!(f, "{a} ")?;
         } else {
@@ -106,15 +111,19 @@ like writing and reading from file descriptors",
         fns: &[
             Fn {
                 name: "println",
-                doc: "writes its argument to stdout, with a newline appended",
+                doc: "writes s to stdout, with a newline appended",
                 ptr: crate::io::println,
+                pure: false,
+                arg_names: &["s"],
                 args: &[Type::Str],
                 ret: Type::Void,
             },
             Fn {
                 name: "print",
                 ptr: crate::io::print,
-                doc: "writes its argument to stdout",
+                doc: "writes s to stdout",
+                pure: false,
+                arg_names: &["s"],
                 args: &[Type::Str],
                 ret: Type::Void,
             },
@@ -127,22 +136,28 @@ like writing and reading from file descriptors",
         fns: &[
             Fn {
                 name: "contains",
-                doc: "reports whether arg 1 is in arg 0",
+                doc: "reports whether needle appears in hay",
                 ptr: crate::strings::contains,
+                pure: true,
+                arg_names: &["hay", "needle"],
                 args: &[Type::Str, Type::Str],
                 ret: Type::Bool,
             },
             Fn {
                 name: "repeat",
-                doc: "repeats arg0 arg1 times",
+                doc: "repeats s n times",
                 ptr: crate::strings::repeat,
+                pure: false,
+                arg_names: &["s", "n"],
                 args: &[Type::Str, Type::Int],
                 ret: Type::Str,
             },
             Fn {
                 name: "len",
-                doc: "returns len of arg 0",
+                doc: "returns the length of s in bytes",
                 ptr: crate::strings::len,
+                pure: true,
+                arg_names: &["s"],
                 args: &[Type::Str],
                 ret: Type::Int,
             },
@@ -155,15 +170,19 @@ like writing and reading from file descriptors",
         fns: &[
             Fn {
                 name: "from_int",
-                doc: "converts Int to Str",
+                doc: "converts n to Str",
                 ptr: crate::conv::from_int,
+                pure: true,
+                arg_names: &["n"],
                 args: &[Type::Int],
                 ret: Type::Str,
             },
             Fn {
                 name: "from_double",
-                doc: "converts Double to Str",
+                doc: "converts d to Str",
                 ptr: crate::conv::from_double,
+                pure: true,
+                arg_names: &["d"],
                 args: &[Type::Double],
                 ret: Type::Str,
             },
@@ -175,8 +194,10 @@ like writing and reading from file descriptors",
         pkgs: &[],
         fns: &[Fn {
             name: "assert",
-            doc: "Asserts arg0 is true",
+            doc: "asserts condition is true",
             ptr: crate::testing::assert,
+            pure: false,
+            arg_names: &["condition"],
             args: &[Type::Bool],
             ret: Type::Void,
         }],

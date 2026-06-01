@@ -9,6 +9,9 @@ use purple_garden_frontend::{err::PgError, lex, lower, parser};
 use purple_garden_runtime::{Anomaly, BuiltinFn, DebugInfo, Vm, VmConfig};
 use purple_garden_shared::config;
 
+pub use purple_garden_macros::{pg_fn, pg_pkg};
+pub use purple_garden_std::{Fn, Pkg, STD, resolve_pkg};
+
 pub mod gc;
 pub mod help;
 pub mod input;

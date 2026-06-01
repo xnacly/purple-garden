@@ -501,6 +501,7 @@ dependencies = [
  "purple-garden-frontend",
  "purple-garden-ir",
  "purple-garden-jit",
+ "purple-garden-macros",
  "purple-garden-opt",
  "purple-garden-runtime",
  "purple-garden-shared",
