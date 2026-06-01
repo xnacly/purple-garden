@@ -1,25 +1,41 @@
 //! Minimal linear-scan register allocator for the JIT.
 //!
-//! Reuses the IR liveness intervals (`ir::Func::live_set_into`, the same
-//! analysis the bytecode backend consumes) and assigns each SSA value a physical
-//! register from a target-provided pool. Values that don't fit spill to
-//! [`ir::Location::Stack`]; the lowering bails on spills for now.
+//! Reuses the IR liveness intervals (the same analysis the bytecode backend
+//! consumes) and assigns each SSA value a physical register from one of two
+//! classes. A value whose live range spans a call must survive it, so it takes a
+//! callee-saved register; everything else takes the cheaper caller-saved class.
+//! Values that don't fit spill to `Location::Stack` and the lowering bails
+//! (falls back to bytecode).
 //!
-//! The scan itself is target-independent; the caller passes the pool of
-//! allocatable physical register numbers (e.g. the x86-64 GPRs), so a future
-//! aarch64 backend can reuse it unchanged.
+//! Target-independent: the caller passes both register pools, so a future
+//! aarch64 backend reuses it unchanged.
 
 use purple_garden_ir as ir;
 
-// TODO: this is currently very uncomplicated, as soon as the jit supports branches, calls and other
-// stuff, this alloc will also require hints, bitmaps for free regs, etc, once that happens this
-// should be a unified purple-garden-regalloc crate
+/// The two register classes the allocator draws from.
+pub struct RegClasses<'a> {
+    /// Clobbered by a call; cheapest, for values not live across one.
+    pub caller: &'a [u8],
+    /// Preserved across a call; for values that span one. The lowering saves the
+    /// ones it used in its prologue.
+    pub callee: &'a [u8],
+}
 
-/// Linear scan over `liveness` (`(def_pos, last_use_pos)` per SSA id; a `u32::MAX`
-/// start marks an unused id). `pool` is the ordered set of allocatable physical
-/// register numbers. Returns a per-SSA-id map.
+/// `[def, last_use]` is live across a call iff a call sits strictly inside it.
+fn spans_call(def: u32, last_use: u32, call_sites: &[u32]) -> bool {
+    call_sites.iter().any(|&c| def < c && c < last_use)
+}
+
+/// Linear scan over `liveness` (`(def_pos, last_use_pos)` per SSA id; a
+/// `u32::MAX` start marks an unused id). `call_sites` are call positions in the
+/// same coordinate space. A value spanning a call takes a `classes.callee`
+/// register, others `classes.caller`; an exhausted class spills that value.
 #[must_use]
-pub fn allocate(liveness: &[(u32, u32)], pool: &[u8]) -> Vec<ir::Location> {
+pub fn allocate(
+    liveness: &[(u32, u32)],
+    call_sites: &[u32],
+    classes: RegClasses,
+) -> Vec<ir::Location> {
     let mut map = vec![ir::Location::Unassigned; liveness.len()];
 
     let mut order: Vec<usize> = (0..liveness.len())
@@ -27,31 +43,39 @@ pub fn allocate(liveness: &[(u32, u32)], pool: &[u8]) -> Vec<ir::Location> {
         .collect();
     order.sort_by_key(|&v| (liveness[v].0, v));
 
-    // `free` is a stack of available physical regs; reversed so we hand out the
-    // pool in its given order (pool[0] first).
-    let mut free: Vec<u8> = pool.iter().rev().copied().collect();
-    let mut active: Vec<(u32, u8)> = Vec::new();
+    // Per-class free stacks, reversed so each pool is handed out in given order.
+    let mut caller_free: Vec<u8> = classes.caller.iter().rev().copied().collect();
+    let mut callee_free: Vec<u8> = classes.callee.iter().rev().copied().collect();
+    let mut active: Vec<(u32, u8, bool)> = Vec::new(); // (last_use, reg, from_callee)
 
     for v in order {
         let (start, end) = liveness[v];
-        // Expire intervals that died at or before this one's def. End-inclusive
-        // (`<=`) mirrors the bytecode allocator: liveness encodes each position
-        // as early+late, so a dying value and a newborn one can share a reg.
-        active.retain(|&(last_use, reg)| {
+        active.retain(|&(last_use, reg, from_callee)| {
             if last_use <= start {
-                free.push(reg);
+                if from_callee {
+                    callee_free.push(reg);
+                } else {
+                    caller_free.push(reg);
+                }
                 false
             } else {
                 true
             }
         });
 
-        if let Some(reg) = free.pop() {
-            map[v] = ir::Location::Reg(reg);
-            active.push((end, reg));
+        let from_callee = spans_call(start, end, call_sites);
+        let free = if from_callee {
+            &mut callee_free
         } else {
-            map[v] = ir::Location::Stack;
-        }
+            &mut caller_free
+        };
+        map[v] = match free.pop() {
+            Some(reg) => {
+                active.push((end, reg, from_callee));
+                ir::Location::Reg(reg)
+            }
+            None => ir::Location::Stack,
+        };
     }
 
     map
@@ -59,36 +83,77 @@ pub fn allocate(liveness: &[(u32, u32)], pool: &[u8]) -> Vec<ir::Location> {
 
 #[cfg(test)]
 mod tests {
-    use super::allocate;
+    use super::{RegClasses, allocate};
     use purple_garden_ir::Location;
+
+    const CALLER: &[u8] = &[0, 1];
+    const CALLEE: &[u8] = &[3, 12];
+
+    fn alloc(liveness: &[(u32, u32)], call_sites: &[u32]) -> Vec<Location> {
+        allocate(
+            liveness,
+            call_sites,
+            RegClasses {
+                caller: CALLER,
+                callee: CALLEE,
+            },
+        )
+    }
+
+    fn spills(map: &[Location]) -> usize {
+        map.iter().filter(|l| matches!(l, Location::Stack)).count()
+    }
 
     #[test]
     fn disjoint_intervals_reuse_a_register() {
-        // v0 lives [0,2], v1 lives [3,5]: disjoint, so v1 reuses v0's reg.
-        let map = allocate(&[(0, 2), (3, 5)], &[0, 1]);
+        let map = alloc(&[(0, 2), (3, 5)], &[]);
         assert_eq!(map[0], Location::Reg(0));
         assert_eq!(map[1], Location::Reg(0));
     }
 
     #[test]
     fn overlapping_intervals_get_distinct_registers() {
-        let map = allocate(&[(0, 5), (2, 6)], &[0, 1]);
+        let map = alloc(&[(0, 5), (2, 6)], &[]);
         assert_eq!(map[0], Location::Reg(0));
         assert_eq!(map[1], Location::Reg(1));
     }
 
     #[test]
-    fn exhausted_pool_spills() {
-        // three values all live at once, pool of two: one spills.
-        let map = allocate(&[(0, 9), (1, 9), (2, 9)], &[0, 1]);
-        let spilled = map.iter().filter(|l| matches!(l, Location::Stack)).count();
-        assert_eq!(spilled, 1);
+    fn exhausted_caller_pool_spills() {
+        assert_eq!(spills(&alloc(&[(0, 9), (1, 9), (2, 9)], &[])), 1);
     }
 
     #[test]
     fn unused_ids_stay_unassigned() {
-        let map = allocate(&[(u32::MAX, 0), (0, 1)], &[0, 1]);
+        let map = alloc(&[(u32::MAX, 0), (0, 1)], &[]);
         assert_eq!(map[0], Location::Unassigned);
         assert_eq!(map[1], Location::Reg(0));
+    }
+
+    #[test]
+    fn value_spanning_a_call_takes_a_callee_register() {
+        // call at pos 5 sits inside [0,10], so v0 must survive it.
+        assert_eq!(alloc(&[(0, 10)], &[5])[0], Location::Reg(3));
+    }
+
+    #[test]
+    fn value_not_crossing_a_call_stays_caller_saved() {
+        // call at pos 20 is after v0's last use, so it doesn't span it.
+        assert_eq!(alloc(&[(0, 10)], &[20])[0], Location::Reg(0));
+    }
+
+    #[test]
+    fn cross_call_value_spills_when_callee_class_is_full() {
+        // all three span the call but only one callee reg exists: two spill,
+        // with no fallback to the caller class.
+        let map = allocate(
+            &[(0, 10), (0, 10), (0, 10)],
+            &[5],
+            RegClasses {
+                caller: CALLER,
+                callee: &[3],
+            },
+        );
+        assert_eq!(spills(&map), 2);
     }
 }

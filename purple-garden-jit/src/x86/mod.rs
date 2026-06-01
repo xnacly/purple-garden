@@ -33,6 +33,9 @@ const POOL: &[u8] = &[0, 1, 2, 6, 8, 9, 10, 11]; // rax rcx rdx rsi r8 r9 r10 r1
 /// Pool for `idiv` functions; rax/rcx/rdx reserved as its fixed scratch, so
 /// fewer regs and likelier to spill back to bytecode.
 const POOL_DIV: &[u8] = &[6, 8, 9, 10, 11]; // rsi r8 r9 r10 r11
+/// Callee-saved class for values live across a call; the prologue saves the
+/// ones actually used.
+const POOL_CALLEE: &[u8] = &[3, 12, 13, 14, 15]; // rbx r12 r13 r14 r15
 /// `rdi` holds `*mut Vm` == `&vm.r[0]`, the base for slot loads/stores.
 const RDI: u8 = 7;
 /// `rsp`, the stack pointer; only touched to re-align for an ABI call.
@@ -337,8 +340,16 @@ pub fn compile_func(func: &ir::Func<'_>, out: &mut Vec<Insn>) -> Option<()> {
         matches!(i, ir::Instr::BinImm { op: BinOp::IDiv, imm, .. } if *imm != 0)
             || matches!(i, ir::Instr::BinImm { op: BinOp::IMod, imm, .. } if *imm != 0 && *imm != 2)
     });
-    let pool = if needs_idiv { POOL_DIV } else { POOL };
-    let regs = crate::regalloc::allocate(&liveness, pool);
+    let caller = if needs_idiv { POOL_DIV } else { POOL };
+    // No calls lowered yet, so call_sites is empty and the callee class is unused.
+    let regs = crate::regalloc::allocate(
+        &liveness,
+        &[],
+        crate::regalloc::RegClasses {
+            caller,
+            callee: POOL_CALLEE,
+        },
+    );
     let reg = |id: ir::Id| match regs.get(id.0 as usize) {
         Some(ir::Location::Reg(r)) => Some(*r),
         _ => None,
