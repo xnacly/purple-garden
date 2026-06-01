@@ -30,8 +30,16 @@ macro_rules! skip {
 /// prologue). `rdi` is the `Vm` pointer, `rsp`/`rbp` the stack. Callee-saved
 /// regs (rbx, r12..r15) aren't used yet.
 const POOL: &[u8] = &[0, 1, 2, 6, 8, 9, 10, 11]; // rax rcx rdx rsi r8 r9 r10 r11
+/// Pool for `idiv` functions; rax/rcx/rdx reserved as its fixed scratch, so
+/// fewer regs and likelier to spill back to bytecode.
+const POOL_DIV: &[u8] = &[6, 8, 9, 10, 11]; // rsi r8 r9 r10 r11
 /// `rdi` holds `*mut Vm` == `&vm.r[0]`, the base for slot loads/stores.
 const RDI: u8 = 7;
+/// `rsp`, the stack pointer; only touched to re-align for an ABI call.
+const RSP: u8 = 4;
+const RAX: u8 = 0;
+const RCX: u8 = 1;
+const RDX: u8 = 2;
 
 /// A single x86-64 instruction. `encode` appends its machine-code bytes;
 /// `Display` renders it as readable assembly (the JIT's own disassembler).
@@ -108,6 +116,21 @@ pub enum Insn {
     Sete {
         dst: u8,
     },
+    /// `movabs r{dst}, imm64`; `MovImm` is i32-only, addresses need 64 bits.
+    MovAbs {
+        dst: u8,
+        imm: u64,
+    },
+    /// `call r{reg}`
+    CallReg {
+        reg: u8,
+    },
+    /// `cqo`; sign-extend rax into rdx:rax (the idiv dividend).
+    Cqo,
+    /// `idiv r{divisor}`; rdx:rax / divisor, quotient to rax, remainder to rdx.
+    Idiv {
+        divisor: u8,
+    },
 }
 
 impl Insn {
@@ -127,7 +150,7 @@ impl Insn {
                 code.push(rex(dst, src));
                 code.extend_from_slice(&[0x0f, 0xaf, modrm(dst, src)]);
             }
-            // 0xf7 /3 — neg r/m64.
+            // 0xf7 /3 ; neg r/m64.
             Insn::Neg { reg } => {
                 code.push(rex(0, reg));
                 code.extend_from_slice(&[0xf7, modrm(3, reg)]);
@@ -138,18 +161,38 @@ impl Insn {
             Insn::AndImm { dst, imm } => reg_imm(code, 4, dst, imm),
             Insn::CmpImm { reg, imm } => reg_imm(code, 7, reg, imm),
             Insn::Test { lhs, rhs } => reg_reg(code, 0x85, rhs, lhs),
-            // 0xc7 /0 — mov r/m, imm32.
+            // 0xc7 /0 ; mov r/m, imm32.
             Insn::MovImm { dst, imm } => {
                 code.push(rex(0, dst));
                 code.push(0xc7);
                 code.push(modrm(0, dst));
                 code.extend_from_slice(&imm.to_le_bytes());
             }
-            // 0x0f 0x94 — setcc(e) r/m8. The bare-or-extended REX lets us name
+            // 0x0f 0x94 ; setcc(e) r/m8. The bare-or-extended REX lets us name
             // sil/r8b etc. as byte registers.
             Insn::Sete { dst } => {
                 code.push(0x40 | u8::from(dst >= 8));
                 code.extend_from_slice(&[0x0f, 0x94, modrm(0, dst)]);
+            }
+            // REX.W 0xb8+rd io64 ; movabs r64, imm64.
+            Insn::MovAbs { dst, imm } => {
+                code.push(0x48 | u8::from(dst >= 8));
+                code.push(0xb8 + (dst & 7));
+                code.extend_from_slice(&imm.to_le_bytes());
+            }
+            // 0xff /2 ; call r/m64. REX.B reaches r8..r15.
+            Insn::CallReg { reg } => {
+                if reg >= 8 {
+                    code.push(0x41);
+                }
+                code.extend_from_slice(&[0xff, modrm(2, reg)]);
+            }
+            // REX.W 0x99 ; cqo.
+            Insn::Cqo => code.extend_from_slice(&[0x48, 0x99]),
+            // REX.W 0xf7 /7 ; idiv r/m64.
+            Insn::Idiv { divisor } => {
+                code.push(rex(0, divisor));
+                code.extend_from_slice(&[0xf7, modrm(7, divisor)]);
             }
         }
     }
@@ -182,6 +225,10 @@ impl fmt::Display for Insn {
             Insn::CmpImm { reg, imm } => write!(f, "cmp {}, {imm}", r(reg)),
             Insn::Test { lhs, rhs } => write!(f, "test {}, {}", r(lhs), r(rhs)),
             Insn::Sete { dst } => write!(f, "sete {}b", r(dst)),
+            Insn::MovAbs { dst, imm } => write!(f, "movabs {}, {imm:#x}", r(dst)),
+            Insn::CallReg { reg } => write!(f, "call {}", r(reg)),
+            Insn::Cqo => write!(f, "cqo"),
+            Insn::Idiv { divisor } => write!(f, "idiv {}", r(divisor)),
         }
     }
 }
@@ -242,6 +289,27 @@ fn emit_bin(out: &mut Vec<Insn>, op: BinOp, d: u8, l: u8, r: u8) {
     }
 }
 
+/// C-ABI `call addr`, rdi already holding `*mut Vm`. Leaves enter at `rsp % 16
+/// == 8`, so realign with `sub`/`add rsp, 8`. Callees clobber caller-saved regs,
+/// fine here: the only use is a trap callback that returns right after.
+fn emit_abi_call(out: &mut Vec<Insn>, addr: u64) {
+    out.push(Insn::SubImm { dst: RSP, imm: 8 });
+    out.push(Insn::MovAbs { dst: 0, imm: addr }); // rax = addr
+    out.push(Insn::CallReg { reg: 0 }); // call rax
+    out.push(Insn::AddImm { dst: RSP, imm: 8 });
+}
+
+/// `d = l <op> imm` for IDiv/IMod, nonzero constant divisor. idiv has no imm
+/// form, so the divisor goes via rcx. Caller allocates l/d from `POOL_DIV`.
+fn emit_idiv(out: &mut Vec<Insn>, op: BinOp, d: u8, l: u8, imm: i32) {
+    out.push(Insn::Mov { dst: RAX, src: l });
+    out.push(Insn::Cqo);
+    out.push(Insn::MovImm { dst: RCX, imm });
+    out.push(Insn::Idiv { divisor: RCX });
+    let src = if matches!(op, BinOp::IDiv) { RAX } else { RDX };
+    out.push(Insn::Mov { dst: d, src });
+}
+
 /// `r{d} <op>= r{s}` for IAdd/ISub/IMul.
 fn op_in_place(out: &mut Vec<Insn>, op: BinOp, d: u8, s: u8) {
     out.push(match op {
@@ -263,7 +331,14 @@ pub fn compile_func(func: &ir::Func<'_>, out: &mut Vec<Insn>) -> Option<()> {
 
     let mut liveness = Vec::new();
     func.live_set_into(&mut liveness);
-    let regs = crate::regalloc::allocate(&liveness, POOL);
+    // Constant-divisor IDiv/IMod (not imm 0, which traps, nor mod 2, which uses
+    // `and`) lowers to `idiv` and needs rax/rcx/rdx reserved.
+    let needs_idiv = block.instructions.iter().any(|i| {
+        matches!(i, ir::Instr::BinImm { op: BinOp::IDiv, imm, .. } if *imm != 0)
+            || matches!(i, ir::Instr::BinImm { op: BinOp::IMod, imm, .. } if *imm != 0 && *imm != 2)
+    });
+    let pool = if needs_idiv { POOL_DIV } else { POOL };
+    let regs = crate::regalloc::allocate(&liveness, pool);
     let reg = |id: ir::Id| match regs.get(id.0 as usize) {
         Some(ir::Location::Reg(r)) => Some(*r),
         _ => None,
@@ -329,12 +404,22 @@ pub fn compile_func(func: &ir::Func<'_>, out: &mut Vec<Insn>) -> Option<()> {
                         out.push(Insn::MovImm { dst: d, imm: 0 });
                         out.push(Insn::Sete { dst: d });
                     }
+                    // static divide-by-zero; trap and return, the rest is dead.
+                    BinOp::IDiv | BinOp::IMod if imm == 0 => {
+                        let helper: unsafe extern "C" fn(*mut purple_garden_runtime::Vm) =
+                            purple_garden_runtime::jit_trap_div_zero;
+                        emit_abi_call(out, helper as usize as u64);
+                        out.push(Insn::Ret);
+                        return Some(());
+                    }
+                    // x % 2, non-negative dividend; mask the low bit.
                     BinOp::IMod if imm == 2 => {
                         if d != l {
                             out.push(Insn::Mov { dst: d, src: l });
                         }
                         out.push(Insn::AndImm { dst: d, imm: 1 });
                     }
+                    BinOp::IDiv | BinOp::IMod => emit_idiv(out, *op, d, l, imm),
                     _ => skip!(func, "unsupported binimm op {op:?}"),
                 }
             }

@@ -28,6 +28,14 @@ pub unsafe extern "C" fn syscall_unimplemented(vm: *mut Vm) {
     vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
 }
 
+/// Divide-by-zero trap, called from JIT code (enum layout isn't a stable ABI,
+/// so the JIT can't set `pending_trap` itself). `vm.pc` was published before the
+/// `Sys` entering the native function, so it points at the call site.
+pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut Vm) {
+    let vm = unsafe { &mut *vm };
+    vm.trap(Anomaly::DivisionByZero { pc: vm.pc });
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VmConfig {
     pub backtrace: bool,
@@ -35,7 +43,7 @@ pub struct VmConfig {
 
 /// Return address of the synthetic root call frame pushed in [`Vm::new`].
 /// Chosen so that after the dispatcher's unconditional `pc += 1` the program
-/// counter lands at `usize::MAX` — never less than the bytecode length, so the
+/// counter lands at `usize::MAX`; never less than the bytecode length, so the
 /// run loop exits. `MAX - 1` (not `MAX`) keeps that `+ 1` from overflowing in
 /// debug builds.
 const ROOT_RETURN_ADDR: usize = usize::MAX - 1;

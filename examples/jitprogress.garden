@@ -5,4 +5,8 @@ fn arithmetics(a:int b:int c:int d:int) int {
     let x4 = x3 + x2 * b - d
     x4 + x1 % 2
 }
+fn divs(a:int b:int) int {
+    a / 7 + b % 3
+}
 arithmetics(2 3 4 5)
+divs(42 17)
