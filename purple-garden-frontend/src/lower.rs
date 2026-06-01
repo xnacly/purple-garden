@@ -500,11 +500,17 @@ impl<'lower> Lower<'lower> {
 
                     self.switch_to_block(body_blocks[i]);
                     self.block_mut(body_blocks[i]).params = case_params;
+                    // A match arm is its own scope: `let` bindings inside it
+                    // (including ones that shadow a param) must not leak into
+                    // sibling arms, the default arm, or code after the match.
+                    // env is a flat map, so snapshot it and restore afterwards.
+                    let saved_env = self.ctx.env.clone();
                     let mut last = None;
                     for node in body {
                         last = self.lower_node(node)?;
                     }
                     let value = last.expect("match body must produce value");
+                    self.ctx.env = saved_env;
 
                     let body_jump_params = self.ctx.func.intern_params(vec![value]);
                     self.block_mut(body_blocks[i]).term = Some(Terminator::Jump {
@@ -518,12 +524,16 @@ impl<'lower> Lower<'lower> {
                 let (default_tok, body) = default;
                 let default_span = default_tok.start as u32;
                 self.switch_to_block(default_block);
+                // Same scoping as the case arms above: the default body's
+                // `let` bindings stay local to it.
+                let saved_env = self.ctx.env.clone();
                 let mut last = None;
                 for node in body {
                     last = self.lower_node(node)?;
                 }
 
                 let last = last.expect("match default must produce value");
+                self.ctx.env = saved_env;
                 let default_jump_params = self.ctx.func.intern_params(vec![last]);
                 let join_params = self.ctx.func.intern_params(vec![last]);
                 let default_block_mut = self.block_mut(default_block);

@@ -33,6 +33,13 @@ pub struct VmConfig {
     pub backtrace: bool,
 }
 
+/// Return address of the synthetic root call frame pushed in [`Vm::new`].
+/// Chosen so that after the dispatcher's unconditional `pc += 1` the program
+/// counter lands at `usize::MAX` — never less than the bytecode length, so the
+/// run loop exits. `MAX - 1` (not `MAX`) keeps that `+ 1` from overflowing in
+/// debug builds.
+const ROOT_RETURN_ADDR: usize = usize::MAX - 1;
+
 #[derive(Default, Debug)]
 pub struct CallFrame {
     pub return_to: usize,
@@ -110,9 +117,18 @@ macro_rules! trap_if {
 impl Vm {
     #[must_use]
     pub fn new(config: VmConfig) -> Self {
+        let mut frames = Vec::with_capacity(64);
+        // Synthetic root frame: the VM enters the entry function directly, so
+        // its trailing Op::Ret needs a frame to pop. Popping it ends the run
+        // (see ROOT_RETURN_ADDR) and drains any pending trap.
+        frames.push(CallFrame {
+            return_to: ROOT_RETURN_ADDR,
+            #[cfg(debug_assertions)]
+            spilled_depth: 0,
+        });
         Self {
             r: [const { Value(0) }; REGISTER_COUNT],
-            frames: Vec::with_capacity(64),
+            frames,
             pc: 0,
             bytecode: Vec::new(),
             globals: Vec::new(),
@@ -330,6 +346,11 @@ impl Vm {
                     #[cfg(debug_assertions)]
                     let pre_sys: [Value; REGISTER_COUNT] = self.r;
 
+                    // Publish the current pc before the call: a syscall that
+                    // traps reads vm.pc to locate itself, but the loop only
+                    // writes self.pc on exit, so without this the trap would
+                    // carry a stale pc and render at the wrong source span.
+                    self.pc = pc;
                     (*syscalls.add(idx as usize))(self as *mut Vm);
 
                     #[cfg(debug_assertions)]
@@ -344,9 +365,14 @@ impl Vm {
                     if std::hint::unlikely(self.config.backtrace) {
                         self.backtrace.pop();
                     }
-                    let Some(frame) = self.frames.pop() else {
-                        unreachable!("Op::Ret had no frame to drop, this is a compiler bug");
-                    };
+
+                    // PERF: fully replacing the pop with just an access and a length truncation?
+
+                    // The synthetic root frame from Vm::new guarantees the
+                    // stack is never empty here, so the pop always yields a
+                    // frame.
+                    let frame = unsafe { self.frames.pop().unwrap_unchecked() };
+
                     // See Op::Push: every function must leave the spill
                     // stack at the depth it found it. Catches arg-shuffle
                     // cycle paths or caller-save spills that forgot to

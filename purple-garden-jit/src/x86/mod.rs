@@ -282,11 +282,28 @@ pub fn compile_func(func: &ir::Func<'_>, out: &mut Vec<Insn>) -> Option<()> {
     for instr in &block.instructions {
         match instr {
             ir::Instr::Noop => {}
+            ir::Instr::LoadConst { dst, value, .. } => {
+                let Some(dst) = reg(dst.id) else {
+                    unreachable!();
+                };
+                let imm = match value {
+                    purple_garden_ir::Const::False => 0,
+                    purple_garden_ir::Const::True => 1,
+                    purple_garden_ir::Const::Int(i)
+                        if (*i as i32) < i32::MAX && (*i as i32) > i32::MIN =>
+                    {
+                        *i as i32
+                    }
+                    _ => skip!(func, "const not true, false or i32::MIN < i < i32::MAX"),
+                };
+
+                out.push(Insn::MovImm { dst, imm })
+            }
             ir::Instr::BinImm {
                 op, dst, lhs, imm, ..
             } => {
                 let (Some(d), Some(l)) = (reg(dst.id), reg(*lhs)) else {
-                    skip!(func, "unallocated operand in {instr:?}");
+                    unreachable!();
                 };
                 let imm = *imm;
                 match op {

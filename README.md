@@ -15,7 +15,7 @@ io.println("Hello World")
   optimisations (both IR and peephole), see the
   [ir](./purple-garden/src/opt/ir/mod.rs) and
   [opt](./purple-garden/src/opt/bc/mod.rs) modules
-- JIT compilation for runtime hotspots, or for everything with `--native`
+- JIT compilation for the whole input by default
 - Embeddable with minimal friction for Rust interop via `vm::BuiltinFn`, see
   [help/embed](./purple-garden/help/embed.txt)
 - Memory efficient, with an optional garbage collector and a minimal standard

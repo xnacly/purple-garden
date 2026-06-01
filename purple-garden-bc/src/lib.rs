@@ -12,7 +12,10 @@ use purple_garden_shared::config::Config;
 
 #[derive(Debug, Clone)]
 pub enum CcFunc<'fun> {
-    Bc { name: &'fun str, pc: usize },
+    Bc {
+        name: &'fun str,
+        pc: usize,
+    },
     /// `idx` is the syscall slot the JIT page was injected at; `insns` is the
     /// emitted native instruction list, owned here and kept for `-D` (the
     /// executable bytes live only in the page).
@@ -47,6 +50,11 @@ pub struct Cc<'cc> {
     pub strings: Interner<&'cc str>,
     pub std_fns: Interner<BuiltinFn>,
     pub functions: HashMap<Id, CcFunc<'cc>>,
+    /// pc of the entry trampoline when the entry function (`Id(0)`) compiled to
+    /// native. The VM enters the entry directly rather than through a Call, so a
+    /// native entry gets a `Sys <native>; Ret` stub here that `finalize` points
+    /// `vm.pc` at. `None` when the entry stays bytecode-dispatched.
+    entry_pc: Option<usize>,
     /// `pc_to_span[pc]` is the byte offset into the source of the AST node
     /// that produced the op at `pc`. Threaded into Vm by `Cc::finalize` so
     /// runtime traps can be rendered with <file:line:col>. Parallel to
@@ -212,6 +220,7 @@ impl<'cc> Cc<'cc> {
             strings: Interner::new(),
             std_fns: Interner::new(),
             functions: HashMap::new(),
+            entry_pc: None,
             block_map: Vec::new(),
             regalloc: Ralloc::default(),
             cur_span: 0,
@@ -302,22 +311,24 @@ impl<'cc> Cc<'cc> {
         self.regalloc.rebuild(&live_set, &arg_hints);
 
         // The JIT reuses the register assignment computed above instead of
-        // recomputing its own. The entry function stays bytecode-dispatched:
-        // the VM enters it directly, never through a Sys, so it can't go native.
-        let native = match native {
-            Some(_) if fun.id == ir::Id(0) => {
-                purple_garden_shared::trace!(
-                    "[bc::Cc::cc][{}] native skipped: entry must remain bytecode-dispatched",
-                    fun.name
-                );
-                None
-            }
-            other => other,
-        };
+        // recomputing its own. A native function is injected as a syscall and
+        // reached via the `Sys` each Call site lowers to. The entry function
+        // has no Call site (the VM enters it directly at its pc), so a native
+        // entry needs a `Sys <native>; Ret` trampoline at that pc to dispatch
+        // into the injected body; `finalize` points `vm.pc` at it.
+        let is_root = fun.id == ir::Id(0);
         if let Some(native) = native
             && self.try_compile_native(fun, native)?
         {
             purple_garden_shared::trace!("[bc::Cc::cc][{}] native", fun.name);
+            if is_root {
+                let Some(&CcFunc::Native { idx, .. }) = self.functions.get(&fun.id) else {
+                    unreachable!("try_compile_native inserts a Native CcFunc on success");
+                };
+                self.entry_pc = Some(self.buf.len());
+                self.emit(Op::Sys { idx });
+                self.emit(Op::Ret);
+            }
             self.live_set = live_set;
             self.arg_hints = arg_hints;
             return Ok(());
@@ -337,7 +348,6 @@ impl<'cc> Cc<'cc> {
             .find(|b| !b.tombstone)
             .map(|b| fun.params(b.params).len())
             .unwrap_or(0) as u8;
-        let is_root = fun.id == ir::Id(0);
         let lo = if is_root {
             max_reg.saturating_add(1)
         } else {
@@ -387,6 +397,16 @@ impl<'cc> Cc<'cc> {
                 .map(|b| b.id);
             self.term(fun, block.term.as_ref(), next_block, lo, max_reg);
             pos += 2; // terminator row
+        }
+
+        // The entry/root function is entered directly by the VM, not through a
+        // Call, so its last block falls off the end of the buffer instead of
+        // returning. Emit a trailing Ret so a syscall trap raised at top level
+        // is drained: pending_trap is only checked on Op::Ret. The synthetic
+        // root frame in Vm::new gives this Ret a frame to pop.
+        if is_root && !matches!(self.buf.last(), Some(Op::Ret | Op::Tail { .. })) {
+            self.emit_epilogue(lo, max_reg);
+            self.emit(Op::Ret);
         }
 
         for i in pc..self.buf.len() {
@@ -705,6 +725,8 @@ impl<'cc> Cc<'cc> {
             }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let dst = self.ensure_register(dst.id);
+                // PERF: add a fastpath for booleans, since rn they touch the globals file, which is
+                // unnecessary
                 if let Const::Int(i) = value
                     && *i < i32::MAX as i64
                 {
@@ -943,10 +965,11 @@ impl<'cc> Cc<'cc> {
 
     pub fn finalize(self, config: VmConfig) -> (Vm, Vec<BuiltinFn>, DebugInfo) {
         let mut vm = Vm::new(config);
+        // A native entry runs from its trampoline pc; a bytecode entry from its
+        // own first op.
         vm.pc = self
-            .functions
-            .get(&ir::Id(0))
-            .and_then(CcFunc::pc)
+            .entry_pc
+            .or_else(|| self.functions.get(&ir::Id(0)).and_then(CcFunc::pc))
             .unwrap_or_default();
 
         let (string_data, strings) = self.strings.into_arena();
