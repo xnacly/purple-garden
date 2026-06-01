@@ -21,7 +21,7 @@ mod arch;
 #[path = "aarch64/mod.rs"]
 mod arch;
 pub mod mem;
-#[cfg(any(test, target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 mod regalloc;
 
 pub use arch::Insn;

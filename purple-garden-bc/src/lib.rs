@@ -12,7 +12,10 @@ use purple_garden_shared::config::Config;
 
 #[derive(Debug, Clone)]
 pub enum CcFunc<'fun> {
-    Bc { name: &'fun str, pc: usize },
+    Bc {
+        name: &'fun str,
+        pc: usize,
+    },
     /// `idx` is the syscall slot the JIT page was injected at; `insns` is the
     /// emitted native instruction list, owned here and kept for `-D` (the
     /// executable bytes live only in the page).
