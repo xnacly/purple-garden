@@ -129,7 +129,7 @@ mod tests {
         self as ir, BinOp, Block, Id, Instr, Terminator, TypeId, constant::Const, ptype::Type,
     };
 
-    fn int(id: u32) -> TypeId<'_> {
+    fn int(id: u32) -> TypeId<'static> {
         TypeId {
             id: Id(id),
             ty: Type::Int,

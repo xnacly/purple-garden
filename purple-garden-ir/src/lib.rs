@@ -576,7 +576,7 @@ impl Func<'_> {
 mod tests {
     use super::{ptype::Type, *};
 
-    fn type_id(id: u32) -> TypeId {
+    fn type_id(id: u32) -> TypeId<'static> {
         TypeId {
             id: Id(id),
             ty: Type::Int,
