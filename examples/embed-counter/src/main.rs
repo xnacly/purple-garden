@@ -1,60 +1,32 @@
-use std::sync::atomic::AtomicI64;
+#[path = "counter.rs"]
+mod counter_pkg;
 
-use purple_garden::{FromVm, IntoVm, Pg, PgType, pg_pkg};
-
-#[derive(PgType, FromVm, IntoVm, Debug)]
-/// A thread safe counter
-pub struct Counter {
-    value: AtomicI64,
-}
-
-/// The purple garden wrapper for Counter, usable in purple-garden like so:
-///
-/// ```garden
-/// import ("counter" "testing")
-///
-/// let c = counter.new(0)
-/// counter.increment(c)
-/// counter.increment(c)
-/// counter.increment(c)
-/// testing.assert(counter.get(c) == 3)
-/// ```
-#[pg_pkg]
-pub mod counter {
-    use super::Counter;
-    use std::sync::atomic::{AtomicI64, Ordering};
-
-    /// Creates a new counter.
-    pub fn new(value: i64) -> Counter {
-        Counter {
-            value: AtomicI64::new(value),
-        }
-    }
-
-    /// Increments counter and returns the new value.
-    pub fn increment(counter: &Counter) -> i64 {
-        counter.value.fetch_add(1, Ordering::SeqCst) + 1
-    }
-
-    /// Returns the current counter value.
-    pub fn get(counter: &Counter) -> i64 {
-        counter.value.load(Ordering::SeqCst)
-    }
-}
+use purple_garden::Pg;
 
 fn main() {
+    // Load the Purple Garden source that will be compiled and executed.
     let input = include_bytes!("counter.garden");
+
+    // Register the embedded package so the compiler can resolve `import "counter"` and `counter.*`
+    // references in the script against the Rust implementation below.
     let mut program = Pg::new()
         .with_stdlib()
-        .with_lib(&counter::PACKAGE)
+        .with_lib(&counter_pkg::counter::PACKAGE)
         .compile(input)
         .expect("counter script should compile");
 
+    // Run the script and decode its return value as a borrowed Rust handle.
+    // The script returns the `Counter` it created, so the VM result is the
+    // same opaque foreign type we defined with `PgType`, `FromVm`, and `IntoVm`.
     let counter = program
-        .run_take::<&Counter>()
+        .run_take::<&counter_pkg::Counter>()
         .expect("counter script should run");
 
-    counter::increment(counter);
-    assert_eq!(counter::get(counter), 4);
+    // Call back into the embedded package from Rust to show that the value
+    // returned by Purple Garden can still be used by native code.
+    counter_pkg::counter::increment(counter);
+    assert_eq!(counter_pkg::counter::get(counter), 4);
+
+    // Print the Rust-side view of the foreign value after the round-trip.
     println!("{:#?}", counter);
 }

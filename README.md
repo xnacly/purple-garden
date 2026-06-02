@@ -17,7 +17,9 @@ io.println("Hello World")
   [opt](./purple-garden/src/opt/bc/mod.rs) modules
 - JIT compilation for the whole input by default
 - Embeddable with minimal friction for Rust interop via `vm::BuiltinFn`, see
-  [help/embed](./purple-garden/help/embed.txt)
+  [help/embed](./purple-garden/help/embed.txt) for a guide and
+  [examples/embed-counter/](./examples/embed-counter/) for its real world
+  counter part.
 - Memory efficient, with an optional garbage collector and a minimal standard
   library, see [std](./purple-garden/src/std/)
 

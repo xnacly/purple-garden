@@ -104,11 +104,13 @@ pub enum Node<'node> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeExpr<'te> {
-    /// atom types like: int, str, double, bool and void
+    /// atom types like: Int, Str, Double, Bool and Void
     Atom(Token<'te>),
-    /// optionals work via ?<`type_expr`>
+    /// foreign types like `Foreign<Counter>`
+    Foreign(Token<'te>),
+    /// optionals work via `Option<type_expr>`
     Option(Box<TypeExpr<'te>>),
-    /// Array via [<type>]
+    /// arrays work via `Array<type_expr>`
     Array(Box<TypeExpr<'te>>),
 }
 
@@ -116,8 +118,9 @@ impl Display for TypeExpr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TypeExpr::Atom(token) => write!(f, "{}", token.t.as_str()),
-            TypeExpr::Option(type_expr) => write!(f, "?{type_expr}"),
-            TypeExpr::Array(type_expr) => write!(f, "[{type_expr}]"),
+            TypeExpr::Foreign(token) => write!(f, "Foreign<{}>", token.t.as_str()),
+            TypeExpr::Option(type_expr) => write!(f, "Option<{type_expr}>"),
+            TypeExpr::Array(type_expr) => write!(f, "Array<{type_expr}>"),
         }
     }
 }

@@ -8,10 +8,10 @@ Purple garden provides the primitive types any programmer would expect:
 
 Furthermore, there are four non primitive types:
 
-    Option
-    Array
+    Option<T>
+    Array<T>
     Struct
-    Foreign
+    Foreign<identifier>
 
 
 Binary operators
@@ -40,10 +40,10 @@ Casts
 The `as` keyword converts between primitive types. Only these
 directions are permitted:
 
-    int    as double        widens to f64
-    double as int           truncates toward zero
-    int    as bool          0 becomes false, anything else true
-    bool   as int           false becomes 0, true becomes 1
+    Int    as Double        widens to f64
+    Double as Int           truncates toward zero
+    Int    as Bool          0 becomes false, anything else true
+    Bool   as Int           false becomes 0, true becomes 1
 
 Bool and Double cannot be cast in either direction. Going from Bool to
 Double has no useful purpose (write `1.0` / `0.0` directly), and Double

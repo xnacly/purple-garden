@@ -1,10 +1,10 @@
-# fib — both the doubly-recursive and tail-recursive variants in one
+# fib; both the doubly-recursive and tail-recursive variants in one
 # file, since they're commonly compared. Doubly-recursive stresses call
 # overhead and arg-shuffle per recursion; tail-recursive becomes a hot
 # loop after the tailcall pass.
 import "testing"
 
-fn fib(n:int) int {
+fn fib(n:Int) Int {
     match {
         n == 0 { 0 }
         n == 1 { 1 }
@@ -12,7 +12,7 @@ fn fib(n:int) int {
     }
 }
 
-fn fibt(n:int a:int b:int) int {
+fn fibt(n:Int a:Int b:Int) Int {
     match {
         n == 0 { a }
         n == 1 { b }

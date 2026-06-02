@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::{Const, Func, Id, Instr, Terminator, TypeId};
 
-impl Display for TypeId {
+impl Display for TypeId<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{:?}", self.id.0, self.ty)
     }
@@ -124,7 +124,7 @@ impl Display for Func<'_> {
             ") -> {} {{",
             self.ret
                 .as_ref()
-                .map_or_else(|| "void".to_string(), std::string::ToString::to_string)
+                .map_or_else(|| "Void".to_string(), std::string::ToString::to_string)
         )?;
 
         for block in &self.blocks {

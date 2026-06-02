@@ -1,11 +1,11 @@
-fn arithmetics(a:int b:int c:int d:int) int {
+fn arithmetics(a:Int b:Int c:Int d:Int) Int {
     let x1 = a + b * c - d
     let x2 = x1 + c * d - b
     let x3 = x2 + x1 * a - c
     let x4 = x3 + x2 * b - d
     x4 + x1 % 2
 }
-fn divs(a:int b:int) int {
+fn divs(a:Int b:Int) Int {
     a / 7 + b % 3
 }
 arithmetics(2 3 4 5)

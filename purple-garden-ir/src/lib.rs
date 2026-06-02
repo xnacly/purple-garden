@@ -59,9 +59,9 @@ pub struct ParamsId(pub u32);
 pub const EMPTY_PARAMS: ParamsId = ParamsId(0);
 
 #[derive(Debug, Clone)]
-pub struct TypeId {
+pub struct TypeId<'t> {
     pub id: Id,
-    pub ty: Type,
+    pub ty: Type<'t>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -87,7 +87,7 @@ pub enum BinOp {
 pub enum Instr<'i> {
     Bin {
         op: BinOp,
-        dst: TypeId,
+        dst: TypeId<'i>,
         lhs: Id,
         rhs: Id,
         /// Byte offset into the source of the originating AST node. Threaded
@@ -97,32 +97,32 @@ pub enum Instr<'i> {
     },
     BinImm {
         op: BinOp,
-        dst: TypeId,
+        dst: TypeId<'i>,
         lhs: Id,
         imm: i32,
         span: u32,
     },
     LoadConst {
-        dst: TypeId,
+        dst: TypeId<'i>,
         value: Const<'i>,
         span: u32,
     },
     Call {
-        dst: TypeId,
+        dst: TypeId<'i>,
         func: Id,
         args: Vec<Id>,
         span: u32,
     },
     Sys {
-        dst: TypeId,
+        dst: TypeId<'i>,
         path: &'i str,
         name: &'i str,
         args: Vec<Id>,
         span: u32,
     },
     Cast {
-        dst: TypeId,
-        from: TypeId,
+        dst: TypeId<'i>,
+        from: TypeId<'i>,
         span: u32,
     },
     Noop,
@@ -208,7 +208,7 @@ pub struct Func<'f> {
     pub id: Id,
     pub span: u32,
     pub params: Vec<Id>,
-    pub ret: Option<Type>,
+    pub ret: Option<Type<'f>>,
     pub blocks: Vec<Block<'f>>,
     /// Owning storage for every block-param / Branch-arg / Jump-arg
     /// `[Id]` list this function references. Together with [`ParamsId`]
@@ -238,7 +238,7 @@ impl<'f> Func<'f> {
     /// this; a `Func` whose pool is empty would make `EMPTY_PARAMS` an
     /// out-of-bounds lookup.
     #[must_use]
-    pub fn new(name: &'f str, id: Id, params: Vec<Id>, ret: Option<Type>) -> Self {
+    pub fn new(name: &'f str, id: Id, params: Vec<Id>, ret: Option<Type<'f>>) -> Self {
         Self {
             name,
             id,

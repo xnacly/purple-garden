@@ -64,11 +64,11 @@ fn as_keyword_type(inner: &str) -> Option<Type<'_>> {
         "let" => Type::Let,
         "fn" => Type::Fn,
         "match" => Type::Match,
-        "str" => Type::Str,
-        "int" => Type::Int,
-        "double" => Type::Double,
-        "bool" => Type::Bool,
-        "void" => Type::Void,
+        "Str" => Type::Str,
+        "Int" => Type::Int,
+        "Double" => Type::Double,
+        "Bool" => Type::Bool,
+        "Void" => Type::Void,
         _ => return None,
     })
 }
@@ -348,11 +348,11 @@ mod tests {
     let
     fn
     match
-    str
-    int
-    double
-    bool
-    void
+    Str
+    Int
+    Double
+    Bool
+    Void
     "),
             vec![
                 Type::Import,

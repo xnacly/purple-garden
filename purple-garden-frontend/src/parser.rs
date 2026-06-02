@@ -159,7 +159,14 @@ impl<'p> Parser<'p> {
         }
         self.expect(Type::BraceRight)?;
 
-        let return_type = self.parse_type()?;
+        let return_type = if self.cur().t == Type::CurlyLeft {
+            TypeExpr::Atom(Token {
+                start: self.cur().start,
+                t: Type::Void,
+            })
+        } else {
+            self.parse_type()?
+        };
 
         let mut body = vec![];
         self.expect(Type::CurlyLeft)?;
@@ -367,27 +374,57 @@ impl<'p> Parser<'p> {
     fn parse_type(&mut self) -> Result<TypeExpr<'p>, PgError> {
         let Token { t, .. } = self.cur();
         Ok(match t {
-            // Optionals: ?<type>
-            Type::Question => {
-                self.advance()?;
-                TypeExpr::Option(Box::new(self.parse_type()?))
-            }
-            // Arrays: [<type>]
-            Type::BraketLeft => {
-                self.advance()?;
-                let inner = Box::new(self.parse_type()?);
-                self.expect(Type::BraketRight)?;
-                TypeExpr::Array(inner)
-            }
             // Atom types
             Type::Str | Type::Int | Type::Bool | Type::Void | Type::Double => {
                 let tt = TypeExpr::Atom(self.cur().clone());
                 self.advance()?;
                 tt
             }
+            // Foreign types: Foreign<Counter>
+            Type::Ident("Foreign") => {
+                self.advance()?;
+                self.expect(Type::LessThan)?;
+                if self.cur().t == Type::GreaterThan {
+                    return Err(PgError::with_msg(
+                        "Expected a foreign type name after `Foreign<`",
+                        &self.cur,
+                    ));
+                }
+                let inner = self.expect_ident()?;
+                self.expect(Type::GreaterThan)?;
+                TypeExpr::Foreign(inner)
+            }
+            // Optionals: Option<type>
+            Type::Ident("Option") => {
+                self.advance()?;
+                self.expect(Type::LessThan)?;
+                if self.cur().t == Type::GreaterThan {
+                    return Err(PgError::with_msg(
+                        "Expected a type after `Option<`",
+                        &self.cur,
+                    ));
+                }
+                let inner = Box::new(self.parse_type()?);
+                self.expect(Type::GreaterThan)?;
+                TypeExpr::Option(inner)
+            }
+            // Arrays: Array<type>
+            Type::Ident("Array") => {
+                self.advance()?;
+                self.expect(Type::LessThan)?;
+                if self.cur().t == Type::GreaterThan {
+                    return Err(PgError::with_msg(
+                        "Expected a type after `Array<`",
+                        &self.cur,
+                    ));
+                }
+                let inner = Box::new(self.parse_type()?);
+                self.expect(Type::GreaterThan)?;
+                TypeExpr::Array(inner)
+            }
             _ => {
                 return Err(PgError::with_msg(
-                    "Bad type, expected either type, ?type, [type] or type[type], where type is str, int, double, bool or void",
+                    "Bad type, expected one of: Str, Int, Double, Bool, Void, Foreign<name>, Option<type> or Array<type>",
                     self.cur(),
                 ));
             }
@@ -429,31 +466,64 @@ mod tests {
 
     table_parse_types! {
         parse_types_atom,
-        (int,"int",TypeExpr::Atom(mk_tok!(Type::Int)))
-        (double,"double", TypeExpr::Atom(mk_tok!(Type::Double)))
-        (str,"str", TypeExpr::Atom(mk_tok!(Type::Str)))
-        (bool,"bool", TypeExpr::Atom(mk_tok!(Type::Bool)))
-        (void,"void", TypeExpr::Atom(mk_tok!(Type::Void)))
+        (int,"Int",TypeExpr::Atom(mk_tok!(Type::Int)))
+        (double,"Double", TypeExpr::Atom(mk_tok!(Type::Double)))
+        (str,"Str", TypeExpr::Atom(mk_tok!(Type::Str)))
+        (bool,"Bool", TypeExpr::Atom(mk_tok!(Type::Bool)))
+        (void,"Void", TypeExpr::Atom(mk_tok!(Type::Void)))
     }
 
     table_parse_types! {
         parse_types_option,
-        (int,"?int", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Int)))))
-        (double,"?double", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Double)))))
-        (str,"?str", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Str)))))
-        (bool,"?bool", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Bool)))))
-        (void,"?void", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))
-        (double_wrapped,"??void", TypeExpr::Option(Box::new(TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))))
+        (int,"Option<Int>", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Int)))))
+        (double,"Option<Double>", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Double)))))
+        (str,"Option<Str>", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Str)))))
+        (bool,"Option<Bool>", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Bool)))))
+        (void,"Option<Void>", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))
+        (double_wrapped,"Option<Option<Void>>", TypeExpr::Option(Box::new(TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))))
     }
 
     table_parse_types! {
         parse_types_array,
-        (int,"[int]", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Int)))))
-        (double,"[double]", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Double)))))
-        (str,"[str]", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Str)))))
-        (bool,"[bool]", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Bool)))))
-        (void,"[void]", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))
-        (double_wrapped,"[[void]]", TypeExpr::Array(Box::new(TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))))
+        (int,"Array<Int>", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Int)))))
+        (double,"Array<Double>", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Double)))))
+        (str,"Array<Str>", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Str)))))
+        (bool,"Array<Bool>", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Bool)))))
+        (void,"Array<Void>", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))
+        (double_wrapped,"Array<Array<Void>>", TypeExpr::Array(Box::new(TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))))
+    }
+
+    table_parse_types! {
+        parse_types_foreign,
+        (
+            counter,
+            "Foreign<Counter>",
+            TypeExpr::Foreign(mk_tok!(Type::Ident("Counter")))
+        )
+    }
+
+    #[test]
+    fn empty_foreign_has_specific_error() {
+        let l = Lexer::new(b"Foreign<>");
+        let mut p = Parser::new(l).unwrap();
+        let err = p.parse_type().unwrap_err();
+        assert_eq!(err.msg, "Expected a foreign type name after `Foreign<`");
+    }
+
+    #[test]
+    fn empty_option_has_specific_error() {
+        let l = Lexer::new(b"Option<>");
+        let mut p = Parser::new(l).unwrap();
+        let err = p.parse_type().unwrap_err();
+        assert_eq!(err.msg, "Expected a type after `Option<`");
+    }
+
+    #[test]
+    fn empty_array_has_specific_error() {
+        let l = Lexer::new(b"Array<>");
+        let mut p = Parser::new(l).unwrap();
+        let err = p.parse_type().unwrap_err();
+        assert_eq!(err.msg, "Expected a type after `Array<`");
     }
 
     macro_rules! table {
@@ -489,12 +559,35 @@ mod tests {
             }]
         )
         (
-            function,
-            "fn zero_args() void {}",
+            function_with_explicit_void,
+            "fn zero_args() {}",
             vec![Node::Fn {
                 name: mk_tok!(Type::Ident("zero_args")),
                 args: vec![],
                 return_type: TypeExpr::Atom(mk_tok!(Type::Void)),
+                body: vec![],
+            }]
+        )
+        (
+            function,
+            "fn implicit_void() {}",
+            vec![Node::Fn {
+                name: mk_tok!(Type::Ident("implicit_void")),
+                args: vec![],
+                return_type: TypeExpr::Atom(mk_tok!(Type::Void)),
+                body: vec![],
+            }]
+        )
+        (
+            foreign_function,
+            "fn new(value: Foreign<Counter>) Foreign<Counter> {}",
+            vec![Node::Fn {
+                name: mk_tok!(Type::Ident("new")),
+                args: vec![(
+                    mk_tok!(Type::Ident("value")),
+                    TypeExpr::Foreign(mk_tok!(Type::Ident("Counter"))),
+                )],
+                return_type: TypeExpr::Foreign(mk_tok!(Type::Ident("Counter"))),
                 body: vec![],
             }]
         )

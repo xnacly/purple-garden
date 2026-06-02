@@ -4,7 +4,7 @@
 # one huge IR Func (thousands of SSA ids).
 import "testing"
 
-fn classify(n:int) int {
+fn classify(n:Int) Int {
     match {
         n == 0 { 1 }
         n == 1 { 8 }
@@ -1010,7 +1010,7 @@ fn classify(n:int) int {
     }
 }
 
-fn sweep(i:int n:int acc:int) int {
+fn sweep(i:Int n:Int acc:Int) Int {
     match {
         i == n { acc }
         { sweep(i+1 n acc + classify(i)) }

@@ -28,20 +28,20 @@ pub fn id_from_node(node: &Node) -> Option<usize> {
 }
 
 #[derive(Debug, Clone)]
-struct FunctionType {
-    args: Vec<Type>,
-    ret: Type,
+struct FunctionType<'t> {
+    args: Vec<(&'t str, Type<'t>)>,
+    ret: Type<'t>,
 }
 
-impl Display for FunctionType {
+impl Display for FunctionType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(")?;
-        for (i, t) in self.args.iter().enumerate() {
+        for (i, (name, t)) in self.args.iter().enumerate() {
+            write!(f, "{name}: {t}")?;
             if i + 1 == self.args.len() {
-                write!(f, "{t}")?;
-            } else {
-                write!(f, "{t} ")?;
+                continue;
             }
+            write!(f, " ")?;
         }
         write!(f, ") -> {}", self.ret)?;
         Ok(())
@@ -51,13 +51,13 @@ impl Display for FunctionType {
 #[derive(Default, Debug)]
 pub struct Typechecker<'t> {
     /// Node id -> Type. Indexed by id; Node ids are dense from the parser.
-    map: Vec<Option<Type>>,
+    map: Vec<Option<Type<'t>>>,
     /// scope stack; innermost frame last; lookups walk from top to bottom
-    env: Vec<HashMap<&'t str, Type>>,
+    env: Vec<HashMap<&'t str, Type<'t>>>,
     /// map a function name to its type(s)
-    functions: HashMap<&'t str, FunctionType>,
+    functions: HashMap<&'t str, FunctionType<'t>>,
     /// map a pkg name to a map of its methods and their types
-    packages: HashMap<&'t str, HashMap<&'t str, FunctionType>>,
+    packages: HashMap<&'t str, HashMap<&'t str, FunctionType<'t>>>,
     libs: Vec<&'t Pkg>,
 }
 
@@ -75,11 +75,11 @@ impl<'t> Typechecker<'t> {
         self
     }
 
-    fn env_get(&self, k: &str) -> Option<&Type> {
+    fn env_get(&self, k: &str) -> Option<&Type<'t>> {
         self.env.iter().rev().find_map(|frame| frame.get(k))
     }
 
-    fn env_insert(&mut self, k: &'t str, v: Type) {
+    fn env_insert(&mut self, k: &'t str, v: Type<'t>) {
         self.env.last_mut().unwrap().insert(k, v);
     }
 
@@ -92,22 +92,22 @@ impl<'t> Typechecker<'t> {
     }
 
     #[must_use]
-    pub fn finalise(self) -> Vec<Option<Type>> {
+    pub fn finalise(self) -> Vec<Option<Type<'t>>> {
         self.map
     }
 
-    fn set_type(&mut self, id: usize, t: Type) {
+    fn set_type(&mut self, id: usize, t: Type<'t>) {
         if id >= self.map.len() {
             self.map.resize(id + 1, None);
         }
         self.map[id] = Some(t);
     }
 
-    fn already_checked(&'t self, node: &Node) -> Option<&'t Type> {
-        self.map.get(id_from_node(node)?).and_then(|o| o.as_ref())
+    fn already_checked(&self, node: &Node) -> Option<Type<'t>> {
+        self.map.get(id_from_node(node)?).and_then(|o| o.as_ref()).cloned()
     }
 
-    fn fuse(op: &lex::Token, lhs: &Type, rhs: &Type) -> Result<Type, PgError> {
+    fn fuse(op: &lex::Token, lhs: &Type<'t>, rhs: &Type<'t>) -> Result<Type<'t>, PgError> {
         Ok(match op.t {
             // arithmetics
             lex::Type::Plus | lex::Type::Minus | lex::Type::Asteriks | lex::Type::Slash => {
@@ -218,7 +218,7 @@ impl<'t> Typechecker<'t> {
         })
     }
 
-    fn cast(at: &lex::Token, i: &Type, o: &Type) -> Result<Type, PgError> {
+    fn cast(at: &lex::Token, i: &Type<'t>, o: &Type<'t>) -> Result<Type<'t>, PgError> {
         Ok(match (i, o) {
             (Type::Int, Type::Double) => Type::Double,
             (Type::Double | Type::Bool, Type::Int) => Type::Int,
@@ -229,7 +229,7 @@ impl<'t> Typechecker<'t> {
         })
     }
 
-    fn block_type(&mut self, nodes: &'t [Node]) -> Result<Type, PgError> {
+    fn block_type(&mut self, nodes: &'t [Node]) -> Result<Type<'t>, PgError> {
         self.env.push(HashMap::new());
         let mut last_type = Type::Void;
         for node in nodes {
@@ -239,9 +239,9 @@ impl<'t> Typechecker<'t> {
         Ok(last_type)
     }
 
-    pub fn node(&mut self, node: &'t Node) -> Result<Type, PgError> {
+    pub fn node(&mut self, node: &'t Node) -> Result<Type<'t>, PgError> {
         if let Some(t) = self.already_checked(node) {
-            return Ok(t.clone());
+            return Ok(t);
         }
 
         Ok(match node {
@@ -341,13 +341,14 @@ impl<'t> Typechecker<'t> {
                     else {
                         unreachable!()
                     };
+                    let inner_name = *inner_name;
 
                     let t = crate::type_from_type_expr(arg_type);
                     self.env_insert(inner_name, t.clone());
-                    typed_arguments.push(t);
+                    typed_arguments.push((inner_name, t));
                 }
 
-                let ret: Type = crate::type_from_type_expr(return_type);
+                let ret: Type<'t> = crate::type_from_type_expr(return_type);
                 let f_type = FunctionType {
                     args: typed_arguments,
                     ret: ret.clone(),
@@ -454,7 +455,7 @@ impl<'t> Typechecker<'t> {
 
                 for (i, provided_node) in args.iter().enumerate() {
                     let provided_type = self.node(provided_node)?;
-                    let expected_type = &fun.args[i];
+                    let expected_type = &fun.args[i].1;
 
                     if expected_type != &provided_type {
                         return Err(PgError::with_msg(
@@ -478,11 +479,11 @@ impl<'t> Typechecker<'t> {
                 let case_count = cases.len();
 
                 // all branches MUST resolve to the same type :)
-                let mut branch_types: Vec<Option<(&Token, Type)>> =
+                let mut branch_types: Vec<Option<(&Token, Type<'t>)>> =
                     vec![const { None }; case_count];
 
                 for (i, ((condition_token, condition), body)) in cases.iter().enumerate() {
-                    let condition_type: Type = self.node(condition)?;
+                    let condition_type: Type<'t> = self.node(condition)?;
 
                     if condition_type != Type::Bool {
                         return Err(PgError::with_msg(
@@ -537,25 +538,29 @@ impl<'t> Typechecker<'t> {
 
                     purple_garden_shared::trace!("ty: resolved pkg `{}`", pkg.name);
 
+                    let mut registered = HashMap::new();
+                    for f in pkg.fns {
+                        let f_type = FunctionType {
+                            args: f
+                                .arg_names
+                                .iter()
+                                .copied()
+                                .zip(f.args.iter().cloned())
+                                .collect(),
+                            ret: f.ret.clone(),
+                        };
+                        purple_garden_shared::trace!(
+                            "[ir::typecheck::Typechecker::node][{}.{}]: {}",
+                            pkg.name,
+                            f.name,
+                            f_type
+                        );
+                        registered.insert(f.name, f_type);
+                    }
+
                     self.packages.insert(
                         pkg.name,
-                        pkg.fns
-                            .iter()
-                            .map(|f| {
-                                purple_garden_shared::trace!(
-                                    "ty: registered `{}.{}`",
-                                    pkg.name,
-                                    f.name
-                                );
-                                (
-                                    f.name,
-                                    FunctionType {
-                                        args: f.args.to_vec(),
-                                        ret: f.ret.clone(),
-                                    },
-                                )
-                            })
-                            .collect(),
+                        registered,
                     );
                 }
 

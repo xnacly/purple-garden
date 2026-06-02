@@ -15,7 +15,7 @@ pub fn pg_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Derives the Purple Garden type metadata for a Rust struct.
 ///
-/// Structs derive to `Type::Foreign("StructName")`. Primitive types already
+/// Structs derive to `Type::Foreign<StructName>`. Primitive types already
 /// implement this in the runtime.
 #[proc_macro_derive(PgType)]
 pub fn derive_pg_type(item: TokenStream) -> TokenStream {

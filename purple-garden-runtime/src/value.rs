@@ -108,7 +108,7 @@ impl From<f64> for Value {
 }
 
 pub trait PgType {
-    const TYPE: Type;
+    const TYPE: Type<'static>;
 }
 
 /// Decode a Rust argument from a VM register.
@@ -129,15 +129,15 @@ pub trait IntoVm {
 }
 
 impl PgType for &str {
-    const TYPE: Type = Type::Str;
+    const TYPE: Type<'static> = Type::Str;
 }
 
 impl<T: PgType + ?Sized> PgType for &T {
-    const TYPE: Type = T::TYPE;
+    const TYPE: Type<'static> = T::TYPE;
 }
 
 impl<T: PgType + ?Sized> PgType for &mut T {
-    const TYPE: Type = T::TYPE;
+    const TYPE: Type<'static> = T::TYPE;
 }
 
 impl<'vm> FromVm<'vm> for &'vm str {
@@ -154,7 +154,7 @@ impl IntoVm for &str {
 }
 
 impl PgType for String {
-    const TYPE: Type = Type::Str;
+    const TYPE: Type<'static> = Type::Str;
 }
 
 impl<'vm> FromVm<'vm> for String {
@@ -171,7 +171,7 @@ impl IntoVm for String {
 }
 
 impl PgType for i64 {
-    const TYPE: Type = Type::Int;
+    const TYPE: Type<'static> = Type::Int;
 }
 
 impl<'vm> FromVm<'vm> for i64 {
@@ -187,7 +187,7 @@ impl IntoVm for i64 {
 }
 
 impl PgType for f64 {
-    const TYPE: Type = Type::Double;
+    const TYPE: Type<'static> = Type::Double;
 }
 
 impl<'vm> FromVm<'vm> for f64 {
@@ -203,7 +203,7 @@ impl IntoVm for f64 {
 }
 
 impl PgType for bool {
-    const TYPE: Type = Type::Bool;
+    const TYPE: Type<'static> = Type::Bool;
 }
 
 impl<'vm> FromVm<'vm> for bool {
@@ -219,7 +219,7 @@ impl IntoVm for bool {
 }
 
 impl PgType for () {
-    const TYPE: Type = Type::Void;
+    const TYPE: Type<'static> = Type::Void;
 }
 
 impl<'vm> FromVm<'vm> for () {

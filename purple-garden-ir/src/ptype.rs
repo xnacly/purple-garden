@@ -5,24 +5,24 @@ use crate::Const;
 
 /// Compile time type system,
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum Type {
+pub enum Type<'a> {
     Void,
     Bool,
     Int,
     Double,
     Str,
-    Option(Box<Type>),
-    Array(Box<Type>),
+    Option(Box<Type<'a>>),
+    Array(Box<Type<'a>>),
     // Foreign type for handling opaque rust data feed into the vm runtime
     //
-    // which is useful for something like Foreign("counter") vs
-    // Foreign("player") in the typesystem, meaning functions defined on the former can not be
+    // which is useful for something like Foreign<counter> vs
+    // Foreign<player> in the typesystem, meaning functions defined on the former can not be
     // called on the latter, resulting in a type error
-    Foreign(&'static str),
+    Foreign(&'a str),
     // TODO: add Record type for structuring data together as fields
 }
 
-impl Display for Type {
+impl Display for Type<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Type::Void => write!(f, "Void"),
@@ -37,7 +37,7 @@ impl Display for Type {
     }
 }
 
-impl From<Const<'_>> for Type {
+impl<'a> From<Const<'a>> for Type<'a> {
     fn from(value: Const<'_>) -> Self {
         match value {
             Const::True | Const::False => Self::Bool,

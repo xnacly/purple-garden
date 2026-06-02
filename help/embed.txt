@@ -66,12 +66,15 @@ Write normal Rust functions inside a `#[pg_pkg]` module:
 The macro generates `counter::PACKAGE`, VM wrappers, docs, argument names, type
 metadata, and the `pure` flag.
 
-Standard library calls are selected at compile time from the argument types.
-The public name stays stable, so `io.println(x)` can map to a concrete
-`println_*` variant without exposing those implementation names in user code.
-That same substitution path is what will let `testing.assert_eq` stay a single
-source-level function while the compiler picks the typed backend entry.
+If you want to ship package signatures for tooling, the generated package
+metadata can be rendered into an `extern.garden` file during a build step. The
+example crate does this in `build.rs`, writing `extern.garden` next to the
+crate so editors and LSP tooling can load it without a custom runtime flag.
+The generated file mirrors Purple Garden function declarations and uses `#!`
+doc lines from the Rust package and function docs.
 
+The runtime API also exposes `Pkg::extern_source()` for callers that want to
+generate the file themselves.
 
 Calling from Purple Garden
 --------------------------

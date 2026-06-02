@@ -42,7 +42,7 @@ fn expand_pg_type(api: &Path, input: &DeriveInput) -> TokenStream2 {
 
     quote! {
         impl #impl_generics #api::PgType for #ident #ty_generics #where_clause {
-            const TYPE: #api::Type = #api::Type::Foreign(#foreign);
+            const TYPE: #api::Type<'static> = #api::Type::Foreign(#foreign);
         }
     }
 }

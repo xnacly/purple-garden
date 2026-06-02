@@ -24,7 +24,7 @@ pub enum Type<'t> {
 
     /// compile time known string
     S(&'t str),
-    /// double
+    /// Double
     D(&'t str),
     /// integer
     I(&'t str),
@@ -106,11 +106,11 @@ impl<'t> Type<'t> {
             Type::Fn => "fn",
             Type::Match => "match",
             Type::As => "as",
-            Type::Str => "str",
-            Type::Int => "int",
-            Type::Double => "double",
-            Type::Bool => "bool",
-            Type::Void => "void",
+            Type::Str => "Str",
+            Type::Int => "Int",
+            Type::Double => "Double",
+            Type::Bool => "Bool",
+            Type::Void => "Void",
         }
     }
 }

@@ -2,11 +2,11 @@
 # modulo, multiplication.
 import "testing"
 
-fn is_even(n:int) bool {
+fn is_even(n:Int) Bool {
     n % 2 == 0
 }
 
-fn collatz_steps(n:int acc:int) int {
+fn collatz_steps(n:Int acc:Int) Int {
     match {
         n == 1 { acc }
         is_even(n) { collatz_steps(n / 2  acc + 1) }
@@ -14,7 +14,7 @@ fn collatz_steps(n:int acc:int) int {
     }
 }
 
-fn sum_steps(i:int n:int acc:int) int {
+fn sum_steps(i:Int n:Int acc:Int) Int {
     match {
         i > n { acc }
         { sum_steps(i + 1  n  acc + collatz_steps(i 0)) }

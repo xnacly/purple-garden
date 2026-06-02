@@ -3,7 +3,7 @@ use purple_garden_ir::{self as ir, BinOp, Id, Instr, TypeId, constant::Const};
 
 /// Fold single-use integer constants into integer binops while the IR
 /// still knows SSA use counts.
-pub fn imm_fold<'fold, 's>(fun: &'fold mut ir::Func<'s>, scratch: &'fold mut super::Scratch<'s>) {
+pub fn imm_fold<'fun, 's>(fun: &'fun mut ir::Func<'s>, scratch: &mut super::Scratch<'s>) {
     scratch.reset();
 
     for (bi, block) in fun.blocks.iter().enumerate() {
@@ -39,7 +39,7 @@ pub fn imm_fold<'fold, 's>(fun: &'fold mut ir::Func<'s>, scratch: &'fold mut sup
             continue;
         }
         for ii in 0..fun.blocks[bi].instructions.len() {
-            let Some((op, lhs, def, imm, dst, span)) =
+            let Some((op, lhs, def_block, def_instr, imm, dst, span)) =
                 try_fold(&fun.blocks[bi].instructions[ii], scratch)
             else {
                 continue;
@@ -58,7 +58,7 @@ pub fn imm_fold<'fold, 's>(fun: &'fold mut ir::Func<'s>, scratch: &'fold mut sup
                 imm,
                 span,
             };
-            fun.blocks[def.block as usize].instructions[def.instr as usize] = Instr::Noop;
+            fun.blocks[def_block as usize].instructions[def_instr as usize] = Instr::Noop;
         }
     }
 }
@@ -71,9 +71,9 @@ fn bump_if_const(scratch: &mut Scratch<'_>, id: Id) {
 }
 
 fn try_fold<'scratch>(
-    instr: &Instr<'_>,
-    scratch: &'scratch Scratch<'_>,
-) -> Option<(BinOp, Id, ConstDef<'scratch>, i32, TypeId, u32)> {
+    instr: &Instr<'scratch>,
+    scratch: &Scratch<'_>,
+) -> Option<(BinOp, Id, u32, u32, i32, TypeId<'scratch>, u32)> {
     let Instr::Bin {
         op,
         dst,
@@ -118,7 +118,7 @@ fn try_fold<'scratch>(
     // fit; the original Bin + LoadConst stay intact and run as-is.
     let imm = i32::try_from(value).ok()?;
 
-    Some((new_op, new_lhs, def, imm, dst.clone(), *span))
+    Some((new_op, new_lhs, def.block, def.instr, imm, dst.clone(), *span))
 }
 
 #[cfg(test)]
@@ -129,7 +129,7 @@ mod tests {
         self as ir, BinOp, Block, Id, Instr, Terminator, TypeId, constant::Const, ptype::Type,
     };
 
-    fn int(id: u32) -> TypeId {
+    fn int(id: u32) -> TypeId<'_> {
         TypeId {
             id: Id(id),
             ty: Type::Int,

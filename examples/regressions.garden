@@ -5,7 +5,7 @@ import "testing"
 # block's parameter register lands on cond's register, JmpF reads the
 # wrong value and the wrong branch fires. Reproduces when the first arm
 # returns a function parameter (so its shuffle dst matches cond's reg).
-fn pick(n:int a:int) int {
+fn pick(n:Int a:Int) Int {
     match {
         n == 0 { a }
         { 999 }
@@ -20,7 +20,7 @@ testing.assert(pick(7 33) == 999)
 # live_set coordinate, the spill check misses r1 and the recursive call
 # clobbers it. Result is wrong unless r1 is actually pushed across the
 # nested call.
-fn fib(n:int) int {
+fn fib(n:Int) Int {
     match {
         n == 0 { 0 }
         n == 1 { 1 }
@@ -33,7 +33,7 @@ testing.assert(fib(10) == 55)
 # regalloc places the next call's args in r1, r0; a swap relative to r0, r1.
 # Sequential `mov` would clobber a still-needed source (and mov_merge would
 # then collapse the swap into nops).
-fn diff(a:int b:int) int { a - b }
+fn diff(a:Int b:Int) Int { a - b }
 testing.assert(true)
 testing.assert(diff(10 3) == 7)
 testing.assert(diff(100 1) == 99)
@@ -41,13 +41,13 @@ testing.assert(diff(100 1) == 99)
 # block_map collisions across functions: ir block ids restart at 0 per
 # function, so a shared block_map patched at finalize would route a
 # branch in the first function to a block in the second.
-fn first_branch(n:int) int {
+fn first_branch(n:Int) Int {
     match {
         n == 0 { 1 }
         { 2 }
     }
 }
-fn second_branch(n:int) int {
+fn second_branch(n:Int) Int {
     match {
         n == 0 { 10 }
         { 20 }
@@ -62,16 +62,16 @@ testing.assert(second_branch(1) == 20)
 # (ISub/DSub against a freshly emitted zero const) and `+x` to a no-op,
 # so the regression catches an accidental wrong-op routing or a missing
 # zero const for either numeric type.
-fn neg(x:int) int { 0 - x }
+fn neg(x:Int) Int { 0 - x }
 testing.assert(-5 == neg(5))
 testing.assert(-0 == 0)
 testing.assert(+7 == 7)
 testing.assert(- - 3 == 3)
 testing.assert(-(2 + 3) == neg(5))
-fn double_neg(x:int) int { -x * 2 }
+fn double_neg(x:Int) Int { -x * 2 }
 testing.assert(double_neg(4) == neg(8))
 testing.assert(double_neg(-5) == 10)
-# unary on Double — no DEq, so use ordering
+# unary on Double; no DEq, so use ordering
 testing.assert(-1.5 < 0.0)
 testing.assert(+1.5 > 0.0)
 testing.assert(- - 2.5 > 0.0)
@@ -79,7 +79,7 @@ testing.assert(- - 2.5 > 0.0)
 # Typechecker scope stack: function params must be visible inside match arm
 # conditions and bodies; let bindings in one arm must not leak into siblings;
 # outer let must be reachable from nested arms; inner let shadows outer binding.
-fn scope_pick(x:int y:int) int {
+fn scope_pick(x:Int y:Int) Int {
     match {
         x == 0 { y }
         { x + y }
@@ -88,7 +88,7 @@ fn scope_pick(x:int y:int) int {
 testing.assert(scope_pick(0 42) == 42)
 testing.assert(scope_pick(3 7) == 10)
 
-fn scope_sign(x:int) int {
+fn scope_sign(x:Int) Int {
     match {
         x > 0 {
             let pos = x + x
@@ -103,7 +103,7 @@ fn scope_sign(x:int) int {
 testing.assert(scope_sign(5) == 10)
 testing.assert(scope_sign(-3) == 3)
 
-fn scope_base(x:int) int {
+fn scope_base(x:Int) Int {
     let base = 100
     match {
         x == 0 { base }
@@ -113,7 +113,7 @@ fn scope_base(x:int) int {
 testing.assert(scope_base(0) == 100)
 testing.assert(scope_base(5) == 105)
 
-fn scope_shadow(x:int) int {
+fn scope_shadow(x:Int) Int {
     match {
         x > 0 {
             let x = 0 - x

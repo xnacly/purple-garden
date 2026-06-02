@@ -41,8 +41,8 @@ struct LowerCtx<'lower> {
 pub struct Lower<'lower> {
     ctx: LowerCtx<'lower>,
     functions: Vec<Func<'lower>>,
-    func_name_to_id: HashMap<&'lower str, (Id, Option<ptype::Type>)>,
-    types: Vec<Option<ptype::Type>>,
+    func_name_to_id: HashMap<&'lower str, (Id, Option<ptype::Type<'lower>>)>,
+    types: Vec<Option<ptype::Type<'lower>>>,
     packages: HashMap<&'lower str, (&'lower Pkg, HashMap<&'lower str, &'lower pstd::Fn>)>,
     libs: Vec<&'lower Pkg>,
 }
@@ -570,7 +570,7 @@ impl<'lower> Lower<'lower> {
     /// Lower [ast] into a list of Func nodes, the entry point is always `entry`
     pub fn ir_from(
         mut self,
-        ast: &[Node<'lower>],
+        ast: &'lower [Node<'lower>],
     ) -> Result<
         (
             Vec<Func<'lower>>,

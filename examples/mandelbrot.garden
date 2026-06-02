@@ -1,9 +1,9 @@
 # Mandelbrot escape counter along a horizontal slice.
-# Mixed double arithmetic + integer loop + branchy comparisons.
+# Mixed Double arithmetic + integer loop + branchy comparisons.
 # Each pixel iterates until |z|^2 > 4 or `max` reached, then we sum.
 import "testing"
 
-fn mandel_iter(zr:double zi:double cr:double ci:double i:int max:int) int {
+fn mandel_iter(zr:Double zi:Double cr:Double ci:Double i:Int max:Int) Int {
     match {
         i == max { max }
         zr*zr + zi*zi > 4.0 { i }
@@ -11,10 +11,10 @@ fn mandel_iter(zr:double zi:double cr:double ci:double i:int max:int) int {
     }
 }
 
-fn slice_sum(i:int n:int max:int acc:int) int {
+fn slice_sum(i:Int n:Int max:Int acc:Int) Int {
     match {
         i == n { acc }
-        { slice_sum(i+1 n max acc + mandel_iter(0.0 0.0 ((i as double) / 100.0 - 1.5) 0.0 0 max)) }
+        { slice_sum(i+1 n max acc + mandel_iter(0.0 0.0 ((i as Double) / 100.0 - 1.5) 0.0 0 max)) }
     }
 }
 

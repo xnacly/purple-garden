@@ -11,7 +11,7 @@ use ast::TypeExpr;
 use purple_garden_ir::ptype;
 
 #[must_use]
-pub fn type_from_atom_token_type(t: &lex::Type<'_>) -> ptype::Type {
+pub fn type_from_atom_token_type<'a>(t: &lex::Type<'a>) -> ptype::Type<'a> {
     match t {
         lex::Type::S(_) => ptype::Type::Str,
         lex::Type::D(_) => ptype::Type::Double,
@@ -22,7 +22,7 @@ pub fn type_from_atom_token_type(t: &lex::Type<'_>) -> ptype::Type {
 }
 
 #[must_use]
-pub fn type_from_lex_type(t: lex::Type<'_>) -> ptype::Type {
+pub fn type_from_lex_type<'a>(t: lex::Type<'a>) -> ptype::Type<'a> {
     match t {
         lex::Type::Int => ptype::Type::Int,
         lex::Type::Double => ptype::Type::Double,
@@ -34,9 +34,10 @@ pub fn type_from_lex_type(t: lex::Type<'_>) -> ptype::Type {
 }
 
 #[must_use]
-pub fn type_from_type_expr(value: &TypeExpr<'_>) -> ptype::Type {
+pub fn type_from_type_expr<'a>(value: &TypeExpr<'a>) -> ptype::Type<'a> {
     match value {
         TypeExpr::Atom(token) => type_from_lex_type(token.t),
+        TypeExpr::Foreign(token) => ptype::Type::Foreign(token.t.as_str()),
         TypeExpr::Option(type_expr) => {
             ptype::Type::Option(Box::new(type_from_type_expr(type_expr.as_ref())))
         }

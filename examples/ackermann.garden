@@ -1,9 +1,9 @@
-# Ackermann function — classic explosive recursion.
+# Ackermann function; classic explosive recursion.
 # Stresses call/return, caller-save spill, and arg shuffles.
 # ack(3, 8) = 2045, ack(3, 9) = 4093.
 import "testing"
 
-fn ack(m:int n:int) int {
+fn ack(m:Int n:Int) Int {
     match {
         m == 0 { n + 1 }
         n == 0 { ack(m-1 1) }

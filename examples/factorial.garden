@@ -2,7 +2,7 @@
 # a hot loop that exercises arg-shuffle + the i64 overflow point.
 import "testing"
 
-fn factorial(n:int a:int) int {
+fn factorial(n:Int a:Int) Int {
     match {
         n == 0 { a }
         { factorial(n-1 n*a) }

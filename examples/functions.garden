@@ -1,9 +1,8 @@
-# vim: filetype=python
 import "testing"
 
-# compute n! with acumulator a
-# see https://en.wikipedia.org/wiki/Factorial
-fn factorial(n:int a:int) int {
+#! compute n! with acumulator a
+#! see https://en.wikipedia.org/wiki/Factorial
+fn factorial(n:Int a:Int) Int {
     match {
         n == 0 { a }
         { factorial(n-1 n*a) }
@@ -11,7 +10,7 @@ fn factorial(n:int a:int) int {
 }
 testing.assert(factorial(16 1) == 20922789888000)
 
-fn fibt(n:int a:int b:int) int {
+fn fibt(n:Int a:Int b:Int) Int {
     match {
         n == 0 { a }
         n == 1 { b } 
@@ -20,7 +19,7 @@ fn fibt(n:int a:int b:int) int {
 }
 testing.assert(fibt(35 0 1) == 9227465)
 
-fn fib(n:int) int {
+fn fib(n:Int) Int {
     match {
         n == 0 { 0 }
         n == 1 { 1 }
@@ -31,10 +30,10 @@ fn fib(n:int) int {
 testing.assert(fib(35) == 9227465)
 
 # tail calls 
-fn inc(x:int) int {x + 1}
-fn call1(x:int) int {inc(x)}
-fn call2(x:int) int {call1(x)}
-fn call3(x:int) int {call2(x)}
-fn call4(x:int) int {call3(x)}
-fn call5(x:int) int {call4(x)}
+fn inc(x:Int) Int {x + 1}
+fn call1(x:Int) Int {inc(x)}
+fn call2(x:Int) Int {call1(x)}
+fn call3(x:Int) Int {call2(x)}
+fn call4(x:Int) Int {call3(x)}
+fn call5(x:Int) Int {call4(x)}
 testing.assert(call5(0) == 1)
