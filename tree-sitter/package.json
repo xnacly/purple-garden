@@ -1,0 +1,17 @@
+{
+  "name": "tree-sitter",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for Purple Garden",
+  "main": "grammar.js",
+  "keywords": [
+    "tree-sitter",
+    "garden",
+    "purple-garden"
+  ],
+  "license": "MIT",
+  "files": [
+    "grammar.js",
+    "queries",
+    "src"
+  ]
+}
