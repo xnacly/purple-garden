@@ -34,28 +34,32 @@ fn programs() -> Vec<(String, Vec<u8>)> {
     out
 }
 
-const CFG: &Config = &{
+fn cfg() -> Config {
     let mut c = Config::default();
     c.no_jit = true;
     c
-};
-const CFG_OPT: &Config = &{
+}
+
+fn cfg_opt() -> Config {
     let mut c = Config::default();
     c.opt = 1;
     c.no_jit = true;
     c
-};
-const CFG_OPT_JIT: &Config = &{
+}
+
+fn cfg_opt_jit() -> Config {
     let mut c = Config::default();
     c.opt = 1;
     c
-};
+}
 
 pub fn suite(c: &mut Criterion) {
     for (name, source) in programs() {
         // Validate once at startup so codegen bugs panic loudly here, not
         // silently affect the timing.
-        let mut probe = purple_garden::new(CFG_OPT_JIT, &source)
+        let mut probe = purple_garden::Pg::new()
+            .config(cfg_opt_jit())
+            .compile(&source)
             .unwrap_or_else(|e| panic!("compile failed for {name}: {e:?}"));
         probe
             .run()
@@ -63,21 +67,33 @@ pub fn suite(c: &mut Criterion) {
 
         c.bench_function(&format!("{name}_compile"), |b| {
             b.iter(|| {
-                purple_garden::new(CFG, &source).unwrap();
+                purple_garden::Pg::new()
+                    .config(cfg())
+                    .compile(&source)
+                    .unwrap();
             });
         });
         c.bench_function(&format!("{name}_compile_opt"), |b| {
             b.iter(|| {
-                purple_garden::new(CFG_OPT, &source).unwrap();
+                purple_garden::Pg::new()
+                    .config(cfg_opt())
+                    .compile(&source)
+                    .unwrap();
             });
         });
         c.bench_function(&format!("{name}_compile_opt_jit"), |b| {
             b.iter(|| {
-                purple_garden::new(CFG_OPT_JIT, &source).unwrap();
+                purple_garden::Pg::new()
+                    .config(cfg_opt_jit())
+                    .compile(&source)
+                    .unwrap();
             });
         });
         c.bench_function(&format!("{name}_run"), |b| {
-            let mut program = purple_garden::new(CFG, &source).unwrap();
+            let mut program = purple_garden::Pg::new()
+                .config(cfg())
+                .compile(&source)
+                .unwrap();
             let entry = program.entry;
             b.iter(|| {
                 program.vm.pc = entry;
@@ -85,7 +101,10 @@ pub fn suite(c: &mut Criterion) {
             });
         });
         c.bench_function(&format!("{name}_run_opt"), |b| {
-            let mut program = purple_garden::new(CFG_OPT, &source).unwrap();
+            let mut program = purple_garden::Pg::new()
+                .config(cfg_opt())
+                .compile(&source)
+                .unwrap();
             let entry = program.entry;
             b.iter(|| {
                 program.vm.pc = entry;
@@ -93,7 +112,10 @@ pub fn suite(c: &mut Criterion) {
             });
         });
         c.bench_function(&format!("{name}_run_opt_jit"), |b| {
-            let mut program = purple_garden::new(CFG_OPT_JIT, &source).unwrap();
+            let mut program = purple_garden::Pg::new()
+                .config(cfg_opt_jit())
+                .compile(&source)
+                .unwrap();
             let entry = program.entry;
             b.iter(|| {
                 program.vm.pc = entry;

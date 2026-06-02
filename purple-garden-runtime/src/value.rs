@@ -111,7 +111,10 @@ pub trait PgType {
     const TYPE: Type;
 }
 
-/// Decode a Rust value from the VM argument registers.
+/// Decode a Rust argument from a VM register.
+///
+/// Implemented for primitives and derived for foreign structs. Package authors
+/// normally rely on `#[derive(FromVm)]` instead of calling this directly.
 pub trait FromVm<'vm>: Sized {
     fn from_vm(vm: &'vm Vm, idx: usize) -> Self;
 }
@@ -120,12 +123,21 @@ pub trait FromVm<'vm>: Sized {
 ///
 /// The VM is available for return types that need runtime allocation, such as
 /// strings. The caller still decides where the returned [`Value`] is written.
+/// Package authors normally rely on `#[derive(IntoVm)]` for foreign structs.
 pub trait IntoVm {
     fn into_vm(self, vm: &mut Vm) -> Value;
 }
 
 impl PgType for &str {
     const TYPE: Type = Type::Str;
+}
+
+impl<T: PgType + ?Sized> PgType for &T {
+    const TYPE: Type = T::TYPE;
+}
+
+impl<T: PgType + ?Sized> PgType for &mut T {
+    const TYPE: Type = T::TYPE;
 }
 
 impl<'vm> FromVm<'vm> for &'vm str {

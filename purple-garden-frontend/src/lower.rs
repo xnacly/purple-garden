@@ -8,9 +8,9 @@ use crate::{
     typecheck::id_from_node,
 };
 use purple_garden_ir::{
-    BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype,
+    ptype, BinOp, Block, Const, Func, Id, Instr, Terminator, TypeId, EMPTY_PARAMS,
 };
-use purple_garden_runtime::BuiltinFn;
+use purple_garden_runtime::{BuiltinFn, Pkg};
 use purple_garden_std as pstd;
 
 #[derive(Default)]
@@ -43,13 +43,28 @@ pub struct Lower<'lower> {
     functions: Vec<Func<'lower>>,
     func_name_to_id: HashMap<&'lower str, (Id, Option<ptype::Type>)>,
     types: Vec<Option<ptype::Type>>,
-    packages: HashMap<&'lower str, (&'lower pstd::Pkg, HashMap<&'lower str, &'lower pstd::Fn>)>,
+    packages: HashMap<&'lower str, (&'lower Pkg, HashMap<&'lower str, &'lower pstd::Fn>)>,
+    libs: Vec<&'lower Pkg>,
 }
 
 impl<'lower> Lower<'lower> {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    #[must_use]
+    pub fn with_libs(mut self, libs: Vec<&'lower Pkg>) -> Self {
+        self.libs = libs;
+        self
+    }
+
+    fn resolve_pkg(&self, query: &'lower str) -> Option<&'lower Pkg> {
+        self.libs
+            .iter()
+            .copied()
+            .find(|pkg| pkg.name == query)
+            .or_else(|| pstd::resolve_pkg(query))
     }
 
     fn emit(&mut self, i: Instr<'lower>) {
@@ -404,7 +419,7 @@ impl<'lower> Lower<'lower> {
                     };
 
                     // the type checker already checks all packages are valid
-                    let Some(pkg) = pstd::resolve_pkg(as_str) else {
+                    let Some(pkg) = self.resolve_pkg(as_str) else {
                         unreachable!()
                     };
 
@@ -563,7 +578,7 @@ impl<'lower> Lower<'lower> {
         ),
         PgError,
     > {
-        let mut typechecker = crate::typecheck::Typechecker::new();
+        let mut typechecker = crate::typecheck::Typechecker::new().with_libs(self.libs.clone());
         for node in ast {
             let _t = typechecker.node(node)?;
         }
@@ -575,10 +590,19 @@ impl<'lower> Lower<'lower> {
         let entry = self.new_block();
         self.switch_to_block(entry);
 
+        let mut last = None;
+        let last_span = entry_span(ast).unwrap_or(0);
         for node in ast {
-            let _ = &self.lower_node(node)?;
+            last = self.lower_node(node)?;
             // reset to the main entry point block to keep emitting nodes into the correct conext
             self.switch_to_block(entry);
+        }
+
+        if last.is_some() {
+            self.block_mut(self.ctx.block).term = Some(Terminator::Return {
+                value: last,
+                span: last_span,
+            });
         }
 
         self.functions.push(self.ctx.func);

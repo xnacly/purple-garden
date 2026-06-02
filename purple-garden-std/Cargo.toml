@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 purple-garden-ir = { path = "../purple-garden-ir" }
+purple-garden-macros = { path = "../purple-garden-macros" }
 purple-garden-runtime = { path = "../purple-garden-runtime" }
 
 [features]

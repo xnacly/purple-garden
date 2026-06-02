@@ -1,7 +1,6 @@
 use criterion::{BatchSize, Criterion};
-use purple_garden::Program;
-use purple_garden_runtime::{VmConfig, op::Op};
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use purple_garden_runtime::{op::Op, Vm, VmConfig};
+use rand::{rngs::StdRng, RngExt, SeedableRng};
 
 mod common;
 
@@ -17,11 +16,11 @@ pub fn bench_uniform_dispatch(c: &mut Criterion) {
                 for _ in 0..OP_CODE_SIZE {
                     bc.push(Op::Nop);
                 }
-                let mut p = Program::new(CONFIG);
-                p.vm.bytecode = bc;
-                p
+                let mut vm = Vm::new(CONFIG);
+                vm.bytecode = bc;
+                vm
             },
-            |mut program| program.run(),
+            |mut vm| vm.run(&[]),
             BatchSize::LargeInput,
         );
     });
@@ -107,11 +106,11 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
                     let idx = rng.random_range(0..RANDOM_OPS.len());
                     bc.push(RANDOM_OPS[idx]);
                 }
-                let mut p = Program::new(CONFIG);
-                p.vm.bytecode = bc;
-                p
+                let mut vm = Vm::new(CONFIG);
+                vm.bytecode = bc;
+                vm
             },
-            |mut program| program.run(),
+            |mut vm| vm.run(&[]),
             BatchSize::LargeInput,
         );
     });

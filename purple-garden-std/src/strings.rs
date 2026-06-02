@@ -1,23 +1,22 @@
-use purple_garden_runtime::IntoVm;
+pub use self::strings::PACKAGE;
 
-crate::builtin! {
-    pub fn repeat(vm) {
-        let arg0 = vm.r(0).as_str(vm.strings(), vm.string_data());
-        let arg1 = vm.r(1).as_int();
-        let repeated = arg0.repeat(arg1 as usize);
-        let ret = repeated.into_vm(vm);
-        *vm.r_mut(0) = ret;
+#[purple_garden_macros::pg_pkg(runtime = purple_garden_runtime)]
+/// Package strings implements functions manipulating strings
+pub mod strings {
+    /// reports whether needle appears in hay
+    #[purple_garden_macros::pg_fn(pure)]
+    pub fn contains(hay: &str, needle: &str) -> bool {
+        hay.contains(needle)
     }
 
-    pub fn contains(vm) {
-        let arg0 = vm.r(0).as_str(vm.strings(), vm.string_data());
-        let arg1 = vm.r(1).as_str(vm.strings(), vm.string_data());
-        let ret = arg0.contains(arg1).into_vm(vm);
-        *vm.r_mut(0) = ret;
+    /// repeats s n times
+    pub fn repeat(s: &str, n: i64) -> String {
+        s.repeat(n as usize)
     }
 
-    pub fn len(vm) {
-        let ret = (vm.r(0).as_str(vm.strings(), vm.string_data()).len() as i64).into_vm(vm);
-        *vm.r_mut(0) = ret;
+    /// returns the length of s in bytes
+    #[purple_garden_macros::pg_fn(pure)]
+    pub fn len(s: &str) -> i64 {
+        s.len() as i64
     }
 }

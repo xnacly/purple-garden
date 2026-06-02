@@ -1,20 +1,5 @@
-use purple_garden_ir::ptype::Type;
 pub use purple_garden_runtime::{Fn, Pkg};
 
-macro_rules! builtin {
-    ($(pub fn $name:ident($vm:ident) $body:block)*) => {
-        $(
-            pub unsafe extern "C" fn $name($vm: *mut purple_garden_runtime::Vm) {
-                let $vm = unsafe { &mut *$vm };
-                $body
-            }
-        )*
-    };
-}
-
-pub(crate) use builtin;
-
-mod conv;
 mod io;
 mod strings;
 mod testing;
@@ -37,103 +22,7 @@ pub fn resolve_pkg(query: &str) -> Option<&Pkg> {
 }
 
 pub static STD: &[Pkg] = &[
-    Pkg {
-        name: "io",
-        doc: "Package io provides rudimentary I/O primitives,
-like writing and reading from file descriptors",
-        pkgs: &[],
-        fns: &[
-            Fn {
-                name: "println",
-                doc: "writes s to stdout, with a newline appended",
-                ptr: crate::io::println,
-                pure: false,
-                arg_names: &["s"],
-                args: &[Type::Str],
-                ret: Type::Void,
-            },
-            Fn {
-                name: "print",
-                ptr: crate::io::print,
-                doc: "writes s to stdout",
-                pure: false,
-                arg_names: &["s"],
-                args: &[Type::Str],
-                ret: Type::Void,
-            },
-        ],
-    },
-    Pkg {
-        name: "strings",
-        doc: "Package strings implements functions manipulating strings",
-        pkgs: &[],
-        fns: &[
-            Fn {
-                name: "contains",
-                doc: "reports whether needle appears in hay",
-                ptr: crate::strings::contains,
-                pure: true,
-                arg_names: &["hay", "needle"],
-                args: &[Type::Str, Type::Str],
-                ret: Type::Bool,
-            },
-            Fn {
-                name: "repeat",
-                doc: "repeats s n times",
-                ptr: crate::strings::repeat,
-                pure: false,
-                arg_names: &["s", "n"],
-                args: &[Type::Str, Type::Int],
-                ret: Type::Str,
-            },
-            Fn {
-                name: "len",
-                doc: "returns the length of s in bytes",
-                ptr: crate::strings::len,
-                pure: true,
-                arg_names: &["s"],
-                args: &[Type::Str],
-                ret: Type::Int,
-            },
-        ],
-    },
-    Pkg {
-        name: "conv",
-        doc: "Package conv includes helpers for roundtripping various datatypes",
-        pkgs: &[],
-        fns: &[
-            Fn {
-                name: "from_int",
-                doc: "converts n to Str",
-                ptr: crate::conv::from_int,
-                pure: true,
-                arg_names: &["n"],
-                args: &[Type::Int],
-                ret: Type::Str,
-            },
-            Fn {
-                name: "from_double",
-                doc: "converts d to Str",
-                ptr: crate::conv::from_double,
-                pure: true,
-                arg_names: &["d"],
-                args: &[Type::Double],
-                ret: Type::Str,
-            },
-        ],
-    },
-    Pkg {
-        name: "testing",
-        doc: "Package testing includes helpers for runtime assertions and the likes",
-        pkgs: &[],
-        fns: &[Fn {
-            name: "assert",
-            doc: "asserts condition is true",
-            ptr: crate::testing::assert,
-            pure: false,
-            arg_names: &["condition"],
-            args: &[Type::Bool],
-            ret: Type::Void,
-        }],
-    },
+    io::PACKAGE,
+    strings::PACKAGE,
+    testing::PACKAGE,
 ];

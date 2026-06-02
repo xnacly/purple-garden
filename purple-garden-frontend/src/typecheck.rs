@@ -6,6 +6,7 @@ use crate::{
     lex::{self, Token},
 };
 use purple_garden_ir::ptype::Type;
+use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
 
 #[must_use]
@@ -57,6 +58,7 @@ pub struct Typechecker<'t> {
     functions: HashMap<&'t str, FunctionType>,
     /// map a pkg name to a map of its methods and their types
     packages: HashMap<&'t str, HashMap<&'t str, FunctionType>>,
+    libs: Vec<&'t Pkg>,
 }
 
 impl<'t> Typechecker<'t> {
@@ -67,12 +69,26 @@ impl<'t> Typechecker<'t> {
         s
     }
 
+    #[must_use]
+    pub fn with_libs(mut self, libs: Vec<&'t Pkg>) -> Self {
+        self.libs = libs;
+        self
+    }
+
     fn env_get(&self, k: &str) -> Option<&Type> {
         self.env.iter().rev().find_map(|frame| frame.get(k))
     }
 
     fn env_insert(&mut self, k: &'t str, v: Type) {
         self.env.last_mut().unwrap().insert(k, v);
+    }
+
+    fn resolve_pkg(&self, query: &'t str) -> Option<&'t Pkg> {
+        self.libs
+            .iter()
+            .copied()
+            .find(|pkg| pkg.name == query)
+            .or_else(|| pstd::resolve_pkg(query))
     }
 
     #[must_use]
@@ -512,7 +528,7 @@ impl<'t> Typechecker<'t> {
                         unreachable!();
                     };
 
-                    let Some(pkg) = pstd::resolve_pkg(pkg_name) else {
+                    let Some(pkg) = self.resolve_pkg(pkg_name) else {
                         return Err(PgError::with_msg(
                             format!("Wasnt able to find a package named `{pkg_name}`"),
                             pkg_tok,

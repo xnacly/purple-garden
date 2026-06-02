@@ -1,151 +1,112 @@
-Purple garden was created to be fast, but also to be embeddable and to be used
-in embedding contexts like scripting for game engines, http servers and the
-likes.
+Purple Garden packages can be exposed from ordinary Rust functions. Most users
+should only write real Rust types and annotate a module; the macro builds the VM
+wrappers and package metadata.
 
 
-Defining the Rust type
-----------------------
+Defining a foreign type
+-----------------------
 
-Lets consider a simple counter, we will make it thread safe via AtomicI64:
+Use the derives for Rust types that should cross the VM boundary as opaque
+foreign handles:
 
-    use crate::vm::{Anomaly, Value, Vm};
     use std::sync::atomic::{AtomicI64, Ordering};
+    use purple_garden::{FromVm, IntoVm, PgType};
 
+    #[derive(PgType, FromVm, IntoVm)]
     pub struct Counter {
         value: AtomicI64,
     }
 
     impl Counter {
-        pub fn new() -> Self {
-            Self {
-                value: AtomicI64::new(0),
-            }
+        fn new(value: i64) -> Self {
+            Self { value: AtomicI64::new(value) }
         }
 
-        pub fn inc(&self) -> i64 {
+        fn increment(&self) -> i64 {
             self.value.fetch_add(1, Ordering::SeqCst) + 1
         }
 
-        pub fn get(&self) -> i64 {
+        fn get(&self) -> i64 {
             self.value.load(Ordering::SeqCst)
         }
     }
 
+The derives map `Counter` to `Foreign<Counter>`. The VM stores an opaque handle;
+Purple Garden code cannot inspect the fields directly.
 
-Wrapping for the VM
--------------------
 
-The next step is to create wrappers for Counter::{new, inc, get}:
+Defining a package
+------------------
 
-    pub fn new(vm: &mut Vm) -> Result<Value, Anomaly> {
-        let counter = Box::new(Counter::new());
-        Ok(Value::from_ptr(Box::into_raw(counter)))
-    }
+Write normal Rust functions inside a `#[pg_pkg]` module:
 
-    pub fn increment(vm: &mut Vm) -> Result<Value, Anomaly> {
-        let ptr = vm.r(0).as_ptr::<Counter>();
+    use purple_garden::{pg_fn, pg_pkg};
 
-        if ptr.is_null() {
-            return Err(Anomaly::Msg {
-                msg: "counter.increment: null pointer",
-                pc: vm.pc,
-            });
+    #[pg_pkg]
+    pub mod counter {
+        use super::Counter;
+
+        /// Creates a new counter.
+        pub fn new(value: i64) -> Counter {
+            Counter::new(value)
         }
 
-        let counter = unsafe { &*ptr };
-
-        let val = counter.inc();
-        Ok(Value::from(val))
-    }
-
-    pub fn get(vm: &mut Vm) -> Result<Value, Anomaly> {
-        let ptr = vm.r(0).as_ptr::<Counter>();
-
-        if ptr.is_null() {
-            return Err(Anomaly::Msg {
-                msg: "counter.get: null pointer",
-                pc: vm.pc,
-            });
+        /// Increments counter and returns the new value.
+        pub fn increment(counter: &Counter) -> i64 {
+            counter.increment()
         }
 
-        let counter = unsafe { &*ptr };
-        Ok(Value::from(counter.get()))
+        /// Returns the current counter value.
+        #[pg_fn(pure)]
+        pub fn get(counter: &Counter) -> i64 {
+            counter.get()
+        }
     }
 
+The macro generates `counter::PACKAGE`, VM wrappers, docs, argument names, type
+metadata, and the `pure` flag.
 
-Registering as a package
-------------------------
-
-This counter now needs these methods registered in the vm as the "counter"
-package:
-
-// TODO: add the macro for doing this easier once its done
-
-    Pkg {
-        name: "counter",
-        doc: "heap-backed counter objects",
-        pkgs: &[],
-        fns: &[
-            Fn {
-                name: "new",
-                doc: "creates a new counter",
-                ptr: crate::std::counter::new,
-                args: &[],
-                ret: Type::Foreign("counter"),
-            },
-            Fn {
-                name: "increment",
-                doc: "increments counter and returns value",
-                ptr: crate::std::counter::increment,
-                args: &[Type::Foreign("counter")],
-                ret: Type::Void,
-            },
-            Fn {
-                name: "get",
-                doc: "returns current counter value",
-                ptr: crate::std::counter::get,
-                args: &[Type::Foreign("counter")],
-                ret: Type::Int,
-            },
-        ],
-    },
+Standard library calls are selected at compile time from the argument types.
+The public name stays stable, so `io.println(x)` can map to a concrete
+`println_*` variant without exposing those implementation names in user code.
+That same substitution path is what will let `testing.assert_eq` stay a single
+source-level function while the compiler picks the typed backend entry.
 
 
-Calling from purple garden
+Calling from Purple Garden
 --------------------------
 
-These registered functions can now be used in the purple garden language:
+Once registered with the embedding API, the package is used like any other
+package:
 
     import ("counter" "testing")
 
-    let c = counter.new()
+    let c = counter.new(0)
     counter.increment(c)
     counter.increment(c)
     counter.increment(c)
-    testing.assert(counter.get(c) == 3)
+    counter.increment(c)
+    c
+
+Embedding code can compile that script with the package:
+
+    let mut program = purple_garden::Pg::new()
+        .with_stdlib()
+        .with_lib(&counter::PACKAGE)
+        .compile(include_bytes!("counter.garden"))?;
+    let counter: &Counter = program.run_take()?;
 
 
 Foreign type isolation
 ----------------------
 
-The 'Type::Foreign("counter")' is used to distinguish different foreign
-interactions in the typechecker, thus making things like the following
-impossible:
+Foreign type names are part of typechecking. A function expecting
+`Foreign<Counter>` will not accept a different foreign type.
 
-    # counter1 is a second foreign namespace instance with a different type ID
-    # than counter, but with the same functions, just the # Foreign str id is
-    # counter1, instead of counter
-    import ("counter" "counter1" "testing")
+The complete runnable example lives in:
 
-    let c = counter.new()
-    counter.increment(c)
-    counter.increment(c)
-    counter.increment(c)
-    counter1.increment(c)
-    testing.assert(counter.get(c) == 3)
+    examples/embed-counter
 
-This fails at typechecking:
+Run it with:
 
-    test.garden:6:18: `counter1.increment` arg0 expected Foreign<counter1>, got Foreign<counter> instead:
-    counter1.increment(c)
-                      ~
+    cargo run -p purple-garden-embed-counter

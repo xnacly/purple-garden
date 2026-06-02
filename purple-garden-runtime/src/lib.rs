@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+pub use purple_garden_ir::ptype::Type;
+
 pub mod anomaly;
 /// purple garden bytecode virtual machine operations
 pub mod op;
@@ -13,7 +15,6 @@ pub const REGISTER_COUNT: usize = 64;
 pub use crate::anomaly::Anomaly;
 pub use crate::value::{FromVm, IntoVm, PgType, Value};
 pub use crate::vm::{jit_trap_div_zero, syscall_unimplemented, CallFrame, DebugInfo, Vm, VmConfig};
-use purple_garden_ir::ptype::Type;
 
 /// Signature for a purple garden syscall
 ///

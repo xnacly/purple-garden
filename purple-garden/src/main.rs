@@ -85,10 +85,23 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 if let Some(method) = method {
-                    let Some(fun) = pkg.fns.iter().find(|f| f.name == method) else {
-                        return err!(format!("function {}.{} not found", pkg.name, method));
+                    let exact: Vec<&pstd::Fn> = pkg.fns.iter().filter(|f| f.name == method).collect();
+                    let matches: Vec<&pstd::Fn> = if exact.is_empty() {
+                        pkg.fns
+                            .iter()
+                            .filter(|f| f.name.starts_with(&format!("{method}_")))
+                            .collect()
+                    } else {
+                        exact
                     };
-                    println!("{fun}");
+
+                    if matches.is_empty() {
+                        return err!(format!("function {}.{} not found", pkg.name, method));
+                    }
+
+                    for fun in matches {
+                        println!("{fun}");
+                    }
                 } else {
                     println!("{pkg}");
                 }

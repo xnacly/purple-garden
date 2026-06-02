@@ -521,6 +521,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "purple-garden-embed-counter"
+version = "0.1.0"
+dependencies = [
+ "purple-garden",
+]
+
+[[package]]
 name = "purple-garden-frontend"
 version = "0.1.0"
 dependencies = [
@@ -550,6 +557,11 @@ dependencies = [
 [[package]]
 name = "purple-garden-macros"
 version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "purple-garden-opt"
@@ -579,6 +591,7 @@ name = "purple-garden-std"
 version = "0.1.0"
 dependencies = [
  "purple-garden-ir",
+ "purple-garden-macros",
  "purple-garden-runtime",
 ]
 

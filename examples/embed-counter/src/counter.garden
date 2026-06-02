@@ -1,0 +1,9 @@
+import ("counter")
+
+let c = counter.new(0)
+counter.increment(c)
+counter.increment(c)
+counter.increment(c)
+
+# we want to return a value so its extractable from the embedders side
+c
