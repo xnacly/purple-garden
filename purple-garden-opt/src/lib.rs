@@ -18,6 +18,9 @@ pub fn ir(ir: &mut [purple_garden_ir::Func]) {
         // Order: we constant fold before imm_folding, otherwise we have fragmented half optimised
         // constant operations, we could have fully merged together at compiletime
         ir::const_fold(fun, &mut scratch);
+        // TODO: renable this after compile time pure function constant codegen is implemented
+        //
+        // ir::const_fold_syscalls(fun, &mut scratch);
         ir::imm_fold(fun, &mut scratch);
         ir::indirect_jump(fun);
         // Order: before tailcall, so a Call-then-Jump-to-Ret-join pattern

@@ -1,4 +1,4 @@
-use crate::ir::{ConstDef, Scratch};
+use crate::ir::Scratch;
 use purple_garden_ir::{self as ir, BinOp, Id, Instr, TypeId, constant::Const};
 
 /// Fold single-use integer constants into integer binops while the IR
@@ -12,12 +12,7 @@ pub fn imm_fold<'fun, 's>(fun: &'fun mut ir::Func<'s>, scratch: &mut super::Scra
         }
         for (ii, instr) in block.instructions.iter().enumerate() {
             if let Instr::LoadConst { dst, value, .. } = instr {
-                scratch.ensure(dst.id);
-                scratch.consts[dst.id.0 as usize] = Some(ConstDef {
-                    value: *value,
-                    block: bi as u32,
-                    instr: ii as u32,
-                });
+                scratch.record_const(dst.id, *value, bi as u32, ii as u32);
             }
         }
     }

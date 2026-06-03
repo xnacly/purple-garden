@@ -521,13 +521,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "purple-garden-embed-counter"
-version = "0.1.0"
-dependencies = [
- "purple-garden",
-]
-
-[[package]]
 name = "purple-garden-frontend"
 version = "0.1.0"
 dependencies = [

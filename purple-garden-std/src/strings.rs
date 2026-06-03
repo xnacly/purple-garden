@@ -14,6 +14,15 @@ pub mod strings {
         s.repeat(n as usize)
     }
 
+    /// concatenates a and b
+    #[purple_garden_macros::pg_fn(pure)]
+    pub fn concat(a: &str, b: &str) -> String {
+        let mut out = String::with_capacity(a.len() + b.len());
+        out.push_str(a);
+        out.push_str(b);
+        out
+    }
+
     /// returns the length of s in bytes
     #[purple_garden_macros::pg_fn(pure)]
     pub fn len(s: &str) -> i64 {

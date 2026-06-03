@@ -170,6 +170,11 @@ impl Function {
             },
         };
 
+        if self.pure {
+            // TODO: script compile time function execution by converting all args to purple_garden_ir::constant::Const and
+            // returning the same type
+        }
+
         quote! {
             unsafe extern "C" fn #wrapper_name(vm: *mut std::ffi::c_void) {
                 let vm = unsafe { &mut *vm.cast::<#api::Vm>() };

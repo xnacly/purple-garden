@@ -4,6 +4,7 @@
 //! run, in what order) lives in [crate::ir] in `src/opt/mod.rs`.
 
 mod const_fold;
+mod const_fold_syscalls;
 mod imm_fold;
 mod indirect_jump;
 mod ret_inline;
@@ -39,7 +40,7 @@ pub struct Scratch<'scratch> {
     consts: Vec<Option<ConstDef<'scratch>>>,
 }
 
-impl Scratch<'_> {
+impl<'scratch> Scratch<'scratch> {
     pub fn reset(&mut self) {
         self.uses.clear();
         self.consts.clear();
@@ -60,6 +61,15 @@ impl Scratch<'_> {
             self.uses.resize(len, 0);
             self.consts.resize(len, None);
         }
+    }
+
+    pub fn record_const(&mut self, id: Id, value: Const<'scratch>, block: u32, instr: u32) {
+        self.ensure(id);
+        self.consts[id.0 as usize] = Some(ConstDef {
+            value,
+            block,
+            instr,
+        });
     }
 
     /// Record one use of `id`. After the analyze pass `uses[id.0]` is
@@ -84,6 +94,7 @@ impl Scratch<'_> {
 
 // reexports
 pub use const_fold::const_fold;
+pub use const_fold_syscalls::const_fold_syscalls;
 pub use imm_fold::imm_fold;
 pub use indirect_jump::indirect_jump;
 pub use ret_inline::ret_inline;

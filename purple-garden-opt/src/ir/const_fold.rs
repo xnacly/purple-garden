@@ -35,13 +35,8 @@ pub fn const_fold<'fold, 's>(fun: &'fold mut ir::Func<'s>, scratch: &'fold mut S
                 ..
             } = fun.blocks[i].instructions[j]
             {
-                scratch.ensure(id);
                 let (block, instr) = (i as u32, j as u32);
-                scratch.consts[id.0 as usize] = Some(super::ConstDef {
-                    value,
-                    block,
-                    instr,
-                });
+                scratch.record_const(id, value, block, instr);
             }
         }
     }
