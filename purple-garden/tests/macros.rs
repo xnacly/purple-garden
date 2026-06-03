@@ -1,4 +1,4 @@
-use purple_garden::{pg_pkg, FromVm, IntoVm, PgType, Value, Vm, VmConfig};
+use purple_garden::{FromVm, IntoVm, PgType, Value, Vm, VmConfig, pg_pkg};
 
 #[derive(PgType, FromVm, IntoVm)]
 struct Counter {
@@ -53,7 +53,7 @@ fn pg_pkg_wrapper_decodes_args_and_encodes_return() {
     let idx = vm.new_string("hello".to_owned());
     *vm.r_mut(0) = Value::from(idx);
 
-    unsafe { (strings::PACKAGE.fns[0].ptr)(&mut vm) };
+    unsafe { (strings::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
 
     assert_eq!(vm.r(0).as_int(), 5);
 }
@@ -65,7 +65,7 @@ fn pg_pkg_wrapper_allocates_return_strings() {
     *vm.r_mut(0) = Value::from(idx);
     *vm.r_mut(1) = Value::from(3_i64);
 
-    unsafe { (strings::PACKAGE.fns[1].ptr)(&mut vm) };
+    unsafe { (strings::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
     assert_eq!(vm.r(0).as_str(vm.strings(), vm.string_data()), "hahaha");
 }
@@ -84,8 +84,8 @@ fn pg_pkg_supports_foreign_derived_types() {
     let mut vm = Vm::new(VmConfig::default());
     *vm.r_mut(0) = Value::from(7_i64);
 
-    unsafe { (counters::PACKAGE.fns[0].ptr)(&mut vm) };
-    unsafe { (counters::PACKAGE.fns[1].ptr)(&mut vm) };
+    unsafe { (counters::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
+    unsafe { (counters::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
     assert_eq!(vm.r(0).as_int(), 7);
 }

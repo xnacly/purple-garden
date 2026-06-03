@@ -9,9 +9,9 @@ use purple_garden_frontend::{err::PgError, lex, lower, parser};
 use purple_garden_runtime::{Anomaly, BuiltinFn, DebugInfo};
 pub use purple_garden_shared::config;
 
-pub use purple_garden_macros::{pg_fn, pg_pkg, FromVm, IntoVm, PgType};
+pub use purple_garden_macros::{FromVm, IntoVm, PgType, pg_fn, pg_pkg};
 pub use purple_garden_runtime::{Fn, FromVm, IntoVm, PgType, Pkg, Type, Value, Vm, VmConfig};
-pub use purple_garden_std::{resolve_pkg, STD};
+pub use purple_garden_std::{STD, resolve_pkg};
 
 pub mod gc;
 pub mod help;
@@ -114,13 +114,13 @@ fn compile<'e>(
     let lexer = lex::Lexer::new(input);
     let ast = parser::Parser::new(lexer)?.parse()?;
 
-    let (mut ir, pkg_fns) = lower::Lower::new().with_libs(libs.to_vec()).ir_from(&ast)?;
+    let mut ir = lower::Lower::new().with_libs(libs.to_vec()).ir_from(&ast)?;
     if config.opt >= 1 {
         purple_garden_opt::ir(&mut ir);
     }
 
     let mut cc = bc::Cc::new();
-    let native_pages = cc.compile(config, &ir, &pkg_fns).map_err(|msg| PgError {
+    let native_pages = cc.compile(config, &ir).map_err(|msg| PgError {
         msg,
         start: 0,
         len: 0,

@@ -85,7 +85,8 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 if let Some(method) = method {
-                    let exact: Vec<&pstd::Fn> = pkg.fns.iter().filter(|f| f.name == method).collect();
+                    let exact: Vec<&pstd::Fn> =
+                        pkg.fns.iter().filter(|f| f.name == method).collect();
                     let matches: Vec<&pstd::Fn> = if exact.is_empty() {
                         pkg.fns
                             .iter()
@@ -144,7 +145,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let lower = Lower::new();
-    let (mut ir, pkg_fns) = match lower.ir_from(&ast) {
+    let mut ir = match lower.ir_from(&ast) {
         Ok(v) => v,
         Err(e) => {
             return err!(e.render(input_source, input.as_bytes()));
@@ -164,7 +165,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut cc = bc::Cc::new();
-    let native_pages = cc.compile(&conf, &ir, &pkg_fns)?;
+    let native_pages = cc.compile(&conf, &ir)?;
 
     purple_garden_shared::trace!("[main] Lowered IR to bytecode");
 

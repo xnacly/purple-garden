@@ -268,7 +268,6 @@ impl<'cc> Cc<'cc> {
         &mut self,
         config: &Config,
         ir: &[Func<'cc>],
-        pkg_fns: &HashMap<&str, HashMap<&str, BuiltinFn>>,
     ) -> Result<Vec<purple_garden_jit::JitFn>, String> {
         let mut native_pages: Option<Vec<purple_garden_jit::JitFn>> =
             (!config.no_jit).then(Vec::new);
@@ -286,7 +285,7 @@ impl<'cc> Cc<'cc> {
                 }
                 println!("{out}");
             }
-            self.cc(func, pkg_fns, native_pages.as_mut())?;
+            self.cc(func, native_pages.as_mut())?;
         }
 
         Ok(native_pages.unwrap_or_default())
@@ -295,7 +294,6 @@ impl<'cc> Cc<'cc> {
     fn cc(
         &mut self,
         fun: &Func<'cc>,
-        pkg_fns: &HashMap<&str, HashMap<&str, BuiltinFn>>,
         native: Option<&mut Vec<purple_garden_jit::JitFn>>,
     ) -> Result<(), String> {
         // Take the reusable scratch buffers out of self so we can hold an
@@ -381,7 +379,7 @@ impl<'cc> Cc<'cc> {
             pos += 2; // block params row
             for instruction in &block.instructions {
                 self.cur_span = instruction.span();
-                self.instr(&live_set, pos, instruction, pkg_fns);
+                self.instr(&live_set, pos, instruction);
                 pos += 2;
             }
 
@@ -693,13 +691,7 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn instr(
-        &mut self,
-        live_set: &[(u32, u32)],
-        pos: u32,
-        i: &ir::Instr<'cc>,
-        pkg_fns: &HashMap<&str, HashMap<&str, BuiltinFn>>,
-    ) {
+    fn instr(&mut self, live_set: &[(u32, u32)], pos: u32, i: &ir::Instr<'cc>) {
         match i {
             ir::Instr::Cast {
                 dst: TypeId { id, ty: dst_ty },
@@ -797,15 +789,8 @@ impl<'cc> Cc<'cc> {
                     &self.scratch,
                 );
             }
-            ir::Instr::Sys {
-                dst,
-                path,
-                name,
-                args,
-                ..
-            } => {
-                let ptr = pkg_fns[path][name];
-                let idx = self.std_fns.intern(ptr);
+            ir::Instr::Sys { dst, fun, args, .. } => {
+                let idx = self.std_fns.intern(fun.ptr);
 
                 // Syscall convention: shuffle writes r0..r{argcount-1}, syscall
                 // body writes r0 (return slot). Clobber range is r0..r{clobber_end-1}

@@ -2,6 +2,24 @@ use std::fmt::Display;
 
 use crate::{Const, Func, Id, Instr, Terminator, TypeId};
 
+impl Display for crate::Fn<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "fn {}(", self.name)?;
+        for (i, a) in self.args.iter().enumerate() {
+            if let Some(name) = self.arg_names.get(i) {
+                write!(f, "{name} ")?;
+            }
+            if i + 1 < self.args.len() {
+                write!(f, "{a} ")?;
+            } else {
+                write!(f, "{a}")?;
+            }
+        }
+        writeln!(f, ") {}", self.ret)?;
+        writeln!(f, "\t{}", self.doc)
+    }
+}
+
 impl Display for TypeId<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{:?}", self.id.0, self.ty)
@@ -42,12 +60,12 @@ impl Display for Instr<'_> {
             Instr::Sys {
                 dst,
                 path,
-                name,
+                fun,
                 args,
                 ..
             } => {
                 write!(f, "%v{dst} = ")?;
-                write!(f, "Sys {path}.{name}(")?;
+                write!(f, "Sys {path}.{}(", fun.name)?;
                 for (i, arg) in args.iter().enumerate() {
                     if i + 1 == args.len() {
                         write!(f, "%v{}", arg.0)?;

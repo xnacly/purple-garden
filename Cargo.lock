@@ -577,6 +577,7 @@ name = "purple-garden-runtime"
 version = "0.1.0"
 dependencies = [
  "purple-garden-ir",
+ "purple-garden-shared",
 ]
 
 [[package]]

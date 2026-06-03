@@ -417,7 +417,7 @@ pub fn compile_func(func: &ir::Func<'_>, out: &mut Vec<Insn>) -> Option<()> {
                     }
                     // static divide-by-zero; trap and return, the rest is dead.
                     BinOp::IDiv | BinOp::IMod if imm == 0 => {
-                        let helper: unsafe extern "C" fn(*mut purple_garden_runtime::Vm) =
+                        let helper: purple_garden_runtime::BuiltinFn =
                             purple_garden_runtime::jit_trap_div_zero;
                         emit_abi_call(out, helper as usize as u64);
                         out.push(Insn::Ret);

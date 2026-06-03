@@ -1,4 +1,5 @@
-use crate::{op::Op, Anomaly, BuiltinFn, Value, REGISTER_COUNT};
+use crate::{Anomaly, BuiltinFn, REGISTER_COUNT, Value, op::Op};
+use std::ffi::c_void;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VmConfig {
@@ -44,16 +45,16 @@ impl DebugInfo {
     }
 }
 
-pub unsafe extern "C" fn syscall_unimplemented(vm: *mut Vm) {
-    let vm = unsafe { &mut *vm };
+pub unsafe extern "C" fn syscall_unimplemented(vm: *mut c_void) {
+    let vm = unsafe { &mut *vm.cast::<Vm>() };
     vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
 }
 
 /// Divide-by-zero trap, called from JIT code (enum layout isn't a stable ABI,
 /// so the JIT can't set `pending_trap` itself). `vm.pc` was published before the
 /// `Sys` entering the native function, so it points at the call site.
-pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut Vm) {
-    let vm = unsafe { &mut *vm };
+pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) {
+    let vm = unsafe { &mut *vm.cast::<Vm>() };
     vm.trap(Anomaly::DivisionByZero { pc: vm.pc });
 }
 
@@ -336,7 +337,7 @@ impl Vm {
                     // writes self.pc on exit, so without this the trap would
                     // carry a stale pc and render at the wrong source span.
                     self.pc = pc;
-                    (*syscalls.add(idx as usize))(self as *mut Vm);
+                    (*syscalls.add(idx as usize))((self as *mut Vm).cast());
 
                     #[cfg(debug_assertions)]
                     for (i, pre) in pre_sys.iter().enumerate().skip(1) {

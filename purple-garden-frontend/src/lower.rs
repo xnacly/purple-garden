@@ -8,9 +8,9 @@ use crate::{
     typecheck::id_from_node,
 };
 use purple_garden_ir::{
-    ptype, BinOp, Block, Const, Func, Id, Instr, Terminator, TypeId, EMPTY_PARAMS,
+    BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype,
 };
-use purple_garden_runtime::{BuiltinFn, Pkg};
+use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
 
 #[derive(Default)]
@@ -43,7 +43,7 @@ pub struct Lower<'lower> {
     functions: Vec<Func<'lower>>,
     func_name_to_id: HashMap<&'lower str, (Id, Option<ptype::Type<'lower>>)>,
     types: Vec<Option<ptype::Type<'lower>>>,
-    packages: HashMap<&'lower str, (&'lower Pkg, HashMap<&'lower str, &'lower pstd::Fn>)>,
+    packages: HashMap<&'lower str, (&'lower Pkg, HashMap<&'lower str, &'lower pstd::Fn<'static>>)>,
     libs: Vec<&'lower Pkg>,
 }
 
@@ -373,7 +373,7 @@ impl<'lower> Lower<'lower> {
                         self.emit(Instr::Sys {
                             dst,
                             path: pkg_name,
-                            name: inner_name,
+                            fun,
                             args: a,
                             span: name.start as u32,
                         });
@@ -568,16 +568,7 @@ impl<'lower> Lower<'lower> {
     }
 
     /// Lower [ast] into a list of Func nodes, the entry point is always `entry`
-    pub fn ir_from(
-        mut self,
-        ast: &'lower [Node<'lower>],
-    ) -> Result<
-        (
-            Vec<Func<'lower>>,
-            HashMap<&'lower str, HashMap<&'lower str, BuiltinFn>>,
-        ),
-        PgError,
-    > {
+    pub fn ir_from(mut self, ast: &'lower [Node<'lower>]) -> Result<Vec<Func<'lower>>, PgError> {
         let mut typechecker = crate::typecheck::Typechecker::new().with_libs(self.libs.clone());
         for node in ast {
             let _t = typechecker.node(node)?;
@@ -607,17 +598,7 @@ impl<'lower> Lower<'lower> {
 
         self.functions.push(self.ctx.func);
 
-        let pkg_fns = self
-            .packages
-            .into_iter()
-            .map(|(pkg, (_, fns))| {
-                (
-                    pkg,
-                    fns.into_iter().map(|(name, f)| (name, f.ptr)).collect(),
-                )
-            })
-            .collect();
-        Ok((self.functions, pkg_fns))
+        Ok(self.functions)
     }
 }
 

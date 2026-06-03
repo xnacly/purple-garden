@@ -2,8 +2,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    parse::Parser, parse_macro_input, punctuated::Punctuated, spanned::Spanned, Attribute, FnArg,
-    Ident, Item, ItemFn, ItemMod, LitStr, Meta, Pat, Path, ReturnType, Type,
+    Attribute, FnArg, Ident, Item, ItemFn, ItemMod, LitStr, Meta, Pat, Path, ReturnType, Type,
+    parse::Parser, parse_macro_input, punctuated::Punctuated, spanned::Spanned,
 };
 
 struct Arg {
@@ -171,8 +171,8 @@ impl Function {
         };
 
         quote! {
-            unsafe extern "C" fn #wrapper_name(vm: *mut #api::Vm) {
-                let vm = unsafe { &mut *vm };
+            unsafe extern "C" fn #wrapper_name(vm: *mut std::ffi::c_void) {
+                let vm = unsafe { &mut *vm.cast::<#api::Vm>() };
                 #body
             }
         }

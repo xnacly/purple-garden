@@ -25,6 +25,18 @@ pub mod ptype;
 
 pub use crate::constant::Const;
 use crate::ptype::Type;
+use purple_garden_shared::BuiltinFn;
+
+#[derive(Debug, Clone)]
+pub struct Fn<'f> {
+    pub name: &'f str,
+    pub doc: &'f str,
+    pub ptr: BuiltinFn,
+    pub pure: bool,
+    pub arg_names: &'f [&'f str],
+    pub args: &'f [Type<'f>],
+    pub ret: Type<'f>,
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Id(pub u32);
@@ -116,7 +128,7 @@ pub enum Instr<'i> {
     Sys {
         dst: TypeId<'i>,
         path: &'i str,
-        name: &'i str,
+        fun: &'i Fn<'i>,
         args: Vec<Id>,
         span: u32,
     },

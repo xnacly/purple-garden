@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 purple-garden-ir = { path = "../purple-garden-ir" }
+purple-garden-shared = { path = "../purple-garden-shared" }
 
 [features]
 trace = []
