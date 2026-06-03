@@ -10,6 +10,7 @@ pub mod strings {
     }
 
     /// repeats s n times
+    #[purple_garden_macros::pg_fn(pure)]
     pub fn repeat(s: &str, n: i64) -> String {
         s.repeat(n as usize)
     }
