@@ -21,8 +21,4 @@ pub fn resolve_pkg(query: &str) -> Option<&Pkg> {
     })
 }
 
-pub static STD: &[Pkg] = &[
-    io::PACKAGE,
-    strings::PACKAGE,
-    testing::PACKAGE,
-];
+pub static STD: &[Pkg] = &[io::PACKAGE, strings::PACKAGE, testing::PACKAGE];

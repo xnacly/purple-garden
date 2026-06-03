@@ -102,7 +102,7 @@ impl<'lower> Lower<'lower> {
         Ok(match node {
             Node::Atom { raw, .. } => {
                 let value = match raw.t {
-                    Type::S(str) => Const::Str(str),
+                    Type::S(str) => Const::from(str),
                     Type::D(doub) => Const::Double(
                         doub.parse::<f64>()
                             .map_err(|e: num::ParseFloatError| {
@@ -124,7 +124,7 @@ impl<'lower> Lower<'lower> {
                 self.emit(Instr::LoadConst {
                     dst: TypeId {
                         id,
-                        ty: value.into(),
+                        ty: value.clone().into(),
                     },
                     value,
                     span: raw.start as u32,

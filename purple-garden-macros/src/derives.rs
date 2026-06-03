@@ -2,8 +2,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{
-    parse_macro_input, spanned::Spanned, Data, DeriveInput, GenericParam, Generics, Lifetime,
-    LifetimeParam, Path,
+    Data, DeriveInput, GenericParam, Generics, Lifetime, LifetimeParam, Path, parse_macro_input,
+    spanned::Spanned,
 };
 
 fn runtime_path() -> Path {

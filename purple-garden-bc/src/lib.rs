@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
@@ -47,7 +48,7 @@ impl<'fun> CcFunc<'fun> {
 pub struct Cc<'cc> {
     pub buf: Vec<Op>,
     pub globals: Interner<Const<'cc>>,
-    pub strings: Interner<&'cc str>,
+    pub strings: Interner<Cow<'cc, str>>,
     pub std_fns: Interner<BuiltinFn>,
     pub functions: HashMap<Id, CcFunc<'cc>>,
     /// pc of the entry trampoline when the entry function (`Id(0)`) compiled to
@@ -727,7 +728,7 @@ impl<'cc> Cc<'cc> {
                         value: *i as i32,
                     });
                 } else {
-                    let idx = self.intern(*value);
+                    let idx = self.intern(value.clone());
                     self.emit(Op::LoadG { dst, idx });
                 }
             }

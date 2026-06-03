@@ -12,7 +12,7 @@ pub fn imm_fold<'fun, 's>(fun: &'fun mut ir::Func<'s>, scratch: &mut super::Scra
         }
         for (ii, instr) in block.instructions.iter().enumerate() {
             if let Instr::LoadConst { dst, value, .. } = instr {
-                scratch.record_const(dst.id, *value, bi as u32, ii as u32);
+                scratch.record_const(dst.id, value.clone(), bi as u32, ii as u32);
             }
         }
     }
@@ -60,7 +60,7 @@ pub fn imm_fold<'fun, 's>(fun: &'fun mut ir::Func<'s>, scratch: &mut super::Scra
 
 fn bump_if_const(scratch: &mut Scratch<'_>, id: Id) {
     let idx = id.0 as usize;
-    if scratch.consts.get(idx).copied().flatten().is_some() {
+    if scratch.consts.get(idx).is_some_and(Option::is_some) {
         scratch.uses[idx] += 1;
     }
 }
@@ -113,7 +113,15 @@ fn try_fold<'scratch>(
     // fit; the original Bin + LoadConst stay intact and run as-is.
     let imm = i32::try_from(value).ok()?;
 
-    Some((new_op, new_lhs, def.block, def.instr, imm, dst.clone(), *span))
+    Some((
+        new_op,
+        new_lhs,
+        def.block,
+        def.instr,
+        imm,
+        dst.clone(),
+        *span,
+    ))
 }
 
 #[cfg(test)]

@@ -18,7 +18,7 @@ use purple_garden_ir::{Id, constant::Const};
 /// `value` is stored at its native IR width (`i64`); consumers that
 /// need a narrower form (e.g. `imm_fold` lowering to `i32` bytecode
 /// immediates) narrow at fold time and skip the fold on overflow.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct ConstDef<'def> {
     value: Const<'def>,
     block: u32,
@@ -49,8 +49,8 @@ impl<'scratch> Scratch<'scratch> {
     /// Returns the recorded `ConstDef` for `id`, no use-count gate.
     /// `const_fold` uses this; `imm_fold` uses `single_use_const` instead
     /// because it noops the `LoadConst` and needs single-use safety.
-    pub fn const_def(&self, id: Id) -> Option<ConstDef<'_>> {
-        self.consts.get(id.0 as usize).copied().flatten()
+    pub fn const_def(&self, id: Id) -> Option<ConstDef<'scratch>> {
+        self.consts.get(id.0 as usize).cloned().flatten()
     }
 
     /// Grow both vecs to cover `id`, preserving the parallel-length
@@ -83,12 +83,12 @@ impl<'scratch> Scratch<'scratch> {
     /// `LoadConst` AND has exactly one use. The single-use check is the
     /// fold-safety gate: with >1 uses the `LoadConst` is still needed
     /// elsewhere and noop'ing it would corrupt those uses.
-    pub fn single_use_const(&self, id: Id) -> Option<ConstDef<'_>> {
+    pub fn single_use_const(&self, id: Id) -> Option<ConstDef<'scratch>> {
         let idx = id.0 as usize;
         if self.uses.get(idx).copied() != Some(1) {
             return None;
         }
-        self.consts[idx]
+        self.consts[idx].clone()
     }
 }
 

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::mem::MaybeUninit;
 
@@ -7,7 +8,7 @@ pub struct Interner<T> {
     next_id: u32,
 }
 
-impl<'a> Interner<&'a str> {
+impl<'a> Interner<Cow<'a, str>> {
     /// Builds a flat string arena from the interner. All interned strings are concatenated
     /// into one `String`; the returned spans vec maps each interned index to its `(offset, len)`
     /// in that buffer. One allocation instead of N `Box<str>` allocations.
@@ -16,9 +17,9 @@ impl<'a> Interner<&'a str> {
         let total: usize = self.map.keys().map(|s| s.len()).sum();
         let mut data = String::with_capacity(total);
         let mut spans = vec![(0u32, 0u32); len];
-        for (&s, &i) in &self.map {
+        for (s, &i) in &self.map {
             let off = data.len() as u32;
-            data.push_str(s);
+            data.push_str(s.as_ref());
             spans[i as usize] = (off, s.len() as u32);
         }
         (data, spans)
@@ -46,13 +47,13 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
 
     pub fn to_vec(&self) -> Vec<T>
     where
-        T: Copy,
+        T: Clone,
     {
         let len = self.next_id as usize;
         let mut vec: Vec<MaybeUninit<T>> = Vec::with_capacity(len);
         unsafe { vec.set_len(len) };
-        for (&v, &i) in &self.map {
-            vec[i as usize].write(v);
+        for (v, &i) in &self.map {
+            vec[i as usize].write(v.clone());
         }
         unsafe { std::mem::transmute::<Vec<MaybeUninit<T>>, Vec<T>>(vec) }
     }
@@ -122,7 +123,7 @@ mod tests {
         let mut i = Interner::new();
 
         let a = i.intern(Const::Int(10));
-        let b = i.intern(Const::Str("abc"));
+        let b = i.intern(Const::from("abc"));
 
         assert_eq!(a, 0);
         assert_eq!(b, 1);
@@ -161,13 +162,13 @@ mod tests {
 
         i.intern(Const::Int(1));
         i.intern(Const::Int(2));
-        i.intern(Const::Str("x"));
+        i.intern(Const::from("x"));
 
         let v = i.into_vec();
 
         assert_eq!(v[0], Const::Int(1));
         assert_eq!(v[1], Const::Int(2));
-        assert_eq!(v[2], Const::Str("x"));
+        assert_eq!(v[2], Const::from("x"));
     }
 
     #[test]

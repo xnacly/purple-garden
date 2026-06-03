@@ -63,7 +63,14 @@ impl PgError {
         // line_no/col from locate() are 0-based; render them 1-based to match
         // editor conventions. The caret below keeps the 0-based col for its
         // leading-space count.
-        writeln!(&mut buf, "{file}:{}:{}: {}:", line_no + 1, col + 1, self.msg).unwrap();
+        writeln!(
+            &mut buf,
+            "{file}:{}:{}: {}:",
+            line_no + 1,
+            col + 1,
+            self.msg
+        )
+        .unwrap();
         writeln!(&mut buf, "{line_text}").unwrap();
         writeln!(
             &mut buf,

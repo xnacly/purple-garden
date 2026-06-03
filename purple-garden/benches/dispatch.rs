@@ -1,6 +1,6 @@
 use criterion::{BatchSize, Criterion};
-use purple_garden_runtime::{op::Op, Vm, VmConfig};
-use rand::{rngs::StdRng, RngExt, SeedableRng};
+use purple_garden_runtime::{Vm, VmConfig, op::Op};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 mod common;
 

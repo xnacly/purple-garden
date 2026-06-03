@@ -24,7 +24,7 @@ pub fn const_fold_syscalls<'fold, 's>(
                 ..
             } = instr
             {
-                scratch.record_const(*id, *value, bi as u32, ii as u32);
+                scratch.record_const(*id, value.clone(), bi as u32, ii as u32);
             }
 
             let candidate = syscall_fold_candidate(instr, scratch);
@@ -74,7 +74,7 @@ fn syscall_fold_candidate<'scratch, 'ir>(
 
     let args = args
         .iter()
-        .map(|arg| scratch.const_def(*arg).map(|def| def.value))
+        .map(|arg| scratch.const_def(*arg).map(|def| def.value.clone()))
         .collect::<Option<Vec<_>>>()?;
 
     Some(SyscallFoldCandidate {

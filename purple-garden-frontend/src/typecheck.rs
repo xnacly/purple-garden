@@ -104,7 +104,10 @@ impl<'t> Typechecker<'t> {
     }
 
     fn already_checked(&self, node: &Node) -> Option<Type<'t>> {
-        self.map.get(id_from_node(node)?).and_then(|o| o.as_ref()).cloned()
+        self.map
+            .get(id_from_node(node)?)
+            .and_then(|o| o.as_ref())
+            .cloned()
     }
 
     fn fuse(op: &lex::Token, lhs: &Type<'t>, rhs: &Type<'t>) -> Result<Type<'t>, PgError> {
@@ -558,10 +561,7 @@ impl<'t> Typechecker<'t> {
                         registered.insert(f.name, f_type);
                     }
 
-                    self.packages.insert(
-                        pkg.name,
-                        registered,
-                    );
+                    self.packages.insert(pkg.name, registered);
                 }
 
                 Type::Void

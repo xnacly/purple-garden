@@ -1,5 +1,7 @@
+use std::borrow::Cow;
+
 /// Compile time Value representation, used for interning and constant propagation
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum Const<'c> {
     #[default]
     Undefined,
@@ -7,7 +9,7 @@ pub enum Const<'c> {
     True,
     Int(i64),
     Double(u64),
-    Str(&'c str),
+    Str(Cow<'c, str>),
 }
 
 impl From<bool> for Const<'_> {
@@ -25,5 +27,17 @@ impl From<i64> for Const<'_> {
 impl From<f64> for Const<'_> {
     fn from(value: f64) -> Self {
         Self::Double(value.to_bits())
+    }
+}
+
+impl<'c> From<&'c str> for Const<'c> {
+    fn from(value: &'c str) -> Self {
+        Self::Str(Cow::Borrowed(value))
+    }
+}
+
+impl From<String> for Const<'_> {
+    fn from(value: String) -> Self {
+        Self::Str(Cow::Owned(value))
     }
 }

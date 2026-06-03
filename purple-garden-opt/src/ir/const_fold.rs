@@ -33,10 +33,10 @@ pub fn const_fold<'fold, 's>(fun: &'fold mut ir::Func<'s>, scratch: &'fold mut S
                 dst: TypeId { id, .. },
                 value,
                 ..
-            } = fun.blocks[i].instructions[j]
+            } = &fun.blocks[i].instructions[j]
             {
                 let (block, instr) = (i as u32, j as u32);
-                scratch.record_const(id, value, block, instr);
+                scratch.record_const(*id, value.clone(), block, instr);
             }
         }
     }
@@ -90,15 +90,15 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch) -> bool {
                 return false;
             };
 
-            let result = match (&from.ty, &dst.ty, def.value) {
+            let result = match (&from.ty, &dst.ty, &def.value) {
                 (Type::Double, Type::Int, Const::Double(value)) => {
-                    Const::Int(f64::from_bits(value) as i64)
+                    Const::Int(f64::from_bits(*value) as i64)
                 }
                 (Type::Int, Type::Double, Const::Int(value)) => {
-                    Const::Double((value as f64).to_bits())
+                    Const::Double((*value as f64).to_bits())
                 }
                 (Type::Int, Type::Bool, Const::Int(value)) => {
-                    if value != 0 {
+                    if *value != 0 {
                         Const::True
                     } else {
                         Const::False
@@ -132,105 +132,105 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch) -> bool {
 
             let result: Const = match op {
                 BinOp::IAdd => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_c.value, rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
                         unreachable!();
                     };
-                    lhs.wrapping_add(rhs).into()
+                    lhs.wrapping_add(*rhs).into()
                 }
                 BinOp::ISub => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_c.value, rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
                         unreachable!();
                     };
-                    lhs.wrapping_sub(rhs).into()
+                    lhs.wrapping_sub(*rhs).into()
                 }
                 BinOp::IMul => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_c.value, rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
                         unreachable!();
                     };
-                    lhs.wrapping_mul(rhs).into()
+                    lhs.wrapping_mul(*rhs).into()
                 }
                 BinOp::IDiv => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_c.value, rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
                         unreachable!();
                     };
-                    if rhs == 0 {
+                    if *rhs == 0 {
                         return false;
                     }
-                    (lhs / rhs).into()
+                    (*lhs / *rhs).into()
                 }
                 BinOp::IMod => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_c.value, rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
                         unreachable!();
                     };
-                    if rhs == 0 {
+                    if *rhs == 0 {
                         return false;
                     }
-                    (lhs % rhs).into()
+                    (*lhs % *rhs).into()
                 }
                 BinOp::ILt => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_c.value, rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
                         unreachable!();
                     };
                     (lhs < rhs).into()
                 }
                 BinOp::IGt => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_c.value, rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
                         unreachable!();
                     };
                     (lhs > rhs).into()
                 }
                 BinOp::IEq => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_c.value, rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
                         unreachable!();
                     };
                     (lhs == rhs).into()
                 }
                 BinOp::DAdd => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_c.value, rhs_c.value)
+                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
                     else {
                         unreachable!();
                     };
-                    (f64::from_bits(lhs) + f64::from_bits(rhs)).into()
+                    (f64::from_bits(*lhs) + f64::from_bits(*rhs)).into()
                 }
                 BinOp::DSub => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_c.value, rhs_c.value)
+                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
                     else {
                         unreachable!();
                     };
-                    (f64::from_bits(lhs) - f64::from_bits(rhs)).into()
+                    (f64::from_bits(*lhs) - f64::from_bits(*rhs)).into()
                 }
                 BinOp::DMul => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_c.value, rhs_c.value)
+                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
                     else {
                         unreachable!();
                     };
-                    (f64::from_bits(lhs) * f64::from_bits(rhs)).into()
+                    (f64::from_bits(*lhs) * f64::from_bits(*rhs)).into()
                 }
                 BinOp::DDiv => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_c.value, rhs_c.value)
+                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
                     else {
                         unreachable!();
                     };
-                    let lhs = f64::from_bits(lhs);
-                    let rhs = f64::from_bits(rhs);
+                    let lhs = f64::from_bits(*lhs);
+                    let rhs = f64::from_bits(*rhs);
                     if rhs == 0.0 {
                         return false;
                     }
                     (lhs / rhs).into()
                 }
                 BinOp::DLt => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_c.value, rhs_c.value)
+                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
                     else {
                         unreachable!();
                     };
-                    (f64::from_bits(lhs) < f64::from_bits(rhs)).into()
+                    (f64::from_bits(*lhs) < f64::from_bits(*rhs)).into()
                 }
                 BinOp::DGt => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_c.value, rhs_c.value)
+                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
                     else {
                         unreachable!();
                     };
-                    (f64::from_bits(lhs) > f64::from_bits(rhs)).into()
+                    (f64::from_bits(*lhs) > f64::from_bits(*rhs)).into()
                 }
                 BinOp::BEq => (lhs_c.value == rhs_c.value).into(),
             };
