@@ -21,18 +21,19 @@ mod arch;
 #[path = "aarch64/mod.rs"]
 mod arch;
 pub mod mem;
-#[cfg(target_arch = "x86_64")]
 mod regalloc;
 
 pub use arch::Insn;
 pub use mem::JitFn;
 use purple_garden_ir as ir;
 
-/// Holds the machine-code buffer reused across functions; [`JitFn::new`] copies
-/// it into the executable page, so it can be overwritten on the next call.
+/// Reusable JIT codegen state.
 #[derive(Debug, Default, Clone)]
 pub struct Jit {
     code: Vec<u8>,
+    insns: Vec<Insn>,
+    liveness: Vec<(u32, u32)>,
+    regalloc: regalloc::Allocator,
 }
 
 impl Jit {
@@ -41,18 +42,33 @@ impl Jit {
         Self::default()
     }
 
-    /// Lower `func` to its instruction list (the caller owns it; `None` if
-    /// unsupported) and encode it into the reusable byte buffer, readable via
-    /// [`Jit::code`] until the next call. Keeping the `Insn`s lets callers both
-    /// run the bytes and disassemble them, with no duplicate byte storage.
-    pub fn compile_func(&mut self, func: &ir::Func<'_>) -> Option<Vec<Insn>> {
-        let mut insns = Vec::new();
-        arch::compile_func(func, &mut insns)?;
+    /// Lower and encode `func`, returning `None` when unsupported.
+    pub fn compile_func(&mut self, func: &ir::Func<'_>) -> Option<()> {
+        self.liveness.clear();
+        func.live_set_into(&mut self.liveness);
+        let liveness = std::mem::take(&mut self.liveness);
+        let result = self.compile_func_with_liveness(func, &liveness);
+        self.liveness = liveness;
+        result
+    }
+
+    /// Lower and encode `func` using precomputed liveness.
+    pub fn compile_func_with_liveness(
+        &mut self,
+        func: &ir::Func<'_>,
+        liveness: &[(u32, u32)],
+    ) -> Option<()> {
+        self.insns.clear();
         self.code.clear();
-        for insn in &insns {
+        if arch::compile_func(func, &mut self.insns, liveness, &mut self.regalloc).is_none() {
+            self.insns.clear();
+            return None;
+        }
+
+        for insn in &self.insns {
             insn.encode(&mut self.code);
         }
-        Some(insns)
+        Some(())
     }
 
     /// The machine code for the most recent [`Jit::compile_func`].

@@ -17,13 +17,10 @@ pub enum CcFunc<'fun> {
         name: &'fun str,
         pc: usize,
     },
-    /// `idx` is the syscall slot the JIT page was injected at; `insns` is the
-    /// emitted native instruction list, owned here and kept for `-D` (the
-    /// executable bytes live only in the page).
+    /// `idx` is the syscall slot the JIT page was injected at.
     Native {
         name: &'fun str,
         idx: u16,
-        insns: Vec<purple_garden_jit::Insn>,
     },
 }
 
@@ -51,6 +48,8 @@ pub struct Cc<'cc> {
     pub strings: Interner<Cow<'cc, str>>,
     pub std_fns: Interner<BuiltinFn>,
     pub functions: HashMap<Id, CcFunc<'cc>>,
+    /// Native code retained only for diagnostic dumps.
+    pub native_code: Option<Vec<(&'cc str, Vec<u8>)>>,
     /// pc of the entry trampoline when the entry function (`Id(0)`) compiled to
     /// native. The VM enters the entry directly rather than through a Call, so a
     /// native entry gets a `Sys <native>; Ret` stub here that `finalize` points
@@ -221,6 +220,7 @@ impl<'cc> Cc<'cc> {
             strings: Interner::new(),
             std_fns: Interner::new(),
             functions: HashMap::new(),
+            native_code: None,
             entry_pc: None,
             block_map: Vec::new(),
             regalloc: Ralloc::default(),
@@ -268,10 +268,11 @@ impl<'cc> Cc<'cc> {
     pub fn compile(
         &mut self,
         config: &Config,
-        ir: &[Func<'cc>],
+        ir: &'cc [Func<'cc>],
     ) -> Result<Vec<purple_garden_jit::JitFn>, String> {
         let mut native_pages: Option<Vec<purple_garden_jit::JitFn>> =
             (!config.no_jit).then(Vec::new);
+        self.native_code = config.disassemble.then(Vec::new);
 
         for func in ir {
             if config.liveness {
@@ -294,7 +295,7 @@ impl<'cc> Cc<'cc> {
 
     fn cc(
         &mut self,
-        fun: &Func<'cc>,
+        fun: &'cc Func<'cc>,
         native: Option<&mut Vec<purple_garden_jit::JitFn>>,
     ) -> Result<(), String> {
         // Take the reusable scratch buffers out of self so we can hold an
@@ -309,15 +310,11 @@ impl<'cc> Cc<'cc> {
         fun.arg_hints_into(&mut arg_hints);
         self.regalloc.rebuild(&live_set, &arg_hints);
 
-        // The JIT reuses the register assignment computed above instead of
-        // recomputing its own. A native function is injected as a syscall and
-        // reached via the `Sys` each Call site lowers to. The entry function
-        // has no Call site (the VM enters it directly at its pc), so a native
-        // entry needs a `Sys <native>; Ret` trampoline at that pc to dispatch
-        // into the injected body; `finalize` points `vm.pc` at it.
+        // Native functions are injected as syscalls. The entry function needs
+        // a trampoline because the VM enters it directly.
         let is_root = fun.id == ir::Id(0);
         if let Some(native) = native
-            && self.try_compile_native(fun, native)?
+            && self.try_compile_native(fun, &live_set, native)?
         {
             purple_garden_shared::trace!("[bc::Cc::cc][{}] native", fun.name);
             if is_root {
@@ -437,24 +434,26 @@ impl<'cc> Cc<'cc> {
     fn try_compile_native(
         &mut self,
         fun: &Func<'cc>,
+        liveness: &[(u32, u32)],
         pages: &mut Vec<purple_garden_jit::JitFn>,
     ) -> Result<bool, String> {
-        let Some(insns) = self.jit.compile_func(fun) else {
+        let Some(()) = self.jit.compile_func_with_liveness(fun, liveness) else {
             purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
             return Ok(false);
         };
 
-        // The page copies the bytes; we move the instruction list onto the
-        // CcFunc (single owner, no duplicate byte blob) for `-D`.
+        // Retain a copy only when diagnostics need it.
         let jit = purple_garden_jit::JitFn::new(self.jit.code())
             .map_err(|e| format!("native code allocation failed: {e}"))?;
+        if let Some(native_code) = &mut self.native_code {
+            native_code.push((fun.name, self.jit.code().to_vec()));
+        }
         let idx = self.std_fns.intern(jit.entry()) as u16;
         self.functions.insert(
             fun.id,
             CcFunc::Native {
                 name: fun.name,
                 idx,
-                insns,
             },
         );
         pages.push(jit);

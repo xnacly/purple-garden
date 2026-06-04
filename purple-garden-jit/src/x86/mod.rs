@@ -323,7 +323,12 @@ fn op_in_place(out: &mut Vec<Insn>, op: BinOp, d: u8, s: u8) {
     });
 }
 
-pub fn compile_func(func: &ir::Func<'_>, out: &mut Vec<Insn>) -> Option<()> {
+pub fn compile_func(
+    func: &ir::Func<'_>,
+    out: &mut Vec<Insn>,
+    liveness: &[(u32, u32)],
+    allocator: &mut crate::regalloc::Allocator,
+) -> Option<()> {
     let mut blocks = func.blocks.iter().filter(|block| !block.tombstone);
     let Some(block) = blocks.next() else {
         skip!(func, "empty function");
@@ -332,8 +337,6 @@ pub fn compile_func(func: &ir::Func<'_>, out: &mut Vec<Insn>) -> Option<()> {
         skip!(func, "multiple blocks");
     }
 
-    let mut liveness = Vec::new();
-    func.live_set_into(&mut liveness);
     // Constant-divisor IDiv/IMod (not imm 0, which traps, nor mod 2, which uses
     // `and`) lowers to `idiv` and needs rax/rcx/rdx reserved.
     let needs_idiv = block.instructions.iter().any(|i| {
@@ -342,8 +345,8 @@ pub fn compile_func(func: &ir::Func<'_>, out: &mut Vec<Insn>) -> Option<()> {
     });
     let caller = if needs_idiv { POOL_DIV } else { POOL };
     // No calls lowered yet, so call_sites is empty and the callee class is unused.
-    let regs = crate::regalloc::allocate(
-        &liveness,
+    let regs = allocator.rebuild(
+        liveness,
         &[],
         crate::regalloc::RegClasses {
             caller,

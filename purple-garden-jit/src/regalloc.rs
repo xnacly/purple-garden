@@ -30,74 +30,91 @@ fn spans_call(def: u32, last_use: u32, call_sites: &[u32]) -> bool {
 /// `u32::MAX` start marks an unused id). `call_sites` are call positions in the
 /// same coordinate space. A value spanning a call takes a `classes.callee`
 /// register, others `classes.caller`; an exhausted class spills that value.
-#[must_use]
-pub fn allocate(
-    liveness: &[(u32, u32)],
-    call_sites: &[u32],
-    classes: RegClasses,
-) -> Vec<ir::Location> {
-    let mut map = vec![ir::Location::Unassigned; liveness.len()];
+#[derive(Debug, Default, Clone)]
+pub struct Allocator {
+    map: Vec<ir::Location>,
+    order: Vec<usize>,
+    caller_free: Vec<u8>,
+    callee_free: Vec<u8>,
+    active: Vec<(u32, u8, bool)>, // (last_use, reg, from_callee)
+}
 
-    let mut order: Vec<usize> = (0..liveness.len())
-        .filter(|&v| liveness[v].0 != u32::MAX)
-        .collect();
-    order.sort_by_key(|&v| (liveness[v].0, v));
+impl Allocator {
+    pub fn rebuild(
+        &mut self,
+        liveness: &[(u32, u32)],
+        call_sites: &[u32],
+        classes: RegClasses<'_>,
+    ) -> &[ir::Location] {
+        self.map.clear();
+        self.map.resize(liveness.len(), ir::Location::Unassigned);
 
-    // Per-class free stacks, reversed so each pool is handed out in given order.
-    let mut caller_free: Vec<u8> = classes.caller.iter().rev().copied().collect();
-    let mut callee_free: Vec<u8> = classes.callee.iter().rev().copied().collect();
-    let mut active: Vec<(u32, u8, bool)> = Vec::new(); // (last_use, reg, from_callee)
+        self.order.clear();
+        self.order
+            .extend((0..liveness.len()).filter(|&v| liveness[v].0 != u32::MAX));
+        self.order.sort_by_key(|&v| (liveness[v].0, v));
 
-    for v in order {
-        let (start, end) = liveness[v];
-        active.retain(|&(last_use, reg, from_callee)| {
-            if last_use <= start {
-                if from_callee {
-                    callee_free.push(reg);
+        self.caller_free.clear();
+        self.caller_free
+            .extend(classes.caller.iter().rev().copied());
+        self.callee_free.clear();
+        self.callee_free
+            .extend(classes.callee.iter().rev().copied());
+        self.active.clear();
+
+        for &v in &self.order {
+            let (start, end) = liveness[v];
+            self.active.retain(|&(last_use, reg, from_callee)| {
+                if last_use <= start {
+                    if from_callee {
+                        self.callee_free.push(reg);
+                    } else {
+                        self.caller_free.push(reg);
+                    }
+                    false
                 } else {
-                    caller_free.push(reg);
+                    true
                 }
-                false
+            });
+
+            let from_callee = spans_call(start, end, call_sites);
+            let free = if from_callee {
+                &mut self.callee_free
             } else {
-                true
-            }
-        });
+                &mut self.caller_free
+            };
+            self.map[v] = match free.pop() {
+                Some(reg) => {
+                    self.active.push((end, reg, from_callee));
+                    ir::Location::Reg(reg)
+                }
+                None => ir::Location::Stack,
+            };
+        }
 
-        let from_callee = spans_call(start, end, call_sites);
-        let free = if from_callee {
-            &mut callee_free
-        } else {
-            &mut caller_free
-        };
-        map[v] = match free.pop() {
-            Some(reg) => {
-                active.push((end, reg, from_callee));
-                ir::Location::Reg(reg)
-            }
-            None => ir::Location::Stack,
-        };
+        &self.map
     }
-
-    map
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RegClasses, allocate};
+    use super::{Allocator, RegClasses};
     use purple_garden_ir::Location;
 
     const CALLER: &[u8] = &[0, 1];
     const CALLEE: &[u8] = &[3, 12];
 
     fn alloc(liveness: &[(u32, u32)], call_sites: &[u32]) -> Vec<Location> {
-        allocate(
-            liveness,
-            call_sites,
-            RegClasses {
-                caller: CALLER,
-                callee: CALLEE,
-            },
-        )
+        Allocator::default()
+            .rebuild(
+                liveness,
+                call_sites,
+                RegClasses {
+                    caller: CALLER,
+                    callee: CALLEE,
+                },
+            )
+            .to_vec()
     }
 
     fn spills(map: &[Location]) -> usize {
@@ -146,14 +163,16 @@ mod tests {
     fn cross_call_value_spills_when_callee_class_is_full() {
         // all three span the call but only one callee reg exists: two spill,
         // with no fallback to the caller class.
-        let map = allocate(
-            &[(0, 10), (0, 10), (0, 10)],
-            &[5],
-            RegClasses {
-                caller: CALLER,
-                callee: &[3],
-            },
-        );
+        let map = Allocator::default()
+            .rebuild(
+                &[(0, 10), (0, 10), (0, 10)],
+                &[5],
+                RegClasses {
+                    caller: CALLER,
+                    callee: &[3],
+                },
+            )
+            .to_vec();
         assert_eq!(spills(&map), 2);
     }
 }

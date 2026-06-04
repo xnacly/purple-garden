@@ -17,7 +17,12 @@ impl fmt::Display for Insn {
     }
 }
 
-pub fn compile_func(_func: &ir::Func<'_>, _: &mut Vec<Insn>) -> Option<()> {
+pub fn compile_func(
+    _func: &ir::Func<'_>,
+    _: &mut Vec<Insn>,
+    _: &[(u32, u32)],
+    _: &mut crate::regalloc::Allocator,
+) -> Option<()> {
     purple_garden_shared::trace!("[jit::aarch64] skipped: backend scaffold only");
     None
 }

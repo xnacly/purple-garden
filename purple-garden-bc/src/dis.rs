@@ -140,7 +140,7 @@ impl<'dis> Disassembler<'dis> {
         map
     }
 
-    pub fn disassemble(&self) {
+    pub fn disassemble_bytecode(&self) {
         let funcs_by_pc: HashMap<u32, &crate::CcFunc> = self
             .cc
             .functions
@@ -361,33 +361,35 @@ impl<'dis> Disassembler<'dis> {
                 println!("  {addr}    {body}");
             }
         }
+    }
 
-        // JIT-compiled functions have no bytecode; dump their native
-        // instructions with the bytes each encodes to (objdump-style). One
-        // reporting path: the call sites above already show `sys N <jit_name>`.
-        let mut native: Vec<(&str, &[purple_garden_jit::Insn])> = self
-            .cc
-            .functions
-            .values()
-            .filter_map(|f| match f {
-                crate::CcFunc::Native { name, insns, .. } => Some((*name, &insns[..])),
-                crate::CcFunc::Bc { .. } => None,
-            })
-            .collect();
-        native.sort_by_key(|(name, _)| *name);
-        let mut bytes = Vec::new();
-        for (name, insns) in native {
-            println!("\n{}:", paint(color, FUNC, &format!("<jit_{name}>")));
-            let mut off = 0usize;
-            for insn in insns {
-                bytes.clear();
-                insn.encode(&mut bytes);
-                let addr = paint(color, ADDR, &format!("{off:04x}:"));
-                let hex: String = bytes.iter().map(|b| format!("{b:02x} ")).collect();
-                let hex = paint(color, COMMENT, &format!("{hex:<23}"));
-                let instr = paint(color, COMMENT, &format!("; {insn}"));
-                println!("  {addr}    {hex} {instr}");
-                off += bytes.len();
+    pub fn disassemble(&self) {
+        self.disassemble_bytecode();
+        self.disassemble_native_hex();
+    }
+
+    pub fn disassemble_native_hex(&self) {
+        let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+        let mut base = 0usize;
+
+        for (name, code) in self.cc.native_code.as_deref().unwrap_or_default() {
+            println!(
+                "\n{:08x} {}:",
+                base,
+                paint(color, FUNC, &format!("<jit_{name}>"))
+            );
+            for (line, chunk) in code.chunks(16).enumerate() {
+                let addr = base + line * 16;
+                let hex = chunk
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                println!(
+                    "  {}    {}",
+                    paint(color, ADDR, &format!("{addr:04x}:")),
+                    hex
+                );
             }
         }
     }
