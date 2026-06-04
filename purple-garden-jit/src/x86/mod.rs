@@ -61,6 +61,11 @@ pub enum Insn {
         src: u8,
         slot: u8,
     },
+    /// `mov [rdi + slot*8], imm`
+    StoreImmSlot {
+        slot: u8,
+        imm: i32,
+    },
     /// `mov r{dst}, r{src}`
     Mov {
         dst: u8,
@@ -142,6 +147,7 @@ impl Insn {
             Insn::Ret => code.push(0xc3),
             Insn::LoadSlot { dst, slot } => mov_slot(code, 0x8b, dst, slot),
             Insn::StoreSlot { src, slot } => mov_slot(code, 0x89, src, slot),
+            Insn::StoreImmSlot { slot, imm } => store_slot_imm(code, slot, imm),
             // 0x89 = `mov r/m, r`: r/m is dst, reg is src.
             Insn::Mov { dst, src } => reg_reg(code, 0x89, src, dst),
             // 0x01 = `add r/m, r`, 0x29 = `sub r/m, r`: r/m is dst, reg is src.
@@ -221,6 +227,7 @@ impl fmt::Display for Insn {
             Insn::Ret => write!(f, "ret"),
             Insn::LoadSlot { dst, slot } => write!(f, "mov {}, [rdi+{:#x}]", r(dst), slot * 8),
             Insn::StoreSlot { src, slot } => write!(f, "mov [rdi+{:#x}], {}", slot * 8, r(src)),
+            Insn::StoreImmSlot { slot, imm } => write!(f, "mov [rdi+{:#x}], {imm}", slot * 8),
             Insn::Mov { dst, src } => write!(f, "mov {}, {}", r(dst), r(src)),
             Insn::MovImm { dst, imm } => write!(f, "mov {}, {imm}", r(dst)),
             Insn::Add { dst, src } => write!(f, "add {}, {}", r(dst), r(src)),
@@ -271,6 +278,14 @@ fn mov_slot(code: &mut Vec<u8>, opcode: u8, reg: u8, slot: u8) {
     // ModRM mod=01 (disp8), reg field = GPR, rm = rdi.
     let m = 0x40 | ((reg & 7) << 3) | RDI;
     code.extend_from_slice(&[rex(reg, RDI), opcode, m, slot * 8]);
+}
+
+/// `mov [rdi + slot*8], imm32`
+fn store_slot_imm(code: &mut Vec<u8>, slot: u8, imm: i32) {
+    // ModRM mod=01 (disp8), reg field = /0, rm = rdi.
+    let m = 0x40 | RDI;
+    code.extend_from_slice(&[rex(0, RDI), 0xc7, m, slot * 8]);
+    code.extend_from_slice(&imm.to_le_bytes());
 }
 
 /// Emit `r{d} = r{l} <op> r{r}` in place (op is IAdd/ISub/IMul). x86 binops are
@@ -365,6 +380,7 @@ pub fn compile_func(
         Some(ir::Location::Reg(r)) => Some(*r),
         _ => None,
     };
+    let mut last_const_load: Option<(ir::Id, i32, usize)> = None;
 
     // Args arrive in the VM register file: param i in vm.r[i] == [rdi + i*8].
     for (i, &param) in func.params.iter().enumerate() {
@@ -383,7 +399,7 @@ pub fn compile_func(
         match instr {
             ir::Instr::Noop => {}
             ir::Instr::LoadConst { dst, value, .. } => {
-                let Some(dst) = reg(dst.id) else {
+                let Some(dst_reg) = reg(dst.id) else {
                     unreachable!();
                 };
                 let imm = match value {
@@ -396,12 +412,14 @@ pub fn compile_func(
                     }
                     _ => skip!(func, "const not true, false or i32::MIN < i < i32::MAX"),
                 };
-
-                emit(out, Insn::MovImm { dst, imm })
+                let code_start = out.len();
+                emit(out, Insn::MovImm { dst: dst_reg, imm });
+                last_const_load = Some((dst.id, imm, code_start));
             }
             ir::Instr::BinImm {
                 op, dst, lhs, imm, ..
             } => {
+                last_const_load = None;
                 let (Some(d), Some(l)) = (reg(dst.id), reg(*lhs)) else {
                     unreachable!();
                 };
@@ -454,6 +472,7 @@ pub fn compile_func(
             ir::Instr::Bin {
                 op, dst, lhs, rhs, ..
             } => {
+                last_const_load = None;
                 let (Some(d), Some(l), Some(r)) = (reg(dst.id), reg(*lhs), reg(*rhs)) else {
                     skip!(func, "unallocated operand in {instr:?}");
                 };
@@ -463,7 +482,9 @@ pub fn compile_func(
                 };
                 emit_bin(out, op, d, l, r);
             }
-            _ => skip!(func, "unsupported instruction {instr:?}"),
+            _ => {
+                skip!(func, "unsupported instruction {instr:?}")
+            }
         }
     }
 
@@ -472,6 +493,19 @@ pub fn compile_func(
         None => {}
         Some(ir::Terminator::Return { value, .. }) => {
             if let Some(value) = value {
+                if let Some((loaded_id, imm, code_start)) = last_const_load
+                    && loaded_id == *value
+                {
+                    out.truncate(code_start);
+                    emit(out, Insn::StoreImmSlot { slot: 0, imm });
+                    emit(out, Insn::Ret);
+                    purple_garden_shared::trace!(
+                        "[jit::x86] compiled {} ({} bytes)",
+                        func.name,
+                        out.len()
+                    );
+                    return Some(());
+                }
                 let Some(r) = reg(*value) else {
                     skip!(func, "return value %v{} unallocated", value.0);
                 };
