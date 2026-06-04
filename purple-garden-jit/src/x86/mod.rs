@@ -201,6 +201,11 @@ impl Insn {
     }
 }
 
+#[inline]
+fn emit(code: &mut Vec<u8>, insn: Insn) {
+    insn.encode(code);
+}
+
 /// 64-bit GPR name for a physical register number.
 fn reg_name(r: u8) -> &'static str {
     [
@@ -272,7 +277,7 @@ fn mov_slot(code: &mut Vec<u8>, opcode: u8, reg: u8, slot: u8) {
 /// two-operand (`dst <op>= src`), so the destination must start out holding the
 /// left operand; the branches handle the cases where the allocator gave the
 /// result the same register as an operand.
-fn emit_bin(out: &mut Vec<Insn>, op: BinOp, d: u8, l: u8, r: u8) {
+fn emit_bin(out: &mut Vec<u8>, op: BinOp, d: u8, l: u8, r: u8) {
     if d == l {
         // dst already holds lhs.
         op_in_place(out, op, d, r);
@@ -280,14 +285,14 @@ fn emit_bin(out: &mut Vec<Insn>, op: BinOp, d: u8, l: u8, r: u8) {
         // dst holds rhs. add/mul commute, so `dst <op>= lhs` is the answer. sub
         // doesn't: compute rhs - lhs, then negate -> lhs - rhs (no temp needed).
         if matches!(op, BinOp::ISub) {
-            out.push(Insn::Sub { dst: d, src: l });
-            out.push(Insn::Neg { reg: d });
+            emit(out, Insn::Sub { dst: d, src: l });
+            emit(out, Insn::Neg { reg: d });
         } else {
             op_in_place(out, op, d, l);
         }
     } else {
         // dst aliases neither operand: load lhs, then op rhs.
-        out.push(Insn::Mov { dst: d, src: l });
+        emit(out, Insn::Mov { dst: d, src: l });
         op_in_place(out, op, d, r);
     }
 }
@@ -295,37 +300,40 @@ fn emit_bin(out: &mut Vec<Insn>, op: BinOp, d: u8, l: u8, r: u8) {
 /// C-ABI `call addr`, rdi already holding `*mut Vm`. Leaves enter at `rsp % 16
 /// == 8`, so realign with `sub`/`add rsp, 8`. Callees clobber caller-saved regs,
 /// fine here: the only use is a trap callback that returns right after.
-fn emit_abi_call(out: &mut Vec<Insn>, addr: u64) {
-    out.push(Insn::SubImm { dst: RSP, imm: 8 });
-    out.push(Insn::MovAbs { dst: 0, imm: addr }); // rax = addr
-    out.push(Insn::CallReg { reg: 0 }); // call rax
-    out.push(Insn::AddImm { dst: RSP, imm: 8 });
+fn emit_abi_call(out: &mut Vec<u8>, addr: u64) {
+    emit(out, Insn::SubImm { dst: RSP, imm: 8 });
+    emit(out, Insn::MovAbs { dst: 0, imm: addr }); // rax = addr
+    emit(out, Insn::CallReg { reg: 0 }); // call rax
+    emit(out, Insn::AddImm { dst: RSP, imm: 8 });
 }
 
 /// `d = l <op> imm` for IDiv/IMod, nonzero constant divisor. idiv has no imm
 /// form, so the divisor goes via rcx. Caller allocates l/d from `POOL_DIV`.
-fn emit_idiv(out: &mut Vec<Insn>, op: BinOp, d: u8, l: u8, imm: i32) {
-    out.push(Insn::Mov { dst: RAX, src: l });
-    out.push(Insn::Cqo);
-    out.push(Insn::MovImm { dst: RCX, imm });
-    out.push(Insn::Idiv { divisor: RCX });
+fn emit_idiv(out: &mut Vec<u8>, op: BinOp, d: u8, l: u8, imm: i32) {
+    emit(out, Insn::Mov { dst: RAX, src: l });
+    emit(out, Insn::Cqo);
+    emit(out, Insn::MovImm { dst: RCX, imm });
+    emit(out, Insn::Idiv { divisor: RCX });
     let src = if matches!(op, BinOp::IDiv) { RAX } else { RDX };
-    out.push(Insn::Mov { dst: d, src });
+    emit(out, Insn::Mov { dst: d, src });
 }
 
 /// `r{d} <op>= r{s}` for IAdd/ISub/IMul.
-fn op_in_place(out: &mut Vec<Insn>, op: BinOp, d: u8, s: u8) {
-    out.push(match op {
-        BinOp::IAdd => Insn::Add { dst: d, src: s },
-        BinOp::ISub => Insn::Sub { dst: d, src: s },
-        BinOp::IMul => Insn::Imul { dst: d, src: s },
-        _ => unreachable!("emit_bin only handles IAdd/ISub/IMul"),
-    });
+fn op_in_place(out: &mut Vec<u8>, op: BinOp, d: u8, s: u8) {
+    emit(
+        out,
+        match op {
+            BinOp::IAdd => Insn::Add { dst: d, src: s },
+            BinOp::ISub => Insn::Sub { dst: d, src: s },
+            BinOp::IMul => Insn::Imul { dst: d, src: s },
+            _ => unreachable!("emit_bin only handles IAdd/ISub/IMul"),
+        },
+    );
 }
 
 pub fn compile_func(
     func: &ir::Func<'_>,
-    out: &mut Vec<Insn>,
+    out: &mut Vec<u8>,
     liveness: &[(u32, u32)],
     allocator: &mut crate::regalloc::Allocator,
 ) -> Option<()> {
@@ -361,10 +369,13 @@ pub fn compile_func(
     // Args arrive in the VM register file: param i in vm.r[i] == [rdi + i*8].
     for (i, &param) in func.params.iter().enumerate() {
         if let Some(r) = reg(param) {
-            out.push(Insn::LoadSlot {
-                dst: r,
-                slot: i as u8,
-            });
+            emit(
+                out,
+                Insn::LoadSlot {
+                    dst: r,
+                    slot: i as u8,
+                },
+            );
         }
     }
 
@@ -386,7 +397,7 @@ pub fn compile_func(
                     _ => skip!(func, "const not true, false or i32::MIN < i < i32::MAX"),
                 };
 
-                out.push(Insn::MovImm { dst, imm })
+                emit(out, Insn::MovImm { dst, imm })
             }
             ir::Instr::BinImm {
                 op, dst, lhs, imm, ..
@@ -399,39 +410,42 @@ pub fn compile_func(
                     // dst = lhs <op> imm. Get lhs into dst, then op in place.
                     BinOp::IAdd | BinOp::ISub => {
                         if d != l {
-                            out.push(Insn::Mov { dst: d, src: l });
+                            emit(out, Insn::Mov { dst: d, src: l });
                         }
-                        out.push(match op {
-                            BinOp::IAdd => Insn::AddImm { dst: d, imm },
-                            _ => Insn::SubImm { dst: d, imm },
-                        });
+                        emit(
+                            out,
+                            match op {
+                                BinOp::IAdd => Insn::AddImm { dst: d, imm },
+                                _ => Insn::SubImm { dst: d, imm },
+                            },
+                        );
                     }
                     // dst = (lhs == imm) as 0/1. cmp reads lhs and sets flags;
                     // mov (no flags) clears dst; sete writes the low byte. Safe
                     // even if dst == lhs (the cmp happens before the mov).
                     BinOp::IEq => {
                         if imm == 0 {
-                            out.push(Insn::Test { lhs: l, rhs: l });
+                            emit(out, Insn::Test { lhs: l, rhs: l });
                         } else {
-                            out.push(Insn::CmpImm { reg: l, imm });
+                            emit(out, Insn::CmpImm { reg: l, imm });
                         }
-                        out.push(Insn::MovImm { dst: d, imm: 0 });
-                        out.push(Insn::Sete { dst: d });
+                        emit(out, Insn::MovImm { dst: d, imm: 0 });
+                        emit(out, Insn::Sete { dst: d });
                     }
                     // static divide-by-zero; trap and return, the rest is dead.
                     BinOp::IDiv | BinOp::IMod if imm == 0 => {
                         let helper: purple_garden_runtime::BuiltinFn =
                             purple_garden_runtime::jit_trap_div_zero;
                         emit_abi_call(out, helper as usize as u64);
-                        out.push(Insn::Ret);
+                        emit(out, Insn::Ret);
                         return Some(());
                     }
                     // x % 2, non-negative dividend; mask the low bit.
                     BinOp::IMod if imm == 2 => {
                         if d != l {
-                            out.push(Insn::Mov { dst: d, src: l });
+                            emit(out, Insn::Mov { dst: d, src: l });
                         }
-                        out.push(Insn::AndImm { dst: d, imm: 1 });
+                        emit(out, Insn::AndImm { dst: d, imm: 1 });
                     }
                     BinOp::IDiv | BinOp::IMod => emit_idiv(out, *op, d, l, imm),
                     _ => skip!(func, "unsupported binimm op {op:?}"),
@@ -461,14 +475,14 @@ pub fn compile_func(
                 let Some(r) = reg(*value) else {
                     skip!(func, "return value %v{} unallocated", value.0);
                 };
-                out.push(Insn::StoreSlot { src: r, slot: 0 }); // result -> vm.r[0]
+                emit(out, Insn::StoreSlot { src: r, slot: 0 }); // result -> vm.r[0]
             }
         }
         _ => skip!(func, "unsupported terminator {term:?}"),
     }
-    out.push(Insn::Ret);
+    emit(out, Insn::Ret);
 
-    purple_garden_shared::trace!("[jit::x86] compiled {} ({} insns)", func.name, out.len());
+    purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
     Some(())
 }
 

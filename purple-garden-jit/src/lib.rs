@@ -23,7 +23,6 @@ mod arch;
 pub mod mem;
 mod regalloc;
 
-pub use arch::Insn;
 pub use mem::JitFn;
 use purple_garden_ir as ir;
 
@@ -31,7 +30,6 @@ use purple_garden_ir as ir;
 #[derive(Debug, Default, Clone)]
 pub struct Jit {
     code: Vec<u8>,
-    insns: Vec<Insn>,
     liveness: Vec<(u32, u32)>,
     regalloc: regalloc::Allocator,
 }
@@ -58,17 +56,12 @@ impl Jit {
         func: &ir::Func<'_>,
         liveness: &[(u32, u32)],
     ) -> Option<()> {
-        self.insns.clear();
         self.code.clear();
-        if arch::compile_func(func, &mut self.insns, liveness, &mut self.regalloc).is_none() {
-            self.insns.clear();
-            return None;
+        let result = arch::compile_func(func, &mut self.code, liveness, &mut self.regalloc);
+        if result.is_none() {
+            self.code.clear();
         }
-
-        for insn in &self.insns {
-            insn.encode(&mut self.code);
-        }
-        Some(())
+        result
     }
 
     /// The machine code for the most recent [`Jit::compile_func`].
