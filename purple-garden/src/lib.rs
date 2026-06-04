@@ -66,6 +66,7 @@ impl Default for Pg<'_> {
 pub struct Program {
     pub vm: Vm,
     pub entry: usize,
+    entry_native: Option<BuiltinFn>,
     pub syscalls: Vec<BuiltinFn>,
     pub debug: DebugInfo,
     pub jit: Vec<JitFn>,
@@ -79,10 +80,17 @@ impl Program {
         Self {
             vm,
             entry,
+            entry_native: None,
             syscalls,
             debug,
             jit: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_entry_native(mut self, entry_native: Option<BuiltinFn>) -> Self {
+        self.entry_native = entry_native;
+        self
     }
 
     pub fn push_jit(&mut self, jit: JitFn) -> u16 {
@@ -93,6 +101,14 @@ impl Program {
     }
 
     pub fn run(&mut self) -> Result<(), Anomaly> {
+        if let Some(entry) = self.entry_native {
+            self.vm.pc = self.entry;
+            unsafe { entry((&mut self.vm as *mut Vm).cast()) };
+            if let Some(anomaly) = self.vm.take_trap() {
+                return Err(anomaly);
+            }
+            return Ok(());
+        }
         self.vm.run(&self.syscalls)
     }
 
@@ -101,7 +117,7 @@ impl Program {
     /// Top-level scripts return their final value-producing expression. If the
     /// script has no final value, use [`Program::run`] instead.
     pub fn run_take<'vm, T: FromVm<'vm>>(&'vm mut self) -> Result<T, Anomaly> {
-        self.vm.run(&self.syscalls)?;
+        self.run()?;
         Ok(T::from_vm(&self.vm, 0))
     }
 }
@@ -130,10 +146,11 @@ fn compile<'e>(
         cc.compact_nops();
     }
 
-    let (vm, syscalls, debug) = cc.finalize(VmConfig {
+    let (vm, syscalls, debug, entry_native_idx) = cc.finalize(VmConfig {
         backtrace: config.backtrace,
     });
-    let mut program = Program::from_vm(vm, syscalls, debug);
+    let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
+    let mut program = Program::from_vm(vm, syscalls, debug).with_entry_native(entry_native);
     if !config.no_jit {
         program.jit = native_pages;
     }

@@ -428,6 +428,11 @@ impl Vm {
     }
 
     #[inline(always)]
+    pub fn take_trap(&mut self) -> Option<Anomaly> {
+        self.pending_trap.take()
+    }
+
+    #[inline(always)]
     /// access register [idx] by indexing [`vm::r`]
     #[must_use]
     pub fn r(&self, idx: usize) -> &Value {

@@ -66,11 +66,10 @@ pub struct Cc<'cc> {
     pub functions: HashMap<Id, CcFunc<'cc>>,
     /// Native code retained only for diagnostic dumps.
     pub native_code: Option<Vec<(&'cc str, Vec<u8>)>>,
-    /// pc of the entry trampoline when the entry function (`Id(0)`) compiled to
-    /// native. The VM enters the entry directly rather than through a Call, so a
-    /// native entry gets a `Sys <native>; Ret` stub here that `finalize` points
-    /// `vm.pc` at. `None` when the entry stays bytecode-dispatched.
-    entry_pc: Option<usize>,
+    /// Syscall slot of the native entry function (`Id(0)`), if it compiled to
+    /// JIT. When present, `Program::run` can jump directly into the native page
+    /// instead of starting from the bytecode trampoline.
+    entry_native_idx: Option<u16>,
     /// `pc_to_span[pc]` is the byte offset into the source of the AST node
     /// that produced the op at `pc`. Threaded into Vm by `Cc::finalize` so
     /// runtime traps can be rendered with <file:line:col>. Parallel to
@@ -237,7 +236,7 @@ impl<'cc> Cc<'cc> {
             std_fns: Interner::new(),
             functions: HashMap::new(),
             native_code: None,
-            entry_pc: None,
+            entry_native_idx: None,
             block_map: Vec::new(),
             regalloc: Ralloc::default(),
             cur_span: 0,
@@ -326,8 +325,8 @@ impl<'cc> Cc<'cc> {
         fun.arg_hints_into(&mut arg_hints);
         self.regalloc.rebuild(&live_set, &arg_hints);
 
-        // Native functions are injected as syscalls. The entry function needs
-        // a trampoline because the VM enters it directly.
+        // Native functions are injected as syscalls. The entry function can
+        // be run directly from the native page when it compiles to JIT.
         let is_root = fun.id == ir::Id(0);
         if let Some(native) = native
             && self.try_compile_native(fun, &live_set, native)?
@@ -337,9 +336,7 @@ impl<'cc> Cc<'cc> {
                 let Some(&CcFunc::Native { idx, .. }) = self.functions.get(&fun.id) else {
                     unreachable!("try_compile_native inserts a Native CcFunc on success");
                 };
-                self.entry_pc = Some(self.buf.len());
-                self.emit(Op::Sys { idx });
-                self.emit(Op::Ret);
+                self.entry_native_idx = Some(idx);
             }
             self.live_set = live_set;
             self.arg_hints = arg_hints;
@@ -416,7 +413,10 @@ impl<'cc> Cc<'cc> {
         // returning. Emit a trailing Ret so a syscall trap raised at top level
         // is drained: pending_trap is only checked on Op::Ret. The synthetic
         // root frame in Vm::new gives this Ret a frame to pop.
-        if is_root && !matches!(self.buf.last(), Some(Op::Ret | Op::Tail { .. })) {
+        if is_root
+            && self.entry_native_idx.is_none()
+            && !matches!(self.buf.last(), Some(Op::Ret | Op::Tail { .. }))
+        {
             self.emit_epilogue(lo, max_reg);
             self.emit(Op::Ret);
         }
@@ -957,24 +957,36 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    pub fn finalize(self, config: VmConfig) -> (Vm, Vec<BuiltinFn>, DebugInfo) {
+    pub fn finalize(self, config: VmConfig) -> (Vm, Vec<BuiltinFn>, DebugInfo, Option<u16>) {
+        let Cc {
+            buf,
+            globals,
+            strings,
+            std_fns,
+            functions,
+            entry_native_idx,
+            pc_to_span,
+            ..
+        } = self;
+
         let mut vm = Vm::new(config);
-        // A native entry runs from its trampoline pc; a bytecode entry from its
-        // own first op.
-        vm.pc = self
-            .entry_pc
-            .or_else(|| self.functions.get(&ir::Id(0)).and_then(CcFunc::pc))
+        // A native entry runs directly from its native page; a bytecode entry
+        // from its own first op.
+        vm.pc = entry_native_idx
+            .map(|_| 0)
+            .or_else(|| functions.get(&ir::Id(0)).and_then(CcFunc::pc))
             .unwrap_or_default();
 
-        let (string_data, strings) = self.strings.into_arena();
-        vm.bytecode = self.buf;
-        vm.globals = self.globals.into_vec_fn(Value::from);
+        let (string_data, strings) = strings.into_arena();
+        vm.bytecode = buf;
+        vm.globals = globals.into_vec_fn(Value::from);
         vm.strings = strings;
         vm.string_data = string_data;
         (
             vm,
-            self.std_fns.into_vec(),
-            DebugInfo::new(self.pc_to_span.into_boxed_slice()),
+            std_fns.into_vec(),
+            DebugInfo::new(pc_to_span.into_boxed_slice()),
+            entry_native_idx,
         )
     }
 

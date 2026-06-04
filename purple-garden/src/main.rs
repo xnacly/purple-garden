@@ -184,10 +184,12 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    let (vm, syscalls, debug) = cc.finalize(VmConfig {
+    let (vm, syscalls, debug, entry_native_idx) = cc.finalize(VmConfig {
         backtrace: conf.backtrace,
     });
-    let mut program = purple_garden::Program::from_vm(vm, syscalls, debug);
+    let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
+    let mut program =
+        purple_garden::Program::from_vm(vm, syscalls, debug).with_entry_native(entry_native);
     if !conf.no_jit {
         program.jit = native_pages;
     }
@@ -215,19 +217,19 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         if conf.backtrace {
-            let entry_point_pc = function_table
+            if let Some(entry_point_pc) = function_table
                 .iter()
                 .find(|(_, name)| name.as_str() == "entry")
                 .map(|(pc, _)| *pc)
-                .unwrap_or_default();
-            program.vm.backtrace.insert(0, entry_point_pc);
+            {
+                program.vm.backtrace.insert(0, entry_point_pc);
+            }
 
             eprintln!("at:");
             for (idx, trace_id) in program.vm.backtrace.iter().enumerate() {
-                let Some(name) = function_table.get(trace_id) else {
-                    panic!("Backtrace bug");
-                };
-                eprintln!(" #{idx} {name}");
+                if let Some(name) = function_table.get(trace_id) {
+                    eprintln!(" #{idx} {name}");
+                }
             }
         }
 
