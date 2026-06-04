@@ -27,7 +27,6 @@ macro_rules! err {
 
 fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let conf = <config::Config as clap::Parser>::parse();
-    purple_garden_shared::trace!("starting with {:#?}", &conf);
     match conf.version {
         1 => {
             println!(
