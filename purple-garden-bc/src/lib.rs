@@ -41,6 +41,21 @@ impl<'fun> CcFunc<'fun> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum CcCallTarget {
+    Bc { pc: usize },
+    Native { idx: u16 },
+}
+
+impl From<&CcFunc<'_>> for CcCallTarget {
+    fn from(func: &CcFunc<'_>) -> Self {
+        match func {
+            CcFunc::Bc { pc, .. } => Self::Bc { pc: *pc },
+            CcFunc::Native { idx, .. } => Self::Native { idx: *idx },
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Cc<'cc> {
     pub buf: Vec<Op>,
@@ -235,12 +250,12 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn intern(&mut self, constant: Const<'cc>) -> u32 {
+    fn intern(&mut self, constant: &'cc Const<'cc>) -> u32 {
         if let Const::Str(str) = constant {
-            let str_pool_idx = self.strings.intern(str);
+            let str_pool_idx = self.strings.intern(Cow::Borrowed(str.as_ref()));
             self.globals.intern(Const::Int(str_pool_idx as i64))
         } else {
-            self.globals.intern(constant)
+            self.globals.intern(constant.clone())
         }
     }
 
@@ -666,13 +681,9 @@ impl<'cc> Cc<'cc> {
                 }
             }
             ir::Terminator::Tail { func, args, .. } => {
-                let Some(func) = self.functions.get(func) else {
+                let Some(target) = self.functions.get(func).map(CcCallTarget::from) else {
                     unreachable!();
                 };
-
-                // Clone to release the `self.functions` borrow before the emit
-                // calls below take `&mut self`.
-                let func = func.clone();
 
                 // Arg shuffle first (reads computed values from callee-saved regs),
                 // then epilogue (restores r{lo}..r{max_reg}, which is above the arg
@@ -680,9 +691,9 @@ impl<'cc> Cc<'cc> {
                 self.emit_arg_shuffle(args);
                 self.emit_epilogue(lo, max_reg);
 
-                match func {
-                    CcFunc::Bc { pc, .. } => self.emit(Op::Tail { func: pc as u32 }),
-                    CcFunc::Native { idx, .. } => {
+                match target {
+                    CcCallTarget::Bc { pc } => self.emit(Op::Tail { func: pc as u32 }),
+                    CcCallTarget::Native { idx } => {
                         self.emit(Op::Sys { idx });
                         self.emit(Op::Ret)
                     }
@@ -691,7 +702,7 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn instr(&mut self, live_set: &[(u32, u32)], pos: u32, i: &ir::Instr<'cc>) {
+    fn instr(&mut self, live_set: &[(u32, u32)], pos: u32, i: &'cc ir::Instr<'cc>) {
         match i {
             ir::Instr::Cast {
                 dst: TypeId { id, ty: dst_ty },
@@ -727,19 +738,16 @@ impl<'cc> Cc<'cc> {
                         value: *i as i32,
                     });
                 } else {
-                    let idx = self.intern(value.clone());
+                    let idx = self.intern(value);
                     self.emit(Op::LoadG { dst, idx });
                 }
             }
             ir::Instr::Call {
                 dst, func, args, ..
             } => {
-                let Some(func) = self.functions.get(func) else {
+                let Some(target) = self.functions.get(func).map(CcCallTarget::from) else {
                     unreachable!();
                 };
-                // Clone to release the `self.functions` borrow before the emit
-                // calls below take `&mut self`.
-                let func = func.clone();
 
                 // Callee-saved convention: the callee's prologue preserves r1..r{max_reg_callee}.
                 // The caller only needs to spill live values in r0..r{clobber_end-1},
@@ -776,9 +784,9 @@ impl<'cc> Cc<'cc> {
                 self.emit_arg_shuffle(args);
 
                 let dst = self.ensure_register(dst.id);
-                match func {
-                    CcFunc::Bc { pc, .. } => self.emit(Op::Call { func: pc as u32 }),
-                    CcFunc::Native { idx, .. } => self.emit(Op::Sys { idx }),
+                match target {
+                    CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
+                    CcCallTarget::Native { idx } => self.emit(Op::Sys { idx }),
                 };
                 self.emit(Op::Mov { dst, src: 0 });
                 self.scratch.reverse();
