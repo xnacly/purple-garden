@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 
 use purple_garden_ir::Id;
 use purple_garden_runtime::{BuiltinFn, op::Op};
@@ -363,19 +363,13 @@ impl<'dis> Disassembler<'dis> {
         }
     }
 
-    pub fn disassemble(&self) {
-        self.disassemble_bytecode();
-        self.disassemble_native_hex();
-    }
-
-    pub fn disassemble_native_hex(&self) {
+    pub fn disassemble_native(&self) {
         let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
         let mut base = 0usize;
 
         for (name, code) in self.cc.native_code.as_deref().unwrap_or_default() {
             println!(
-                "\n{:08x} {}:",
-                base,
+                "\n{base:08x} {}:",
                 paint(color, FUNC, &format!("<jit_{name}>"))
             );
             for (line, chunk) in code.chunks(16).enumerate() {
@@ -385,13 +379,14 @@ impl<'dis> Disassembler<'dis> {
                     .map(|byte| format!("{byte:02x}"))
                     .collect::<Vec<_>>()
                     .join(" ");
-                println!(
-                    "  {}    {}",
-                    paint(color, ADDR, &format!("{addr:04x}:")),
-                    hex
-                );
+                println!("  {}    {hex}", paint(color, ADDR, &format!("{addr:04x}:")));
             }
+            base += code.len();
         }
+    }
+
+    pub fn dump_native_elf(&self, out: impl Write) -> std::io::Result<()> {
+        crate::elf::write(self.cc.native_code.as_deref().unwrap_or_default(), out)
     }
 
     fn source_line(&self, pc: usize) -> Option<(usize, &'dis str)> {

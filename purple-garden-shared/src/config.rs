@@ -23,9 +23,18 @@ pub struct Config {
     #[arg(short = 'd', long)]
     pub dry: bool,
 
-    /// Readable bytecode or machine code, depending on execution strategy
-    #[arg(short = 'D', long)]
-    pub disassemble: bool,
+    /// Dump generated code.
+    ///
+    /// -D prints readable bytecode and named native machine code.
+    ///
+    /// -DD writes a minimal relocatable ELF object to stdout, for instance to be passed to objdump:
+    ///
+    ///    objdump -d (purple-garden -d -DD script.garden | psub)
+    ///
+    /// Dumping does not stop execution. Add -d when stdout must contain only
+    /// the dump, particularly with -DD.
+    #[arg(short = 'D', long, action = clap::ArgAction::Count)]
+    pub disassemble: u8,
     /// Readable abstract syntax tree
     #[arg(short = 'A', long)]
     pub ast: bool,
@@ -82,7 +91,7 @@ impl Config {
         Config {
             opt: 0,
             dry: false,
-            disassemble: false,
+            disassemble: 0,
             ast: false,
             ir: false,
             backtrace: false,

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 pub mod dis;
+mod elf;
 mod intern;
 mod regalloc;
 
@@ -287,7 +288,7 @@ impl<'cc> Cc<'cc> {
     ) -> Result<Vec<purple_garden_jit::JitFn>, String> {
         let mut native_pages: Option<Vec<purple_garden_jit::JitFn>> =
             (!config.no_jit).then(Vec::new);
-        self.native_code = config.disassemble.then(Vec::new);
+        self.native_code = (config.disassemble > 0).then(Vec::new);
 
         for func in ir {
             if config.liveness {

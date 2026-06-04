@@ -180,7 +180,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         HashMap::new()
     };
 
-    let ctx = if conf.disassemble {
+    let ctx = if conf.disassemble > 0 {
         Some(cc.clone())
     } else {
         None
@@ -193,10 +193,16 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         program.jit = native_pages;
     }
 
-    if conf.disassemble {
-        bc::dis::Disassembler::new(&program.vm.bytecode, ctx.unwrap())
-            .with_source(input.as_bytes())
-            .disassemble();
+    if let Some(ctx) = ctx {
+        let dis =
+            bc::dis::Disassembler::new(&program.vm.bytecode, ctx).with_source(input.as_bytes());
+        match conf.disassemble {
+            1 => {
+                dis.disassemble_bytecode();
+                dis.disassemble_native();
+            }
+            _ => dis.dump_native_elf(std::io::stdout().lock())?,
+        }
     }
 
     if conf.dry {
@@ -204,7 +210,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Err(e) = program.run() {
-        println!(
+        eprintln!(
             "{}",
             PgError::from_anomaly(e, &program.debug).render(input_source, input.as_bytes())
         );
@@ -217,12 +223,12 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_default();
             program.vm.backtrace.insert(0, entry_point_pc);
 
-            println!("at:");
+            eprintln!("at:");
             for (idx, trace_id) in program.vm.backtrace.iter().enumerate() {
                 let Some(name) = function_table.get(trace_id) else {
                     panic!("Backtrace bug");
                 };
-                println!(" #{idx} {name}");
+                eprintln!(" #{idx} {name}");
             }
         }
 
@@ -235,7 +241,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
 fn main() {
     if let Err(e) = entry() {
-        println!("{e}");
+        eprintln!("{e}");
         std::process::exit(1);
     }
 }
