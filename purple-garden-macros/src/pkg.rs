@@ -49,8 +49,11 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         };
 
         match expand_function(&api, fun) {
-            Ok((wrapper, meta)) => {
+            Ok((wrapper, eval, meta)) => {
                 generated.push(Item::Verbatim(wrapper));
+                if let Some(eval) = eval {
+                    generated.push(Item::Verbatim(eval));
+                }
                 metadata.push(meta);
             }
             Err(err) => errors.extend(err.to_compile_error()),
@@ -108,9 +111,17 @@ fn parse_attr(attr: TokenStream) -> syn::Result<Path> {
     Ok(syn::parse_quote!(::purple_garden))
 }
 
-fn expand_function(api: &Path, fun: &mut ItemFn) -> syn::Result<(TokenStream2, TokenStream2)> {
+fn expand_function(
+    api: &Path,
+    fun: &mut ItemFn,
+) -> syn::Result<(TokenStream2, Option<TokenStream2>, TokenStream2)> {
     let function = Function::parse(fun)?;
-    Ok((function.wrapper(api), function.metadata(api)))
+    let eval = function.const_eval()?;
+    Ok((
+        function.wrapper(api),
+        eval.clone(),
+        function.metadata(api, eval.is_some()),
+    ))
 }
 
 impl Function {
@@ -170,11 +181,6 @@ impl Function {
             },
         };
 
-        if self.pure {
-            // TODO: script compile time function execution by converting all args to purple_garden_ir::constant::Const and
-            // returning the same type
-        }
-
         quote! {
             unsafe extern "C" fn #wrapper_name(vm: *mut std::ffi::c_void) {
                 let vm = unsafe { &mut *vm.cast::<#api::Vm>() };
@@ -183,8 +189,51 @@ impl Function {
         }
     }
 
-    fn metadata(&self, api: &Path) -> TokenStream2 {
+    fn const_eval(&self) -> syn::Result<Option<TokenStream2>> {
+        if !self.pure {
+            return Ok(None);
+        }
+
+        let eval_name = format_ident!("__pg_eval_{}", self.ident);
+        let fn_name = &self.ident;
+        let argc = self.args.len();
+        let mut arg_bindings = Vec::with_capacity(self.args.len());
+        for (idx, arg) in self.args.iter().enumerate() {
+            let Some(expr) = const_arg_expr(&arg.ty, idx) else {
+                return Ok(None);
+            };
+            let binding = &arg.binding;
+            arg_bindings.push(quote! {
+                let #binding = #expr;
+            });
+        }
+        let arg_exprs = self.args.iter().map(|arg| &arg.binding);
+        let Some(ret_expr) = const_ret_expr(&self.ret) else {
+            return Ok(None);
+        };
+
+        Ok(Some(quote! {
+            fn #eval_name<'args, 'c>(
+                args: &'args [::purple_garden_ir::Const<'c>],
+            ) -> Option<::purple_garden_ir::Const<'c>> {
+                if args.len() != #argc {
+                    return None;
+                }
+                #(#arg_bindings)*
+                let ret = #fn_name(#(#arg_exprs),*);
+                Some(#ret_expr)
+            }
+        }))
+    }
+
+    fn metadata(&self, api: &Path, has_eval: bool) -> TokenStream2 {
         let wrapper_name = &self.wrapper;
+        let eval_name = if has_eval {
+            let ident = format_ident!("__pg_eval_{}", self.ident);
+            quote!(Some(#ident))
+        } else {
+            quote!(None)
+        };
         let name = &self.name;
         let doc = &self.doc;
         let pure = self.pure;
@@ -201,6 +250,7 @@ impl Function {
                 doc: #doc,
                 ptr: #wrapper_name,
                 pure: #pure,
+                eval: #eval_name,
                 arg_names: &[#(#arg_names),*],
                 args: &[#(<#arg_types as #api::PgType>::TYPE),*],
                 ret: <#ret_ty as #api::PgType>::TYPE,
@@ -313,4 +363,78 @@ fn doc_string(attrs: &[Attribute]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn const_arg_expr(ty: &Type, idx: usize) -> Option<TokenStream2> {
+    match ty {
+        Type::Path(path) if path_is_ident(path, "bool") => Some(quote! {
+            match args.get(#idx)? {
+                ::purple_garden_ir::Const::True => true,
+                ::purple_garden_ir::Const::False => false,
+                _ => return None,
+            }
+        }),
+        Type::Path(path) if path_is_ident(path, "i64") => Some(quote! {
+            match args.get(#idx)? {
+                ::purple_garden_ir::Const::Int(v) => *v,
+                _ => return None,
+            }
+        }),
+        Type::Path(path) if path_is_ident(path, "f64") => Some(quote! {
+            match args.get(#idx)? {
+                ::purple_garden_ir::Const::Double(v) => f64::from_bits(*v),
+                _ => return None,
+            }
+        }),
+        Type::Path(path) if path_is_ident(path, "String") => Some(quote! {
+            match args.get(#idx)? {
+                ::purple_garden_ir::Const::Str(v) => v.clone().into_owned(),
+                _ => return None,
+            }
+        }),
+        Type::Reference(reference) if is_str_ref(reference) => Some(quote! {
+            match args.get(#idx)? {
+                ::purple_garden_ir::Const::Str(v) => v.as_ref(),
+                _ => return None,
+            }
+        }),
+        _ => None,
+    }
+}
+
+fn const_ret_expr(ty: &Type) -> Option<TokenStream2> {
+    match ty {
+        Type::Path(path) if path_is_ident(path, "bool") => Some(quote! {
+            ::purple_garden_ir::Const::from(ret)
+        }),
+        Type::Path(path) if path_is_ident(path, "i64") => Some(quote! {
+            ::purple_garden_ir::Const::from(ret)
+        }),
+        Type::Path(path) if path_is_ident(path, "f64") => Some(quote! {
+            ::purple_garden_ir::Const::from(ret)
+        }),
+        Type::Path(path) if path_is_ident(path, "String") => Some(quote! {
+            ::purple_garden_ir::Const::from(ret)
+        }),
+        Type::Reference(reference) if is_str_ref(reference) => Some(quote! {
+            ::purple_garden_ir::Const::from(ret)
+        }),
+        _ => None,
+    }
+}
+
+fn path_is_ident(path: &syn::TypePath, ident: &str) -> bool {
+    path.qself.is_none()
+        && path
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == ident)
+}
+
+fn is_str_ref(reference: &syn::TypeReference) -> bool {
+    match reference.elem.as_ref() {
+        Type::Path(path) => path_is_ident(path, "str"),
+        _ => false,
+    }
 }

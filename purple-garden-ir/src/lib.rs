@@ -27,12 +27,15 @@ pub use crate::constant::Const;
 use crate::ptype::Type;
 use purple_garden_shared::BuiltinFn;
 
+pub type ConstEvalFn = for<'args, 'c> fn(&'args [Const<'c>]) -> Option<Const<'c>>;
+
 #[derive(Debug, Clone)]
 pub struct Fn<'f> {
     pub name: &'f str,
     pub doc: &'f str,
     pub ptr: BuiltinFn,
     pub pure: bool,
+    pub eval: Option<ConstEvalFn>,
     pub arg_names: &'f [&'f str],
     pub args: &'f [Type<'f>],
     pub ret: Type<'f>,

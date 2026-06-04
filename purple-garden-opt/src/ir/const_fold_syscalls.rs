@@ -34,32 +34,42 @@ pub fn const_fold_syscalls<'fold, 's>(
                 continue;
             };
 
-            let _ = (
-                candidate.dst.id,
-                candidate.fun.ptr,
-                candidate.args.len(),
-                candidate.span,
+            let Some(eval) = candidate.fun.eval else {
+                continue;
+            };
+
+            let Some(value) = eval(&candidate.args) else {
+                continue;
+            };
+
+            purple_garden_shared::trace!(
+                "[opt::ir::const_fold_syscalls] folded syscall {} into constant {:?}",
+                candidate.fun.name,
+                value
             );
-            // TODO: invoke the macro-generated const-eval wrapper for
-            // `candidate.fun`, then replace this instruction with
-            // `Instr::LoadConst` carrying the returned `Const`.
+
+            *instr = Instr::LoadConst {
+                dst: candidate.dst,
+                value,
+                span: candidate.span,
+            };
         }
     }
 }
 
 #[derive(Debug)]
-struct SyscallFoldCandidate<'consts, 'ir> {
+struct SyscallFoldCandidate<'ir> {
     dst: TypeId<'ir>,
     fun: &'ir ir::Fn<'ir>,
-    args: Vec<&'consts Const<'ir>>,
+    args: Vec<Const<'ir>>,
     span: u32,
 }
 
-fn syscall_fold_candidate<'consts, 'ir>(
+fn syscall_fold_candidate<'ir>(
     instr: &Instr<'ir>,
     scratch: &Scratch<'ir>,
-    previous: &'consts [Instr<'ir>],
-) -> Option<SyscallFoldCandidate<'consts, 'ir>> {
+    previous: &[Instr<'ir>],
+) -> Option<SyscallFoldCandidate<'ir>> {
     let Instr::Sys {
         dst,
         fun,
@@ -80,7 +90,7 @@ fn syscall_fold_candidate<'consts, 'ir>(
         .map(|arg| {
             scratch
                 .const_def(*arg)
-                .and_then(|def| const_value(previous, def))
+                .and_then(|def| const_value(previous, def).cloned())
         })
         .collect::<Option<Vec<_>>>()?;
 
@@ -106,6 +116,7 @@ fn const_value<'instr, 'ir>(
 mod tests {
     use super::syscall_fold_candidate;
     use crate::ir::Scratch;
+    use crate::ir::dce;
     use purple_garden_ir::{
         Block, EMPTY_PARAMS, Func, Id, Instr, TypeId, constant::Const, ptype::Type,
     };
@@ -114,11 +125,19 @@ mod tests {
 
     unsafe extern "C" fn test_syscall(_: *mut c_void) {}
 
+    fn double_int<'args, 'c>(args: &'args [Const<'c>]) -> Option<Const<'c>> {
+        let Const::Int(value) = args.first()? else {
+            return None;
+        };
+        Some(Const::Int(value * 2))
+    }
+
     static PURE_FN: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
         name: "pure",
         doc: "",
         ptr: test_syscall as BuiltinFn,
         pure: true,
+        eval: Some(double_int),
         arg_names: &["arg"],
         args: &[Type::Int],
         ret: Type::Int,
@@ -129,6 +148,7 @@ mod tests {
         doc: "",
         ptr: test_syscall as BuiltinFn,
         pure: false,
+        eval: None,
         arg_names: &["arg"],
         args: &[Type::Int],
         ret: Type::Int,
@@ -160,7 +180,7 @@ mod tests {
 
         let candidate =
             syscall_fold_candidate(&instr, &scratch, &previous).expect("fold candidate");
-        assert_eq!(candidate.args, vec![&Const::Int(7)]);
+        assert_eq!(candidate.args, vec![Const::Int(7)]);
         assert_eq!(candidate.dst.id, Id(1));
         assert_eq!(candidate.fun.name, "pure");
         assert_eq!(candidate.span, 12);
@@ -196,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn scaffold_pass_keeps_ir_unchanged_until_execution_is_implemented() {
+    fn impure_syscalls_stay_in_place() {
         let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Int));
         let block = Id(0);
         fun.blocks.push(Block {
@@ -222,7 +242,7 @@ mod tests {
                 ty: Type::Int,
             },
             path: "testing",
-            fun: &PURE_FN,
+            fun: &IMPURE_FN,
             args: vec![Id(0)],
             span: 0,
         });
@@ -232,6 +252,127 @@ mod tests {
         assert!(matches!(
             fun.blocks[block.0 as usize].instructions[1],
             Instr::Sys { .. }
+        ));
+    }
+
+    #[test]
+    fn folds_pure_syscalls_with_const_args() {
+        let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Int));
+        let block = Id(0);
+        fun.blocks.push(Block {
+            tombstone: false,
+            id: block,
+            instructions: Vec::new(),
+            params: EMPTY_PARAMS,
+            term: None,
+        });
+
+        fun.blocks[block.0 as usize]
+            .instructions
+            .push(Instr::LoadConst {
+                dst: TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                value: Const::Int(7),
+                span: 0,
+            });
+
+        fun.blocks[block.0 as usize].instructions.push(Instr::Sys {
+            dst: TypeId {
+                id: Id(1),
+                ty: Type::Int,
+            },
+            path: "testing",
+            fun: &PURE_FN,
+            args: vec![Id(0)],
+            span: 0,
+        });
+        fun.blocks[block.0 as usize].term = Some(purple_garden_ir::Terminator::Return {
+            value: Some(Id(1)),
+            span: 0,
+        });
+
+        super::const_fold_syscalls(&mut fun, &mut Scratch::default());
+
+        assert!(matches!(
+            fun.blocks[block.0 as usize].instructions[1],
+            Instr::LoadConst {
+                value: Const::Int(14),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn dce_removes_dead_const_inputs_after_syscall_fold() {
+        fn strlen_eval<'args, 'c>(args: &'args [Const<'c>]) -> Option<Const<'c>> {
+            let Const::Str(s) = args.first()? else {
+                return None;
+            };
+            Some(Const::Int(s.len() as i64))
+        }
+
+        static LEN_FN: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
+            name: "len",
+            doc: "",
+            ptr: test_syscall as BuiltinFn,
+            pure: true,
+            eval: Some(strlen_eval),
+            arg_names: &["s"],
+            args: &[Type::Str],
+            ret: Type::Int,
+        };
+
+        let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Int));
+        let block = Id(0);
+        fun.blocks.push(Block {
+            tombstone: false,
+            id: block,
+            instructions: Vec::new(),
+            params: EMPTY_PARAMS,
+            term: None,
+        });
+
+        fun.blocks[block.0 as usize]
+            .instructions
+            .push(Instr::LoadConst {
+                dst: TypeId {
+                    id: Id(0),
+                    ty: Type::Str,
+                },
+                value: Const::from("hello world"),
+                span: 0,
+            });
+        fun.blocks[block.0 as usize].instructions.push(Instr::Sys {
+            dst: TypeId {
+                id: Id(1),
+                ty: Type::Int,
+            },
+            path: "testing",
+            fun: &LEN_FN,
+            args: vec![Id(0)],
+            span: 0,
+        });
+        fun.blocks[block.0 as usize].term = Some(purple_garden_ir::Terminator::Return {
+            value: Some(Id(1)),
+            span: 0,
+        });
+
+        let mut scratch = Scratch::default();
+        super::const_fold_syscalls(&mut fun, &mut scratch);
+        dce(&mut fun, &mut scratch);
+
+        assert!(matches!(
+            fun.blocks[block.0 as usize].instructions[0],
+            Instr::Noop
+        ));
+        assert!(matches!(
+            fun.blocks[block.0 as usize].instructions[1],
+            Instr::LoadConst {
+                value: Const::Int(11),
+                ..
+            }
         ));
     }
 }

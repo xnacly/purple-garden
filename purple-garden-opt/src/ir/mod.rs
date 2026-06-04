@@ -10,7 +10,7 @@ mod indirect_jump;
 mod ret_inline;
 mod tailcall;
 
-use purple_garden_ir::Id;
+use purple_garden_ir::{self as ir, Id};
 
 /// Location of a recorded `LoadConst`.
 #[derive(Clone, Copy)]
@@ -70,6 +70,12 @@ impl<'scratch> Scratch<'scratch> {
         self.uses[id.0 as usize] += 1;
     }
 
+    /// Returns the total use count for `id`, or `0` if the slot was never
+    /// touched in this analysis pass.
+    pub fn use_count(&self, id: Id) -> u32 {
+        self.uses.get(id.0 as usize).copied().unwrap_or(0)
+    }
+
     /// Returns the `ConstDef` for `id` iff it was defined by a
     /// `LoadConst` AND has exactly one use. The single-use check is the
     /// fold-safety gate: with >1 uses the `LoadConst` is still needed
@@ -80,6 +86,73 @@ impl<'scratch> Scratch<'scratch> {
             return None;
         }
         self.consts[idx]
+    }
+}
+
+/// Remove dead SSA-producing instructions that have no observable effect.
+///
+/// This runs to a fixed point because removing one dead producer can make
+/// earlier producers dead too.
+pub fn dce(fun: &mut ir::Func<'_>, scratch: &mut Scratch<'_>) {
+    loop {
+        let mut changed = false;
+
+        record_uses(fun, scratch);
+
+        for block in &mut fun.blocks {
+            if block.tombstone {
+                continue;
+            }
+
+            for instr in &mut block.instructions {
+                let Some(dst) = ir::Func::def_of(instr) else {
+                    continue;
+                };
+
+                if scratch.use_count(dst) != 0 {
+                    continue;
+                }
+
+                if removable(instr) {
+                    *instr = ir::Instr::Noop;
+                    changed = true;
+                }
+            }
+        }
+
+        if !changed {
+            break;
+        }
+    }
+}
+
+fn record_uses(fun: &ir::Func<'_>, scratch: &mut Scratch<'_>) {
+    scratch.reset();
+
+    for block in &fun.blocks {
+        if block.tombstone {
+            continue;
+        }
+
+        for instr in &block.instructions {
+            if let Some(id) = ir::Func::def_of(instr) {
+                scratch.ensure(id);
+            }
+            ir::Func::for_each_use_of_instr(instr, |id| scratch.bump(id));
+        }
+
+        if let Some(term) = &block.term {
+            fun.for_each_use_of_term(term, |id| scratch.bump(id));
+        }
+    }
+}
+
+fn removable(instr: &ir::Instr<'_>) -> bool {
+    match instr {
+        ir::Instr::Call { .. } => false,
+        ir::Instr::Sys { fun, .. } => fun.pure,
+        ir::Instr::Noop => false,
+        _ => true,
     }
 }
 

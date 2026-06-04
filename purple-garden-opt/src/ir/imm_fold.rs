@@ -34,7 +34,7 @@ pub fn imm_fold<'fun, 's>(fun: &'fun mut ir::Func<'s>, scratch: &mut super::Scra
             continue;
         }
         for ii in 0..fun.blocks[bi].instructions.len() {
-            let Some((op, lhs, def_block, def_instr, imm, dst, span)) =
+            let Some((op, lhs, _def_block, _def_instr, imm, dst, span)) =
                 try_fold(&fun.blocks[bi].instructions[ii], scratch, fun)
             else {
                 continue;
@@ -53,7 +53,6 @@ pub fn imm_fold<'fun, 's>(fun: &'fun mut ir::Func<'s>, scratch: &mut super::Scra
                 imm,
                 span,
             };
-            fun.blocks[def_block as usize].instructions[def_instr as usize] = Instr::Noop;
         }
     }
 }
@@ -185,7 +184,10 @@ mod tests {
 
         imm_fold(&mut fun, &mut Scratch::default());
 
-        assert!(matches!(fun.blocks[0].instructions[0], Instr::Noop));
+        assert!(matches!(
+            fun.blocks[0].instructions[0],
+            Instr::LoadConst { .. }
+        ));
         assert!(matches!(
             &fun.blocks[0].instructions[1],
             Instr::BinImm {
