@@ -11,8 +11,8 @@ pub fn imm_fold<'fun, 's>(fun: &'fun mut ir::Func<'s>, scratch: &mut super::Scra
             continue;
         }
         for (ii, instr) in block.instructions.iter().enumerate() {
-            if let Instr::LoadConst { dst, value, .. } = instr {
-                scratch.record_const(dst.id, value.clone(), bi as u32, ii as u32);
+            if let Instr::LoadConst { dst, .. } = instr {
+                scratch.record_const(dst.id, bi as u32, ii as u32);
             }
         }
     }
@@ -35,7 +35,7 @@ pub fn imm_fold<'fun, 's>(fun: &'fun mut ir::Func<'s>, scratch: &mut super::Scra
         }
         for ii in 0..fun.blocks[bi].instructions.len() {
             let Some((op, lhs, def_block, def_instr, imm, dst, span)) =
-                try_fold(&fun.blocks[bi].instructions[ii], scratch)
+                try_fold(&fun.blocks[bi].instructions[ii], scratch, fun)
             else {
                 continue;
             };
@@ -68,6 +68,7 @@ fn bump_if_const(scratch: &mut Scratch<'_>, id: Id) {
 fn try_fold<'scratch>(
     instr: &Instr<'scratch>,
     scratch: &Scratch<'_>,
+    fun: &ir::Func<'scratch>,
 ) -> Option<(BinOp, Id, u32, u32, i32, TypeId<'scratch>, u32)> {
     let Instr::Bin {
         op,
@@ -105,13 +106,13 @@ fn try_fold<'scratch>(
         _ => return None,
     };
 
-    let Const::Int(value) = def.value else {
+    let Const::Int(value) = const_value(fun, def)? else {
         return None;
     };
 
     // Bytecode immediate ops carry an i32; bail if the constant doesn't
     // fit; the original Bin + LoadConst stay intact and run as-is.
-    let imm = i32::try_from(value).ok()?;
+    let imm = i32::try_from(*value).ok()?;
 
     Some((
         new_op,
@@ -122,6 +123,21 @@ fn try_fold<'scratch>(
         dst.clone(),
         *span,
     ))
+}
+
+fn const_value<'fun>(
+    fun: &'fun ir::Func<'_>,
+    def: crate::ir::ConstDef,
+) -> Option<&'fun Const<'fun>> {
+    let Instr::LoadConst { value, .. } = fun
+        .blocks
+        .get(def.block as usize)?
+        .instructions
+        .get(def.instr as usize)?
+    else {
+        return None;
+    };
+    Some(value)
 }
 
 #[cfg(test)]

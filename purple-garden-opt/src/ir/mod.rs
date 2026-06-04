@@ -10,17 +10,11 @@ mod indirect_jump;
 mod ret_inline;
 mod tailcall;
 
-use purple_garden_ir::{Id, constant::Const};
+use purple_garden_ir::Id;
 
-/// A `LoadConst { dst, Int(value) }` recorded for possible folding.
-/// `block`/`instr` are a backpointer to the original `LoadConst` so a
-/// caller can overwrite it with `Noop` once it's been folded away.
-/// `value` is stored at its native IR width (`i64`); consumers that
-/// need a narrower form (e.g. `imm_fold` lowering to `i32` bytecode
-/// immediates) narrow at fold time and skip the fold on overflow.
-#[derive(Clone)]
-pub struct ConstDef<'def> {
-    value: Const<'def>,
+/// Location of a recorded `LoadConst`.
+#[derive(Clone, Copy)]
+pub struct ConstDef {
     block: u32,
     instr: u32,
 }
@@ -37,7 +31,8 @@ pub struct ConstDef<'def> {
 #[derive(Default)]
 pub struct Scratch<'scratch> {
     uses: Vec<u32>,
-    consts: Vec<Option<ConstDef<'scratch>>>,
+    consts: Vec<Option<ConstDef>>,
+    _marker: std::marker::PhantomData<&'scratch ()>,
 }
 
 impl<'scratch> Scratch<'scratch> {
@@ -49,8 +44,8 @@ impl<'scratch> Scratch<'scratch> {
     /// Returns the recorded `ConstDef` for `id`, no use-count gate.
     /// `const_fold` uses this; `imm_fold` uses `single_use_const` instead
     /// because it noops the `LoadConst` and needs single-use safety.
-    pub fn const_def(&self, id: Id) -> Option<ConstDef<'scratch>> {
-        self.consts.get(id.0 as usize).cloned().flatten()
+    pub fn const_def(&self, id: Id) -> Option<ConstDef> {
+        self.consts.get(id.0 as usize).copied().flatten()
     }
 
     /// Grow both vecs to cover `id`, preserving the parallel-length
@@ -63,13 +58,9 @@ impl<'scratch> Scratch<'scratch> {
         }
     }
 
-    pub fn record_const(&mut self, id: Id, value: Const<'scratch>, block: u32, instr: u32) {
+    pub fn record_const(&mut self, id: Id, block: u32, instr: u32) {
         self.ensure(id);
-        self.consts[id.0 as usize] = Some(ConstDef {
-            value,
-            block,
-            instr,
-        });
+        self.consts[id.0 as usize] = Some(ConstDef { block, instr });
     }
 
     /// Record one use of `id`. After the analyze pass `uses[id.0]` is
@@ -83,12 +74,12 @@ impl<'scratch> Scratch<'scratch> {
     /// `LoadConst` AND has exactly one use. The single-use check is the
     /// fold-safety gate: with >1 uses the `LoadConst` is still needed
     /// elsewhere and noop'ing it would corrupt those uses.
-    pub fn single_use_const(&self, id: Id) -> Option<ConstDef<'scratch>> {
+    pub fn single_use_const(&self, id: Id) -> Option<ConstDef> {
         let idx = id.0 as usize;
         if self.uses.get(idx).copied() != Some(1) {
             return None;
         }
-        self.consts[idx].clone()
+        self.consts[idx]
     }
 }
 

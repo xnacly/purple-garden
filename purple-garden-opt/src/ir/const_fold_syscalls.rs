@@ -10,24 +10,26 @@ pub fn const_fold_syscalls<'fold, 's>(
     fun: &'fold mut ir::Func<'s>,
     scratch: &'fold mut Scratch<'s>,
 ) {
-    for (bi, block) in fun.blocks.iter_mut().enumerate() {
-        if block.tombstone {
+    for bi in 0..fun.blocks.len() {
+        if fun.blocks[bi].tombstone {
             continue;
         }
 
         scratch.reset();
 
-        for (ii, instr) in block.instructions.iter_mut().enumerate() {
+        for ii in 0..fun.blocks[bi].instructions.len() {
+            let (previous, current) = fun.blocks[bi].instructions.split_at_mut(ii);
+            let instr = &mut current[0];
+
             if let Instr::LoadConst {
                 dst: TypeId { id, .. },
-                value,
                 ..
             } = instr
             {
-                scratch.record_const(*id, value.clone(), bi as u32, ii as u32);
+                scratch.record_const(*id, bi as u32, ii as u32);
             }
 
-            let candidate = syscall_fold_candidate(instr, scratch);
+            let candidate = syscall_fold_candidate(instr, scratch, previous);
             let Some(candidate) = candidate else {
                 continue;
             };
@@ -46,17 +48,18 @@ pub fn const_fold_syscalls<'fold, 's>(
 }
 
 #[derive(Debug)]
-struct SyscallFoldCandidate<'scratch, 'ir> {
+struct SyscallFoldCandidate<'consts, 'ir> {
     dst: TypeId<'ir>,
     fun: &'ir ir::Fn<'ir>,
-    args: Vec<Const<'scratch>>,
+    args: Vec<&'consts Const<'ir>>,
     span: u32,
 }
 
-fn syscall_fold_candidate<'scratch, 'ir>(
+fn syscall_fold_candidate<'consts, 'ir>(
     instr: &Instr<'ir>,
-    scratch: &'scratch Scratch<'ir>,
-) -> Option<SyscallFoldCandidate<'scratch, 'ir>> {
+    scratch: &Scratch<'ir>,
+    previous: &'consts [Instr<'ir>],
+) -> Option<SyscallFoldCandidate<'consts, 'ir>> {
     let Instr::Sys {
         dst,
         fun,
@@ -74,7 +77,11 @@ fn syscall_fold_candidate<'scratch, 'ir>(
 
     let args = args
         .iter()
-        .map(|arg| scratch.const_def(*arg).map(|def| def.value.clone()))
+        .map(|arg| {
+            scratch
+                .const_def(*arg)
+                .and_then(|def| const_value(previous, def))
+        })
         .collect::<Option<Vec<_>>>()?;
 
     Some(SyscallFoldCandidate {
@@ -83,6 +90,16 @@ fn syscall_fold_candidate<'scratch, 'ir>(
         args,
         span: *span,
     })
+}
+
+fn const_value<'instr, 'ir>(
+    instructions: &'instr [Instr<'ir>],
+    def: crate::ir::ConstDef,
+) -> Option<&'instr Const<'ir>> {
+    let Instr::LoadConst { value, .. } = instructions.get(def.instr as usize)? else {
+        return None;
+    };
+    Some(value)
 }
 
 #[cfg(test)]
@@ -120,7 +137,15 @@ mod tests {
     #[test]
     fn candidate_requires_pure_syscall_with_const_args() {
         let mut scratch = Scratch::default();
-        scratch.record_const(Id(0), Const::Int(7), 0, 0);
+        scratch.record_const(Id(0), 0, 0);
+        let previous = vec![Instr::LoadConst {
+            dst: TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            },
+            value: Const::Int(7),
+            span: 0,
+        }];
 
         let instr = Instr::Sys {
             dst: TypeId {
@@ -133,8 +158,9 @@ mod tests {
             span: 12,
         };
 
-        let candidate = syscall_fold_candidate(&instr, &scratch).expect("fold candidate");
-        assert_eq!(candidate.args, vec![Const::Int(7)]);
+        let candidate =
+            syscall_fold_candidate(&instr, &scratch, &previous).expect("fold candidate");
+        assert_eq!(candidate.args, vec![&Const::Int(7)]);
         assert_eq!(candidate.dst.id, Id(1));
         assert_eq!(candidate.fun.name, "pure");
         assert_eq!(candidate.span, 12);
@@ -154,7 +180,7 @@ mod tests {
             args: vec![],
             span: 0,
         };
-        assert!(syscall_fold_candidate(&impure, &scratch).is_none());
+        assert!(syscall_fold_candidate(&impure, &scratch, &[]).is_none());
 
         let non_const = Instr::Sys {
             dst: TypeId {
@@ -166,7 +192,7 @@ mod tests {
             args: vec![Id(0)],
             span: 0,
         };
-        assert!(syscall_fold_candidate(&non_const, &scratch).is_none());
+        assert!(syscall_fold_candidate(&non_const, &scratch, &[]).is_none());
     }
 
     #[test]

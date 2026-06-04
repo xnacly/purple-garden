@@ -27,16 +27,17 @@ pub fn const_fold<'fold, 's>(fun: &'fold mut ir::Func<'s>, scratch: &'fold mut S
         scratch.reset();
 
         for j in 0..fun.blocks[i].instructions.len() {
-            changed |= try_const_fold(&mut fun.blocks[i].instructions[j], scratch);
+            let (previous, current) = fun.blocks[i].instructions.split_at_mut(j);
+            let instr = &mut current[0];
+            changed |= try_const_fold(instr, scratch, previous);
 
             if let Instr::LoadConst {
                 dst: TypeId { id, .. },
-                value,
                 ..
-            } = &fun.blocks[i].instructions[j]
+            } = instr
             {
                 let (block, instr) = (i as u32, j as u32);
-                scratch.record_const(*id, value.clone(), block, instr);
+                scratch.record_const(*id, block, instr);
             }
         }
     }
@@ -83,14 +84,17 @@ fn remove_dead_load_consts<'s>(fun: &mut ir::Func<'s>, scratch: &mut Scratch<'s>
     }
 }
 
-fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch) -> bool {
+fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch, previous: &[Instr<'_>]) -> bool {
     match instr {
         Instr::Cast { dst, from, span } => {
             let Some(def) = scratch.const_def(from.id) else {
                 return false;
             };
+            let Some(def_value) = const_value(previous, def) else {
+                return false;
+            };
 
-            let result = match (&from.ty, &dst.ty, &def.value) {
+            let result = match (&from.ty, &dst.ty, def_value) {
                 (Type::Double, Type::Int, Const::Double(value)) => {
                     Const::Int(f64::from_bits(*value) as i64)
                 }
@@ -129,28 +133,33 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch) -> bool {
             else {
                 return false;
             };
+            let (Some(lhs_value), Some(rhs_value)) =
+                (const_value(previous, lhs_c), const_value(previous, rhs_c))
+            else {
+                return false;
+            };
 
             let result: Const = match op {
                 BinOp::IAdd => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     lhs.wrapping_add(*rhs).into()
                 }
                 BinOp::ISub => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     lhs.wrapping_sub(*rhs).into()
                 }
                 BinOp::IMul => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     lhs.wrapping_mul(*rhs).into()
                 }
                 BinOp::IDiv => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     if *rhs == 0 {
@@ -159,7 +168,7 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch) -> bool {
                     (*lhs / *rhs).into()
                 }
                 BinOp::IMod => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     if *rhs == 0 {
@@ -168,47 +177,43 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch) -> bool {
                     (*lhs % *rhs).into()
                 }
                 BinOp::ILt => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     (lhs < rhs).into()
                 }
                 BinOp::IGt => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     (lhs > rhs).into()
                 }
                 BinOp::IEq => {
-                    let (Const::Int(lhs), Const::Int(rhs)) = (&lhs_c.value, &rhs_c.value) else {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     (lhs == rhs).into()
                 }
                 BinOp::DAdd => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
-                    else {
+                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     (f64::from_bits(*lhs) + f64::from_bits(*rhs)).into()
                 }
                 BinOp::DSub => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
-                    else {
+                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     (f64::from_bits(*lhs) - f64::from_bits(*rhs)).into()
                 }
                 BinOp::DMul => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
-                    else {
+                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     (f64::from_bits(*lhs) * f64::from_bits(*rhs)).into()
                 }
                 BinOp::DDiv => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
-                    else {
+                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     let lhs = f64::from_bits(*lhs);
@@ -219,20 +224,18 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch) -> bool {
                     (lhs / rhs).into()
                 }
                 BinOp::DLt => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
-                    else {
+                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     (f64::from_bits(*lhs) < f64::from_bits(*rhs)).into()
                 }
                 BinOp::DGt => {
-                    let (Const::Double(lhs), Const::Double(rhs)) = (&lhs_c.value, &rhs_c.value)
-                    else {
+                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     (f64::from_bits(*lhs) > f64::from_bits(*rhs)).into()
                 }
-                BinOp::BEq => (lhs_c.value == rhs_c.value).into(),
+                BinOp::BEq => (lhs_value == rhs_value).into(),
             };
 
             *instr = Instr::LoadConst {
@@ -247,6 +250,16 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch) -> bool {
         // pass
         _ => false,
     }
+}
+
+fn const_value<'instr>(
+    instructions: &'instr [Instr<'_>],
+    def: crate::ir::ConstDef,
+) -> Option<&'instr Const<'instr>> {
+    let Instr::LoadConst { value, .. } = instructions.get(def.instr as usize)? else {
+        return None;
+    };
+    Some(value)
 }
 
 #[cfg(test)]
