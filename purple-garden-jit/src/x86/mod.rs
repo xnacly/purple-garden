@@ -46,8 +46,18 @@ const RDX: u8 = 2;
 
 /// A single x86-64 instruction. `encode` appends its machine-code bytes;
 /// `Display` renders it as readable assembly (the JIT's own disassembler).
-/// Register fields are physical GPR numbers (0=rax .. 15=r15); `slot` indexes
-/// the VM register file at `[rdi + slot*8]`.
+///
+/// Register fields use x86's physical GPR numbering:
+///
+/// ```text
+/// 0 rax   1 rcx   2 rdx   3 rbx   4 rsp   5 rbp   6 rsi   7 rdi
+/// 8 r8    9 r9   10 r10  11 r11  12 r12  13 r13  14 r14  15 r15
+/// ```
+///
+/// The low three bits go into ModRM/SIB fields. Bit 3 is carried by a REX
+/// prefix (`REX.R` for the ModRM `reg` field, `REX.B` for the ModRM `r/m`
+/// field, or opcode low bits for `movabs`). `slot` indexes the VM register file
+/// at `[rdi + slot*8]`.
 #[derive(Debug, Clone, Copy)]
 pub enum Insn {
     Ret,
@@ -148,48 +158,62 @@ impl Insn {
             Insn::LoadSlot { dst, slot } => mov_slot(code, 0x8b, dst, slot),
             Insn::StoreSlot { src, slot } => mov_slot(code, 0x89, src, slot),
             Insn::StoreImmSlot { slot, imm } => store_slot_imm(code, slot, imm),
-            // 0x89 = `mov r/m, r`: r/m is dst, reg is src.
+            // 0x89 = `mov r/m64, r64`.
+            // ModRM.reg encodes src; ModRM.r/m encodes dst.
             Insn::Mov { dst, src } => reg_reg(code, 0x89, src, dst),
-            // 0x01 = `add r/m, r`, 0x29 = `sub r/m, r`: r/m is dst, reg is src.
+            // 0x01 = `add r/m64, r64`, 0x29 = `sub r/m64, r64`.
+            // Same direction as mov: reg is src, r/m is dst.
             Insn::Add { dst, src } => reg_reg(code, 0x01, src, dst),
             Insn::Sub { dst, src } => reg_reg(code, 0x29, src, dst),
-            // 0x0f 0xaf = `imul r, r/m`: reg is dst, r/m is src (operand order
-            // is the opposite of add/sub).
+            // 0x0f 0xaf = `imul r64, r/m64`.
+            // Here ModRM.reg is dst and ModRM.r/m is src, opposite of add/sub.
             Insn::Imul { dst, src } => {
                 code.push(rex(dst, src));
                 code.extend_from_slice(&[0x0f, 0xaf, modrm(dst, src)]);
             }
-            // 0xf7 /3 ; neg r/m64.
+            // 0xf7 /3 = `neg r/m64`.
+            // `/3` means ModRM.reg is not a register; it is the opcode extension
+            // digit 3. ModRM.r/m names the operand.
             Insn::Neg { reg } => {
                 code.push(rex(0, reg));
                 code.extend_from_slice(&[0xf7, modrm(3, reg)]);
             }
-            // 0x81 /0 add, /5 sub, /7 cmp; r/m, imm32.
+            // 0x81 /digit = `op r/m64, imm32`.
+            // /0 add, /4 and, /5 sub, /7 cmp.
             Insn::AddImm { dst, imm } => reg_imm(code, 0, dst, imm),
             Insn::SubImm { dst, imm } => reg_imm(code, 5, dst, imm),
             Insn::AndImm { dst, imm } => reg_imm(code, 4, dst, imm),
             Insn::CmpImm { reg, imm } => reg_imm(code, 7, reg, imm),
+            // 0x85 = `test r/m64, r64`.
+            // Both operands are only read, but keep the same packing convention:
+            // ModRM.reg = rhs, ModRM.r/m = lhs.
             Insn::Test { lhs, rhs } => reg_reg(code, 0x85, rhs, lhs),
-            // 0xc7 /0 ; mov r/m, imm32.
+            // 0xc7 /0 = `mov r/m64, imm32`.
             Insn::MovImm { dst, imm } => {
                 code.push(rex(0, dst));
                 code.push(0xc7);
                 code.push(modrm(0, dst));
                 code.extend_from_slice(&imm.to_le_bytes());
             }
-            // 0x0f 0x94 ; setcc(e) r/m8. The bare-or-extended REX lets us name
-            // sil/r8b etc. as byte registers.
+            // 0x0f 0x94 = `sete r/m8`.
+            // The REX prefix is not REX.W here; it exists only so byte-register
+            // names are the modern low-byte registers (`sil`, `dil`, `r8b`, ...).
+            // ModRM.reg is /0, ModRM.r/m names the byte destination.
             Insn::Sete { dst } => {
                 code.push(0x40 | u8::from(dst >= 8));
                 code.extend_from_slice(&[0x0f, 0x94, modrm(0, dst)]);
             }
-            // REX.W 0xb8+rd io64 ; movabs r64, imm64.
+            // REX.W 0xb8+rd io64 = `movabs r64, imm64`.
+            // This form has no ModRM byte; the low 3 register bits are embedded
+            // in the opcode and the high bit goes in REX.B.
             Insn::MovAbs { dst, imm } => {
                 code.push(0x48 | u8::from(dst >= 8));
                 code.push(0xb8 + (dst & 7));
                 code.extend_from_slice(&imm.to_le_bytes());
             }
-            // 0xff /2 ; call r/m64. REX.B reaches r8..r15.
+            // 0xff /2 = `call r/m64`.
+            // `/2` is the opcode extension; ModRM.r/m names the call target.
+            // No REX.W is required. REX.B is enough to reach r8..r15.
             Insn::CallReg { reg } => {
                 if reg >= 8 {
                     code.push(0x41);
@@ -198,7 +222,8 @@ impl Insn {
             }
             // REX.W 0x99 ; cqo.
             Insn::Cqo => code.extend_from_slice(&[0x48, 0x99]),
-            // REX.W 0xf7 /7 ; idiv r/m64.
+            // REX.W 0xf7 /7 = `idiv r/m64`.
+            // `/7` is the opcode extension; ModRM.r/m names the divisor.
             Insn::Idiv { divisor } => {
                 code.push(rex(0, divisor));
                 code.extend_from_slice(&[0xf7, modrm(7, divisor)]);
@@ -248,24 +273,56 @@ impl fmt::Display for Insn {
     }
 }
 
-/// REX.W prefix, plus REX.R if the `reg` field is r8..r15 and REX.B if the `rm`
-/// field is r8..r15.
+/// REX.W prefix for 64-bit operand size, plus high register bits.
+///
+/// ```text
+/// 0100WRXB
+///     ||||
+///     |||+-- B: high bit for ModRM.r/m, SIB.base, or opcode +rd
+///     ||+--- X: high bit for SIB.index (unused here)
+///     |+---- R: high bit for ModRM.reg
+///     +----- W: 64-bit operand size
+/// ```
+///
+/// This backend only needs `W`, `R`, and `B`, so the base byte is `0x48`
+/// (`0100_1000`: REX.W) and we OR in `R`/`B` from register numbers >= 8.
 fn rex(reg: u8, rm: u8) -> u8 {
     0x48 | (u8::from(reg >= 8) << 2) | u8::from(rm >= 8)
 }
 
-/// ModRM byte for the register-direct form (mod=11): `reg` in bits 3..6,
-/// `rm` in bits 0..2.
+/// ModRM byte for register-direct operands.
+///
+/// ```text
+/// 76543210
+/// mmrrrbbb
+/// ||||||||
+/// |||||+++-- r/m: operand register low 3 bits
+/// ||+++----- reg: register operand low 3 bits, or an opcode extension `/digit`
+/// ++-------- mod: addressing mode; `11` means register-direct
+/// ```
+///
+/// For example `modrm(1, 0)` with opcode `0x89` means `mov rax, rcx`:
+/// `reg=rcx`, `r/m=rax`, `mod=11`.
 fn modrm(reg: u8, rm: u8) -> u8 {
     0xc0 | ((reg & 7) << 3) | (rm & 7)
 }
 
 /// Register-register op: `REX.W opcode ModRM(reg, rm)`.
+///
+/// The meaning of `reg` and `rm` depends on the opcode:
+///
+/// - `mov/add/sub r/m64, r64`: `rm` is dst, `reg` is src.
+/// - `imul r64, r/m64`: `reg` is dst, `rm` is src.
+/// - `test r/m64, r64`: both are sources.
 fn reg_reg(code: &mut Vec<u8>, opcode: u8, reg: u8, rm: u8) {
     code.extend_from_slice(&[rex(reg, rm), opcode, modrm(reg, rm)]);
 }
 
-/// Register-immediate op: `REX.W 0x81 /digit imm32`.
+/// Register-immediate op: `REX.W 0x81 /digit r/m64, imm32`.
+///
+/// The `/digit` is encoded in ModRM.reg and selects the operation:
+/// `/0 add`, `/4 and`, `/5 sub`, `/7 cmp`. The actual destination register is
+/// ModRM.r/m.
 fn reg_imm(code: &mut Vec<u8>, digit: u8, rm: u8, imm: i32) {
     code.push(rex(0, rm));
     code.push(0x81);
@@ -274,6 +331,18 @@ fn reg_imm(code: &mut Vec<u8>, digit: u8, rm: u8, imm: i32) {
 }
 
 /// `mov` between GPR `reg` and `[rdi + slot*8]` (opcode 0x8b load, 0x89 store).
+///
+/// Memory operands use `mod != 11`, so this cannot use [`modrm`]. We use:
+///
+/// ```text
+/// mod = 01       disp8 follows the ModRM byte
+/// reg = reg&7    loaded/stored GPR
+/// r/m = 111      base register rdi
+/// disp8 = slot*8 byte offset into Vm::r
+/// ```
+///
+/// This is why `compile_func` currently rejects more than 32 params: `slot*8`
+/// must fit in a signed 8-bit displacement for this compact addressing form.
 fn mov_slot(code: &mut Vec<u8>, opcode: u8, reg: u8, slot: u8) {
     // ModRM mod=01 (disp8), reg field = GPR, rm = rdi.
     let m = 0x40 | ((reg & 7) << 3) | RDI;
@@ -281,6 +350,9 @@ fn mov_slot(code: &mut Vec<u8>, opcode: u8, reg: u8, slot: u8) {
 }
 
 /// `mov [rdi + slot*8], imm32`
+///
+/// Same `[rdi + disp8]` addressing as [`mov_slot`], but opcode `0xc7 /0` uses
+/// ModRM.reg as opcode extension `/0`, not as a register.
 fn store_slot_imm(code: &mut Vec<u8>, slot: u8, imm: i32) {
     // ModRM mod=01 (disp8), reg field = /0, rm = rdi.
     let m = 0x40 | RDI;
@@ -346,6 +418,25 @@ fn op_in_place(out: &mut Vec<u8>, op: BinOp, d: u8, s: u8) {
     );
 }
 
+fn supported_bin_imm(op: BinOp) -> bool {
+    matches!(
+        op,
+        BinOp::IAdd | BinOp::ISub | BinOp::IEq | BinOp::IDiv | BinOp::IMod
+    )
+}
+
+fn supported_bin(op: BinOp) -> bool {
+    matches!(op, BinOp::IAdd | BinOp::ISub | BinOp::IMul)
+}
+
+fn supported_const(value: &ir::Const<'_>) -> bool {
+    match value {
+        ir::Const::False | ir::Const::True => true,
+        ir::Const::Int(i) => (*i as i32) < i32::MAX && (*i as i32) > i32::MIN,
+        _ => false,
+    }
+}
+
 pub fn compile_func(
     func: &ir::Func<'_>,
     out: &mut Vec<u8>,
@@ -359,13 +450,36 @@ pub fn compile_func(
     if blocks.next().is_some() {
         skip!(func, "multiple blocks");
     }
+    if func.params.len() > 32 {
+        skip!(
+            func,
+            "too many params for disp8 slot loads: {}",
+            func.params.len()
+        );
+    }
+
+    let mut needs_idiv = false;
+    for instr in &block.instructions {
+        match instr {
+            ir::Instr::Noop => {}
+            ir::Instr::LoadConst { value, .. } if supported_const(value) => {}
+            ir::Instr::BinImm { op, imm, .. } if supported_bin_imm(*op) => {
+                needs_idiv |= matches!(op, BinOp::IDiv if *imm != 0)
+                    || matches!(op, BinOp::IMod if *imm != 0 && *imm != 2);
+            }
+            ir::Instr::Bin { op, .. } if supported_bin(*op) => {}
+            _ => skip!(func, "unsupported instruction {instr:?}"),
+        }
+    }
+    match block.term.as_ref() {
+        None | Some(ir::Terminator::Return { .. }) => {}
+        _term => skip!(func, "unsupported terminator {_term:?}"),
+    }
+
+    out.reserve(func.params.len() * 4 + block.instructions.len() * 16 + 16);
 
     // Constant-divisor IDiv/IMod (not imm 0, which traps, nor mod 2, which uses
     // `and`) lowers to `idiv` and needs rax/rcx/rdx reserved.
-    let needs_idiv = block.instructions.iter().any(|i| {
-        matches!(i, ir::Instr::BinImm { op: BinOp::IDiv, imm, .. } if *imm != 0)
-            || matches!(i, ir::Instr::BinImm { op: BinOp::IMod, imm, .. } if *imm != 0 && *imm != 2)
-    });
     let caller = if needs_idiv { POOL_DIV } else { POOL };
     // No calls lowered yet, so call_sites is empty and the callee class is unused.
     let regs = allocator.rebuild(

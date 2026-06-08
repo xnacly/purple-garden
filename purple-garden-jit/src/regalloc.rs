@@ -50,9 +50,19 @@ impl Allocator {
         self.map.resize(liveness.len(), ir::Location::Unassigned);
 
         self.order.clear();
-        self.order
-            .extend((0..liveness.len()).filter(|&v| liveness[v].0 != u32::MAX));
-        self.order.sort_by_key(|&v| (liveness[v].0, v));
+        let mut last_start = 0;
+        let mut already_sorted = true;
+        for (v, &(start, _)) in liveness.iter().enumerate() {
+            if start == u32::MAX {
+                continue;
+            }
+            already_sorted &= self.order.is_empty() || start >= last_start;
+            last_start = start;
+            self.order.push(v);
+        }
+        if !already_sorted {
+            self.order.sort_by_key(|&v| (liveness[v].0, v));
+        }
 
         self.caller_free.clear();
         self.caller_free
@@ -133,6 +143,13 @@ mod tests {
         let map = alloc(&[(0, 5), (2, 6)], &[]);
         assert_eq!(map[0], Location::Reg(0));
         assert_eq!(map[1], Location::Reg(1));
+    }
+
+    #[test]
+    fn out_of_order_intervals_are_sorted_by_start() {
+        let map = alloc(&[(5, 8), (0, 10)], &[]);
+        assert_eq!(map[1], Location::Reg(0));
+        assert_eq!(map[0], Location::Reg(1));
     }
 
     #[test]
