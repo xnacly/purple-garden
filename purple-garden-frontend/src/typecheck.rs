@@ -1,31 +1,13 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{
-    ast::Node,
+    ast::{Ast, Node, NodeId},
     err::PgError,
     lex::{self, Token},
 };
 use purple_garden_ir::ptype::Type;
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
-
-#[must_use]
-pub fn id_from_node(node: &Node) -> Option<usize> {
-    Some(match node {
-        Node::Atom { id, .. }
-        | Node::Ident { id, .. }
-        | Node::Bin { id, .. }
-        | Node::Unary { id, .. }
-        | Node::Array { id, .. }
-        | Node::Object { id, .. }
-        | Node::Let { id, .. }
-        | Node::Match { id, .. }
-        | Node::Call { id, .. }
-        | Node::Cast { id, .. }
-        | Node::Field { id, .. } => *id,
-        Node::Fn { .. } | Node::Import { .. } => return None,
-    })
-}
 
 #[derive(Debug, Clone)]
 struct FunctionType<'t> {
@@ -48,8 +30,9 @@ impl Display for FunctionType<'_> {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Typechecker<'t> {
+    ast: &'t Ast<'t>,
     /// Node id -> Type. Indexed by id; Node ids are dense from the parser.
     map: Vec<Option<Type<'t>>>,
     /// scope stack; innermost frame last; lookups walk from top to bottom
@@ -64,8 +47,16 @@ pub struct Typechecker<'t> {
 
 impl<'t> Typechecker<'t> {
     #[must_use]
-    pub fn new() -> Self {
-        let mut s = Self::default();
+    pub fn new(ast: &'t Ast<'t>) -> Self {
+        let mut s = Self {
+            ast,
+            map: Vec::new(),
+            env: Vec::new(),
+            functions: HashMap::new(),
+            packages: HashMap::new(),
+            pkg_cache: HashMap::new(),
+            libs: Vec::new(),
+        };
         s.env.push(HashMap::new());
         s
     }
@@ -112,9 +103,9 @@ impl<'t> Typechecker<'t> {
         self.map[id] = Some(t);
     }
 
-    fn already_checked(&self, node: &Node) -> Option<Type<'t>> {
+    fn already_checked(&self, node: NodeId) -> Option<Type<'t>> {
         self.map
-            .get(id_from_node(node)?)
+            .get(self.ast.value_id(node)?)
             .and_then(|o| o.as_ref())
             .cloned()
     }
@@ -241,18 +232,19 @@ impl<'t> Typechecker<'t> {
         })
     }
 
-    fn block_type(&mut self, nodes: &'t [Node]) -> Result<Type<'t>, PgError> {
+    fn block_type(&mut self, nodes: &[NodeId]) -> Result<Type<'t>, PgError> {
         self.env.push(HashMap::new());
         let mut last_type = Type::Void;
-        for node in nodes {
+        for &node in nodes {
             last_type = self.node(node)?;
         }
         self.env.pop();
         Ok(last_type)
     }
 
-    pub fn node(&mut self, node: &'t Node) -> Result<Type<'t>, PgError> {
-        if let Some(t) = self.already_checked(node) {
+    pub fn node(&mut self, node_id: NodeId) -> Result<Type<'t>, PgError> {
+        let node = self.ast.node(node_id);
+        if let Some(t) = self.already_checked(node_id) {
             return Ok(t);
         }
 
@@ -282,14 +274,14 @@ impl<'t> Typechecker<'t> {
                 t
             }
             Node::Bin { id, op, lhs, rhs } => {
-                let lhs = self.node(lhs)?;
-                let rhs = self.node(rhs)?;
+                let lhs = self.node(*lhs)?;
+                let rhs = self.node(*rhs)?;
                 let res = Self::fuse(op, &lhs, &rhs)?;
                 self.set_type(*id, res.clone());
                 res
             }
             Node::Unary { id, op, rhs } => {
-                let inner = self.node(rhs)?;
+                let inner = self.node(*rhs)?;
                 let t = match (&op.t, &inner) {
                     (lex::Type::Plus | lex::Type::Minus, Type::Int) => Type::Int,
                     (lex::Type::Plus | lex::Type::Minus, Type::Double) => Type::Double,
@@ -308,7 +300,7 @@ impl<'t> Typechecker<'t> {
                 t
             }
             Node::Let { id, name, rhs } => {
-                let inner = self.node(rhs)?;
+                let inner = self.node(*rhs)?;
                 self.set_type(*id, inner.clone());
                 let lex::Token {
                     t: lex::Type::Ident(inner_name),
@@ -355,12 +347,12 @@ impl<'t> Typechecker<'t> {
                     };
                     let inner_name = *inner_name;
 
-                    let t = crate::type_from_type_expr(arg_type);
+                    let t = crate::type_from_type_expr(self.ast, *arg_type);
                     self.env_insert(inner_name, t.clone());
                     typed_arguments.push((inner_name, t));
                 }
 
-                let ret: Type<'t> = crate::type_from_type_expr(return_type);
+                let ret: Type<'t> = crate::type_from_type_expr(self.ast, *return_type);
                 let f_type = FunctionType {
                     args: typed_arguments,
                     ret: ret.clone(),
@@ -371,7 +363,7 @@ impl<'t> Typechecker<'t> {
                 if ret != computed_ret {
                     return Err(PgError::with_msg(
                         format!("`{inner_name}` should return {ret}, but returns {computed_ret}"),
-                        return_type,
+                        self.ast.type_token(*return_type),
                     ));
                 }
 
@@ -384,14 +376,14 @@ impl<'t> Typechecker<'t> {
                 ret
             }
             Node::Cast { id, lhs, rhs, src } => {
-                let rhs = crate::type_from_type_expr(rhs);
-                let cast = Self::cast(src, &self.node(lhs)?, &rhs)?;
+                let rhs = crate::type_from_type_expr(self.ast, *rhs);
+                let cast = Self::cast(src, &self.node(*lhs)?, &rhs)?;
                 self.set_type(*id, cast.clone());
                 cast
             }
             Node::Field { .. } => todo!(),
             Node::Call { id, target, args } => {
-                let (tok, inner_name, fun) = match target.as_ref() {
+                let (tok, inner_name, fun) = match self.ast.node(*target) {
                     Node::Field { target, name, .. } => {
                         let Node::Ident {
                             name:
@@ -400,7 +392,7 @@ impl<'t> Typechecker<'t> {
                                     ..
                                 },
                             ..
-                        } = target.as_ref()
+                        } = self.ast.node(*target)
                         else {
                             // TODO: add error handling for non ident call targets
                             unreachable!();
@@ -466,7 +458,7 @@ impl<'t> Typechecker<'t> {
                 self.set_type(*id, fun.ret.clone());
 
                 for (i, provided_node) in args.iter().enumerate() {
-                    let provided_type = self.node(provided_node)?;
+                    let provided_type = self.node(*provided_node)?;
                     let expected_type = &fun.args[i].1;
 
                     if expected_type != &provided_type {
@@ -495,7 +487,7 @@ impl<'t> Typechecker<'t> {
                     vec![const { None }; case_count];
 
                 for (i, ((condition_token, condition), body)) in cases.iter().enumerate() {
-                    let condition_type: Type<'t> = self.node(condition)?;
+                    let condition_type: Type<'t> = self.node(*condition)?;
 
                     if condition_type != Type::Bool {
                         return Err(PgError::with_msg(

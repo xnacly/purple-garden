@@ -1,4 +1,4 @@
-use crate::{ast::TypeExpr, lex::Token};
+use crate::lex::Token;
 use purple_garden_runtime::{Anomaly, DebugInfo};
 use std::fmt::Write;
 
@@ -16,16 +16,6 @@ impl From<&Token<'_>> for PgError {
             msg: String::new(),
             start: value.start,
             len: value.t.as_str().len(),
-        }
-    }
-}
-
-impl From<&TypeExpr<'_>> for PgError {
-    fn from(value: &TypeExpr<'_>) -> Self {
-        match value {
-            TypeExpr::Atom(tok) => tok.into(),
-            TypeExpr::Foreign(tok) => tok.into(),
-            TypeExpr::Option(inner) | TypeExpr::Array(inner) => inner.as_ref().into(),
         }
     }
 }

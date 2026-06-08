@@ -135,12 +135,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     purple_garden_shared::trace!("[main] Tokenisation and Parsing done");
 
     if conf.ast {
-        print!(
-            "{}",
-            ast.iter()
-                .map(std::string::ToString::to_string)
-                .collect::<String>()
-        );
+        print!("{ast}");
     }
 
     let lower = Lower::new();

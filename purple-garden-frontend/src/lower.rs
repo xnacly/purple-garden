@@ -1,11 +1,10 @@
 use std::{collections::HashMap, num};
 
 use crate::{
-    ast::{Node, TypeExpr},
+    ast::{Ast, Node, NodeId, TypeExpr},
     err::PgError,
     lex::{self, Token, Type},
     type_from_type_expr,
-    typecheck::id_from_node,
 };
 use purple_garden_ir::{
     BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype,
@@ -107,7 +106,12 @@ impl<'lower> Lower<'lower> {
         self.ctx.block = id;
     }
 
-    fn lower_node(&mut self, node: &Node<'lower>) -> Result<Option<Id>, PgError> {
+    fn lower_node(
+        &mut self,
+        ast: &'lower Ast<'lower>,
+        node_id: NodeId,
+    ) -> Result<Option<Id>, PgError> {
+        let node = ast.node(node_id);
         Ok(match node {
             Node::Atom { raw, .. } => {
                 let value = match raw.t {
@@ -156,13 +160,13 @@ impl<'lower> Lower<'lower> {
                     BEq, DAdd, DDiv, DGt, DLt, DMul, DSub, IAdd, IDiv, IEq, IGt, ILt, IMod, IMul,
                     ISub,
                 };
-                let src_type = self.types[id_from_node(lhs).unwrap()].clone().unwrap();
+                let src_type = self.types[ast.value_id(*lhs).unwrap()].clone().unwrap();
                 let span = op.start as u32;
 
-                let Some(lhs) = self.lower_node(lhs)? else {
+                let Some(lhs) = self.lower_node(ast, *lhs)? else {
                     unreachable!()
                 };
-                let Some(rhs) = self.lower_node(rhs)? else {
+                let Some(rhs) = self.lower_node(ast, *rhs)? else {
                     unreachable!()
                 };
 
@@ -211,9 +215,9 @@ impl<'lower> Lower<'lower> {
                 Some(dst_id)
             }
             Node::Unary { op, rhs, .. } => {
-                let inner_ty = self.types[id_from_node(rhs).unwrap()].clone().unwrap();
+                let inner_ty = self.types[ast.value_id(*rhs).unwrap()].clone().unwrap();
                 let span = op.start as u32;
-                let Some(rhs_id) = self.lower_node(rhs)? else {
+                let Some(rhs_id) = self.lower_node(ast, *rhs)? else {
                     unreachable!()
                 };
 
@@ -255,7 +259,7 @@ impl<'lower> Lower<'lower> {
                 let Type::Ident(i) = name.t else {
                     unreachable!()
                 };
-                if let Some(id) = self.lower_node(rhs)? {
+                if let Some(id) = self.lower_node(ast, *rhs)? {
                     self.ctx.env.insert(i, id);
                 } else {
                     return Err(PgError::with_msg(
@@ -278,12 +282,13 @@ impl<'lower> Lower<'lower> {
                     unreachable!()
                 };
 
-                let ret = if let TypeExpr::Atom(Token { t: Type::Void, .. }) = return_type {
+                let ret = if let TypeExpr::Atom(Token { t: Type::Void, .. }) = ast.ty(*return_type)
+                {
                     None
-                } else if let TypeExpr::Atom(Token { t, .. }) = return_type {
+                } else if let TypeExpr::Atom(Token { t, .. }) = ast.ty(*return_type) {
                     Some(crate::type_from_lex_type(*t))
                 } else {
-                    None
+                    Some(crate::type_from_type_expr(ast, *return_type))
                 };
 
                 self.func_name_to_id.insert(ident_name, (id, ret.clone()));
@@ -308,9 +313,9 @@ impl<'lower> Lower<'lower> {
                 self.block_mut(entry).params = entry_params;
 
                 let mut last = None;
-                for node in body {
+                for &node in body {
                     self.switch_to_block(entry);
-                    last = self.lower_node(node)?;
+                    last = self.lower_node(ast, node)?;
                 }
 
                 let ret_span = name.start as u32;
@@ -332,8 +337,8 @@ impl<'lower> Lower<'lower> {
             }
             Node::Call { target, args, .. } => {
                 let mut a = vec![];
-                for arg in args {
-                    let Some(id) = self.lower_node(arg)? else {
+                for &arg in args {
+                    let Some(id) = self.lower_node(ast, arg)? else {
                         unreachable!();
                     };
                     a.push(id);
@@ -346,7 +351,7 @@ impl<'lower> Lower<'lower> {
                     id: dst_id,
                 };
 
-                match target.as_ref() {
+                match ast.node(*target) {
                     // 'syscall' / stdlib call
                     Node::Field { target, name, .. } => {
                         let Node::Ident {
@@ -356,7 +361,7 @@ impl<'lower> Lower<'lower> {
                                     ..
                                 },
                             ..
-                        } = target.as_ref()
+                        } = ast.node(*target)
                         else {
                             unreachable!();
                         };
@@ -438,18 +443,19 @@ impl<'lower> Lower<'lower> {
                 None
             }
             Node::Cast { lhs, rhs, src, .. } => {
-                let src_ty = id_from_node(lhs)
+                let src_ty = ast
+                    .value_id(*lhs)
                     .and_then(|aid| self.types.get(aid).cloned().flatten())
                     .expect("typechecker should have typed the cast's lhs");
 
-                let Some(from_id) = self.lower_node(lhs)? else {
+                let Some(from_id) = self.lower_node(ast, *lhs)? else {
                     unreachable!()
                 };
 
                 let dst = self.ctx.id_store.new_value();
                 let value = TypeId {
                     id: dst,
-                    ty: type_from_type_expr(rhs),
+                    ty: type_from_type_expr(ast, *rhs),
                 };
 
                 self.emit(Instr::Cast {
@@ -501,7 +507,7 @@ impl<'lower> Lower<'lower> {
                 for (i, ((case_tok, condition), body)) in cases.iter().enumerate() {
                     let case_span = case_tok.start as u32;
                     self.switch_to_block(check_blocks[i]);
-                    let Some(cond) = self.lower_node(condition)? else {
+                    let Some(cond) = self.lower_node(ast, *condition)? else {
                         unreachable!(
                             "Compiler bug, match cases MUST have a condition returning a value"
                         );
@@ -530,8 +536,8 @@ impl<'lower> Lower<'lower> {
                     // env is a flat map, so snapshot it and restore afterwards.
                     let saved_env = self.ctx.env.clone();
                     let mut last = None;
-                    for node in body {
-                        last = self.lower_node(node)?;
+                    for &node in body {
+                        last = self.lower_node(ast, node)?;
                     }
                     let value = last.expect("match body must produce value");
                     self.ctx.env = saved_env;
@@ -552,8 +558,8 @@ impl<'lower> Lower<'lower> {
                 // `let` bindings stay local to it.
                 let saved_env = self.ctx.env.clone();
                 let mut last = None;
-                for node in body {
-                    last = self.lower_node(node)?;
+                for &node in body {
+                    last = self.lower_node(ast, node)?;
                 }
 
                 let last = last.expect("match default must produce value");
@@ -577,23 +583,23 @@ impl<'lower> Lower<'lower> {
     }
 
     /// Lower [ast] into a list of Func nodes, the entry point is always `entry`
-    pub fn ir_from(mut self, ast: &'lower [Node<'lower>]) -> Result<Vec<Func<'lower>>, PgError> {
-        let mut typechecker = crate::typecheck::Typechecker::new().with_libs(self.libs.clone());
-        for node in ast {
+    pub fn ir_from(mut self, ast: &'lower Ast<'lower>) -> Result<Vec<Func<'lower>>, PgError> {
+        let mut typechecker = crate::typecheck::Typechecker::new(ast).with_libs(self.libs.clone());
+        for &node in &ast.roots {
             let _t = typechecker.node(node)?;
         }
         purple_garden_shared::trace!("[ir::lower::Lower::ir_from] Finished type checking");
         self.types = typechecker.finalise();
 
         self.ctx.func =
-            Func::new("entry", Id(0), Vec::new(), None).with_span(entry_span(ast).unwrap_or(0));
+            Func::new("entry", Id(0), Vec::new(), None).with_span(ast.entry_span().unwrap_or(0));
         let entry = self.new_block();
         self.switch_to_block(entry);
 
         let mut last = None;
-        let last_span = entry_span(ast).unwrap_or(0);
-        for node in ast {
-            last = self.lower_node(node)?;
+        let last_span = ast.entry_span().unwrap_or(0);
+        for &node in &ast.roots {
+            last = self.lower_node(ast, node)?;
             // reset to the main entry point block to keep emitting nodes into the correct conext
             self.switch_to_block(entry);
         }
@@ -609,28 +615,4 @@ impl<'lower> Lower<'lower> {
 
         Ok(self.functions)
     }
-}
-
-fn entry_span(ast: &[Node<'_>]) -> Option<u32> {
-    ast.iter()
-        .find(|node| !matches!(node, Node::Fn { .. } | Node::Import { .. }))
-        .and_then(node_start)
-}
-
-fn node_start(node: &Node<'_>) -> Option<u32> {
-    Some(match node {
-        Node::Atom { raw, .. } | Node::Ident { name: raw, .. } => raw.start,
-        Node::Bin { lhs, op, .. } => node_start(lhs).unwrap_or(op.start as u32) as usize,
-        Node::Unary { op, .. } => op.start,
-        Node::Array { members, .. } => members.first().and_then(node_start)? as usize,
-        Node::Object { pairs, .. } => pairs.first().and_then(|(key, _)| node_start(key))? as usize,
-        Node::Let { name, .. } => name.start,
-        Node::Fn { name, .. } => name.start,
-        Node::Match { cases, default, .. } => cases
-            .first()
-            .map(|((token, _), _)| token.start)
-            .unwrap_or(default.0.start),
-        Node::Call { target, .. } | Node::Field { target, .. } => node_start(target)? as usize,
-        Node::Cast { src, .. } | Node::Import { src, .. } => src.start,
-    } as u32)
 }

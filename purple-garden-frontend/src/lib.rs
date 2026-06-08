@@ -7,7 +7,7 @@ pub mod lower;
 pub mod parser;
 pub mod typecheck;
 
-use ast::TypeExpr;
+use ast::{Ast, TypeExpr, TypeExprId};
 use purple_garden_ir::ptype;
 
 #[must_use]
@@ -34,15 +34,15 @@ pub fn type_from_lex_type<'a>(t: lex::Type<'a>) -> ptype::Type<'a> {
 }
 
 #[must_use]
-pub fn type_from_type_expr<'a>(value: &TypeExpr<'a>) -> ptype::Type<'a> {
-    match value {
+pub fn type_from_type_expr<'a>(ast: &Ast<'a>, id: TypeExprId) -> ptype::Type<'a> {
+    match ast.ty(id) {
         TypeExpr::Atom(token) => type_from_lex_type(token.t),
         TypeExpr::Foreign(token) => ptype::Type::Foreign(token.t.as_str()),
         TypeExpr::Option(type_expr) => {
-            ptype::Type::Option(Box::new(type_from_type_expr(type_expr.as_ref())))
+            ptype::Type::Option(Box::new(type_from_type_expr(ast, *type_expr)))
         }
         TypeExpr::Array(type_expr) => {
-            ptype::Type::Array(Box::new(type_from_type_expr(type_expr.as_ref())))
+            ptype::Type::Array(Box::new(type_from_type_expr(ast, *type_expr)))
         }
     }
 }

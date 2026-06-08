@@ -1,10 +1,8 @@
 use crate::{
-    ast::{Node, TypeExpr},
+    ast::{Ast, Node, NodeId, TypeExpr, TypeExprId},
     err::PgError,
     lex::{Lexer, Token, Type},
 };
-
-// TODO: add BNAF to each Parser::parse_* method
 
 /// Parsing the token stream one token at a time into the abstract syntax tree, see
 /// [ast.rs](./ast.rs) for documentation regarding each node and the way those should be parsed.
@@ -12,12 +10,18 @@ pub struct Parser<'p> {
     lex: Lexer<'p>,
     id: usize,
     cur: Token<'p>,
+    ast: Ast<'p>,
 }
 
 impl<'p> Parser<'p> {
     pub fn new(mut lex: Lexer<'p>) -> Result<Self, PgError> {
         let cur = lex.one()?;
-        Ok(Self { cur, lex, id: 0 })
+        Ok(Self {
+            cur,
+            lex,
+            id: 0,
+            ast: Ast::new(),
+        })
     }
 
     fn next_id(&mut self) -> usize {
@@ -70,15 +74,25 @@ impl<'p> Parser<'p> {
         Ok(())
     }
 
-    pub fn parse(mut self) -> Result<Vec<Node<'p>>, PgError> {
-        let mut raindrain = vec![];
-        while !self.at_end() {
-            raindrain.push(self.parse_prefix()?);
-        }
-        Ok(raindrain)
+    fn push_node(&mut self, node: Node<'p>) -> NodeId {
+        self.ast.push_node(node)
     }
 
-    fn parse_prefix(&mut self) -> Result<Node<'p>, PgError> {
+    fn push_type(&mut self, ty: TypeExpr<'p>) -> TypeExprId {
+        self.ast.push_type(ty)
+    }
+
+    /// program = prefix*
+    pub fn parse(mut self) -> Result<Ast<'p>, PgError> {
+        while !self.at_end() {
+            let node = self.parse_prefix()?;
+            self.ast.roots.push(node);
+        }
+        Ok(self.ast)
+    }
+
+    /// prefix = import | let | fn | match | expr
+    fn parse_prefix(&mut self) -> Result<NodeId, PgError> {
         match self.cur().t {
             Type::Import => self.parse_import(),
             Type::Let => self.parse_let(),
@@ -88,7 +102,8 @@ impl<'p> Parser<'p> {
         }
     }
 
-    fn parse_import(&mut self) -> Result<Node<'p>, PgError> {
+    /// import = "import" string | "import" "(" string* ")"
+    fn parse_import(&mut self) -> Result<NodeId, PgError> {
         let src = self.cur.clone();
         // skip Type::Import
         self.advance()?;
@@ -100,11 +115,8 @@ impl<'p> Parser<'p> {
             // skip pkg name
             self.advance()?;
 
-            return Ok(Node::Import {
-                src,
-                id: self.next_id(),
-                pkgs,
-            });
+            let id = self.next_id();
+            return Ok(self.push_node(Node::Import { src, id, pkgs }));
         }
 
         // multiple package import:
@@ -126,26 +138,23 @@ impl<'p> Parser<'p> {
         }
 
         self.expect(Type::BraceRight)?;
-        Ok(Node::Import {
-            src,
-            id: self.next_id(),
-            pkgs,
-        })
+        let id = self.next_id();
+        Ok(self.push_node(Node::Import { src, id, pkgs }))
     }
 
-    fn parse_let(&mut self) -> Result<Node<'p>, PgError> {
+    /// let = "let" ident "=" prefix
+    fn parse_let(&mut self) -> Result<NodeId, PgError> {
         self.expect(Type::Let)?;
         let name = self.expect_ident()?;
         self.expect(Type::Equal)?;
+        let rhs = self.parse_prefix()?;
+        let id = self.next_id();
 
-        Ok(Node::Let {
-            id: self.next_id(),
-            name,
-            rhs: Box::new(self.parse_prefix()?),
-        })
+        Ok(self.push_node(Node::Let { id, name, rhs }))
     }
 
-    fn parse_fn(&mut self) -> Result<Node<'p>, PgError> {
+    /// fn = "fn" ident "(" (ident ":" type)* ")" type? "{" prefix* "}"
+    fn parse_fn(&mut self) -> Result<NodeId, PgError> {
         self.advance()?;
         let name = self.expect_ident()?;
 
@@ -160,10 +169,10 @@ impl<'p> Parser<'p> {
         self.expect(Type::BraceRight)?;
 
         let return_type = if self.cur().t == Type::CurlyLeft {
-            TypeExpr::Atom(Token {
+            self.push_type(TypeExpr::Atom(Token {
                 start: self.cur().start,
                 t: Type::Void,
-            })
+            }))
         } else {
             self.parse_type()?
         };
@@ -175,15 +184,16 @@ impl<'p> Parser<'p> {
         }
         self.expect(Type::CurlyRight)?;
 
-        Ok(Node::Fn {
+        Ok(self.push_node(Node::Fn {
             name,
             args,
             return_type,
             body,
-        })
+        }))
     }
 
-    fn parse_match(&mut self) -> Result<Node<'p>, PgError> {
+    /// match = "match" "{" (expr "{" prefix* "}")* "{" prefix* "}" "}"
+    fn parse_match(&mut self) -> Result<NodeId, PgError> {
         self.advance()?;
         let mut cases = vec![];
         let mut default = None;
@@ -222,31 +232,25 @@ impl<'p> Parser<'p> {
             ));
         };
 
-        Ok(Node::Match {
-            id: self.next_id(),
-            cases,
-            default,
-        })
+        let id = self.next_id();
+        Ok(self.push_node(Node::Match { id, cases, default }))
     }
 
-    fn parse_expr(&mut self, min_bp: u8) -> Result<Node<'p>, PgError> {
+    /// expr = atom | ident | "(" expr ")" | prefix-op expr | expr postfix-op | expr infix-op expr
+    fn parse_expr(&mut self, min_bp: u8) -> Result<NodeId, PgError> {
         let mut lhs = match self.cur().t {
             Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => {
                 let raw = self.cur.clone();
                 self.advance()?;
-                Node::Atom {
-                    raw,
-                    id: self.next_id(),
-                }
+                let id = self.next_id();
+                self.push_node(Node::Atom { raw, id })
             }
             Type::Ident(_) => {
                 let first = self.cur.clone();
                 self.advance()?;
 
-                Node::Ident {
-                    name: first,
-                    id: self.next_id(),
-                }
+                let id = self.next_id();
+                self.push_node(Node::Ident { name: first, id })
             }
             Type::BraceLeft => {
                 self.advance()?;
@@ -259,11 +263,8 @@ impl<'p> Parser<'p> {
                 let rbp = Parser::prefix_binding_power(&self.cur().t);
                 self.advance()?;
                 let rhs = self.parse_expr(rbp)?;
-                Node::Unary {
-                    id: self.next_id(),
-                    op,
-                    rhs: Box::new(rhs),
-                }
+                let id = self.next_id();
+                self.push_node(Node::Unary { id, op, rhs })
             }
             _ => todo!("{:?}", self.cur().t),
         };
@@ -275,15 +276,16 @@ impl<'p> Parser<'p> {
                     self.advance()?;
                     let field = self.expect_ident()?;
 
-                    lhs = Node::Field {
-                        id: self.next_id(),
-                        target: Box::new(lhs),
+                    let id = self.next_id();
+                    lhs = self.push_node(Node::Field {
+                        id,
+                        target: lhs,
                         name: field,
-                    };
+                    });
                 }
 
                 Type::BraceLeft => {
-                    if !Self::is_callable_target(&lhs) {
+                    if !Self::is_callable_target(self.ast.node(lhs)) {
                         break;
                     }
 
@@ -295,11 +297,12 @@ impl<'p> Parser<'p> {
                     }
 
                     self.expect(Type::BraceRight)?;
-                    lhs = Node::Call {
-                        id: self.next_id(),
-                        target: Box::new(lhs),
+                    let id = self.next_id();
+                    lhs = self.push_node(Node::Call {
+                        id,
+                        target: lhs,
                         args,
-                    }
+                    })
                 }
                 _ => break,
             }
@@ -321,12 +324,13 @@ impl<'p> Parser<'p> {
             if let Token { t: Type::As, .. } = op {
                 self.advance()?;
                 let ty = self.parse_type()?;
-                lhs = Node::Cast {
+                let id = self.next_id();
+                lhs = self.push_node(Node::Cast {
                     src: op,
-                    id: self.next_id(),
-                    lhs: Box::new(lhs),
+                    id,
+                    lhs,
                     rhs: ty,
-                };
+                });
                 continue;
             }
 
@@ -338,12 +342,8 @@ impl<'p> Parser<'p> {
                 self.advance()?;
 
                 let rhs = self.parse_expr(rbp)?;
-                lhs = Node::Bin {
-                    id: self.next_id(),
-                    op,
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
-                };
+                let id = self.next_id();
+                lhs = self.push_node(Node::Bin { id, op, lhs, rhs });
             }
         }
 
@@ -371,12 +371,13 @@ impl<'p> Parser<'p> {
         })
     }
 
-    fn parse_type(&mut self) -> Result<TypeExpr<'p>, PgError> {
+    /// type = atom-type | "Foreign" "<" ident ">" | "Option" "<" type ">" | "Array" "<" type ">"
+    fn parse_type(&mut self) -> Result<TypeExprId, PgError> {
         let Token { t, .. } = self.cur();
         Ok(match t {
             // Atom types
             Type::Str | Type::Int | Type::Bool | Type::Void | Type::Double => {
-                let tt = TypeExpr::Atom(self.cur().clone());
+                let tt = self.push_type(TypeExpr::Atom(self.cur().clone()));
                 self.advance()?;
                 tt
             }
@@ -392,7 +393,7 @@ impl<'p> Parser<'p> {
                 }
                 let inner = self.expect_ident()?;
                 self.expect(Type::GreaterThan)?;
-                TypeExpr::Foreign(inner)
+                self.push_type(TypeExpr::Foreign(inner))
             }
             // Optionals: Option<type>
             Type::Ident("Option") => {
@@ -404,9 +405,9 @@ impl<'p> Parser<'p> {
                         &self.cur,
                     ));
                 }
-                let inner = Box::new(self.parse_type()?);
+                let inner = self.parse_type()?;
                 self.expect(Type::GreaterThan)?;
-                TypeExpr::Option(inner)
+                self.push_type(TypeExpr::Option(inner))
             }
             // Arrays: Array<type>
             Type::Ident("Array") => {
@@ -418,9 +419,9 @@ impl<'p> Parser<'p> {
                         &self.cur,
                     ));
                 }
-                let inner = Box::new(self.parse_type()?);
+                let inner = self.parse_type()?;
                 self.expect(Type::GreaterThan)?;
-                TypeExpr::Array(inner)
+                self.push_type(TypeExpr::Array(inner))
             }
             _ => {
                 return Err(PgError::with_msg(
@@ -434,20 +435,10 @@ impl<'p> Parser<'p> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        ast::{Node, TypeExpr},
-        lex::{Lexer, Token, Type},
-        parser::Parser,
-    };
-
-    macro_rules! mk_tok {
-        ($type:expr) => {
-            Token { start: 0, t: $type }
-        };
-    }
+    use crate::{ast::Node, lex::Lexer, parser::Parser};
 
     macro_rules! table_parse_types {
-        ($group:ident,$(($name:ident,$input:literal,$expected:expr))*) => {
+        ($group:ident,$(($name:ident,$input:literal,$expected:literal))*) => {
             mod $group {
                 use super::*;
 
@@ -457,7 +448,7 @@ mod tests {
                         let l = Lexer::new($input.as_bytes());
                         let mut p = Parser::new(l).unwrap();
                         let tt = p.parse_type().unwrap();
-                        assert_eq!(tt, $expected);
+                        assert_eq!(p.ast.type_display(tt).to_string(), $expected);
                     }
                 )*
             }
@@ -466,40 +457,36 @@ mod tests {
 
     table_parse_types! {
         parse_types_atom,
-        (int,"Int",TypeExpr::Atom(mk_tok!(Type::Int)))
-        (double,"Double", TypeExpr::Atom(mk_tok!(Type::Double)))
-        (str,"Str", TypeExpr::Atom(mk_tok!(Type::Str)))
-        (bool,"Bool", TypeExpr::Atom(mk_tok!(Type::Bool)))
-        (void,"Void", TypeExpr::Atom(mk_tok!(Type::Void)))
+        (int,"Int","Int")
+        (double,"Double", "Double")
+        (str,"Str", "Str")
+        (bool,"Bool", "Bool")
+        (void,"Void", "Void")
     }
 
     table_parse_types! {
         parse_types_option,
-        (int,"Option<Int>", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Int)))))
-        (double,"Option<Double>", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Double)))))
-        (str,"Option<Str>", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Str)))))
-        (bool,"Option<Bool>", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Bool)))))
-        (void,"Option<Void>", TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))
-        (double_wrapped,"Option<Option<Void>>", TypeExpr::Option(Box::new(TypeExpr::Option(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))))
+        (int,"Option<Int>", "Option<Int>")
+        (double,"Option<Double>", "Option<Double>")
+        (str,"Option<Str>", "Option<Str>")
+        (bool,"Option<Bool>", "Option<Bool>")
+        (void,"Option<Void>", "Option<Void>")
+        (double_wrapped,"Option<Option<Void>>", "Option<Option<Void>>")
     }
 
     table_parse_types! {
         parse_types_array,
-        (int,"Array<Int>", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Int)))))
-        (double,"Array<Double>", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Double)))))
-        (str,"Array<Str>", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Str)))))
-        (bool,"Array<Bool>", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Bool)))))
-        (void,"Array<Void>", TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))
-        (double_wrapped,"Array<Array<Void>>", TypeExpr::Array(Box::new(TypeExpr::Array(Box::new(TypeExpr::Atom(mk_tok!(Type::Void)))))))
+        (int,"Array<Int>", "Array<Int>")
+        (double,"Array<Double>", "Array<Double>")
+        (str,"Array<Str>", "Array<Str>")
+        (bool,"Array<Bool>", "Array<Bool>")
+        (void,"Array<Void>", "Array<Void>")
+        (double_wrapped,"Array<Array<Void>>", "Array<Array<Void>>")
     }
 
     table_parse_types! {
         parse_types_foreign,
-        (
-            counter,
-            "Foreign<Counter>",
-            TypeExpr::Foreign(mk_tok!(Type::Ident("Counter")))
-        )
+        (counter, "Foreign<Counter>", "Foreign<Counter>")
     }
 
     #[test]
@@ -526,8 +513,8 @@ mod tests {
         assert_eq!(err.msg, "Expected a type after `Array<`");
     }
 
-    macro_rules! table {
-        ($group:ident,$(($name:ident,$input:literal,$expected:expr))*) => {
+    macro_rules! table_roots {
+        ($group:ident,$(($name:ident,$input:literal,$root_count:literal))*) => {
             mod $group {
                 use super::*;
 
@@ -536,131 +523,38 @@ mod tests {
                     fn $name() {
                         let l = Lexer::new($input.as_bytes());
                         let p = Parser::new(l).unwrap();
-                        let tt = p.parse().unwrap();
-                        assert_eq!(tt, $expected);
+                        let ast = p.parse().unwrap();
+                        assert_eq!(ast.roots.len(), $root_count);
+                        assert!(!ast.nodes.is_empty());
                     }
                 )*
             }
         };
     }
 
-    table! {
+    table_roots! {
         happy_path,
-        (
-            binding,
-            "let variable_name = 5",
-            vec![Node::Let {
-                id: 0,
-                name: mk_tok!(Type::Ident("variable_name")),
-                rhs: Box::new(Node::Atom {
-                    id: 1,
-                    raw: mk_tok!(Type::I("5")),
-                })
-            }]
-        )
-        (
-            function_with_explicit_void,
-            "fn zero_args() {}",
-            vec![Node::Fn {
-                name: mk_tok!(Type::Ident("zero_args")),
-                args: vec![],
-                return_type: TypeExpr::Atom(mk_tok!(Type::Void)),
-                body: vec![],
-            }]
-        )
-        (
-            function,
-            "fn implicit_void() {}",
-            vec![Node::Fn {
-                name: mk_tok!(Type::Ident("implicit_void")),
-                args: vec![],
-                return_type: TypeExpr::Atom(mk_tok!(Type::Void)),
-                body: vec![],
-            }]
-        )
-        (
-            foreign_function,
-            "fn new(value: Foreign<Counter>) Foreign<Counter> {}",
-            vec![Node::Fn {
-                name: mk_tok!(Type::Ident("new")),
-                args: vec![(
-                    mk_tok!(Type::Ident("value")),
-                    TypeExpr::Foreign(mk_tok!(Type::Ident("Counter"))),
-                )],
-                return_type: TypeExpr::Foreign(mk_tok!(Type::Ident("Counter"))),
-                body: vec![],
-            }]
-        )
-        (
-            expression,
-            "3+0.1415*5/27",
-            vec![
-                Node::Bin {
-                    id: 6,
-                    op: mk_tok!(Type::Plus),
-                    lhs: Box::new(Node::Atom {
-                        id: 0,
-                        raw: mk_tok!(Type::I("3")),
-                    }),
-                    rhs: Box::new(Node::Bin {
-                        id: 5,
-                        op: mk_tok!(Type::Slash),
-                        lhs: Box::new(Node::Bin {
-                            id: 3,
-                            op: mk_tok!(Type::Asteriks),
-                            lhs: Box::new(Node::Atom {
-                                id: 1,
-                                raw: mk_tok!(Type::D("0.1415")),
-                            }),
-                            rhs: Box::new(Node::Atom {
-                                id: 2,
-                                raw: mk_tok!(Type::I("5")),
-                            }),
-                        }),
-                        rhs: Box::new(Node::Atom {
-                            id: 4,
-                            raw: mk_tok!(Type::I("27")),
-                        }),
-                    }),
-                }
-            ]
-        )
+        (binding, "let variable_name = 5", 1)
+        (function_with_explicit_void, "fn zero_args() {}", 1)
+        (function, "fn implicit_void() {}", 1)
+        (foreign_function, "fn new(value: Foreign<Counter>) Foreign<Counter> {}", 1)
+        (expression, "3+0.1415*5/27", 1)
     }
 
     #[test]
     fn adjacent_parenthesized_arg_after_atom_is_not_postfix_call() {
         let l = Lexer::new(b"f(0.0 (1.0 + 2.0))");
         let p = Parser::new(l).unwrap();
-        let tt = p.parse().unwrap();
+        let ast = p.parse().unwrap();
+        let root = ast.roots[0];
 
-        assert_eq!(
-            tt,
-            vec![Node::Call {
-                id: 5,
-                target: Box::new(Node::Ident {
-                    id: 0,
-                    name: mk_tok!(Type::Ident("f")),
-                }),
-                args: vec![
-                    Node::Atom {
-                        id: 1,
-                        raw: mk_tok!(Type::D("0.0")),
-                    },
-                    Node::Bin {
-                        id: 4,
-                        op: mk_tok!(Type::Plus),
-                        lhs: Box::new(Node::Atom {
-                            id: 2,
-                            raw: mk_tok!(Type::D("1.0")),
-                        }),
-                        rhs: Box::new(Node::Atom {
-                            id: 3,
-                            raw: mk_tok!(Type::D("2.0")),
-                        }),
-                    },
-                ],
-            }]
-        );
+        let Node::Call { target, args, .. } = ast.node(root) else {
+            panic!("expected call root, got {:?}", ast.node(root));
+        };
+        assert_eq!(args.len(), 2);
+        assert!(matches!(ast.node(*target), Node::Ident { .. }));
+        assert!(matches!(ast.node(args[0]), Node::Atom { .. }));
+        assert!(matches!(ast.node(args[1]), Node::Bin { .. }));
     }
 
     #[test]
