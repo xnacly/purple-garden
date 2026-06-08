@@ -34,17 +34,12 @@ pub fn const_fold_syscalls<'fold, 's>(
                 continue;
             };
 
-            let Some(eval) = candidate.fun.eval else {
-                continue;
-            };
-
-            let Some(value) = eval(&candidate.args) else {
+            let Some(value) = (candidate.eval)(&candidate.args) else {
                 continue;
             };
 
             purple_garden_shared::trace!(
-                "[opt::ir::const_fold_syscalls] folded syscall {} into constant {:?}",
-                candidate.fun.name,
+                "[opt::ir::const_fold_syscalls] folded syscall into constant {:?}",
                 value
             );
 
@@ -60,7 +55,7 @@ pub fn const_fold_syscalls<'fold, 's>(
 #[derive(Debug)]
 struct SyscallFoldCandidate<'ir> {
     dst: TypeId<'ir>,
-    fun: &'ir ir::Fn<'ir>,
+    eval: ir::ConstEvalFn,
     args: Vec<Const<'ir>>,
     span: u32,
 }
@@ -85,6 +80,8 @@ fn syscall_fold_candidate<'ir>(
         return None;
     }
 
+    let eval = fun.eval?;
+
     let args = args
         .iter()
         .map(|arg| {
@@ -96,7 +93,7 @@ fn syscall_fold_candidate<'ir>(
 
     Some(SyscallFoldCandidate {
         dst: dst.clone(),
-        fun,
+        eval,
         args,
         span: *span,
     })
@@ -182,7 +179,7 @@ mod tests {
             syscall_fold_candidate(&instr, &scratch, &previous).expect("fold candidate");
         assert_eq!(candidate.args, vec![Const::Int(7)]);
         assert_eq!(candidate.dst.id, Id(1));
-        assert_eq!(candidate.fun.name, "pure");
+        assert_eq!((candidate.eval)(&candidate.args), Some(Const::Int(14)));
         assert_eq!(candidate.span, 12);
     }
 

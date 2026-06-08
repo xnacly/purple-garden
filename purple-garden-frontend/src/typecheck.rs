@@ -58,6 +58,7 @@ pub struct Typechecker<'t> {
     functions: HashMap<&'t str, FunctionType<'t>>,
     /// map a pkg name to a map of its methods and their types
     packages: HashMap<&'t str, HashMap<&'t str, FunctionType<'t>>>,
+    pkg_cache: HashMap<&'t str, Option<&'t Pkg>>,
     libs: Vec<&'t Pkg>,
 }
 
@@ -83,12 +84,20 @@ impl<'t> Typechecker<'t> {
         self.env.last_mut().unwrap().insert(k, v);
     }
 
-    fn resolve_pkg(&self, query: &'t str) -> Option<&'t Pkg> {
-        self.libs
+    fn resolve_pkg(&mut self, query: &'t str) -> Option<&'t Pkg> {
+        if let Some(pkg) = self.pkg_cache.get(query).copied() {
+            return pkg;
+        }
+
+        let pkg = self
+            .libs
             .iter()
             .copied()
             .find(|pkg| pkg.name == query)
-            .or_else(|| pstd::resolve_pkg(query))
+            .or_else(|| pstd::resolve_pkg(query));
+
+        self.pkg_cache.insert(query, pkg);
+        pkg
     }
 
     #[must_use]

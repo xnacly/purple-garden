@@ -6,7 +6,8 @@ use purple_garden_ir as ir;
 /// place the result in r0 instead of routing through a join-block param.
 pub fn ret_inline(fun: &mut ir::Func) {
     let mut rewrites: Vec<(usize, ir::Id, u32)> = Vec::new();
-    let mut inlined_targets: Vec<u32> = Vec::new();
+    let mut pred_counts = predecessor_counts(fun);
+    let mut touched_targets = vec![false; fun.blocks.len()];
 
     for i in 0..fun.blocks.len() {
         if fun.blocks[i].tombstone {
@@ -47,9 +48,9 @@ pub fn ret_inline(fun: &mut ir::Func) {
         let ret_value = jump_params_resolved[0];
 
         rewrites.push((i, ret_value, span));
-        if !inlined_targets.contains(&target_id.0) {
-            inlined_targets.push(target_id.0);
-        }
+        let target_idx = target_id.0 as usize;
+        pred_counts[target_idx] = pred_counts[target_idx].saturating_sub(1);
+        touched_targets[target_idx] = true;
     }
 
     for (i, ret_value, span) in rewrites {
@@ -60,26 +61,35 @@ pub fn ret_inline(fun: &mut ir::Func) {
         });
     }
 
-    for target_id in inlined_targets {
-        let still_referenced = fun.blocks.iter().any(|b| {
-            if b.tombstone {
-                return false;
-            }
-            match &b.term {
-                Some(ir::Terminator::Jump { id, .. }) => id.0 == target_id,
-                Some(ir::Terminator::Branch { yes, no, .. }) => {
-                    yes.0.0 == target_id || no.0.0 == target_id
-                }
-                _ => false,
-            }
-        });
-        if !still_referenced {
+    for (target_id, touched) in touched_targets.into_iter().enumerate() {
+        if touched && pred_counts[target_id] == 0 {
             purple_garden_shared::trace!(
                 "[opt::ir::ret_inline] b{target_id} is now a tombstone (no predecessors)"
             );
-            fun.blocks[target_id as usize].tombstone = true;
+            fun.blocks[target_id].tombstone = true;
         }
     }
+}
+
+fn predecessor_counts(fun: &ir::Func) -> Vec<u32> {
+    let mut counts = vec![0; fun.blocks.len()];
+
+    for block in &fun.blocks {
+        if block.tombstone {
+            continue;
+        }
+
+        match &block.term {
+            Some(ir::Terminator::Jump { id, .. }) => counts[id.0 as usize] += 1,
+            Some(ir::Terminator::Branch { yes, no, .. }) => {
+                counts[yes.0.0 as usize] += 1;
+                counts[no.0.0 as usize] += 1;
+            }
+            _ => {}
+        }
+    }
+
+    counts
 }
 
 #[cfg(test)]

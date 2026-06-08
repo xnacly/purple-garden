@@ -322,8 +322,6 @@ impl<'cc> Cc<'cc> {
         let mut live_set = std::mem::take(&mut self.live_set);
         let mut arg_hints = std::mem::take(&mut self.arg_hints);
         fun.live_set_into(&mut live_set);
-        fun.arg_hints_into(&mut arg_hints);
-        self.regalloc.rebuild(&live_set, &arg_hints);
 
         // Native functions are injected as syscalls. The entry function can
         // be run directly from the native page when it compiles to JIT.
@@ -342,6 +340,9 @@ impl<'cc> Cc<'cc> {
             self.arg_hints = arg_hints;
             return Ok(());
         }
+
+        fun.arg_hints_into(&mut arg_hints);
+        self.regalloc.rebuild(&live_set, &arg_hints);
 
         // binding the id of a function to its context
         let pc = self.buf.len();

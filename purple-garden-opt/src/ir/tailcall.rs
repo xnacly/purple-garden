@@ -56,42 +56,45 @@ pub fn tailcall(fun: &mut ir::Func) {
             continue;
         }
 
-        // last instruction must be a call
-        let Some(Instr::Call {
-            dst,
-            func,
-            args,
-            span,
-        }) = fun.blocks[i].instructions.last().cloned()
-        else {
-            continue;
-        };
+        let replacement = {
+            let block = &fun.blocks[i];
+            let Some(Instr::Call {
+                dst,
+                func,
+                args,
+                span,
+            }) = block.instructions.last()
+            else {
+                continue;
+            };
 
-        // Clone the term so we can hold the match guard's borrow without
-        // blocking calls to fun.params(...) (a Pattern B check needs to
-        // resolve the Jump's ParamsId through the function's pool).
-        let term = fun.blocks[i].term.clone();
+            let is_tail = match &block.term {
+                // Pattern A: direct return
+                Some(ir::Terminator::Return { value: Some(v), .. }) if v.0 == dst.id.0 => true,
 
-        let is_tail = match &term {
-            // Pattern A: direct return
-            Some(ir::Terminator::Return { value: Some(v), .. }) if v.0 == dst.id.0 => true,
+                // Pattern B: jump to canonical return block
+                Some(ir::Terminator::Jump {
+                    id: ir::Id(id),
+                    params: jump_params,
+                    ..
+                }) if *id == last_id as u32 && trivial_return => {
+                    let resolved = fun.params(*jump_params);
+                    resolved.len() == 1 && resolved[0].0 == dst.id.0
+                }
 
-            // Pattern B: jump to canonical return block
-            Some(ir::Terminator::Jump {
-                id: ir::Id(id),
-                params: jump_params,
-                ..
-            }) if *id == last_id as u32 && trivial_return => {
-                let resolved = fun.params(*jump_params);
-                resolved.len() == 1 && resolved[0].0 == dst.id.0
+                _ => false,
+            };
+
+            if is_tail {
+                Some((*func, args.clone(), *span))
+            } else {
+                None
             }
-
-            _ => false,
         };
 
-        if !is_tail {
+        let Some((func, args, span)) = replacement else {
             continue;
-        }
+        };
 
         let block = &mut fun.blocks[i];
 

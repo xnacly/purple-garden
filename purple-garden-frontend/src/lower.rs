@@ -44,6 +44,7 @@ pub struct Lower<'lower> {
     func_name_to_id: HashMap<&'lower str, (Id, Option<ptype::Type<'lower>>)>,
     types: Vec<Option<ptype::Type<'lower>>>,
     packages: HashMap<&'lower str, (&'lower Pkg, HashMap<&'lower str, &'lower pstd::Fn<'static>>)>,
+    pkg_cache: HashMap<&'lower str, Option<&'lower Pkg>>,
     libs: Vec<&'lower Pkg>,
 }
 
@@ -59,12 +60,20 @@ impl<'lower> Lower<'lower> {
         self
     }
 
-    fn resolve_pkg(&self, query: &'lower str) -> Option<&'lower Pkg> {
-        self.libs
+    fn resolve_pkg(&mut self, query: &'lower str) -> Option<&'lower Pkg> {
+        if let Some(pkg) = self.pkg_cache.get(query).copied() {
+            return pkg;
+        }
+
+        let pkg = self
+            .libs
             .iter()
             .copied()
             .find(|pkg| pkg.name == query)
-            .or_else(|| pstd::resolve_pkg(query))
+            .or_else(|| pstd::resolve_pkg(query));
+
+        self.pkg_cache.insert(query, pkg);
+        pkg
     }
 
     fn emit(&mut self, i: Instr<'lower>) {
