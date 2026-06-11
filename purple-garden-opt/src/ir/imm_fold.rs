@@ -58,6 +58,8 @@ pub fn imm_fold<'fun, 's>(fun: &'fun mut ir::Func<'s>, scratch: &mut super::Scra
 }
 
 fn bump_if_const(scratch: &mut Scratch<'_>, id: Id) {
+    // imm_fold only cares whether recorded LoadConst defs are single-use, so
+    // avoid growing the scratch vectors for arbitrary non-constant ids.
     let idx = id.0 as usize;
     if scratch.consts.get(idx).is_some_and(Option::is_some) {
         scratch.uses[idx] += 1;

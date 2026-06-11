@@ -1,3 +1,5 @@
+import "testing"
+
 fn arithmetics(a:Int b:Int c:Int d:Int) Int {
     let x1 = a + b * c - d
     let x2 = x1 + c * d - b
@@ -8,5 +10,23 @@ fn arithmetics(a:Int b:Int c:Int d:Int) Int {
 fn divs(a:Int b:Int) Int {
     a / 7 + b % 3
 }
-arithmetics(2 3 4 5)
-divs(42 17)
+
+fn absish(n:Int) Int {
+    match {
+        n == 0 { 1 }
+        { 2 }
+    }
+}
+
+fn factorial(n:Int a:Int) Int {
+    match {
+        n == 0 { a }
+        { factorial(n - 1 n * a) }
+    }
+}
+
+testing.assert(arithmetics(2 3 4 5) == 114)
+testing.assert(divs(42 17) == 8)
+testing.assert(absish(0) == 1)
+testing.assert(absish(5) == 2)
+testing.assert(factorial(20 1) == 2432902008176640000)

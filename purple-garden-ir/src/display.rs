@@ -118,6 +118,18 @@ impl Display for Terminator {
                 "br %v{}, b{}(params#{}), b{}(params#{})",
                 cond.0, yes.0, yes.1.0, no.0, no.1.0,
             )?,
+            Terminator::BranchCmpImm {
+                op,
+                lhs,
+                imm,
+                yes,
+                no,
+                ..
+            } => write!(
+                f,
+                "br_imm {:?} %v{}, {}, b{}(params#{}), b{}(params#{})",
+                op, lhs.0, imm, yes.0, yes.1.0, no.0, no.1.0,
+            )?,
             Terminator::Tail { func, args, .. } => {
                 write!(f, "tail f{}(", func.0)?;
                 for (i, arg) in args.iter().enumerate() {
@@ -189,6 +201,24 @@ impl Display for Func<'_> {
                         f,
                         "\tbr %v{}, b{}({}), b{}({})",
                         cond.0,
+                        yes.0,
+                        format_ids(self.params(yes.1)),
+                        no.0,
+                        format_ids(self.params(no.1)),
+                    )?,
+                    Terminator::BranchCmpImm {
+                        op,
+                        lhs,
+                        imm,
+                        yes,
+                        no,
+                        ..
+                    } => writeln!(
+                        f,
+                        "\tbr_imm {:?} %v{}, {}, b{}({}), b{}({})",
+                        op,
+                        lhs.0,
+                        imm,
                         yes.0,
                         format_ids(self.params(yes.1)),
                         no.0,

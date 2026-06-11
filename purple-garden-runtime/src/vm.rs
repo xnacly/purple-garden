@@ -315,6 +315,18 @@ impl Vm {
                         continue;
                     }
                 },
+                Op::JmpEqI { lhs, imm, target } => unsafe {
+                    if r!(lhs).as_int() == imm as i64 {
+                        pc = target as usize;
+                        continue;
+                    }
+                },
+                Op::JmpNeI { lhs, imm, target } => unsafe {
+                    if r!(lhs).as_int() != imm as i64 {
+                        pc = target as usize;
+                        continue;
+                    }
+                },
                 Op::Call { func } => {
                     if std::hint::unlikely(self.config.backtrace) {
                         self.backtrace.push(func as usize);

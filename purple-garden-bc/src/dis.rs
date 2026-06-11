@@ -179,7 +179,11 @@ impl<'dis> Disassembler<'dis> {
         let mut block_labels: HashMap<usize, String> = HashMap::new();
         for instr in self.bc {
             match instr {
-                Op::Jmp { target } | Op::JmpT { target, .. } | Op::JmpF { target, .. } => {
+                Op::Jmp { target }
+                | Op::JmpT { target, .. }
+                | Op::JmpF { target, .. }
+                | Op::JmpEqI { target, .. }
+                | Op::JmpNeI { target, .. } => {
                     let pc = *target as usize;
                     if funcs_by_pc.contains_key(&(*target as u32)) {
                         continue;
@@ -298,6 +302,14 @@ impl<'dis> Disassembler<'dis> {
                 ),
                 Op::JmpF { cond, target } => format!(
                     "jmpf r{cond}, {target:04x} <{}>",
+                    target_label(*target, cur_func)
+                ),
+                Op::JmpEqI { lhs, imm, target } => format!(
+                    "jmpeq_imm r{lhs}, #{imm}, {target:04x} <{}>",
+                    target_label(*target, cur_func)
+                ),
+                Op::JmpNeI { lhs, imm, target } => format!(
+                    "jmpne_imm r{lhs}, #{imm}, {target:04x} <{}>",
                     target_label(*target, cur_func)
                 ),
                 Op::Call { func } => format!(

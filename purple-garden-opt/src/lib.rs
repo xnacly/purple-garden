@@ -20,6 +20,7 @@ pub fn ir(ir: &mut [purple_garden_ir::Func]) {
         ir::const_fold(fun, &mut scratch);
         ir::const_fold_syscalls(fun, &mut scratch);
         ir::imm_fold(fun, &mut scratch);
+        ir::branch_cmp(fun, &mut scratch);
         ir::indirect_jump(fun);
         // Order: before tailcall, so a Call-then-Jump-to-Ret-join pattern
         // becomes a direct Return that tailcall then picks up as Pattern A.

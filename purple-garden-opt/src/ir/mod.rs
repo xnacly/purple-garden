@@ -3,6 +3,7 @@
 //! Each pass lives in its own submodule. Orchestration (which passes
 //! run, in what order) lives in [crate::ir] in `src/opt/mod.rs`.
 
+mod branch_cmp;
 mod const_fold;
 mod const_fold_syscalls;
 mod imm_fold;
@@ -21,7 +22,7 @@ pub struct ConstDef {
 
 /// Shared analysis state for IR-level passes that need SSA use counts
 /// plus a map of fold-eligible `LoadConst` defs. One instance is
-/// reused across every function in a compile (reset by `clear()` on
+/// reused across every function in a compile (reset by [`Scratch::reset`]) on
 /// `uses` and `consts`) so the allocation amortises.
 ///
 /// Both vecs are indexed by `Id.0`. Invariant: `uses.len() ==
@@ -36,6 +37,7 @@ pub struct Scratch<'scratch> {
 }
 
 impl<'scratch> Scratch<'scratch> {
+    /// Clear all recorded analysis while retaining vector capacity.
     pub fn reset(&mut self) {
         self.uses.clear();
         self.consts.clear();
@@ -58,6 +60,7 @@ impl<'scratch> Scratch<'scratch> {
         }
     }
 
+    /// Record where a `LoadConst` defines `id`.
     pub fn record_const(&mut self, id: Id, block: u32, instr: u32) {
         self.ensure(id);
         self.consts[id.0 as usize] = Some(ConstDef { block, instr });
@@ -126,7 +129,11 @@ pub fn dce(fun: &mut ir::Func<'_>, scratch: &mut Scratch<'_>) {
     }
 }
 
-fn record_uses(fun: &ir::Func<'_>, scratch: &mut Scratch<'_>) {
+/// Recompute whole-function SSA use counts in `scratch`.
+///
+/// This also calls [`Scratch::ensure`] for definitions with zero uses, so
+/// callers can distinguish "defined but dead" from "id never seen" when needed.
+pub(super) fn record_uses(fun: &ir::Func<'_>, scratch: &mut Scratch<'_>) {
     scratch.reset();
 
     for block in &fun.blocks {
@@ -157,6 +164,7 @@ fn removable(instr: &ir::Instr<'_>) -> bool {
 }
 
 // reexports
+pub use branch_cmp::branch_cmp;
 pub use const_fold::const_fold;
 pub use const_fold_syscalls::const_fold_syscalls;
 pub use imm_fold::imm_fold;

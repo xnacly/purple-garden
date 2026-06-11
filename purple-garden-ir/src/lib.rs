@@ -79,7 +79,7 @@ pub struct TypeId<'t> {
     pub ty: Type<'t>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     IAdd,
     ISub,
@@ -182,6 +182,14 @@ pub enum Terminator {
         no: (Id, ParamsId),
         span: u32,
     },
+    BranchCmpImm {
+        op: BinOp,
+        lhs: Id,
+        imm: i32,
+        yes: (Id, ParamsId),
+        no: (Id, ParamsId),
+        span: u32,
+    },
     Tail {
         func: Id,
         args: Vec<Id>,
@@ -196,6 +204,7 @@ impl Terminator {
             Terminator::Return { span, .. }
             | Terminator::Jump { span, .. }
             | Terminator::Branch { span, .. }
+            | Terminator::BranchCmpImm { span, .. }
             | Terminator::Tail { span, .. } => *span,
         }
     }
@@ -344,6 +353,20 @@ impl Func<'_> {
                     f(p);
                 }
             }
+            Terminator::BranchCmpImm {
+                lhs,
+                yes: (_, yes_params),
+                no: (_, no_params),
+                ..
+            } => {
+                f(*lhs);
+                for &p in self.params(*yes_params) {
+                    f(p);
+                }
+                for &p in self.params(*no_params) {
+                    f(p);
+                }
+            }
         }
     }
 
@@ -434,6 +457,28 @@ impl Func<'_> {
                         // keeps cond's reg out of yes_dst's reach.
                         use_value(intervals, *cond, pos + 1);
                         // no-shuffle runs after JmpT.
+                        for &p in self.params(*no_params) {
+                            use_value(intervals, p, pos + 1);
+                        }
+                        for &p in self.params(self.blocks[no_id.0 as usize].params) {
+                            define(intervals, p, pos + 1);
+                        }
+                    }
+                    Terminator::BranchCmpImm {
+                        lhs,
+                        yes: (yes_id, yes_params),
+                        no: (no_id, no_params),
+                        ..
+                    } => {
+                        // Same edge-move phasing as Branch: yes shuffle first,
+                        // comparison operand after yes moves, no shuffle last.
+                        for &p in self.params(*yes_params) {
+                            use_value(intervals, p, pos);
+                        }
+                        for &p in self.params(self.blocks[yes_id.0 as usize].params) {
+                            define(intervals, p, pos);
+                        }
+                        use_value(intervals, *lhs, pos + 1);
                         for &p in self.params(*no_params) {
                             use_value(intervals, p, pos + 1);
                         }
@@ -564,7 +609,8 @@ impl Func<'_> {
                         }
                     }
                 }
-                Some(Terminator::Branch { yes, no, .. }) => {
+                Some(Terminator::Branch { yes, no, .. })
+                | Some(Terminator::BranchCmpImm { yes, no, .. }) => {
                     for (target_id, params) in [yes, no] {
                         let target = &self.blocks[target_id.0 as usize];
                         if target.tombstone {

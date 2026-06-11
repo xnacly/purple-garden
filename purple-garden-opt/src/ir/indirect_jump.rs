@@ -22,13 +22,7 @@ use purple_garden_ir as ir;
 /// ```
 pub fn indirect_jump(fun: &mut ir::Func) {
     for i in 0..fun.blocks.len() {
-        let Some(ir::Terminator::Branch {
-            cond,
-            yes: (ir::Id(yes), yes_params),
-            no: (ir::Id(no), no_params),
-            span,
-        }) = fun.blocks[i].term.clone()
-        else {
+        let Some((yes, yes_params, no, no_params)) = branch_edges(&fun.blocks[i].term) else {
             continue;
         };
 
@@ -66,12 +60,42 @@ pub fn indirect_jump(fun: &mut ir::Func) {
             purple_garden_shared::trace!("[opt::ir::indirect_jump] b{no} is now a tombstone");
         }
 
-        fun.blocks[i].term = Some(ir::Terminator::Branch {
-            cond,
-            yes: yes_edge.unwrap_or((ir::Id(yes), yes_params)),
-            no: no_edge.unwrap_or((ir::Id(no), no_params)),
-            span,
-        });
+        rewrite_branch_edges(
+            &mut fun.blocks[i].term,
+            yes_edge.unwrap_or((ir::Id(yes), yes_params)),
+            no_edge.unwrap_or((ir::Id(no), no_params)),
+        );
+    }
+}
+
+fn branch_edges(term: &Option<ir::Terminator>) -> Option<(u32, ir::ParamsId, u32, ir::ParamsId)> {
+    match term {
+        Some(ir::Terminator::Branch {
+            yes: (ir::Id(yes), yes_params),
+            no: (ir::Id(no), no_params),
+            ..
+        })
+        | Some(ir::Terminator::BranchCmpImm {
+            yes: (ir::Id(yes), yes_params),
+            no: (ir::Id(no), no_params),
+            ..
+        }) => Some((*yes, *yes_params, *no, *no_params)),
+        _ => None,
+    }
+}
+
+fn rewrite_branch_edges(
+    term: &mut Option<ir::Terminator>,
+    yes_edge: (ir::Id, ir::ParamsId),
+    no_edge: (ir::Id, ir::ParamsId),
+) {
+    match term {
+        Some(ir::Terminator::Branch { yes, no, .. })
+        | Some(ir::Terminator::BranchCmpImm { yes, no, .. }) => {
+            *yes = yes_edge;
+            *no = no_edge;
+        }
+        _ => {}
     }
 }
 

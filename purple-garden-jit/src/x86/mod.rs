@@ -44,6 +44,53 @@ const RAX: u8 = 0;
 const RCX: u8 = 1;
 const RDX: u8 = 2;
 
+/// Compile one IR function into x86-64 machine code, returning `None` if unsupported.
+pub fn compile_func(
+    func: &ir::Func<'_>,
+    out: &mut Vec<u8>,
+    liveness: &[(u32, u32)],
+    allocator: &mut crate::regalloc::Allocator,
+) -> Option<()> {
+    if first_live_block(func).is_none() {
+        skip!(func, "empty function");
+    }
+    if func.params.len() > 32 {
+        skip!(
+            func,
+            "too many params for disp8 slot loads: {}",
+            func.params.len()
+        );
+    }
+
+    let needs_idiv = validate_supported(func)?;
+
+    out.reserve(func.params.len() * 4 + func.blocks.len() * 16 + 64);
+
+    // Constant-divisor IDiv/IMod (not imm 0, which traps, nor mod 2, which uses
+    // `and`) lowers to `idiv` and needs rax/rcx/rdx reserved.
+    let caller = if needs_idiv { POOL_DIV } else { POOL };
+    let regs = allocator.rebuild(
+        liveness,
+        &[],
+        crate::regalloc::RegClasses {
+            caller,
+            callee: POOL_CALLEE,
+        },
+    );
+    // Parallel edge moves only need a scratch register for cycles. If the
+    // allocator consumed every caller register, cyclic edge moves are rejected
+    // and the function falls back to bytecode.
+    let scratch = POOL.iter().copied().find(|candidate| {
+        !regs
+            .iter()
+            .any(|loc| matches!(loc, ir::Location::Reg(r) if r == candidate))
+    });
+    Lowering::new(func, out, regs, scratch).emit()?;
+
+    purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
+    Some(())
+}
+
 #[derive(Clone, Copy)]
 struct Patch {
     /// Offset of the 4-byte relative displacement inside `out`.
@@ -160,6 +207,7 @@ pub enum Insn {
 }
 
 impl Insn {
+    /// Append this instruction's x86-64 machine-code bytes to `code`.
     pub fn encode(self, code: &mut Vec<u8>) {
         match self {
             Insn::Ret => code.push(0xc3),
@@ -241,10 +289,12 @@ impl Insn {
 }
 
 #[inline]
+/// Append one typed instruction to the output buffer.
 fn emit(code: &mut Vec<u8>, insn: Insn) {
     insn.encode(code);
 }
 
+/// Emit a near unconditional jump with a zero rel32 placeholder.
 fn emit_jmp_placeholder(code: &mut Vec<u8>) -> usize {
     code.push(0xe9);
     let rel = code.len();
@@ -252,8 +302,17 @@ fn emit_jmp_placeholder(code: &mut Vec<u8>) -> usize {
     rel
 }
 
+/// Emit a near `jnz` with a zero rel32 placeholder.
 fn emit_jnz_placeholder(code: &mut Vec<u8>) -> usize {
     code.extend_from_slice(&[0x0f, 0x85]);
+    let rel = code.len();
+    code.extend_from_slice(&0i32.to_le_bytes());
+    rel
+}
+
+/// Emit a near `jz` with a zero rel32 placeholder.
+fn emit_jz_placeholder(code: &mut Vec<u8>) -> usize {
+    code.extend_from_slice(&[0x0f, 0x84]);
     let rel = code.len();
     code.extend_from_slice(&0i32.to_le_bytes());
     rel
@@ -280,6 +339,7 @@ fn reg_name(r: u8) -> &'static str {
 }
 
 impl fmt::Display for Insn {
+    /// Render one instruction as the JIT's readable assembly format.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let r = reg_name;
         match *self {
@@ -441,6 +501,7 @@ fn op_in_place(out: &mut Vec<u8>, op: BinOp, d: u8, s: u8) {
     );
 }
 
+/// Emit a register shuffle, resolving cycles through `scratch` when needed.
 fn emit_parallel_moves(out: &mut Vec<u8>, pairs: &mut Vec<(u8, u8)>, scratch: Option<u8>) -> bool {
     pairs.retain(|(src, dst)| src != dst);
 
@@ -471,6 +532,8 @@ fn emit_parallel_moves(out: &mut Vec<u8>, pairs: &mut Vec<(u8, u8)>, scratch: Op
             return false;
         }
 
+        // Example cycle: a->b, b->c, c->a.
+        // Save `a` in scratch, then move c->a, b->c, scratch->b.
         let (start_src, start_dst) = pairs.swap_remove(0);
         emit(
             out,
@@ -495,6 +558,7 @@ fn emit_parallel_moves(out: &mut Vec<u8>, pairs: &mut Vec<(u8, u8)>, scratch: Op
     }
 }
 
+/// Return the physical register allocated to an IR value.
 fn reg_of(regs: &[ir::Location], id: ir::Id) -> Option<u8> {
     match regs.get(id.0 as usize) {
         Some(ir::Location::Reg(r)) => Some(*r),
@@ -502,6 +566,7 @@ fn reg_of(regs: &[ir::Location], id: ir::Id) -> Option<u8> {
     }
 }
 
+/// Move source edge arguments into destination block parameter registers.
 fn emit_param_moves(
     out: &mut Vec<u8>,
     regs: &[ir::Location],
@@ -524,12 +589,23 @@ fn emit_param_moves(
     emit_parallel_moves(out, pairs, scratch)
 }
 
+/// Check whether an edge parameter transfer would emit no moves.
+fn params_moves_empty(regs: &[ir::Location], src_params: &[ir::Id], dst_params: &[ir::Id]) -> bool {
+    src_params.len() == dst_params.len()
+        && src_params
+            .iter()
+            .zip(dst_params)
+            .all(|(&src, &dst)| reg_of(regs, src) == reg_of(regs, dst))
+}
+
+/// Return the parameter ids owned by a branch target block.
 fn branch_target_params<'f>(func: &'f ir::Func<'_>, target: ir::Id) -> Option<&'f [ir::Id]> {
     func.blocks
         .get(target.0 as usize)
         .map(|block| func.params(block.params))
 }
 
+/// Whether this immediate binary op has a direct x86 lowering.
 fn supported_bin_imm(op: BinOp) -> bool {
     matches!(
         op,
@@ -537,10 +613,12 @@ fn supported_bin_imm(op: BinOp) -> bool {
     )
 }
 
+/// Whether this register-register binary op has a direct x86 lowering.
 fn supported_bin(op: BinOp) -> bool {
     matches!(op, BinOp::IAdd | BinOp::ISub | BinOp::IMul | BinOp::IEq)
 }
 
+/// Whether a constant can be materialized by the current x86 lowering.
 fn supported_const(value: &ir::Const<'_>) -> bool {
     match value {
         ir::Const::False | ir::Const::True => true,
@@ -549,6 +627,7 @@ fn supported_const(value: &ir::Const<'_>) -> bool {
     }
 }
 
+/// Validate that `func` is in the x86 JIT subset and report if it needs `idiv`.
 fn validate_supported(func: &ir::Func<'_>) -> Option<bool> {
     let mut needs_idiv = false;
 
@@ -568,6 +647,7 @@ fn validate_supported(func: &ir::Func<'_>) -> Option<bool> {
 
         match block.term.as_ref() {
             None | Some(ir::Terminator::Return { .. } | ir::Terminator::Branch { .. }) => {}
+            Some(ir::Terminator::BranchCmpImm { op: BinOp::IEq, .. }) => {}
             Some(ir::Terminator::Tail {
                 func: tail_func, ..
             }) if *tail_func == func.id => {}
@@ -579,6 +659,7 @@ fn validate_supported(func: &ir::Func<'_>) -> Option<bool> {
     Some(needs_idiv)
 }
 
+/// Return the entry block after tombstone removal.
 fn first_live_block(func: &ir::Func<'_>) -> Option<ir::Id> {
     func.blocks
         .iter()
@@ -602,6 +683,7 @@ struct Lowering<'a, 'ir> {
 }
 
 impl<'a, 'ir> Lowering<'a, 'ir> {
+    /// Create lowering state for one already-admitted IR function.
     fn new(
         func: &'a ir::Func<'ir>,
         out: &'a mut Vec<u8>,
@@ -619,6 +701,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         }
     }
 
+    /// Emit the full function body, then patch deferred branch displacements.
     fn emit(mut self) -> Option<()> {
         self.emit_entry_loads();
 
@@ -628,12 +711,17 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             for instr in &block.instructions {
                 self.emit_instr(instr)?;
             }
-            self.emit_term(block.term.as_ref())?;
+            let next_block = self.func.blocks[block.id.0 as usize + 1..]
+                .iter()
+                .find(|block| !block.tombstone)
+                .map(|block| block.id);
+            self.emit_term(block.term.as_ref(), next_block)?;
         }
 
         self.patch_jumps()
     }
 
+    /// Load function parameters from `vm.r` slots into allocated registers.
     fn emit_entry_loads(&mut self) {
         // Args arrive in the VM register file: param i in vm.r[i] == [rdi + i*8].
         for (i, &param) in self.func.params.iter().enumerate() {
@@ -649,6 +737,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         }
     }
 
+    /// Emit one supported IR instruction.
     fn emit_instr(&mut self, instr: &ir::Instr<'_>) -> Option<()> {
         match instr {
             ir::Instr::Noop => {}
@@ -664,6 +753,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         Some(())
     }
 
+    /// Materialize a supported IR constant into its allocated destination.
     fn emit_const(&mut self, dst: &ir::TypeId<'_>, value: &ir::Const<'_>) -> Option<()> {
         let Some(dst_reg) = reg_of(self.regs, dst.id) else {
             skip!(self.func, "unallocated const dst %v{}", dst.id.0);
@@ -681,6 +771,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         Some(())
     }
 
+    /// Emit an immediate binary operation.
     fn emit_bin_imm(&mut self, op: BinOp, dst: ir::Id, lhs: ir::Id, imm: i32) -> Option<()> {
         let (Some(d), Some(l)) = (reg_of(self.regs, dst), reg_of(self.regs, lhs)) else {
             skip!(self.func, "unallocated binimm operand");
@@ -718,6 +809,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         Some(())
     }
 
+    /// Emit a register-register binary operation.
     fn emit_bin(&mut self, op: BinOp, dst: ir::Id, lhs: ir::Id, rhs: ir::Id) -> Option<()> {
         let (Some(d), Some(l), Some(r)) = (
             reg_of(self.regs, dst),
@@ -735,6 +827,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         Some(())
     }
 
+    /// Emit `dst = lhs == imm` as `test`/`cmp` plus `sete`.
     fn emit_int_eq_imm(&mut self, dst: u8, lhs: u8, imm: i32) {
         if imm == 0 {
             emit(self.out, Insn::Test { lhs, rhs: lhs });
@@ -744,17 +837,24 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         self.emit_sete(dst);
     }
 
+    /// Emit `dst = lhs == rhs` as `cmp` plus `sete`.
     fn emit_int_eq(&mut self, dst: u8, lhs: u8, rhs: u8) {
         emit(self.out, Insn::Cmp { lhs, rhs });
         self.emit_sete(dst);
     }
 
+    /// Materialize the current equality flag into a full 64-bit boolean value.
     fn emit_sete(&mut self, dst: u8) {
         emit(self.out, Insn::MovImm { dst, imm: 0 });
         emit(self.out, Insn::Sete { dst });
     }
 
-    fn emit_term(&mut self, term: Option<&ir::Terminator>) -> Option<()> {
+    /// Emit one block terminator, using `next_block` for fallthrough choices.
+    fn emit_term(
+        &mut self,
+        term: Option<&ir::Terminator>,
+        next_block: Option<ir::Id>,
+    ) -> Option<()> {
         match term {
             None => {}
             Some(ir::Terminator::Return { value, .. }) => self.emit_return(*value)?,
@@ -764,6 +864,23 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 no: (no_id, no_params),
                 ..
             }) => self.emit_branch(*cond, *yes_id, *yes_params, *no_id, *no_params)?,
+            Some(ir::Terminator::BranchCmpImm {
+                op,
+                lhs,
+                imm,
+                yes: (yes_id, yes_params),
+                no: (no_id, no_params),
+                ..
+            }) => self.emit_branch_cmp_imm(
+                *op,
+                *lhs,
+                *imm,
+                *yes_id,
+                *yes_params,
+                *no_id,
+                *no_params,
+                next_block,
+            )?,
             Some(ir::Terminator::Jump { id, params, .. }) => self.emit_jump(*id, *params)?,
             Some(ir::Terminator::Tail {
                 func: tail_func,
@@ -775,6 +892,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         Some(())
     }
 
+    /// Store the optional return value back to `vm.r[0]` and return to Rust.
     fn emit_return(&mut self, value: Option<ir::Id>) -> Option<()> {
         if let Some(value) = value {
             let Some(r) = reg_of(self.regs, value) else {
@@ -786,6 +904,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         Some(())
     }
 
+    /// Emit a boolean branch where the condition is already materialized.
     fn emit_branch(
         &mut self,
         cond: ir::Id,
@@ -798,6 +917,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             skip!(self.func, "bad branch target b{}", yes_id.0);
         };
         let yes_src = self.func.params(yes_params);
+        // The current layout assumes each edge owns its parameter moves. Emit
+        // the yes-edge shuffle before the conditional jump to the yes block.
         self.emit_edge_params(yes_src, yes_dst)?;
 
         let Some(cond) = reg_of(self.regs, cond) else {
@@ -816,11 +937,73 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             skip!(self.func, "bad branch target b{}", no_id.0);
         };
         let no_src = self.func.params(no_params);
+        // The no edge is laid out after the conditional jump, so its shuffle
+        // happens on fallthrough and then branches to the no block.
         self.emit_edge_params(no_src, no_dst)?;
         self.defer_jmp(no_id);
         Some(())
     }
 
+    /// Emit a compare-immediate branch without materializing a boolean.
+    fn emit_branch_cmp_imm(
+        &mut self,
+        op: BinOp,
+        lhs: ir::Id,
+        imm: i32,
+        yes_id: ir::Id,
+        yes_params: ir::ParamsId,
+        no_id: ir::Id,
+        no_params: ir::ParamsId,
+        next_block: Option<ir::Id>,
+    ) -> Option<()> {
+        let Some(yes_dst) = branch_target_params(self.func, yes_id) else {
+            skip!(self.func, "bad branch target b{}", yes_id.0);
+        };
+        let Some(no_dst) = branch_target_params(self.func, no_id) else {
+            skip!(self.func, "bad branch target b{}", no_id.0);
+        };
+        let yes_src = self.func.params(yes_params);
+        let no_src = self.func.params(no_params);
+        let no_moves_empty = params_moves_empty(self.regs, no_src, no_dst);
+
+        self.emit_edge_params(yes_src, yes_dst)?;
+        let Some(lhs) = reg_of(self.regs, lhs) else {
+            skip!(self.func, "unallocated branch comparison operand");
+        };
+        self.emit_cmp_imm(op, lhs, imm)?;
+
+        if op == BinOp::IEq && Some(yes_id) == next_block && no_moves_empty {
+            // If the true arm is the next emitted block and the false edge
+            // needs no parameter moves, invert the branch and fall through to
+            // true. This is the shape BranchCmpImm was added for:
+            // `test/cmp; jnz false; true: ...`.
+            self.defer_jnz(no_id);
+            return Some(());
+        }
+
+        if op == BinOp::IEq {
+            // General case: branch to yes when equal; otherwise resolve the no
+            // edge parameters in-place and jump to the no block.
+            self.defer_jz(yes_id);
+            self.emit_edge_params(no_src, no_dst)?;
+            self.defer_jmp(no_id);
+            return Some(());
+        }
+
+        skip!(self.func, "unsupported branch comparison op {op:?}");
+    }
+
+    /// Set x86 flags for a supported immediate comparison.
+    fn emit_cmp_imm(&mut self, op: BinOp, lhs: u8, imm: i32) -> Option<()> {
+        match op {
+            BinOp::IEq if imm == 0 => emit(self.out, Insn::Test { lhs, rhs: lhs }),
+            BinOp::IEq => emit(self.out, Insn::CmpImm { reg: lhs, imm }),
+            _ => skip!(self.func, "unsupported branch comparison op {op:?}"),
+        }
+        Some(())
+    }
+
+    /// Emit an unconditional IR jump after resolving edge parameters.
     fn emit_jump(&mut self, id: ir::Id, params: ir::ParamsId) -> Option<()> {
         let Some(dst_params) = branch_target_params(self.func, id) else {
             skip!(self.func, "bad jump target b{}", id.0);
@@ -831,12 +1014,14 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         Some(())
     }
 
+    /// Lower a self tail-call as edge-parameter moves plus a jump to entry.
     fn emit_self_tail(&mut self, args: &[ir::Id]) -> Option<()> {
         self.emit_edge_params(args, &self.func.params)?;
         self.defer_jmp(first_live_block(self.func).expect("validated non-empty function"));
         Some(())
     }
 
+    /// Resolve IR edge parameters, which are phi nodes on the predecessor edge.
     fn emit_edge_params(&mut self, src_params: &[ir::Id], dst_params: &[ir::Id]) -> Option<()> {
         // Edge params are the IR's phi nodes. They must be resolved at the
         // predecessor edge, before control reaches the target block.
@@ -853,16 +1038,25 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         Some(())
     }
 
+    /// Emit an unconditional jump placeholder to be patched after all blocks.
     fn defer_jmp(&mut self, target: ir::Id) {
         let rel = emit_jmp_placeholder(self.out);
         self.patches.push(Patch { rel, target });
     }
 
+    /// Emit a `jnz` placeholder to be patched after all blocks.
     fn defer_jnz(&mut self, target: ir::Id) {
         let rel = emit_jnz_placeholder(self.out);
         self.patches.push(Patch { rel, target });
     }
 
+    /// Emit a `jz` placeholder to be patched after all blocks.
+    fn defer_jz(&mut self, target: ir::Id) {
+        let rel = emit_jz_placeholder(self.out);
+        self.patches.push(Patch { rel, target });
+    }
+
+    /// Patch every deferred branch once block offsets are known.
     fn patch_jumps(self) -> Option<()> {
         for Patch { rel, target } in self.patches {
             let Some(target) = self
@@ -879,53 +1073,11 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     }
 }
 
-pub fn compile_func(
-    func: &ir::Func<'_>,
-    out: &mut Vec<u8>,
-    liveness: &[(u32, u32)],
-    allocator: &mut crate::regalloc::Allocator,
-) -> Option<()> {
-    if first_live_block(func).is_none() {
-        skip!(func, "empty function");
-    }
-    if func.params.len() > 32 {
-        skip!(
-            func,
-            "too many params for disp8 slot loads: {}",
-            func.params.len()
-        );
-    }
-
-    let needs_idiv = validate_supported(func)?;
-
-    out.reserve(func.params.len() * 4 + func.blocks.len() * 16 + 64);
-
-    // Constant-divisor IDiv/IMod (not imm 0, which traps, nor mod 2, which uses
-    // `and`) lowers to `idiv` and needs rax/rcx/rdx reserved.
-    let caller = if needs_idiv { POOL_DIV } else { POOL };
-    let regs = allocator.rebuild(
-        liveness,
-        &[],
-        crate::regalloc::RegClasses {
-            caller,
-            callee: POOL_CALLEE,
-        },
-    );
-    let scratch = POOL.iter().copied().find(|candidate| {
-        !regs
-            .iter()
-            .any(|loc| matches!(loc, ir::Location::Reg(r) if r == candidate))
-    });
-    Lowering::new(func, out, regs, scratch).emit()?;
-
-    purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
-    Some(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::Insn;
 
+    /// Encode one instruction into a fresh byte buffer.
     fn enc(insn: Insn) -> Vec<u8> {
         let mut code = Vec::new();
         insn.encode(&mut code);
@@ -933,6 +1085,7 @@ mod tests {
     }
 
     #[test]
+    /// Check the hand-written encoders for representative register and slot forms.
     fn slot_and_reg_encodings() {
         assert_eq!(
             enc(Insn::LoadSlot { dst: 0, slot: 0 }),
