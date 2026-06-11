@@ -44,6 +44,14 @@ const RAX: u8 = 0;
 const RCX: u8 = 1;
 const RDX: u8 = 2;
 
+#[derive(Clone, Copy)]
+struct Patch {
+    /// Offset of the 4-byte relative displacement inside `out`.
+    rel: usize,
+    /// IR block id that owns the final machine-code target offset.
+    target: ir::Id,
+}
+
 /// A single x86-64 instruction. `encode` appends its machine-code bytes;
 /// `Display` renders it as readable assembly (the JIT's own disassembler).
 ///
@@ -70,11 +78,6 @@ pub enum Insn {
     StoreSlot {
         src: u8,
         slot: u8,
-    },
-    /// `mov [rdi + slot*8], imm`
-    StoreImmSlot {
-        slot: u8,
-        imm: i32,
     },
     /// `mov r{dst}, r{src}`
     Mov {
@@ -125,6 +128,11 @@ pub enum Insn {
         reg: u8,
         imm: i32,
     },
+    /// `cmp r{lhs}, r{rhs}`
+    Cmp {
+        lhs: u8,
+        rhs: u8,
+    },
     /// `test r{lhs}, r{rhs}`
     Test {
         lhs: u8,
@@ -157,7 +165,6 @@ impl Insn {
             Insn::Ret => code.push(0xc3),
             Insn::LoadSlot { dst, slot } => mov_slot(code, 0x8b, dst, slot),
             Insn::StoreSlot { src, slot } => mov_slot(code, 0x89, src, slot),
-            Insn::StoreImmSlot { slot, imm } => store_slot_imm(code, slot, imm),
             // 0x89 = `mov r/m64, r64`.
             // ModRM.reg encodes src; ModRM.r/m encodes dst.
             Insn::Mov { dst, src } => reg_reg(code, 0x89, src, dst),
@@ -184,6 +191,7 @@ impl Insn {
             Insn::SubImm { dst, imm } => reg_imm(code, 5, dst, imm),
             Insn::AndImm { dst, imm } => reg_imm(code, 4, dst, imm),
             Insn::CmpImm { reg, imm } => reg_imm(code, 7, reg, imm),
+            Insn::Cmp { lhs, rhs } => reg_reg(code, 0x39, rhs, lhs),
             // 0x85 = `test r/m64, r64`.
             // Both operands are only read, but keep the same packing convention:
             // ModRM.reg = rhs, ModRM.r/m = lhs.
@@ -237,6 +245,32 @@ fn emit(code: &mut Vec<u8>, insn: Insn) {
     insn.encode(code);
 }
 
+fn emit_jmp_placeholder(code: &mut Vec<u8>) -> usize {
+    code.push(0xe9);
+    let rel = code.len();
+    code.extend_from_slice(&0i32.to_le_bytes());
+    rel
+}
+
+fn emit_jnz_placeholder(code: &mut Vec<u8>) -> usize {
+    code.extend_from_slice(&[0x0f, 0x85]);
+    let rel = code.len();
+    code.extend_from_slice(&0i32.to_le_bytes());
+    rel
+}
+
+/// Patch a rel32 branch displacement.
+///
+/// x86 rel32 offsets are relative to the instruction end, not the displacement
+/// field itself. `rel` points at the first byte of the placeholder disp32.
+fn patch_rel32(code: &mut [u8], rel: usize, target: usize) -> Option<()> {
+    let next = rel.checked_add(4)?;
+    let disp = target as isize - next as isize;
+    let disp = i32::try_from(disp).ok()?;
+    code[rel..next].copy_from_slice(&disp.to_le_bytes());
+    Some(())
+}
+
 /// 64-bit GPR name for a physical register number.
 fn reg_name(r: u8) -> &'static str {
     [
@@ -252,7 +286,6 @@ impl fmt::Display for Insn {
             Insn::Ret => write!(f, "ret"),
             Insn::LoadSlot { dst, slot } => write!(f, "mov {}, [rdi+{:#x}]", r(dst), slot * 8),
             Insn::StoreSlot { src, slot } => write!(f, "mov [rdi+{:#x}], {}", slot * 8, r(src)),
-            Insn::StoreImmSlot { slot, imm } => write!(f, "mov [rdi+{:#x}], {imm}", slot * 8),
             Insn::Mov { dst, src } => write!(f, "mov {}, {}", r(dst), r(src)),
             Insn::MovImm { dst, imm } => write!(f, "mov {}, {imm}", r(dst)),
             Insn::Add { dst, src } => write!(f, "add {}, {}", r(dst), r(src)),
@@ -263,6 +296,7 @@ impl fmt::Display for Insn {
             Insn::SubImm { dst, imm } => write!(f, "sub {}, {imm}", r(dst)),
             Insn::AndImm { dst, imm } => write!(f, "and {}, {imm}", r(dst)),
             Insn::CmpImm { reg, imm } => write!(f, "cmp {}, {imm}", r(reg)),
+            Insn::Cmp { lhs, rhs } => write!(f, "cmp {}, {}", r(lhs), r(rhs)),
             Insn::Test { lhs, rhs } => write!(f, "test {}, {}", r(lhs), r(rhs)),
             Insn::Sete { dst } => write!(f, "sete {}b", r(dst)),
             Insn::MovAbs { dst, imm } => write!(f, "movabs {}, {imm:#x}", r(dst)),
@@ -349,17 +383,6 @@ fn mov_slot(code: &mut Vec<u8>, opcode: u8, reg: u8, slot: u8) {
     code.extend_from_slice(&[rex(reg, RDI), opcode, m, slot * 8]);
 }
 
-/// `mov [rdi + slot*8], imm32`
-///
-/// Same `[rdi + disp8]` addressing as [`mov_slot`], but opcode `0xc7 /0` uses
-/// ModRM.reg as opcode extension `/0`, not as a register.
-fn store_slot_imm(code: &mut Vec<u8>, slot: u8, imm: i32) {
-    // ModRM mod=01 (disp8), reg field = /0, rm = rdi.
-    let m = 0x40 | RDI;
-    code.extend_from_slice(&[rex(0, RDI), 0xc7, m, slot * 8]);
-    code.extend_from_slice(&imm.to_le_bytes());
-}
-
 /// Emit `r{d} = r{l} <op> r{r}` in place (op is IAdd/ISub/IMul). x86 binops are
 /// two-operand (`dst <op>= src`), so the destination must start out holding the
 /// left operand; the branches handle the cases where the allocator gave the
@@ -418,6 +441,95 @@ fn op_in_place(out: &mut Vec<u8>, op: BinOp, d: u8, s: u8) {
     );
 }
 
+fn emit_parallel_moves(out: &mut Vec<u8>, pairs: &mut Vec<(u8, u8)>, scratch: Option<u8>) -> bool {
+    pairs.retain(|(src, dst)| src != dst);
+
+    'outer: loop {
+        if pairs.is_empty() {
+            return true;
+        }
+
+        for i in 0..pairs.len() {
+            let (src, dst) = pairs[i];
+            if !pairs.iter().any(|(other_src, _)| *other_src == dst) {
+                emit(out, Insn::Mov { dst, src });
+                pairs.swap_remove(i);
+                continue 'outer;
+            }
+        }
+
+        // Every remaining dst is also a src: the moves contain a cycle.
+        // Break one cycle by saving its head in a free scratch register, then
+        // walk backwards through the just-freed destination registers.
+        let Some(scratch) = scratch else {
+            return false;
+        };
+        if pairs
+            .iter()
+            .any(|(src, dst)| *src == scratch || *dst == scratch)
+        {
+            return false;
+        }
+
+        let (start_src, start_dst) = pairs.swap_remove(0);
+        emit(
+            out,
+            Insn::Mov {
+                dst: scratch,
+                src: start_src,
+            },
+        );
+        let mut cur_freed = start_src;
+        while let Some(idx) = pairs.iter().position(|(_, dst)| *dst == cur_freed) {
+            let (src, dst) = pairs.swap_remove(idx);
+            emit(out, Insn::Mov { dst, src });
+            cur_freed = src;
+        }
+        emit(
+            out,
+            Insn::Mov {
+                dst: start_dst,
+                src: scratch,
+            },
+        );
+    }
+}
+
+fn reg_of(regs: &[ir::Location], id: ir::Id) -> Option<u8> {
+    match regs.get(id.0 as usize) {
+        Some(ir::Location::Reg(r)) => Some(*r),
+        _ => None,
+    }
+}
+
+fn emit_param_moves(
+    out: &mut Vec<u8>,
+    regs: &[ir::Location],
+    pairs: &mut Vec<(u8, u8)>,
+    scratch: Option<u8>,
+    src_params: &[ir::Id],
+    dst_params: &[ir::Id],
+) -> bool {
+    if src_params.len() != dst_params.len() {
+        return false;
+    }
+
+    pairs.clear();
+    for (&src, &dst) in src_params.iter().zip(dst_params) {
+        let (Some(src), Some(dst)) = (reg_of(regs, src), reg_of(regs, dst)) else {
+            return false;
+        };
+        pairs.push((src, dst));
+    }
+    emit_parallel_moves(out, pairs, scratch)
+}
+
+fn branch_target_params<'f>(func: &'f ir::Func<'_>, target: ir::Id) -> Option<&'f [ir::Id]> {
+    func.blocks
+        .get(target.0 as usize)
+        .map(|block| func.params(block.params))
+}
+
 fn supported_bin_imm(op: BinOp) -> bool {
     matches!(
         op,
@@ -426,7 +538,7 @@ fn supported_bin_imm(op: BinOp) -> bool {
 }
 
 fn supported_bin(op: BinOp) -> bool {
-    matches!(op, BinOp::IAdd | BinOp::ISub | BinOp::IMul)
+    matches!(op, BinOp::IAdd | BinOp::ISub | BinOp::IMul | BinOp::IEq)
 }
 
 fn supported_const(value: &ir::Const<'_>) -> bool {
@@ -437,18 +549,344 @@ fn supported_const(value: &ir::Const<'_>) -> bool {
     }
 }
 
+fn validate_supported(func: &ir::Func<'_>) -> Option<bool> {
+    let mut needs_idiv = false;
+
+    for block in func.blocks.iter().filter(|block| !block.tombstone) {
+        for instr in &block.instructions {
+            match instr {
+                ir::Instr::Noop => {}
+                ir::Instr::LoadConst { value, .. } if supported_const(value) => {}
+                ir::Instr::BinImm { op, imm, .. } if supported_bin_imm(*op) => {
+                    needs_idiv |= matches!(op, BinOp::IDiv if *imm != 0)
+                        || matches!(op, BinOp::IMod if *imm != 0 && *imm != 2);
+                }
+                ir::Instr::Bin { op, .. } if supported_bin(*op) => {}
+                _ => skip!(func, "unsupported instruction {instr:?}"),
+            }
+        }
+
+        match block.term.as_ref() {
+            None | Some(ir::Terminator::Return { .. } | ir::Terminator::Branch { .. }) => {}
+            Some(ir::Terminator::Tail {
+                func: tail_func, ..
+            }) if *tail_func == func.id => {}
+            Some(ir::Terminator::Jump { .. }) => {}
+            Some(_) => skip!(func, "unsupported terminator"),
+        }
+    }
+
+    Some(needs_idiv)
+}
+
+fn first_live_block(func: &ir::Func<'_>) -> Option<ir::Id> {
+    func.blocks
+        .iter()
+        .find(|block| !block.tombstone)
+        .map(|block| block.id)
+}
+
+/// Per-function x86 lowering state.
+///
+/// `compile_func` performs admission and register allocation, then hands the
+/// mutable emission state here. Keeping CFG patching, edge-param shuffles, and
+/// instruction lowering in methods keeps the public entry point small.
+struct Lowering<'a, 'ir> {
+    func: &'a ir::Func<'ir>,
+    out: &'a mut Vec<u8>,
+    regs: &'a [ir::Location],
+    scratch: Option<u8>,
+    block_offsets: Vec<usize>,
+    patches: Vec<Patch>,
+    move_pairs: Vec<(u8, u8)>,
+}
+
+impl<'a, 'ir> Lowering<'a, 'ir> {
+    fn new(
+        func: &'a ir::Func<'ir>,
+        out: &'a mut Vec<u8>,
+        regs: &'a [ir::Location],
+        scratch: Option<u8>,
+    ) -> Self {
+        Self {
+            func,
+            out,
+            regs,
+            scratch,
+            block_offsets: vec![usize::MAX; func.blocks.len()],
+            patches: Vec::new(),
+            move_pairs: Vec::new(),
+        }
+    }
+
+    fn emit(mut self) -> Option<()> {
+        self.emit_entry_loads();
+
+        for block in self.func.blocks.iter().filter(|block| !block.tombstone) {
+            self.block_offsets[block.id.0 as usize] = self.out.len();
+
+            for instr in &block.instructions {
+                self.emit_instr(instr)?;
+            }
+            self.emit_term(block.term.as_ref())?;
+        }
+
+        self.patch_jumps()
+    }
+
+    fn emit_entry_loads(&mut self) {
+        // Args arrive in the VM register file: param i in vm.r[i] == [rdi + i*8].
+        for (i, &param) in self.func.params.iter().enumerate() {
+            if let Some(r) = reg_of(self.regs, param) {
+                emit(
+                    self.out,
+                    Insn::LoadSlot {
+                        dst: r,
+                        slot: i as u8,
+                    },
+                );
+            }
+        }
+    }
+
+    fn emit_instr(&mut self, instr: &ir::Instr<'_>) -> Option<()> {
+        match instr {
+            ir::Instr::Noop => {}
+            ir::Instr::LoadConst { dst, value, .. } => self.emit_const(dst, value)?,
+            ir::Instr::BinImm {
+                op, dst, lhs, imm, ..
+            } => self.emit_bin_imm(*op, dst.id, *lhs, *imm)?,
+            ir::Instr::Bin {
+                op, dst, lhs, rhs, ..
+            } => self.emit_bin(*op, dst.id, *lhs, *rhs)?,
+            _ => skip!(self.func, "unsupported instruction {instr:?}"),
+        }
+        Some(())
+    }
+
+    fn emit_const(&mut self, dst: &ir::TypeId<'_>, value: &ir::Const<'_>) -> Option<()> {
+        let Some(dst_reg) = reg_of(self.regs, dst.id) else {
+            skip!(self.func, "unallocated const dst %v{}", dst.id.0);
+        };
+        let imm = match value {
+            ir::Const::False => 0,
+            ir::Const::True => 1,
+            ir::Const::Int(i) if (*i as i32) < i32::MAX && (*i as i32) > i32::MIN => *i as i32,
+            _ => skip!(
+                self.func,
+                "const not true, false or i32::MIN < i < i32::MAX"
+            ),
+        };
+        emit(self.out, Insn::MovImm { dst: dst_reg, imm });
+        Some(())
+    }
+
+    fn emit_bin_imm(&mut self, op: BinOp, dst: ir::Id, lhs: ir::Id, imm: i32) -> Option<()> {
+        let (Some(d), Some(l)) = (reg_of(self.regs, dst), reg_of(self.regs, lhs)) else {
+            skip!(self.func, "unallocated binimm operand");
+        };
+
+        match op {
+            BinOp::IAdd | BinOp::ISub => {
+                if d != l {
+                    emit(self.out, Insn::Mov { dst: d, src: l });
+                }
+                emit(
+                    self.out,
+                    match op {
+                        BinOp::IAdd => Insn::AddImm { dst: d, imm },
+                        _ => Insn::SubImm { dst: d, imm },
+                    },
+                );
+            }
+            BinOp::IEq => self.emit_int_eq_imm(d, l, imm),
+            BinOp::IDiv | BinOp::IMod if imm == 0 => {
+                let helper: purple_garden_runtime::BuiltinFn =
+                    purple_garden_runtime::jit_trap_div_zero;
+                emit_abi_call(self.out, helper as usize as u64);
+                emit(self.out, Insn::Ret);
+            }
+            BinOp::IMod if imm == 2 => {
+                if d != l {
+                    emit(self.out, Insn::Mov { dst: d, src: l });
+                }
+                emit(self.out, Insn::AndImm { dst: d, imm: 1 });
+            }
+            BinOp::IDiv | BinOp::IMod => emit_idiv(self.out, op, d, l, imm),
+            _ => skip!(self.func, "unsupported binimm op {op:?}"),
+        }
+        Some(())
+    }
+
+    fn emit_bin(&mut self, op: BinOp, dst: ir::Id, lhs: ir::Id, rhs: ir::Id) -> Option<()> {
+        let (Some(d), Some(l), Some(r)) = (
+            reg_of(self.regs, dst),
+            reg_of(self.regs, lhs),
+            reg_of(self.regs, rhs),
+        ) else {
+            skip!(self.func, "unallocated bin operand");
+        };
+
+        match op {
+            BinOp::IAdd | BinOp::ISub | BinOp::IMul => emit_bin(self.out, op, d, l, r),
+            BinOp::IEq => self.emit_int_eq(d, l, r),
+            _ => skip!(self.func, "unsupported bin op {op:?}"),
+        }
+        Some(())
+    }
+
+    fn emit_int_eq_imm(&mut self, dst: u8, lhs: u8, imm: i32) {
+        if imm == 0 {
+            emit(self.out, Insn::Test { lhs, rhs: lhs });
+        } else {
+            emit(self.out, Insn::CmpImm { reg: lhs, imm });
+        }
+        self.emit_sete(dst);
+    }
+
+    fn emit_int_eq(&mut self, dst: u8, lhs: u8, rhs: u8) {
+        emit(self.out, Insn::Cmp { lhs, rhs });
+        self.emit_sete(dst);
+    }
+
+    fn emit_sete(&mut self, dst: u8) {
+        emit(self.out, Insn::MovImm { dst, imm: 0 });
+        emit(self.out, Insn::Sete { dst });
+    }
+
+    fn emit_term(&mut self, term: Option<&ir::Terminator>) -> Option<()> {
+        match term {
+            None => {}
+            Some(ir::Terminator::Return { value, .. }) => self.emit_return(*value)?,
+            Some(ir::Terminator::Branch {
+                cond,
+                yes: (yes_id, yes_params),
+                no: (no_id, no_params),
+                ..
+            }) => self.emit_branch(*cond, *yes_id, *yes_params, *no_id, *no_params)?,
+            Some(ir::Terminator::Jump { id, params, .. }) => self.emit_jump(*id, *params)?,
+            Some(ir::Terminator::Tail {
+                func: tail_func,
+                args,
+                ..
+            }) if *tail_func == self.func.id => self.emit_self_tail(args)?,
+            Some(_) => skip!(self.func, "unsupported terminator"),
+        }
+        Some(())
+    }
+
+    fn emit_return(&mut self, value: Option<ir::Id>) -> Option<()> {
+        if let Some(value) = value {
+            let Some(r) = reg_of(self.regs, value) else {
+                skip!(self.func, "return value %v{} unallocated", value.0);
+            };
+            emit(self.out, Insn::StoreSlot { src: r, slot: 0 });
+        }
+        emit(self.out, Insn::Ret);
+        Some(())
+    }
+
+    fn emit_branch(
+        &mut self,
+        cond: ir::Id,
+        yes_id: ir::Id,
+        yes_params: ir::ParamsId,
+        no_id: ir::Id,
+        no_params: ir::ParamsId,
+    ) -> Option<()> {
+        let Some(yes_dst) = branch_target_params(self.func, yes_id) else {
+            skip!(self.func, "bad branch target b{}", yes_id.0);
+        };
+        let yes_src = self.func.params(yes_params);
+        self.emit_edge_params(yes_src, yes_dst)?;
+
+        let Some(cond) = reg_of(self.regs, cond) else {
+            skip!(self.func, "unallocated branch condition");
+        };
+        emit(
+            self.out,
+            Insn::Test {
+                lhs: cond,
+                rhs: cond,
+            },
+        );
+        self.defer_jnz(yes_id);
+
+        let Some(no_dst) = branch_target_params(self.func, no_id) else {
+            skip!(self.func, "bad branch target b{}", no_id.0);
+        };
+        let no_src = self.func.params(no_params);
+        self.emit_edge_params(no_src, no_dst)?;
+        self.defer_jmp(no_id);
+        Some(())
+    }
+
+    fn emit_jump(&mut self, id: ir::Id, params: ir::ParamsId) -> Option<()> {
+        let Some(dst_params) = branch_target_params(self.func, id) else {
+            skip!(self.func, "bad jump target b{}", id.0);
+        };
+        let src_params = self.func.params(params);
+        self.emit_edge_params(src_params, dst_params)?;
+        self.defer_jmp(id);
+        Some(())
+    }
+
+    fn emit_self_tail(&mut self, args: &[ir::Id]) -> Option<()> {
+        self.emit_edge_params(args, &self.func.params)?;
+        self.defer_jmp(first_live_block(self.func).expect("validated non-empty function"));
+        Some(())
+    }
+
+    fn emit_edge_params(&mut self, src_params: &[ir::Id], dst_params: &[ir::Id]) -> Option<()> {
+        // Edge params are the IR's phi nodes. They must be resolved at the
+        // predecessor edge, before control reaches the target block.
+        if !emit_param_moves(
+            self.out,
+            self.regs,
+            &mut self.move_pairs,
+            self.scratch,
+            src_params,
+            dst_params,
+        ) {
+            skip!(self.func, "could not resolve edge-param shuffle");
+        }
+        Some(())
+    }
+
+    fn defer_jmp(&mut self, target: ir::Id) {
+        let rel = emit_jmp_placeholder(self.out);
+        self.patches.push(Patch { rel, target });
+    }
+
+    fn defer_jnz(&mut self, target: ir::Id) {
+        let rel = emit_jnz_placeholder(self.out);
+        self.patches.push(Patch { rel, target });
+    }
+
+    fn patch_jumps(self) -> Option<()> {
+        for Patch { rel, target } in self.patches {
+            let Some(target) = self
+                .block_offsets
+                .get(target.0 as usize)
+                .copied()
+                .filter(|offset| *offset != usize::MAX)
+            else {
+                skip!(self.func, "bad patch target b{}", target.0);
+            };
+            patch_rel32(self.out, rel, target)?;
+        }
+        Some(())
+    }
+}
+
 pub fn compile_func(
     func: &ir::Func<'_>,
     out: &mut Vec<u8>,
     liveness: &[(u32, u32)],
     allocator: &mut crate::regalloc::Allocator,
 ) -> Option<()> {
-    let mut blocks = func.blocks.iter().filter(|block| !block.tombstone);
-    let Some(block) = blocks.next() else {
+    if first_live_block(func).is_none() {
         skip!(func, "empty function");
-    };
-    if blocks.next().is_some() {
-        skip!(func, "multiple blocks");
     }
     if func.params.len() > 32 {
         skip!(
@@ -458,30 +896,13 @@ pub fn compile_func(
         );
     }
 
-    let mut needs_idiv = false;
-    for instr in &block.instructions {
-        match instr {
-            ir::Instr::Noop => {}
-            ir::Instr::LoadConst { value, .. } if supported_const(value) => {}
-            ir::Instr::BinImm { op, imm, .. } if supported_bin_imm(*op) => {
-                needs_idiv |= matches!(op, BinOp::IDiv if *imm != 0)
-                    || matches!(op, BinOp::IMod if *imm != 0 && *imm != 2);
-            }
-            ir::Instr::Bin { op, .. } if supported_bin(*op) => {}
-            _ => skip!(func, "unsupported instruction {instr:?}"),
-        }
-    }
-    match block.term.as_ref() {
-        None | Some(ir::Terminator::Return { .. }) => {}
-        _term => skip!(func, "unsupported terminator {_term:?}"),
-    }
+    let needs_idiv = validate_supported(func)?;
 
-    out.reserve(func.params.len() * 4 + block.instructions.len() * 16 + 16);
+    out.reserve(func.params.len() * 4 + func.blocks.len() * 16 + 64);
 
     // Constant-divisor IDiv/IMod (not imm 0, which traps, nor mod 2, which uses
     // `and`) lowers to `idiv` and needs rax/rcx/rdx reserved.
     let caller = if needs_idiv { POOL_DIV } else { POOL };
-    // No calls lowered yet, so call_sites is empty and the callee class is unused.
     let regs = allocator.rebuild(
         liveness,
         &[],
@@ -490,145 +911,12 @@ pub fn compile_func(
             callee: POOL_CALLEE,
         },
     );
-    let reg = |id: ir::Id| match regs.get(id.0 as usize) {
-        Some(ir::Location::Reg(r)) => Some(*r),
-        _ => None,
-    };
-    let mut last_const_load: Option<(ir::Id, i32, usize)> = None;
-
-    // Args arrive in the VM register file: param i in vm.r[i] == [rdi + i*8].
-    for (i, &param) in func.params.iter().enumerate() {
-        if let Some(r) = reg(param) {
-            emit(
-                out,
-                Insn::LoadSlot {
-                    dst: r,
-                    slot: i as u8,
-                },
-            );
-        }
-    }
-
-    for instr in &block.instructions {
-        match instr {
-            ir::Instr::Noop => {}
-            ir::Instr::LoadConst { dst, value, .. } => {
-                let Some(dst_reg) = reg(dst.id) else {
-                    unreachable!();
-                };
-                let imm = match value {
-                    purple_garden_ir::Const::False => 0,
-                    purple_garden_ir::Const::True => 1,
-                    purple_garden_ir::Const::Int(i)
-                        if (*i as i32) < i32::MAX && (*i as i32) > i32::MIN =>
-                    {
-                        *i as i32
-                    }
-                    _ => skip!(func, "const not true, false or i32::MIN < i < i32::MAX"),
-                };
-                let code_start = out.len();
-                emit(out, Insn::MovImm { dst: dst_reg, imm });
-                last_const_load = Some((dst.id, imm, code_start));
-            }
-            ir::Instr::BinImm {
-                op, dst, lhs, imm, ..
-            } => {
-                last_const_load = None;
-                let (Some(d), Some(l)) = (reg(dst.id), reg(*lhs)) else {
-                    unreachable!();
-                };
-                let imm = *imm;
-                match op {
-                    // dst = lhs <op> imm. Get lhs into dst, then op in place.
-                    BinOp::IAdd | BinOp::ISub => {
-                        if d != l {
-                            emit(out, Insn::Mov { dst: d, src: l });
-                        }
-                        emit(
-                            out,
-                            match op {
-                                BinOp::IAdd => Insn::AddImm { dst: d, imm },
-                                _ => Insn::SubImm { dst: d, imm },
-                            },
-                        );
-                    }
-                    // dst = (lhs == imm) as 0/1. cmp reads lhs and sets flags;
-                    // mov (no flags) clears dst; sete writes the low byte. Safe
-                    // even if dst == lhs (the cmp happens before the mov).
-                    BinOp::IEq => {
-                        if imm == 0 {
-                            emit(out, Insn::Test { lhs: l, rhs: l });
-                        } else {
-                            emit(out, Insn::CmpImm { reg: l, imm });
-                        }
-                        emit(out, Insn::MovImm { dst: d, imm: 0 });
-                        emit(out, Insn::Sete { dst: d });
-                    }
-                    // static divide-by-zero; trap and return, the rest is dead.
-                    BinOp::IDiv | BinOp::IMod if imm == 0 => {
-                        let helper: purple_garden_runtime::BuiltinFn =
-                            purple_garden_runtime::jit_trap_div_zero;
-                        emit_abi_call(out, helper as usize as u64);
-                        emit(out, Insn::Ret);
-                        return Some(());
-                    }
-                    // x % 2, non-negative dividend; mask the low bit.
-                    BinOp::IMod if imm == 2 => {
-                        if d != l {
-                            emit(out, Insn::Mov { dst: d, src: l });
-                        }
-                        emit(out, Insn::AndImm { dst: d, imm: 1 });
-                    }
-                    BinOp::IDiv | BinOp::IMod => emit_idiv(out, *op, d, l, imm),
-                    _ => skip!(func, "unsupported binimm op {op:?}"),
-                }
-            }
-            ir::Instr::Bin {
-                op, dst, lhs, rhs, ..
-            } => {
-                last_const_load = None;
-                let (Some(d), Some(l), Some(r)) = (reg(dst.id), reg(*lhs), reg(*rhs)) else {
-                    skip!(func, "unallocated operand in {instr:?}");
-                };
-                let op = match op {
-                    BinOp::IAdd | BinOp::ISub | BinOp::IMul => *op,
-                    _ => skip!(func, "unsupported bin op {op:?}"),
-                };
-                emit_bin(out, op, d, l, r);
-            }
-            _ => {
-                skip!(func, "unsupported instruction {instr:?}")
-            }
-        }
-    }
-
-    let term = block.term.as_ref();
-    match term {
-        None => {}
-        Some(ir::Terminator::Return { value, .. }) => {
-            if let Some(value) = value {
-                if let Some((loaded_id, imm, code_start)) = last_const_load
-                    && loaded_id == *value
-                {
-                    out.truncate(code_start);
-                    emit(out, Insn::StoreImmSlot { slot: 0, imm });
-                    emit(out, Insn::Ret);
-                    purple_garden_shared::trace!(
-                        "[jit::x86] compiled {} ({} bytes)",
-                        func.name,
-                        out.len()
-                    );
-                    return Some(());
-                }
-                let Some(r) = reg(*value) else {
-                    skip!(func, "return value %v{} unallocated", value.0);
-                };
-                emit(out, Insn::StoreSlot { src: r, slot: 0 }); // result -> vm.r[0]
-            }
-        }
-        _ => skip!(func, "unsupported terminator {term:?}"),
-    }
-    emit(out, Insn::Ret);
+    let scratch = POOL.iter().copied().find(|candidate| {
+        !regs
+            .iter()
+            .any(|loc| matches!(loc, ir::Location::Reg(r) if r == candidate))
+    });
+    Lowering::new(func, out, regs, scratch).emit()?;
 
     purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
     Some(())
@@ -661,6 +949,7 @@ mod tests {
         assert_eq!(enc(Insn::Mov { dst: 0, src: 1 }), [0x48, 0x89, 0xc8]); // mov rax,rcx
         assert_eq!(enc(Insn::Add { dst: 0, src: 2 }), [0x48, 0x01, 0xd0]); // add rax,rdx
         assert_eq!(enc(Insn::Sub { dst: 0, src: 2 }), [0x48, 0x29, 0xd0]); // sub rax,rdx
+        assert_eq!(enc(Insn::Cmp { lhs: 0, rhs: 2 }), [0x48, 0x39, 0xd0]); // cmp rax,rdx
         assert_eq!(enc(Insn::Imul { dst: 0, src: 2 }), [0x48, 0x0f, 0xaf, 0xc2]); // imul rax,rdx
         assert_eq!(
             enc(Insn::SubImm { dst: 0, imm: 1 }),
