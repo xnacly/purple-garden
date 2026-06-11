@@ -1,6 +1,21 @@
-use std::fmt::Display;
+use std::{borrow::Cow, fmt::Display};
 
 use crate::{Const, Func, Id, Instr, Terminator, TypeId};
+
+const MAX_STRING_DISPLAY_CHARS: usize = 65;
+
+fn truncated_string_display(s: &str) -> Cow<'_, str> {
+    if s.chars().count() <= MAX_STRING_DISPLAY_CHARS {
+        return Cow::Borrowed(s);
+    }
+
+    let keep = MAX_STRING_DISPLAY_CHARS - 3;
+    let end = s.char_indices().nth(keep).map_or(s.len(), |(idx, _)| idx);
+    let mut out = String::with_capacity(end + 3);
+    out.push_str(&s[..end]);
+    out.push_str("...");
+    Cow::Owned(out)
+}
 
 impl Display for crate::Fn<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -195,7 +210,7 @@ impl Display for Const<'_> {
             Const::True => write!(f, "true"),
             Const::Int(int) => write!(f, "{int}"),
             Const::Double(bits) => write!(f, "{}", f64::from_bits(*bits)),
-            Const::Str(str) => write!(f, "`{str}`"),
+            Const::Str(str) => write!(f, "`{}`", truncated_string_display(str)),
             Const::Undefined => unreachable!(),
         }
     }

@@ -43,11 +43,13 @@ pub fn const_fold_syscalls<'fold, 's>(
                 value
             );
 
+            let dst_id = candidate.dst.id;
             *instr = Instr::LoadConst {
                 dst: candidate.dst,
                 value,
                 span: candidate.span,
             };
+            scratch.record_const(dst_id, bi as u32, ii as u32);
         }
     }
 }
@@ -370,6 +372,109 @@ mod tests {
                 value: Const::Int(11),
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn folds_cascading_pure_syscalls_in_one_pass() {
+        fn repeat_eval<'args, 'c>(args: &'args [Const<'c>]) -> Option<Const<'c>> {
+            let [Const::Str(s), Const::Int(n)] = args else {
+                return None;
+            };
+            Some(Const::from(s.repeat(*n as usize)))
+        }
+
+        static REPEAT_FN: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
+            name: "repeat",
+            doc: "",
+            ptr: test_syscall as BuiltinFn,
+            pure: true,
+            eval: Some(repeat_eval),
+            arg_names: &["s", "n"],
+            args: &[Type::Str, Type::Int],
+            ret: Type::Str,
+        };
+
+        let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Str));
+        let block = Id(0);
+        fun.blocks.push(Block {
+            tombstone: false,
+            id: block,
+            instructions: Vec::new(),
+            params: EMPTY_PARAMS,
+            term: None,
+        });
+
+        fun.blocks[block.0 as usize]
+            .instructions
+            .push(Instr::LoadConst {
+                dst: TypeId {
+                    id: Id(0),
+                    ty: Type::Str,
+                },
+                value: Const::from("a"),
+                span: 0,
+            });
+        fun.blocks[block.0 as usize]
+            .instructions
+            .push(Instr::LoadConst {
+                dst: TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+                value: Const::Int(2),
+                span: 0,
+            });
+        fun.blocks[block.0 as usize]
+            .instructions
+            .push(Instr::LoadConst {
+                dst: TypeId {
+                    id: Id(2),
+                    ty: Type::Int,
+                },
+                value: Const::Int(3),
+                span: 0,
+            });
+        fun.blocks[block.0 as usize].instructions.push(Instr::Sys {
+            dst: TypeId {
+                id: Id(3),
+                ty: Type::Str,
+            },
+            path: "testing",
+            fun: &REPEAT_FN,
+            args: vec![Id(0), Id(1)],
+            span: 0,
+        });
+        fun.blocks[block.0 as usize].instructions.push(Instr::Sys {
+            dst: TypeId {
+                id: Id(4),
+                ty: Type::Str,
+            },
+            path: "testing",
+            fun: &REPEAT_FN,
+            args: vec![Id(3), Id(2)],
+            span: 0,
+        });
+        fun.blocks[block.0 as usize].term = Some(purple_garden_ir::Terminator::Return {
+            value: Some(Id(4)),
+            span: 0,
+        });
+
+        super::const_fold_syscalls(&mut fun, &mut Scratch::default());
+
+        assert!(matches!(
+            fun.blocks[block.0 as usize].instructions[3],
+            Instr::LoadConst {
+                value: Const::Str(ref s),
+                ..
+            } if s == "aa"
+        ));
+        assert!(matches!(
+            fun.blocks[block.0 as usize].instructions[4],
+            Instr::LoadConst {
+                value: Const::Str(ref s),
+                ..
+            } if s == "aaaaaa"
         ));
     }
 }
