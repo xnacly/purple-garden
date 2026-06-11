@@ -80,7 +80,7 @@ mod tests_x86 {
     use super::Jit;
     use super::mem::ExecPage;
     use purple_garden_ir::{
-        Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype::Type,
+        BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype::Type,
     };
 
     /// Run native code that takes `*mut u64` (the VM register file) and return
@@ -160,6 +160,100 @@ mod tests_x86 {
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
         assert_eq!(run(jit.code(), [0, 0, 0])[0], 42);
+    }
+
+    #[test]
+    fn compiles_tail_recursive_factorial_loop() {
+        let mut func = Func::new("factorial", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let params = func.intern_params(vec![Id(0), Id(1)]);
+        let ret_args = func.intern_params(vec![Id(1)]);
+        let ret_params = func.intern_params(vec![Id(7)]);
+        func.blocks = vec![
+            Block {
+                tombstone: false,
+                id: Id(0),
+                instructions: vec![],
+                params,
+                term: None,
+            },
+            Block {
+                tombstone: false,
+                id: Id(1),
+                instructions: vec![Instr::BinImm {
+                    op: BinOp::IEq,
+                    dst: TypeId {
+                        id: Id(3),
+                        ty: Type::Bool,
+                    },
+                    lhs: Id(0),
+                    imm: 0,
+                    span: 0,
+                }],
+                params,
+                term: Some(Terminator::Branch {
+                    cond: Id(3),
+                    yes: (Id(4), ret_args),
+                    no: (Id(3), params),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: true,
+                id: Id(2),
+                instructions: vec![],
+                params: EMPTY_PARAMS,
+                term: None,
+            },
+            Block {
+                tombstone: false,
+                id: Id(3),
+                instructions: vec![
+                    Instr::BinImm {
+                        op: BinOp::ISub,
+                        dst: TypeId {
+                            id: Id(5),
+                            ty: Type::Int,
+                        },
+                        lhs: Id(0),
+                        imm: 1,
+                        span: 0,
+                    },
+                    Instr::Bin {
+                        op: BinOp::IMul,
+                        dst: TypeId {
+                            id: Id(6),
+                            ty: Type::Int,
+                        },
+                        lhs: Id(0),
+                        rhs: Id(1),
+                        span: 0,
+                    },
+                ],
+                params,
+                term: Some(Terminator::Tail {
+                    func: Id(0),
+                    args: vec![Id(5), Id(6)],
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(4),
+                instructions: vec![],
+                params: ret_params,
+                term: Some(Terminator::Return {
+                    value: Some(Id(7)),
+                    span: 0,
+                }),
+            },
+        ];
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(
+            run(jit.code(), [20, 1, 0])[0] as i64,
+            2_432_902_008_176_640_000
+        );
     }
 
     #[test]
