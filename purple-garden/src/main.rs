@@ -84,24 +84,18 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 if let Some(method) = method {
-                    let exact: Vec<&pstd::Fn> =
-                        pkg.fns.iter().filter(|f| f.name == method).collect();
-                    let matches: Vec<&pstd::Fn> = if exact.is_empty() {
-                        pkg.fns
-                            .iter()
-                            .filter(|f| f.name.starts_with(&format!("{method}_")))
-                            .collect()
-                    } else {
-                        exact
+                    let Some((name, variants)) = pkg
+                        .overload_groups()
+                        .into_iter()
+                        .find(|(name, _)| *name == method)
+                    else {
+                        return err!(format!("function {}.{} not found", pkg.name, method));
                     };
 
-                    if matches.is_empty() {
-                        return err!(format!("function {}.{} not found", pkg.name, method));
-                    }
-
-                    for fun in matches {
-                        println!("{fun}");
-                    }
+                    let mut out = String::new();
+                    purple_garden_runtime::print_overload_group(name, &variants, &mut out)
+                        .expect("writing to a String cannot fail");
+                    print!("{out}");
                 } else {
                     println!("{pkg}");
                 }

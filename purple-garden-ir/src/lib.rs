@@ -39,6 +39,19 @@ pub struct Fn<'f> {
     pub arg_names: &'f [&'f str],
     pub args: &'f [Type<'f>],
     pub ret: Type<'f>,
+    /// Overload group this fn specialises, e.g. `println_int` specialises
+    /// `println`. `Some` ⇒ callable only via the group name, never its own.
+    pub specialises: Option<&'f str>,
+}
+
+impl<'f> Fn<'f> {
+    /// Script-facing name: the overload group when this fn `specialises` one,
+    /// otherwise its own name. The single rule for grouping specialisations,
+    /// shared by typecheck, lowering, and doc rendering.
+    #[must_use]
+    pub fn group_name(&self) -> &'f str {
+        self.specialises.unwrap_or(self.name)
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

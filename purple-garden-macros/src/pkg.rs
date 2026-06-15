@@ -18,6 +18,7 @@ struct Function {
     name: String,
     doc: String,
     pure: bool,
+    specialises: Option<String>,
     args: Vec<Arg>,
     ret: Type,
     result: bool,
@@ -128,11 +129,13 @@ impl Function {
     fn parse(fun: &mut ItemFn) -> syn::Result<Self> {
         let ident = fun.sig.ident.clone();
         let (ret, result) = return_type(&fun.sig.output);
+        let attrs = take_pg_fn_attrs(&mut fun.attrs)?;
         Ok(Self {
             wrapper: format_ident!("__pg_wrapper_{ident}"),
             name: ident.to_string(),
             doc: doc_string(&fun.attrs),
-            pure: take_pg_fn_pure(&mut fun.attrs)?,
+            pure: attrs.pure,
+            specialises: attrs.specialises,
             args: parse_args(&fun.sig.inputs)?,
             ret,
             result,
@@ -237,6 +240,10 @@ impl Function {
         let name = &self.name;
         let doc = &self.doc;
         let pure = self.pure;
+        let specialises = match &self.specialises {
+            Some(group) => quote!(Some(#group)),
+            None => quote!(None),
+        };
         let ret_ty = &self.ret;
         let arg_names = self
             .args
@@ -254,6 +261,7 @@ impl Function {
                 arg_names: &[#(#arg_names),*],
                 args: &[#(<#arg_types as #api::PgType>::TYPE),*],
                 ret: <#ret_ty as #api::PgType>::TYPE,
+                specialises: #specialises,
             }
         }
     }
@@ -316,8 +324,19 @@ fn returns_unit(ty: &Type) -> bool {
     matches!(ty, Type::Tuple(tuple) if tuple.elems.is_empty())
 }
 
-fn take_pg_fn_pure(attrs: &mut Vec<Attribute>) -> syn::Result<bool> {
+struct PgFnAttrs {
+    /// `#[pg_fn(pure)]`: const-foldable, gets a `__pg_eval_*` companion.
+    pure: bool,
+    /// `#[pg_fn(specialises = "group")]`: one variant of an overload group; the
+    /// fn is reachable only via `group`, never its own name.
+    specialises: Option<String>,
+}
+
+/// Strip and parse the `#[pg_fn(..)]` marker off a stdlib fn, leaving its other
+/// attributes intact. Accepts `pure` and `specialises = "group"` in any order.
+fn take_pg_fn_attrs(attrs: &mut Vec<Attribute>) -> syn::Result<PgFnAttrs> {
     let mut pure = false;
+    let mut specialises = None;
     let mut out = Vec::with_capacity(attrs.len());
 
     for attr in attrs.drain(..) {
@@ -330,6 +349,24 @@ fn take_pg_fn_pure(attrs: &mut Vec<Attribute>) -> syn::Result<bool> {
         for meta in metas {
             if meta.path().is_ident("pure") {
                 pure = true;
+            } else if meta.path().is_ident("specialises") {
+                let Meta::NameValue(name_value) = &meta else {
+                    return Err(syn::Error::new(
+                        meta.span(),
+                        "`specialises` must be `specialises = \"group\"`",
+                    ));
+                };
+                let syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(group),
+                    ..
+                }) = &name_value.value
+                else {
+                    return Err(syn::Error::new(
+                        name_value.value.span(),
+                        "`specialises` must be a string literal",
+                    ));
+                };
+                specialises = Some(group.value());
             } else {
                 return Err(syn::Error::new(meta.span(), "unknown pg_fn option"));
             }
@@ -337,7 +374,7 @@ fn take_pg_fn_pure(attrs: &mut Vec<Attribute>) -> syn::Result<bool> {
     }
 
     *attrs = out;
-    Ok(pure)
+    Ok(PgFnAttrs { pure, specialises })
 }
 
 fn path_ends_with(path: &Path, ident: &str) -> bool {

@@ -25,7 +25,7 @@ pub struct Pkg {
     pub fns: &'static [Fn<'static>],
 }
 
-fn print_function_head(fun: &Fn<'_>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+fn print_function_head(fun: &Fn<'_>, f: &mut dyn fmt::Write) -> fmt::Result {
     write!(f, "fn {}(", fun.name)?;
     for (i, a) in fun.args.iter().enumerate() {
         if let Some(name) = fun.arg_names.get(i) {
@@ -38,6 +38,61 @@ fn print_function_head(fun: &Fn<'_>, f: &mut fmt::Formatter<'_>) -> fmt::Result 
         }
     }
     writeln!(f, ") {}", fun.ret)
+}
+
+/// `|`-join type names, deduped and order-preserving: `Str|Int|Double`, or just
+/// `Str` when every variant agrees.
+fn type_union(types: impl Iterator<Item = String>) -> String {
+    let mut seen: Vec<String> = Vec::new();
+    for t in types {
+        if !seen.contains(&t) {
+            seen.push(t);
+        }
+    }
+    seen.join("|")
+}
+
+/// Comma-joined arg types of one specialisation, e.g. `Int` or `Str, Int`.
+fn variant_arg_sig(fun: &Fn<'_>) -> String {
+    fun.args
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Render one overload group. A single-fn group prints as a normal signature;
+/// a specialisation group merges into a unioned head plus a per-variant doc line:
+///
+/// ```text
+/// fn from(Int|Double) Str
+///    Int -> ...
+///    Double -> ...
+/// ```
+pub fn print_overload_group(
+    name: &str,
+    variants: &[&Fn<'_>],
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    if let [single] = variants {
+        return print_function_head(single, f);
+    }
+
+    write!(f, "fn {name}(")?;
+    let argc = variants[0].args.len();
+    for pos in 0..argc {
+        write!(f, "{}", type_union(variants.iter().map(|v| v.args[pos].to_string())))?;
+        if pos + 1 < argc {
+            write!(f, " ")?;
+        }
+    }
+    // ret can vary across variants (e.g. debug's `T -> T`), so union it too.
+    writeln!(f, ") {}", type_union(variants.iter().map(|v| v.ret.to_string())))?;
+
+    for v in variants {
+        writeln!(f, "   {} -> {}", variant_arg_sig(v), v.doc)?;
+    }
+    Ok(())
 }
 
 impl fmt::Display for Pkg {
@@ -54,12 +109,31 @@ impl fmt::Display for Pkg {
 
         if !self.fns.is_empty() {
             writeln!(f)?;
-            for fun in self.fns {
-                print_function_head(fun, f)?;
+            for (name, variants) in self.overload_groups() {
+                print_overload_group(name, &variants, f)?;
             }
         }
 
         Ok(())
+    }
+}
+
+impl Pkg {
+    /// Group `fns` by public name (a `specialises` group, or the fn's own name),
+    /// preserving first-seen order. Single source of truth for overload-aware
+    /// doc rendering and lookup.
+    #[must_use]
+    pub fn overload_groups(&self) -> Vec<(&'static str, Vec<&Fn<'static>>)> {
+        let mut groups: Vec<(&'static str, Vec<&Fn<'static>>)> = Vec::new();
+        for fun in self.fns {
+            let key = fun.group_name();
+            if let Some(group) = groups.iter_mut().find(|(k, _)| *k == key) {
+                group.1.push(fun);
+            } else {
+                groups.push((key, vec![fun]));
+            }
+        }
+        groups
     }
 }
 

@@ -10,6 +10,17 @@ pub mod typecheck;
 use ast::{Ast, TypeExpr, TypeExprId};
 use purple_garden_ir::ptype;
 
+/// Exact arg-type match used to pick one specialisation from an overload group.
+/// Shared by the typechecker and lowering so their variant choices can't drift.
+/// Both sides are iterators so neither caller has to collect the arg types.
+#[must_use]
+pub fn overload_matches<'a, 'b>(
+    candidate: impl ExactSizeIterator<Item = &'a ptype::Type<'a>>,
+    provided: impl ExactSizeIterator<Item = &'b ptype::Type<'b>>,
+) -> bool {
+    candidate.len() == provided.len() && candidate.zip(provided).all(|(c, p)| c == p)
+}
+
 #[must_use]
 pub fn type_from_atom_token_type<'a>(t: &lex::Type<'a>) -> ptype::Type<'a> {
     match t {

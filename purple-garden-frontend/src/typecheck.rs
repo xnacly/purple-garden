@@ -39,8 +39,9 @@ pub struct Typechecker<'t> {
     env: Vec<HashMap<&'t str, Type<'t>>>,
     /// map a function name to its type(s)
     functions: HashMap<&'t str, FunctionType<'t>>,
-    /// map a pkg name to a map of its methods and their types
-    packages: HashMap<&'t str, HashMap<&'t str, FunctionType<'t>>>,
+    /// map a pkg name to a map of its public method names to overload groups
+    /// (one entry per specialisation; >1 means a `specialises` group)
+    packages: HashMap<&'t str, HashMap<&'t str, Vec<FunctionType<'t>>>>,
     pkg_cache: HashMap<&'t str, Option<&'t Pkg>>,
     libs: Vec<&'t Pkg>,
 }
@@ -108,6 +109,15 @@ impl<'t> Typechecker<'t> {
             .get(self.ast.value_id(node)?)
             .and_then(|o| o.as_ref())
             .cloned()
+    }
+
+    /// Type already assigned to `node`, by reference. Callers must have typed
+    /// `node` first (via [`Self::node`]); used to read arg types for overload
+    /// selection without cloning them out of the map.
+    fn resolved_arg_ty(&self, node: NodeId) -> &Type<'t> {
+        self.map[self.ast.value_id(node).expect("arg has a value id")]
+            .as_ref()
+            .expect("arg typed before overload selection")
     }
 
     fn fuse(op: &lex::Token, lhs: &Type<'t>, rhs: &Type<'t>) -> Result<Type<'t>, PgError> {
@@ -406,6 +416,15 @@ impl<'t> Typechecker<'t> {
                             unreachable!();
                         };
 
+                        // Type args up front: overload selection reads them back
+                        // by reference, and `node` memoises so the single-candidate
+                        // fall-through arity check below reuses the results. Doing
+                        // this before borrowing `candidates` lets us hold that
+                        // borrow instead of cloning the whole group.
+                        for &arg in args {
+                            self.node(arg)?;
+                        }
+
                         let Some(pkg) = self.packages.get(pkg_name) else {
                             return Err(PgError::with_msg(
                                 format!("Can't find package `{pkg_name}`"),
@@ -413,16 +432,61 @@ impl<'t> Typechecker<'t> {
                             ));
                         };
 
-                        let Some(fun) = pkg.get(inner_name).cloned() else {
+                        let Some(candidates) = pkg.get(inner_name) else {
                             return Err(PgError::with_msg(
                                 format!("Call to undefined function `{pkg_name}.{inner_name}`"),
                                 name,
                             ));
                         };
+
+                        // A `specialises` group (>1 candidate) dispatches on the
+                        // provided arg types. A single-candidate name falls
+                        // through to the shared arity/per-arg checks below, which
+                        // produce precise per-argument diagnostics.
+                        if candidates.len() > 1 {
+                            let provided = || args.iter().map(|&a| self.resolved_arg_ty(a));
+
+                            let Some(idx) = candidates.iter().position(|c| {
+                                crate::overload_matches(c.args.iter().map(|(_, t)| t), provided())
+                            }) else {
+                                // cold path: format the provided/available signatures.
+                                fn sig<'a, 'b: 'a>(
+                                    types: impl Iterator<Item = &'a Type<'b>>,
+                                ) -> String {
+                                    types.map(ToString::to_string).collect::<Vec<_>>().join(", ")
+                                }
+                                let avail = candidates
+                                    .iter()
+                                    .map(|c| sig(c.args.iter().map(|(_, t)| t)))
+                                    .collect::<Vec<_>>()
+                                    .join(" | ");
+                                return Err(PgError::with_msg(
+                                    format!(
+                                        "no specialisation of `{pkg_name}.{inner_name}` accepts ({}); available: {avail}",
+                                        sig(provided())
+                                    ),
+                                    name,
+                                ));
+                            };
+
+                            let ret = candidates[idx].ret.clone();
+                            purple_garden_shared::trace!(
+                                "[ir::typecheck::Typechecker::node] resolved `{}.{}` to specialisation {}/{} ({}) -> {}",
+                                pkg_name,
+                                inner_name,
+                                idx + 1,
+                                candidates.len(),
+                                provided().map(ToString::to_string).collect::<Vec<_>>().join(", "),
+                                ret
+                            );
+                            self.set_type(*id, ret.clone());
+                            return Ok(ret);
+                        }
+
                         let mut s = String::from(*pkg_name);
                         s.push('.');
                         s.push_str(inner_name);
-                        (name, s, fun)
+                        (name, s, candidates[0].clone())
                     }
                     Node::Ident { name, .. } => {
                         let lex::Token {
@@ -542,7 +606,7 @@ impl<'t> Typechecker<'t> {
 
                     purple_garden_shared::trace!("ty: resolved pkg `{}`", pkg.name);
 
-                    let mut registered = HashMap::new();
+                    let mut registered: HashMap<&str, Vec<FunctionType>> = HashMap::new();
                     for f in pkg.fns {
                         let f_type = FunctionType {
                             args: f
@@ -559,7 +623,9 @@ impl<'t> Typechecker<'t> {
                             f.name,
                             f_type
                         );
-                        registered.insert(f.name, f_type);
+                        // group specialisations under their group name; a normal
+                        // fn forms a one-element group keyed by its own name.
+                        registered.entry(f.group_name()).or_default().push(f_type);
                     }
 
                     self.packages.insert(pkg.name, registered);

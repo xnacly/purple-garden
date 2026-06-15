@@ -42,7 +42,8 @@ pub struct Lower<'lower> {
     functions: Vec<Func<'lower>>,
     func_name_to_id: HashMap<&'lower str, (Id, Option<ptype::Type<'lower>>)>,
     types: Vec<Option<ptype::Type<'lower>>>,
-    packages: HashMap<&'lower str, (&'lower Pkg, HashMap<&'lower str, &'lower pstd::Fn<'static>>)>,
+    packages:
+        HashMap<&'lower str, (&'lower Pkg, HashMap<&'lower str, Vec<&'lower pstd::Fn<'static>>>)>,
     pkg_cache: HashMap<&'lower str, Option<&'lower Pkg>>,
     libs: Vec<&'lower Pkg>,
 }
@@ -375,13 +376,22 @@ impl<'lower> Lower<'lower> {
                         };
 
                         // both unwrappable because the typechecker makes sure everything is fine
-                        let fun = self
-                            .packages
-                            .get(pkg_name)
-                            .unwrap()
-                            .1
-                            .get(inner_name)
-                            .unwrap();
+                        let candidates = &self.packages.get(pkg_name).unwrap().1[inner_name];
+                        // Single candidate: take it. Overload group: pick the
+                        // specialisation matching the arg types with the same
+                        // predicate the typechecker used.
+                        let fun = if candidates.len() == 1 {
+                            candidates[0]
+                        } else {
+                            // arg types stream by reference from the type map; the
+                            // typechecker already proved exactly one variant matches.
+                            let provided =
+                                || args.iter().map(|&n| self.types[ast.value_id(n).unwrap()].as_ref().unwrap());
+                            *candidates
+                                .iter()
+                                .find(|f| crate::overload_matches(f.args.iter(), provided()))
+                                .unwrap()
+                        };
 
                         dst.ty = fun.ret.clone();
                         self.emit(Instr::Sys {
@@ -437,8 +447,13 @@ impl<'lower> Lower<'lower> {
                         unreachable!()
                     };
 
-                    self.packages
-                        .insert(as_str, (pkg, pkg.fns.iter().map(|f| (f.name, f)).collect()));
+                    // group specialisations under their group name, mirroring
+                    // the typechecker's registration.
+                    let mut fns: HashMap<&str, Vec<&pstd::Fn>> = HashMap::new();
+                    for f in pkg.fns {
+                        fns.entry(f.group_name()).or_default().push(f);
+                    }
+                    self.packages.insert(as_str, (pkg, fns));
                 }
                 None
             }

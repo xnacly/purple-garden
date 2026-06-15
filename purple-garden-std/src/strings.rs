@@ -29,4 +29,16 @@ pub mod strings {
     pub fn len(s: &str) -> i64 {
         s.len() as i64
     }
+
+    /// converts Int to Str
+    #[pg_fn(pure, specialises = "from")]
+    pub fn from_i64(i: i64) -> String {
+        i.to_string()
+    }
+
+    /// converts Double to Str
+    #[pg_fn(pure, specialises = "from")]
+    pub fn from_double(d: f64) -> String {
+        d.to_string()
+    }
 }
