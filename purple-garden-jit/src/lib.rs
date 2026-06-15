@@ -257,6 +257,47 @@ mod tests_x86 {
     }
 
     #[test]
+    fn idiv_clobbers_do_not_overwrite_live_values() {
+        let mut func = Func::new("div_plus", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let params = func.intern_params(vec![Id(0), Id(1)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::BinImm {
+                    op: BinOp::IDiv,
+                    dst: TypeId {
+                        id: Id(2),
+                        ty: Type::Int,
+                    },
+                    lhs: Id(0),
+                    imm: 2,
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::IAdd,
+                    dst: TypeId {
+                        id: Id(3),
+                        ty: Type::Int,
+                    },
+                    lhs: Id(1),
+                    rhs: Id(2),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(3)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(run(jit.code(), [20, 7, 0])[0], 17);
+    }
+
+    #[test]
     fn skips_unsupported_functions() {
         let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Int));
         func.blocks.push(Block {

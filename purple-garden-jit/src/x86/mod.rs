@@ -10,6 +10,7 @@
 
 use std::fmt;
 
+use crate::regalloc::FixedClobber;
 use purple_garden_ir::{self as ir, BinOp};
 
 /// Bail out of [`compile_func`] (returning `None`) and, under the `trace`
@@ -30,9 +31,6 @@ macro_rules! skip {
 /// prologue). `rdi` is the `Vm` pointer, `rsp`/`rbp` the stack. Callee-saved
 /// regs (rbx, r12..r15) aren't used yet.
 const POOL: &[u8] = &[0, 1, 2, 6, 8, 9, 10, 11]; // rax rcx rdx rsi r8 r9 r10 r11
-/// Pool for `idiv` functions; rax/rcx/rdx reserved as its fixed scratch, so
-/// fewer regs and likelier to spill back to bytecode.
-const POOL_DIV: &[u8] = &[6, 8, 9, 10, 11]; // rsi r8 r9 r10 r11
 /// Callee-saved class for values live across a call; the prologue saves the
 /// ones actually used.
 const POOL_CALLEE: &[u8] = &[3, 12, 13, 14, 15]; // rbx r12 r13 r14 r15
@@ -43,6 +41,13 @@ const RSP: u8 = 4;
 const RAX: u8 = 0;
 const RCX: u8 = 1;
 const RDX: u8 = 2;
+/// Registers implicitly clobbered by the current `idiv` lowering.
+const IDIV_CLOBBERS: &[u8] = &[RAX, RCX, RDX];
+
+#[derive(Default)]
+struct SupportPlan {
+    fixed_clobbers: Vec<FixedClobber<'static>>,
+}
 
 /// Compile one IR function into x86-64 machine code, returning `None` if unsupported.
 pub fn compile_func(
@@ -62,18 +67,16 @@ pub fn compile_func(
         );
     }
 
-    let needs_idiv = validate_supported(func)?;
+    let plan = validate_supported(func)?;
 
     out.reserve(func.params.len() * 4 + func.blocks.len() * 16 + 64);
 
-    // Constant-divisor IDiv/IMod (not imm 0, which traps, nor mod 2, which uses
-    // `and`) lowers to `idiv` and needs rax/rcx/rdx reserved.
-    let caller = if needs_idiv { POOL_DIV } else { POOL };
     let regs = allocator.rebuild(
         liveness,
         &[],
+        &plan.fixed_clobbers,
         crate::regalloc::RegClasses {
-            caller,
+            caller: POOL,
             callee: POOL_CALLEE,
         },
     );
@@ -478,7 +481,10 @@ fn emit_abi_call(out: &mut Vec<u8>, addr: u64) {
 }
 
 /// `d = l <op> imm` for IDiv/IMod, nonzero constant divisor. idiv has no imm
-/// form, so the divisor goes via rcx. Caller allocates l/d from `POOL_DIV`.
+/// form, so the divisor goes via rcx. rax/rcx/rdx are clobbered here; the
+/// allocator keeps values live across this position out of them via
+/// `IDIV_CLOBBERS`. l (consumed into rax first) and d (written last) may reuse
+/// them.
 fn emit_idiv(out: &mut Vec<u8>, op: BinOp, d: u8, l: u8, imm: i32) {
     emit(out, Insn::Mov { dst: RAX, src: l });
     emit(out, Insn::Cqo);
@@ -627,22 +633,33 @@ fn supported_const(value: &ir::Const<'_>) -> bool {
     }
 }
 
-/// Validate that `func` is in the x86 JIT subset and report if it needs `idiv`.
-fn validate_supported(func: &ir::Func<'_>) -> Option<bool> {
-    let mut needs_idiv = false;
+/// Validate that `func` is in the x86 JIT subset and collect lowering constraints.
+fn validate_supported(func: &ir::Func<'_>) -> Option<SupportPlan> {
+    let mut plan = SupportPlan::default();
+    let mut pos = 0;
 
     for block in func.blocks.iter().filter(|block| !block.tombstone) {
+        // Keep this position walk in lockstep with `Func::live_set_into`.
+        pos += 2;
+
         for instr in &block.instructions {
             match instr {
                 ir::Instr::Noop => {}
                 ir::Instr::LoadConst { value, .. } if supported_const(value) => {}
                 ir::Instr::BinImm { op, imm, .. } if supported_bin_imm(*op) => {
-                    needs_idiv |= matches!(op, BinOp::IDiv if *imm != 0)
-                        || matches!(op, BinOp::IMod if *imm != 0 && *imm != 2);
+                    if matches!(op, BinOp::IDiv if *imm != 0)
+                        || matches!(op, BinOp::IMod if *imm != 0 && *imm != 2)
+                    {
+                        plan.fixed_clobbers.push(FixedClobber {
+                            pos,
+                            regs: IDIV_CLOBBERS,
+                        });
+                    }
                 }
                 ir::Instr::Bin { op, .. } if supported_bin(*op) => {}
                 _ => skip!(func, "unsupported instruction {instr:?}"),
             }
+            pos += 2;
         }
 
         match block.term.as_ref() {
@@ -654,9 +671,10 @@ fn validate_supported(func: &ir::Func<'_>) -> Option<bool> {
             Some(ir::Terminator::Jump { .. }) => {}
             Some(_) => skip!(func, "unsupported terminator"),
         }
+        pos += 2;
     }
 
-    Some(needs_idiv)
+    Some(plan)
 }
 
 /// Return the entry block after tombstone removal.

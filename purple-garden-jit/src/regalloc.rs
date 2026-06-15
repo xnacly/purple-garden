@@ -4,6 +4,8 @@
 //! consumes) and assigns each SSA value a physical register from one of two
 //! classes. A value whose live range spans a call must survive it, so it takes a
 //! callee-saved register; everything else takes the cheaper caller-saved class.
+//! Target-specific fixed-clobber instructions, such as x86 `idiv`, can also
+//! exclude individual caller registers for values live across those positions.
 //! Values that don't fit spill to `Location::Stack` and the lowering bails
 //! (falls back to bytecode).
 //!
@@ -21,15 +23,30 @@ pub struct RegClasses<'a> {
     pub callee: &'a [u8],
 }
 
+/// Registers clobbered by one instruction at `pos` in IR liveness coordinates.
+pub struct FixedClobber<'a> {
+    pub pos: u32,
+    pub regs: &'a [u8],
+}
+
 /// `[def, last_use]` is live across a call iff a call sits strictly inside it.
 fn spans_call(def: u32, last_use: u32, call_sites: &[u32]) -> bool {
     call_sites.iter().any(|&c| def < c && c < last_use)
 }
 
+/// Whether `reg` is clobbered by an instruction inside `[def, last_use]`.
+fn spans_fixed_clobber(def: u32, last_use: u32, reg: u8, clobbers: &[FixedClobber<'_>]) -> bool {
+    clobbers
+        .iter()
+        .any(|c| def < c.pos && c.pos < last_use && c.regs.contains(&reg))
+}
+
 /// Linear scan over `liveness` (`(def_pos, last_use_pos)` per SSA id; a
 /// `u32::MAX` start marks an unused id). `call_sites` are call positions in the
 /// same coordinate space. A value spanning a call takes a `classes.callee`
-/// register, others `classes.caller`; an exhausted class spills that value.
+/// register, others `classes.caller`; fixed clobbers remove specific caller
+/// registers from consideration for intervals crossing them. An exhausted class
+/// spills that value.
 #[derive(Debug, Default, Clone)]
 pub struct Allocator {
     map: Vec<ir::Location>,
@@ -44,6 +61,7 @@ impl Allocator {
         &mut self,
         liveness: &[(u32, u32)],
         call_sites: &[u32],
+        fixed_clobbers: &[FixedClobber<'_>],
         classes: RegClasses<'_>,
     ) -> &[ir::Location] {
         self.map.clear();
@@ -88,18 +106,28 @@ impl Allocator {
             });
 
             let from_callee = spans_call(start, end, call_sites);
-            let free = if from_callee {
-                &mut self.callee_free
+            if from_callee {
+                self.map[v] = match self.callee_free.pop() {
+                    Some(reg) => {
+                        self.active.push((end, reg, true));
+                        ir::Location::Reg(reg)
+                    }
+                    None => ir::Location::Stack,
+                };
             } else {
-                &mut self.caller_free
-            };
-            self.map[v] = match free.pop() {
-                Some(reg) => {
-                    self.active.push((end, reg, from_callee));
-                    ir::Location::Reg(reg)
-                }
-                None => ir::Location::Stack,
-            };
+                let free_idx = self
+                    .caller_free
+                    .iter()
+                    .rposition(|&reg| !spans_fixed_clobber(start, end, reg, fixed_clobbers));
+                self.map[v] = match free_idx {
+                    Some(i) => {
+                        let reg = self.caller_free.swap_remove(i);
+                        self.active.push((end, reg, false));
+                        ir::Location::Reg(reg)
+                    }
+                    None => ir::Location::Stack,
+                };
+            }
         }
 
         &self.map
@@ -108,17 +136,26 @@ impl Allocator {
 
 #[cfg(test)]
 mod tests {
-    use super::{Allocator, RegClasses};
+    use super::{Allocator, FixedClobber, RegClasses};
     use purple_garden_ir::Location;
 
     const CALLER: &[u8] = &[0, 1];
     const CALLEE: &[u8] = &[3, 12];
 
     fn alloc(liveness: &[(u32, u32)], call_sites: &[u32]) -> Vec<Location> {
+        alloc_with_clobbers(liveness, call_sites, &[])
+    }
+
+    fn alloc_with_clobbers(
+        liveness: &[(u32, u32)],
+        call_sites: &[u32],
+        fixed_clobbers: &[FixedClobber<'_>],
+    ) -> Vec<Location> {
         Allocator::default()
             .rebuild(
                 liveness,
                 call_sites,
+                fixed_clobbers,
                 RegClasses {
                     caller: CALLER,
                     callee: CALLEE,
@@ -177,6 +214,28 @@ mod tests {
     }
 
     #[test]
+    fn value_spanning_fixed_clobber_avoids_that_register() {
+        let map = alloc_with_clobbers(
+            &[(0, 10), (0, 10)],
+            &[],
+            &[FixedClobber { pos: 5, regs: &[0] }],
+        );
+        assert_eq!(map[0], Location::Reg(1));
+        assert_eq!(map[1], Location::Stack);
+    }
+
+    #[test]
+    fn value_not_spanning_fixed_clobber_can_use_that_register() {
+        let map = alloc_with_clobbers(
+            &[(0, 5), (5, 10)],
+            &[],
+            &[FixedClobber { pos: 5, regs: &[0] }],
+        );
+        assert_eq!(map[0], Location::Reg(0));
+        assert_eq!(map[1], Location::Reg(0));
+    }
+
+    #[test]
     fn cross_call_value_spills_when_callee_class_is_full() {
         // all three span the call but only one callee reg exists: two spill,
         // with no fallback to the caller class.
@@ -184,6 +243,7 @@ mod tests {
             .rebuild(
                 &[(0, 10), (0, 10), (0, 10)],
                 &[5],
+                &[],
                 RegClasses {
                     caller: CALLER,
                     callee: &[3],
