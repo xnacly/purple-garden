@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Write as _};
 
-pub use purple_garden_ir::{Fn, ptype::Type};
+pub use purple_garden_ir::{ptype::Type, Fn};
 pub use purple_garden_shared::BuiltinFn;
 
 pub mod anomaly;
@@ -15,7 +15,7 @@ pub const REGISTER_COUNT: usize = 64;
 
 pub use crate::anomaly::Anomaly;
 pub use crate::value::{FromVm, IntoVm, PgType, Value};
-pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, jit_trap_div_zero, syscall_unimplemented};
+pub use crate::vm::{jit_trap_div_zero, syscall_unimplemented, CallFrame, DebugInfo, Vm, VmConfig};
 
 #[derive(Debug)]
 pub struct Pkg {
@@ -40,18 +40,6 @@ fn print_function_head(fun: &Fn<'_>, f: &mut dyn fmt::Write) -> fmt::Result {
     writeln!(f, ") {}", fun.ret)
 }
 
-/// `|`-join type names, deduped and order-preserving: `Str|Int|Double`, or just
-/// `Str` when every variant agrees.
-fn type_union(types: impl Iterator<Item = String>) -> String {
-    let mut seen: Vec<String> = Vec::new();
-    for t in types {
-        if !seen.contains(&t) {
-            seen.push(t);
-        }
-    }
-    seen.join("|")
-}
-
 /// Comma-joined arg types of one specialisation, e.g. `Int` or `Str, Int`.
 fn variant_arg_sig(fun: &Fn<'_>) -> String {
     fun.args
@@ -61,13 +49,17 @@ fn variant_arg_sig(fun: &Fn<'_>) -> String {
         .join(", ")
 }
 
+fn variant_sig(fun: &Fn<'_>) -> String {
+    format!("({}) -> {}", variant_arg_sig(fun), fun.ret)
+}
+
 /// Render one overload group. A single-fn group prints as a normal signature;
-/// a specialisation group merges into a unioned head plus a per-variant doc line:
+/// a specialisation group prints the group name plus aligned per-variant docs:
 ///
 /// ```text
-/// fn from(Int|Double) Str
-///    Int -> ...
-///    Double -> ...
+/// fn from:
+///   (Int) -> Str     ...
+///   (Double) -> Str  ...
 /// ```
 pub fn print_overload_group(
     name: &str,
@@ -78,19 +70,17 @@ pub fn print_overload_group(
         return print_function_head(single, f);
     }
 
-    write!(f, "fn {name}(")?;
-    let argc = variants[0].args.len();
-    for pos in 0..argc {
-        write!(f, "{}", type_union(variants.iter().map(|v| v.args[pos].to_string())))?;
-        if pos + 1 < argc {
-            write!(f, " ")?;
-        }
-    }
-    // ret can vary across variants (e.g. debug's `T -> T`), so union it too.
-    writeln!(f, ") {}", type_union(variants.iter().map(|v| v.ret.to_string())))?;
+    writeln!(f, "fn {name}:")?;
 
+    let variant_sigs = variants.iter().map(|v| variant_sig(v)).collect::<Vec<_>>();
+    let sig_width = variant_sigs.iter().map(String::len).max().unwrap_or(0);
     for v in variants {
-        writeln!(f, "   {} -> {}", variant_arg_sig(v), v.doc)?;
+        let sig = variant_sig(v);
+        if v.doc.is_empty() {
+            writeln!(f, "  {sig}")?;
+        } else {
+            writeln!(f, "  {sig:<sig_width$}  {}", v.doc)?;
+        }
     }
     Ok(())
 }

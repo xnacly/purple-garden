@@ -1,4 +1,4 @@
-use crate::{Anomaly, BuiltinFn, REGISTER_COUNT, Value, op::Op};
+use crate::{op::Op, Anomaly, BuiltinFn, Value, REGISTER_COUNT};
 use std::ffi::c_void;
 
 #[derive(Clone, Copy, Debug, Default)]
