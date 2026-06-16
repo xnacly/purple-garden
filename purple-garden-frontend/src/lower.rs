@@ -607,13 +607,28 @@ impl<'lower> Lower<'lower> {
     }
 
     /// Lower [ast] into a list of Func nodes, the entry point is always `entry`
-    pub fn ir_from(mut self, ast: &'lower Ast<'lower>) -> Result<Vec<Func<'lower>>, Diagnostic> {
-        let mut typechecker = crate::typecheck::Typechecker::new(ast).with_libs(self.libs.clone());
-        for &node in &ast.roots {
-            let _t = typechecker.node(node)?;
+    pub fn ir_from(self, ast: &'lower Ast<'lower>) -> Result<Vec<Func<'lower>>, Diagnostic> {
+        let typecheck = crate::typecheck::Typechecker::new(ast)
+            .with_libs(self.libs.clone())
+            .check();
+        if let Some(diagnostic) = typecheck.diagnostics.into_iter().next() {
+            return Err(diagnostic);
         }
         purple_garden_shared::trace!("[ir::lower::Lower::ir_from] Finished type checking");
-        self.types = typechecker.finalise();
+        self.ir_from_types(ast, typecheck.types)
+    }
+
+    /// Lower [ast] using a type map produced by the typechecker.
+    ///
+    /// This is primarily for CLI/tooling paths that already typechecked to
+    /// render diagnostics or type information. Reusing the map keeps the
+    /// successful compile path from walking the AST twice.
+    pub fn ir_from_types(
+        mut self,
+        ast: &'lower Ast<'lower>,
+        types: Vec<Option<ptype::Type<'lower>>>,
+    ) -> Result<Vec<Func<'lower>>, Diagnostic> {
+        self.types = types;
 
         self.ctx.func =
             Func::new("entry", Id(0), Vec::new(), None).with_span(ast.entry_span().unwrap_or(0));

@@ -41,6 +41,13 @@ pub struct Config {
     /// Readable immediate representation
     #[arg(short = 'I', long)]
     pub ir: bool,
+    /// Print typechecker output and stop before lowering.
+    ///
+    /// -T prints top-level bindings and function signatures.
+    ///
+    /// -TT prints every typed AST value node.
+    #[arg(short = 'T', long, action = clap::ArgAction::Count)]
+    pub types: u8,
     /// Dump liveness as <%v>: (<def>,<`last_use`>)
     #[arg(short = 'L', long)]
     pub liveness: bool,
@@ -94,6 +101,7 @@ impl Config {
             disassemble: 0,
             ast: false,
             ir: false,
+            types: 0,
             backtrace: false,
             no_std: false,
             no_env: false,

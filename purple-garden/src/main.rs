@@ -1,6 +1,8 @@
 use purple_garden::{help, input::Input};
 use purple_garden_bc as bc;
-use purple_garden_frontend::{diagnostic::Diagnostic, lex::Lexer, lower::Lower, parser::Parser};
+use purple_garden_frontend::{
+    diagnostic::Diagnostic, lex::Lexer, lower::Lower, parser::Parser, typecheck::Typechecker,
+};
 use purple_garden_runtime::VmConfig;
 use purple_garden_shared::config;
 use purple_garden_std::{self as pstd, Pkg};
@@ -132,8 +134,38 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         print!("{ast}");
     }
 
-    let lower = Lower::new();
-    let mut ir = match lower.ir_from(&ast) {
+    let libs = Vec::new();
+    let typecheck = Typechecker::new(&ast).with_libs(libs.clone()).check();
+    let has_type_errors = !typecheck.diagnostics.is_empty();
+    if has_type_errors {
+        for diagnostic in &typecheck.diagnostics {
+            eprintln!(
+                "{}",
+                diagnostic.clone().render(input_source, input.as_bytes())
+            );
+        }
+    }
+    if conf.types > 0 {
+        if conf.types == 1 {
+            print!("{}", typecheck.render_summary(&ast));
+        } else {
+            print!("{}", typecheck.render_nodes(&ast));
+        }
+        if has_type_errors {
+            std::process::exit(1);
+        }
+
+        let needs_lowered_output = conf.ir || conf.liveness || conf.disassemble > 0;
+        if !needs_lowered_output {
+            std::process::exit(0);
+        }
+    }
+    if has_type_errors {
+        std::process::exit(1);
+    }
+
+    let lower = Lower::new().with_libs(libs);
+    let mut ir = match lower.ir_from_types(&ast, typecheck.types) {
         Ok(v) => v,
         Err(e) => {
             return err!(e.render(input_source, input.as_bytes()));
