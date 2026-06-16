@@ -1,6 +1,6 @@
 [workspace]
-members = ["purple-garden", "purple-garden-ir", "purple-garden-jit", "purple-garden-macros", "purple-garden-runtime", "purple-garden-std", "purple-garden-opt", "purple-garden-bc", "purple-garden-frontend", "purple-garden-shared"]
-default-members = ["purple-garden"]
+members = ["purple-garden", "purple-garden-cli", "purple-garden-ir", "purple-garden-jit", "purple-garden-macros", "purple-garden-runtime", "purple-garden-std", "purple-garden-opt", "purple-garden-bc", "purple-garden-frontend", "purple-garden-shared"]
+default-members = ["purple-garden-cli"]
 resolver = "3"
 
 [profile.release]

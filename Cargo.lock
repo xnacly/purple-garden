@@ -495,7 +495,6 @@ dependencies = [
 name = "purple-garden"
 version = "0.1.0"
 dependencies = [
- "clap",
  "criterion",
  "purple-garden-bc",
  "purple-garden-frontend",
@@ -515,6 +514,22 @@ version = "0.1.0"
 dependencies = [
  "purple-garden-ir",
  "purple-garden-jit",
+ "purple-garden-runtime",
+ "purple-garden-shared",
+ "purple-garden-std",
+]
+
+[[package]]
+name = "purple-garden-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "purple-garden",
+ "purple-garden-bc",
+ "purple-garden-frontend",
+ "purple-garden-ir",
+ "purple-garden-jit",
+ "purple-garden-opt",
  "purple-garden-runtime",
  "purple-garden-shared",
  "purple-garden-std",
@@ -576,9 +591,6 @@ dependencies = [
 [[package]]
 name = "purple-garden-shared"
 version = "0.1.0"
-dependencies = [
- "clap",
-]
 
 [[package]]
 name = "purple-garden-std"

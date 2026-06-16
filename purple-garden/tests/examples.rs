@@ -42,4 +42,37 @@ fn embed_counter_example() {
     );
 }
 
-include!(concat!(env!("OUT_DIR"), "/example_tests.rs"));
+macro_rules! example_tests {
+    ($($name:ident => $path:literal,)*) => {
+        $(
+            #[test]
+            fn $name() {
+                run_source(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../", $path)));
+            }
+
+            mod $name {
+                use super::*;
+
+                #[test]
+                fn opt() {
+                    run_source_opt(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../", $path)));
+                }
+            }
+        )*
+    };
+}
+
+example_tests! {
+    ackermann => "examples/ackermann.garden",
+    call_chain => "examples/call_chain.garden",
+    collatz => "examples/collatz.garden",
+    factorial => "examples/factorial.garden",
+    fib => "examples/fib.garden",
+    functions => "examples/functions.garden",
+    jitprogress => "examples/jitprogress.garden",
+    mandelbrot => "examples/mandelbrot.garden",
+    many_functions => "examples/many_functions.garden",
+    regressions => "examples/regressions.garden",
+    tak => "examples/tak.garden",
+    wide_match => "examples/wide_match.garden",
+}

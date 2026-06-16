@@ -1,12 +1,17 @@
-use purple_garden::{help, input::Input};
 use purple_garden_bc as bc;
 use purple_garden_frontend::{
     diagnostic::Diagnostic, lex::Lexer, lower::Lower, parser::Parser, typecheck::Typechecker,
 };
 use purple_garden_runtime::VmConfig;
-use purple_garden_shared::config;
 use purple_garden_std::{self as pstd, Pkg};
 use std::collections::HashMap;
+
+mod cli;
+mod help;
+mod input;
+
+use cli::{Cli, Command};
+use input::Input;
 
 pub const BUILD_INFO: &str = concat!(
     "version=",
@@ -46,8 +51,10 @@ macro_rules! err {
 ///    ^^^^^^^^     ^^^^^^^^     ^^^^^^^^  
 /// ```
 fn entry() -> Result<(), Box<dyn std::error::Error>> {
-    let conf = <config::Config as clap::Parser>::parse();
-    match conf.version {
+    let cli = <Cli as clap::Parser>::parse();
+    let conf = cli.config();
+
+    match cli.version {
         1 => {
             println!(
                 "purple-garden version {} by xnacly and contributors",
@@ -68,9 +75,9 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         _ => {}
     }
 
-    if let Some(ref cmd) = conf.command {
+    if let Some(ref cmd) = cli.command {
         match &cmd {
-            config::Command::Intro { topic } => {
+            Command::Intro { topic } => {
                 println!(
                     "{}",
                     help::print_help_by_topic(topic.as_ref().map(std::string::String::as_str))
@@ -78,7 +85,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
                 std::process::exit(0);
             }
-            config::Command::Doc { pkg_or_function } => {
+            Command::Doc { pkg_or_function } => {
                 // with no argument we just print all stdlib packages
                 let Some(pkg_or_function) = pkg_or_function else {
                     fn print_pkg(pkg: &Pkg) {
@@ -125,10 +132,10 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let (input, input_source) = if let Some(ref i) = conf.run {
+    let (input, input_source) = if let Some(ref i) = cli.run {
         (Input::Str(i.clone()), "stdio")
     } else {
-        let Some(file_name) = conf.target.as_deref() else {
+        let Some(file_name) = cli.target.as_deref() else {
             return err!("No file or `-r` specified");
         };
         (Input::from_file(file_name)?, file_name)
@@ -155,7 +162,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     purple_garden_shared::trace!("[main] Tokenisation and Parsing done");
 
-    if conf.ast {
+    if cli.ast {
         print!("{ast}");
     }
 
@@ -170,8 +177,8 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     }
-    if conf.types > 0 {
-        if conf.types == 1 {
+    if cli.types > 0 {
+        if cli.types == 1 {
             print!("{}", typecheck.render_summary(&ast));
         } else {
             print!("{}", typecheck.render_nodes(&ast));
@@ -183,7 +190,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
 
-        let needs_lowered_output = conf.ir || conf.liveness || conf.disassemble > 0;
+        let needs_lowered_output = cli.ir || cli.liveness || cli.disassemble > 0;
         if !needs_lowered_output {
             std::process::exit(0);
         }
@@ -206,7 +213,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         purple_garden_opt::ir(&mut ir);
     }
 
-    if conf.ir {
+    if cli.ir {
         for func in &ir {
             println!("{func}");
         }
@@ -246,7 +253,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ctx) = ctx {
         let dis =
             bc::dis::Disassembler::new(&program.vm.bytecode, ctx).with_source(input.as_bytes());
-        match conf.disassemble {
+        match cli.disassemble {
             1 => {
                 dis.disassemble_bytecode();
                 dis.disassemble_native();
@@ -255,7 +262,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if conf.dry {
+    if cli.dry {
         return Ok(());
     }
 

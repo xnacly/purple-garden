@@ -12,13 +12,11 @@ use purple_garden_frontend::{
 use purple_garden_runtime::{Anomaly, BuiltinFn, DebugInfo};
 pub use purple_garden_shared::config;
 
-pub use purple_garden_macros::{pg_fn, pg_pkg, FromVm, IntoVm, PgType};
+pub use purple_garden_macros::{FromVm, IntoVm, PgType, pg_fn, pg_pkg};
 pub use purple_garden_runtime::{Fn, FromVm, IntoVm, PgType, Pkg, Type, Value, Vm, VmConfig};
-pub use purple_garden_std::{resolve_pkg, STD};
+pub use purple_garden_std::{STD, resolve_pkg};
 
 pub mod gc;
-pub mod help;
-pub mod input;
 
 type JitFn = purple_garden_jit::JitFn;
 
@@ -134,7 +132,9 @@ fn compile<'e>(
     if let Some(diagnostic) = parse.diagnostics.into_iter().next() {
         return Err(diagnostic);
     }
-    let ast = parse.ast.expect("parser returned no diagnostics and no AST");
+    let ast = parse
+        .ast
+        .expect("parser returned no diagnostics and no AST");
 
     let mut ir = lower::Lower::new().with_libs(libs.to_vec()).ir_from(&ast)?;
     if config.opt >= 1 {
