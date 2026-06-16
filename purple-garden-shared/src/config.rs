@@ -3,17 +3,17 @@
 pub struct Config {
     /// Set optimisation level. Higher levels increase compile time.
     ///
-    /// pub 0: Baseline lowering with no optimisation passes.
+    /// 0: Baseline lowering with no optimisation passes.
     ///
-    /// pub 1: Local IR and bytecode optimisations:
+    /// 1: Local IR and bytecode optimisations:
     ///    constant folding and propagation, arithmetic simplification,
     ///    peephole bytecode cleanup, redundant load elimination.
     ///
-    /// pub 2: Global IR optimisations:
+    /// 2: Global IR optimisations:
     ///    control-flow aware dead code elimination,
     ///    register lifetime minimisation, copy propagation.
     ///
-    /// pub 3: Aggressive compile-time optimisations:
+    /// 3: Aggressive compile-time optimisations:
     ///    function inlining, guarded operator specialisation,
     ///    constant hoisting, aggressive register reuse.
     #[arg(short = 'O', default_value_t = 1)]
@@ -48,7 +48,7 @@ pub struct Config {
     /// -TT prints every typed AST value node.
     #[arg(short = 'T', long, action = clap::ArgAction::Count)]
     pub types: u8,
-    /// Dump liveness as <%v>: (<def>,<`last_use`>)
+    /// Dump SSA live intervals with the IR positions that define, use, or pass them.
     #[arg(short = 'L', long)]
     pub liveness: bool,
     /// Generate backtraces for function calls
