@@ -139,13 +139,19 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let parse = Parser::new(Lexer::new(input.as_bytes())).parse_collect();
-    if !parse.diagnostics.is_empty() {
-        for diagnostic in parse.diagnostics {
+    let purple_garden_frontend::parser::ParseOutput {
+        ast,
+        diagnostics: parse_diagnostics,
+    } = parse;
+    let has_parse_errors = !parse_diagnostics.is_empty();
+    if has_parse_errors {
+        for diagnostic in parse_diagnostics {
             eprintln!("{}", diagnostic.render(input_source, input.as_bytes()));
         }
-        std::process::exit(1);
     }
-    let ast = parse.ast.expect("parser returned no diagnostics and no AST");
+    let Some(ast) = ast else {
+        std::process::exit(1);
+    };
 
     purple_garden_shared::trace!("[main] Tokenisation and Parsing done");
 
@@ -173,13 +179,16 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         if has_type_errors {
             std::process::exit(1);
         }
+        if has_parse_errors {
+            std::process::exit(1);
+        }
 
         let needs_lowered_output = conf.ir || conf.liveness || conf.disassemble > 0;
         if !needs_lowered_output {
             std::process::exit(0);
         }
     }
-    if has_type_errors {
+    if has_parse_errors || has_type_errors {
         std::process::exit(1);
     }
 

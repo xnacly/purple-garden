@@ -11,6 +11,7 @@ pub struct Parser<'p> {
     id: usize,
     cur: Token<'p>,
     ast: Ast<'p>,
+    diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Debug)]
@@ -23,11 +24,13 @@ impl<'p> Parser<'p> {
     #[must_use]
     pub fn new(mut lex: Lexer<'p>) -> Self {
         let cur = lex.one();
+        let diagnostics = std::mem::take(&mut lex.diagnostics);
         Self {
             cur,
             lex,
             id: 0,
             ast: Ast::new(),
+            diagnostics,
         }
     }
 
@@ -78,6 +81,8 @@ impl<'p> Parser<'p> {
 
     fn advance(&mut self) -> Result<(), Diagnostic> {
         self.cur = self.lex.one();
+        self.diagnostics
+            .extend(std::mem::take(&mut self.lex.diagnostics));
         Ok(())
     }
 
@@ -103,26 +108,43 @@ impl<'p> Parser<'p> {
         Ok(())
     }
 
-    /// Parse while preserving lexer diagnostics. Parser recovery is still a
-    /// later step: a parser diagnostic prevents returning an AST for now, but
-    /// callers still receive any diagnostics accumulated by the lexer before
-    /// the parse failed.
-    pub fn parse_collect(mut self) -> ParseOutput<'p> {
-        let parse_result = self.parse_roots();
-
-        let mut diagnostics = self.lex.into_diagnostics();
-        match parse_result {
-            Ok(()) => ParseOutput {
-                ast: Some(self.ast),
-                diagnostics,
-            },
-            Err(diagnostic) => {
-                diagnostics.push(diagnostic);
-                ParseOutput {
-                    ast: None,
-                    diagnostics,
+    fn parse_roots_collect(&mut self) {
+        while !self.at_end() {
+            match self.parse_prefix() {
+                Ok(node) => self.ast.roots.push(node),
+                Err(diagnostic) => {
+                    self.diagnostics.push(diagnostic);
+                    self.synchronize_root();
                 }
             }
+        }
+    }
+
+    fn is_root_boundary(ty: Type<'_>) -> bool {
+        matches!(
+            ty,
+            Type::Let | Type::Fn | Type::Import | Type::Match | Type::CurlyRight | Type::Eof
+        )
+    }
+
+    fn synchronize_root(&mut self) {
+        while !Self::is_root_boundary(self.cur.t) {
+            self.advance().expect("lexing is infallible");
+        }
+        if self.cur.t == Type::CurlyRight {
+            self.advance().expect("lexing is infallible");
+        }
+    }
+
+    /// Parse while collecting diagnostics. Recovery is intentionally shallow
+    /// for now: a malformed root is dropped, then parsing resumes at the next
+    /// obvious root boundary.
+    pub fn parse_collect(mut self) -> ParseOutput<'p> {
+        self.parse_roots_collect();
+        self.diagnostics.extend(self.lex.into_diagnostics());
+        ParseOutput {
+            ast: Some(self.ast),
+            diagnostics: self.diagnostics,
         }
     }
 
@@ -603,5 +625,39 @@ mod tests {
         let p = Parser::new(l);
         let result = p.parse();
         assert!(result.is_err(), "expected parse error, got: {result:?}");
+    }
+
+    #[test]
+    fn parse_collect_keeps_valid_roots_after_lexer_error() {
+        let l = Lexer::new(b"import 1.2.3\nlet b = 1");
+        let out = Parser::new(l).parse_collect();
+        let ast = out.ast.expect("parse_collect should keep recovered ast");
+
+        assert_eq!(out.diagnostics.len(), 2);
+        assert_eq!(out.diagnostics[0].message, "Invalid numeric literal");
+        assert_eq!(
+            out.diagnostics[1].message,
+            "Expected `BraceLeft`, got let(Let)"
+        );
+        assert_eq!(ast.roots.len(), 1);
+        let Node::Let { name, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected recovered let root");
+        };
+        assert_eq!(name.t, crate::lex::Type::Ident("b"));
+    }
+
+    #[test]
+    fn parse_collect_keeps_valid_roots_after_parser_error() {
+        let l = Lexer::new(b"let a = 1 +\nlet b = 2");
+        let out = Parser::new(l).parse_collect();
+        let ast = out.ast.expect("parse_collect should keep recovered ast");
+
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(out.diagnostics[0].message, "Expected expression, got Let");
+        assert_eq!(ast.roots.len(), 1);
+        let Node::Let { name, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected recovered let root");
+        };
+        assert_eq!(name.t, crate::lex::Type::Ident("b"));
     }
 }

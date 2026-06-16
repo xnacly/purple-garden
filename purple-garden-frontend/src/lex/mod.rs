@@ -52,7 +52,7 @@ fn class_of(b: u8) -> u8 {
 pub struct Lexer<'l> {
     input: &'l [u8],
     pos: usize,
-    diagnostics: Vec<Diagnostic>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
 }
 
 #[inline]
