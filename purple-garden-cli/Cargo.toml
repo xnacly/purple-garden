@@ -32,4 +32,4 @@ purple-garden-std = { path = "../purple-garden-std" }
 purple-garden-opt = { path = "../purple-garden-opt" }
 purple-garden-bc = { path = "../purple-garden-bc" }
 purple-garden-frontend = { path = "../purple-garden-frontend" }
-purple-garden-shared = { path = "../purple-garden-shared" }
+purple-garden-shared = { path = "../purple-garden-shared", features = ["cli"] }

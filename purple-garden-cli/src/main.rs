@@ -9,6 +9,7 @@ use std::collections::HashMap;
 mod cli;
 mod help;
 mod input;
+mod lsp;
 
 use cli::{Cli, Command};
 use input::Input;
@@ -52,7 +53,7 @@ macro_rules! err {
 /// ```
 fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let cli = <Cli as clap::Parser>::parse();
-    let conf = cli.config();
+    let conf = &cli.config;
 
     match cli.version {
         1 => {
@@ -129,6 +130,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
                 std::process::exit(0);
             }
+            Command::Lsp => return lsp::run(),
         }
     }
 
@@ -190,7 +192,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
 
-        let needs_lowered_output = cli.ir || cli.liveness || cli.disassemble > 0;
+        let needs_lowered_output = cli.ir || conf.liveness || conf.disassemble > 0;
         if !needs_lowered_output {
             std::process::exit(0);
         }
@@ -220,7 +222,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut cc = bc::Cc::new();
-    let native_pages = cc.compile(&conf, &ir)?;
+    let native_pages = cc.compile(conf, &ir)?;
 
     purple_garden_shared::trace!("[main] Lowered IR to bytecode");
 
@@ -253,7 +255,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ctx) = ctx {
         let dis =
             bc::dis::Disassembler::new(&program.vm.bytecode, ctx).with_source(input.as_bytes());
-        match cli.disassemble {
+        match conf.disassemble {
             1 => {
                 dis.disassemble_bytecode();
                 dis.disassemble_native();
