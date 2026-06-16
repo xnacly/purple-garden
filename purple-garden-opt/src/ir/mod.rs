@@ -117,6 +117,10 @@ pub fn dce(fun: &mut ir::Func<'_>, scratch: &mut Scratch<'_>) {
                 }
 
                 if removable(instr) {
+                    purple_garden_shared::trace!(
+                        "[opt::ir::dce] removed dead definition %v{}",
+                        dst.0
+                    );
                     *instr = ir::Instr::Noop;
                     changed = true;
                 }

@@ -78,6 +78,10 @@ fn remove_dead_load_consts<'s>(fun: &mut ir::Func<'s>, scratch: &mut Scratch<'s>
             };
 
             if scratch.uses.get(dst.id.0 as usize).copied().unwrap_or(0) == 0 {
+                purple_garden_shared::trace!(
+                    "[opt::ir::const_fold] removed dead LoadConst %v{}",
+                    dst.id.0
+                );
                 *instr = Instr::Noop;
             }
         }
@@ -113,6 +117,12 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch, previous: &[Instr<'_
                 _ => return false,
             };
 
+            purple_garden_shared::trace!(
+                "[opt::ir::const_fold] folded Cast %v{} into constant {:?} / {}",
+                dst.id.0,
+                result,
+                result
+            );
             *instr = Instr::LoadConst {
                 dst: dst.clone(),
                 value: result,
@@ -238,6 +248,13 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch, previous: &[Instr<'_
                 BinOp::BEq => (lhs_value == rhs_value).into(),
             };
 
+            purple_garden_shared::trace!(
+                "[opt::ir::const_fold] folded {:?} %v{} into constant {:?} / {}",
+                op,
+                dst.id.0,
+                result,
+                result
+            );
             *instr = Instr::LoadConst {
                 // PERF: is this an issue?
                 dst: dst.clone(),
