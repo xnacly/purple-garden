@@ -13,15 +13,22 @@ pub struct Parser<'p> {
     ast: Ast<'p>,
 }
 
+#[derive(Debug)]
+pub struct ParseOutput<'p> {
+    pub ast: Option<Ast<'p>>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
 impl<'p> Parser<'p> {
-    pub fn new(mut lex: Lexer<'p>) -> Result<Self, Diagnostic> {
-        let cur = lex.one()?;
-        Ok(Self {
+    #[must_use]
+    pub fn new(mut lex: Lexer<'p>) -> Self {
+        let cur = lex.one();
+        Self {
             cur,
             lex,
             id: 0,
             ast: Ast::new(),
-        })
+        }
     }
 
     fn next_id(&mut self) -> usize {
@@ -70,7 +77,7 @@ impl<'p> Parser<'p> {
     }
 
     fn advance(&mut self) -> Result<(), Diagnostic> {
-        self.cur = self.lex.one()?;
+        self.cur = self.lex.one();
         Ok(())
     }
 
@@ -84,11 +91,39 @@ impl<'p> Parser<'p> {
 
     /// program = prefix*
     pub fn parse(mut self) -> Result<Ast<'p>, Diagnostic> {
+        self.parse_roots()?;
+        Ok(self.ast)
+    }
+
+    fn parse_roots(&mut self) -> Result<(), Diagnostic> {
         while !self.at_end() {
             let node = self.parse_prefix()?;
             self.ast.roots.push(node);
         }
-        Ok(self.ast)
+        Ok(())
+    }
+
+    /// Parse while preserving lexer diagnostics. Parser recovery is still a
+    /// later step: a parser diagnostic prevents returning an AST for now, but
+    /// callers still receive any diagnostics accumulated by the lexer before
+    /// the parse failed.
+    pub fn parse_collect(mut self) -> ParseOutput<'p> {
+        let parse_result = self.parse_roots();
+
+        let mut diagnostics = self.lex.into_diagnostics();
+        match parse_result {
+            Ok(()) => ParseOutput {
+                ast: Some(self.ast),
+                diagnostics,
+            },
+            Err(diagnostic) => {
+                diagnostics.push(diagnostic);
+                ParseOutput {
+                    ast: None,
+                    diagnostics,
+                }
+            }
+        }
     }
 
     /// prefix = import | let | fn | match | expr
@@ -266,7 +301,12 @@ impl<'p> Parser<'p> {
                 let id = self.next_id();
                 self.push_node(Node::Unary { id, op, rhs })
             }
-            _ => todo!("{:?}", self.cur().t),
+            _ => {
+                return Err(Diagnostic::at_token(
+                    format!("Expected expression, got {:?}", self.cur().t),
+                    self.cur(),
+                ));
+            }
         };
 
         // postfix parsing loop
@@ -446,7 +486,7 @@ mod tests {
                     #[test]
                     fn $name() {
                         let l = Lexer::new($input.as_bytes());
-                        let mut p = Parser::new(l).unwrap();
+                        let mut p = Parser::new(l);
                         let tt = p.parse_type().unwrap();
                         assert_eq!(p.ast.type_display(tt).to_string(), $expected);
                     }
@@ -492,7 +532,7 @@ mod tests {
     #[test]
     fn empty_foreign_has_specific_error() {
         let l = Lexer::new(b"Foreign<>");
-        let mut p = Parser::new(l).unwrap();
+        let mut p = Parser::new(l);
         let err = p.parse_type().unwrap_err();
         assert_eq!(err.message, "Expected a foreign type name after `Foreign<`");
     }
@@ -500,7 +540,7 @@ mod tests {
     #[test]
     fn empty_option_has_specific_error() {
         let l = Lexer::new(b"Option<>");
-        let mut p = Parser::new(l).unwrap();
+        let mut p = Parser::new(l);
         let err = p.parse_type().unwrap_err();
         assert_eq!(err.message, "Expected a type after `Option<`");
     }
@@ -508,7 +548,7 @@ mod tests {
     #[test]
     fn empty_array_has_specific_error() {
         let l = Lexer::new(b"Array<>");
-        let mut p = Parser::new(l).unwrap();
+        let mut p = Parser::new(l);
         let err = p.parse_type().unwrap_err();
         assert_eq!(err.message, "Expected a type after `Array<`");
     }
@@ -522,7 +562,7 @@ mod tests {
                     #[test]
                     fn $name() {
                         let l = Lexer::new($input.as_bytes());
-                        let p = Parser::new(l).unwrap();
+                        let p = Parser::new(l);
                         let ast = p.parse().unwrap();
                         assert_eq!(ast.roots.len(), $root_count);
                         assert!(!ast.nodes.is_empty());
@@ -544,7 +584,7 @@ mod tests {
     #[test]
     fn adjacent_parenthesized_arg_after_atom_is_not_postfix_call() {
         let l = Lexer::new(b"f(0.0 (1.0 + 2.0))");
-        let p = Parser::new(l).unwrap();
+        let p = Parser::new(l);
         let ast = p.parse().unwrap();
         let root = ast.roots[0];
 
@@ -560,7 +600,7 @@ mod tests {
     #[test]
     fn equal_in_expression_terminates() {
         let l = Lexer::new(b"(5 = 6)");
-        let p = Parser::new(l).unwrap();
+        let p = Parser::new(l);
         let result = p.parse();
         assert!(result.is_err(), "expected parse error, got: {result:?}");
     }

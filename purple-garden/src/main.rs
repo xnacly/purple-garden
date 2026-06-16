@@ -138,13 +138,14 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let lexer = Lexer::new(input.as_bytes());
-    let ast = match Parser::new(lexer).and_then(purple_garden_frontend::parser::Parser::parse) {
-        Ok(a) => a,
-        Err(e) => {
-            return err!(e.render(input_source, input.as_bytes()));
+    let parse = Parser::new(Lexer::new(input.as_bytes())).parse_collect();
+    if !parse.diagnostics.is_empty() {
+        for diagnostic in parse.diagnostics {
+            eprintln!("{}", diagnostic.render(input_source, input.as_bytes()));
         }
-    };
+        std::process::exit(1);
+    }
+    let ast = parse.ast.expect("parser returned no diagnostics and no AST");
 
     purple_garden_shared::trace!("[main] Tokenisation and Parsing done");
 

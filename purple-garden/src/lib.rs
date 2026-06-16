@@ -130,8 +130,11 @@ fn compile<'e>(
     input: &'e [u8],
     libs: &[&'e Pkg],
 ) -> Result<Program, Diagnostic> {
-    let lexer = lex::Lexer::new(input);
-    let ast = parser::Parser::new(lexer)?.parse()?;
+    let parse = parser::Parser::new(lex::Lexer::new(input)).parse_collect();
+    if let Some(diagnostic) = parse.diagnostics.into_iter().next() {
+        return Err(diagnostic);
+    }
+    let ast = parse.ast.expect("parser returned no diagnostics and no AST");
 
     let mut ir = lower::Lower::new().with_libs(libs.to_vec()).ir_from(&ast)?;
     if config.opt >= 1 {
