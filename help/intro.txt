@@ -1,3 +1,20 @@
+         ,            ,            ,    
+     /\^/`\       /\^/`\       /\^/`\   
+    | \/   |     | \/   |     | \/   |  
+    | |    |     | |    |     | |    |  
+    \ \    /     \ \    /     \ \    /  
+     '\\//'       '\\//'       '\\//'   
+       ||           ||           ||     
+       ||           ||           ||     
+       ||           ||           ||     
+       ||  ,        ||  ,        ||  ,  
+   |\  ||  |\   |\  ||  |\   |\  ||  |\ 
+   | | ||  | |  | | ||  | |  | | ||  | |
+   | | || / /   | | || / /   | | || / / 
+    \ \||/ /     \ \||/ /     \ \||/ /  
+     `\\//`       `\\//`       `\\//`   
+    ^^^^^^^^     ^^^^^^^^     ^^^^^^^^  
+
 Purple garden is a high performance interpreted programming language with a JIT and a
 minimalist standard library. It shines due to its embedability and its easy to extend by its
 embeder.
