@@ -51,8 +51,7 @@ pub enum Type<'t> {
 #[derive(Debug, Clone, Eq)]
 pub struct Token<'t> {
     /// Byte offset into the source where this token starts. Line/column
-    /// numbers are computed lazily on the error path from this offset; see
-    /// `PgError::render`.
+    /// numbers are computed lazily on the diagnostic render path.
     pub start: usize,
     pub t: Type<'t>,
 }

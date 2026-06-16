@@ -1,7 +1,7 @@
 mod byte_search;
 mod tok;
 
-use crate::err::PgError;
+use crate::diagnostic::{Diagnostic, Span};
 use byte_search::{find_byte, skip_ident_cont, skip_num_cont};
 
 pub use tok::{Token, Type};
@@ -84,12 +84,8 @@ impl<'l> Lexer<'l> {
         Token { start, t }
     }
 
-    fn make_err(&self, msg: impl Into<String>, start: usize) -> PgError {
-        PgError {
-            msg: msg.into(),
-            start,
-            len: self.pos.saturating_sub(start),
-        }
+    fn make_err(&self, msg: impl Into<String>, start: usize) -> Diagnostic {
+        Diagnostic::new(msg, Span::new(start, self.pos.saturating_sub(start)))
     }
 
     #[inline]
@@ -115,7 +111,7 @@ impl<'l> Lexer<'l> {
         self.pos = p;
     }
 
-    pub fn one(&mut self) -> Result<Token<'l>, PgError> {
+    pub fn one(&mut self) -> Result<Token<'l>, Diagnostic> {
         self.skip_whitespace();
 
         let start = self.pos;
@@ -215,7 +211,7 @@ impl<'l> Lexer<'l> {
     }
 
     #[cfg(test)]
-    pub fn all(&mut self) -> Result<Vec<Token<'l>>, PgError> {
+    pub fn all(&mut self) -> Result<Vec<Token<'l>>, Diagnostic> {
         let mut raindrain = Vec::with_capacity(1024);
         loop {
             let t = self.one()?;
@@ -408,13 +404,19 @@ mod tests {
     fn unknown_character_error_carries_position() {
         let mut l = Lexer::new(b"  $");
         let err = l.one().expect_err("expected lexer error on `$`");
-        assert_eq!(err.start, 2, "byte offset of the offending character");
+        assert_eq!(
+            err.primary.span.start, 2,
+            "byte offset of the offending character"
+        );
     }
 
     #[test]
     fn error_after_newline_does_not_underflow() {
         let mut l = Lexer::new(b"\n$");
         let err = l.one().expect_err("expected lexer error on `$`");
-        assert_eq!(err.start, 1, "byte offset of the offending character");
+        assert_eq!(
+            err.primary.span.start, 1,
+            "byte offset of the offending character"
+        );
     }
 }

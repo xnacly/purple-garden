@@ -5,13 +5,16 @@
 compile_error!("purple-garden currently supports only Linux or macOS on x86_64 or aarch64");
 
 use purple_garden_bc as bc;
-use purple_garden_frontend::{err::PgError, lex, lower, parser};
+use purple_garden_frontend::{
+    diagnostic::{Diagnostic, Span},
+    lex, lower, parser,
+};
 use purple_garden_runtime::{Anomaly, BuiltinFn, DebugInfo};
 pub use purple_garden_shared::config;
 
-pub use purple_garden_macros::{FromVm, IntoVm, PgType, pg_fn, pg_pkg};
+pub use purple_garden_macros::{pg_fn, pg_pkg, FromVm, IntoVm, PgType};
 pub use purple_garden_runtime::{Fn, FromVm, IntoVm, PgType, Pkg, Type, Value, Vm, VmConfig};
-pub use purple_garden_std::{STD, resolve_pkg};
+pub use purple_garden_std::{resolve_pkg, STD};
 
 pub mod gc;
 pub mod help;
@@ -51,7 +54,7 @@ impl<'pg> Pg<'pg> {
         self
     }
 
-    pub fn compile(&self, input: &[u8]) -> Result<Program, PgError> {
+    pub fn compile(&self, input: &[u8]) -> Result<Program, Diagnostic> {
         compile(&self.config, input, &self.libs)
     }
 }
@@ -126,7 +129,7 @@ fn compile<'e>(
     config: &'e config::Config,
     input: &'e [u8],
     libs: &[&'e Pkg],
-) -> Result<Program, PgError> {
+) -> Result<Program, Diagnostic> {
     let lexer = lex::Lexer::new(input);
     let ast = parser::Parser::new(lexer)?.parse()?;
 
@@ -136,11 +139,9 @@ fn compile<'e>(
     }
 
     let mut cc = bc::Cc::new();
-    let native_pages = cc.compile(config, &ir).map_err(|msg| PgError {
-        msg,
-        start: 0,
-        len: 0,
-    })?;
+    let native_pages = cc
+        .compile(config, &ir)
+        .map_err(|msg| Diagnostic::new(msg, Span::new(0, 0)))?;
     if config.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);
         cc.compact_nops();

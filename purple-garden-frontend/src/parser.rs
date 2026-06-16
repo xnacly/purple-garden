@@ -1,6 +1,6 @@
 use crate::{
     ast::{Ast, Node, NodeId, TypeExpr, TypeExprId},
-    err::PgError,
+    diagnostic::Diagnostic,
     lex::{Lexer, Token, Type},
 };
 
@@ -14,7 +14,7 @@ pub struct Parser<'p> {
 }
 
 impl<'p> Parser<'p> {
-    pub fn new(mut lex: Lexer<'p>) -> Result<Self, PgError> {
+    pub fn new(mut lex: Lexer<'p>) -> Result<Self, Diagnostic> {
         let cur = lex.one()?;
         Ok(Self {
             cur,
@@ -38,11 +38,11 @@ impl<'p> Parser<'p> {
         self.cur.t == Type::Eof
     }
 
-    fn expect(&mut self, ty: Type) -> Result<(), PgError> {
+    fn expect(&mut self, ty: Type) -> Result<(), Diagnostic> {
         if self.cur.t == ty {
             self.advance()?;
         } else {
-            return Err(PgError::with_msg(
+            return Err(Diagnostic::at_token(
                 format!(
                     "Expected `{:?}`, got {}({:?})",
                     ty,
@@ -56,20 +56,20 @@ impl<'p> Parser<'p> {
         Ok(())
     }
 
-    fn expect_ident(&mut self) -> Result<Token<'p>, PgError> {
+    fn expect_ident(&mut self) -> Result<Token<'p>, Diagnostic> {
         if let Type::Ident(_) = self.cur.t {
             let matched = self.cur.clone();
             self.advance()?;
             Ok(matched)
         } else {
-            Err(PgError::with_msg(
+            Err(Diagnostic::at_token(
                 format!("Expected an identifier, got {:?}", self.cur.t),
                 &self.cur,
             ))
         }
     }
 
-    fn advance(&mut self) -> Result<(), PgError> {
+    fn advance(&mut self) -> Result<(), Diagnostic> {
         self.cur = self.lex.one()?;
         Ok(())
     }
@@ -83,7 +83,7 @@ impl<'p> Parser<'p> {
     }
 
     /// program = prefix*
-    pub fn parse(mut self) -> Result<Ast<'p>, PgError> {
+    pub fn parse(mut self) -> Result<Ast<'p>, Diagnostic> {
         while !self.at_end() {
             let node = self.parse_prefix()?;
             self.ast.roots.push(node);
@@ -92,7 +92,7 @@ impl<'p> Parser<'p> {
     }
 
     /// prefix = import | let | fn | match | expr
-    fn parse_prefix(&mut self) -> Result<NodeId, PgError> {
+    fn parse_prefix(&mut self) -> Result<NodeId, Diagnostic> {
         match self.cur().t {
             Type::Import => self.parse_import(),
             Type::Let => self.parse_let(),
@@ -103,7 +103,7 @@ impl<'p> Parser<'p> {
     }
 
     /// import = "import" string | "import" "(" string* ")"
-    fn parse_import(&mut self) -> Result<NodeId, PgError> {
+    fn parse_import(&mut self) -> Result<NodeId, Diagnostic> {
         let src = self.cur.clone();
         // skip Type::Import
         self.advance()?;
@@ -128,7 +128,7 @@ impl<'p> Parser<'p> {
 
         while !self.at_end() && self.cur().t != Type::BraceRight {
             let &Token { t: Type::S(_), .. } = self.cur() else {
-                return Err(PgError::with_msg(
+                return Err(Diagnostic::at_token(
                     "Only strings are allowed as import paths",
                     &self.cur,
                 ));
@@ -143,7 +143,7 @@ impl<'p> Parser<'p> {
     }
 
     /// let = "let" ident "=" prefix
-    fn parse_let(&mut self) -> Result<NodeId, PgError> {
+    fn parse_let(&mut self) -> Result<NodeId, Diagnostic> {
         self.expect(Type::Let)?;
         let name = self.expect_ident()?;
         self.expect(Type::Equal)?;
@@ -154,7 +154,7 @@ impl<'p> Parser<'p> {
     }
 
     /// fn = "fn" ident "(" (ident ":" type)* ")" type? "{" prefix* "}"
-    fn parse_fn(&mut self) -> Result<NodeId, PgError> {
+    fn parse_fn(&mut self) -> Result<NodeId, Diagnostic> {
         self.advance()?;
         let name = self.expect_ident()?;
 
@@ -193,7 +193,7 @@ impl<'p> Parser<'p> {
     }
 
     /// match = "match" "{" (expr "{" prefix* "}")* "{" prefix* "}" "}"
-    fn parse_match(&mut self) -> Result<NodeId, PgError> {
+    fn parse_match(&mut self) -> Result<NodeId, Diagnostic> {
         self.advance()?;
         let mut cases = vec![];
         let mut default = None;
@@ -226,7 +226,7 @@ impl<'p> Parser<'p> {
         self.expect(Type::CurlyRight)?;
 
         let Some(default) = default else {
-            return Err(PgError::with_msg(
+            return Err(Diagnostic::at_token(
                 "A match statement requires a default branch",
                 &tok,
             ));
@@ -237,7 +237,7 @@ impl<'p> Parser<'p> {
     }
 
     /// expr = atom | ident | "(" expr ")" | prefix-op expr | expr postfix-op | expr infix-op expr
-    fn parse_expr(&mut self, min_bp: u8) -> Result<NodeId, PgError> {
+    fn parse_expr(&mut self, min_bp: u8) -> Result<NodeId, Diagnostic> {
         let mut lhs = match self.cur().t {
             Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => {
                 let raw = self.cur.clone();
@@ -372,7 +372,7 @@ impl<'p> Parser<'p> {
     }
 
     /// type = atom-type | "Foreign" "<" ident ">" | "Option" "<" type ">" | "Array" "<" type ">"
-    fn parse_type(&mut self) -> Result<TypeExprId, PgError> {
+    fn parse_type(&mut self) -> Result<TypeExprId, Diagnostic> {
         let Token { t, .. } = self.cur();
         Ok(match t {
             // Atom types
@@ -386,7 +386,7 @@ impl<'p> Parser<'p> {
                 self.advance()?;
                 self.expect(Type::LessThan)?;
                 if self.cur().t == Type::GreaterThan {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         "Expected a foreign type name after `Foreign<`",
                         &self.cur,
                     ));
@@ -400,7 +400,7 @@ impl<'p> Parser<'p> {
                 self.advance()?;
                 self.expect(Type::LessThan)?;
                 if self.cur().t == Type::GreaterThan {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         "Expected a type after `Option<`",
                         &self.cur,
                     ));
@@ -414,7 +414,7 @@ impl<'p> Parser<'p> {
                 self.advance()?;
                 self.expect(Type::LessThan)?;
                 if self.cur().t == Type::GreaterThan {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         "Expected a type after `Array<`",
                         &self.cur,
                     ));
@@ -424,7 +424,7 @@ impl<'p> Parser<'p> {
                 self.push_type(TypeExpr::Array(inner))
             }
             _ => {
-                return Err(PgError::with_msg(
+                return Err(Diagnostic::at_token(
                     "Bad type, expected one of: Str, Int, Double, Bool, Void, Foreign<name>, Option<type> or Array<type>",
                     self.cur(),
                 ));
@@ -494,7 +494,7 @@ mod tests {
         let l = Lexer::new(b"Foreign<>");
         let mut p = Parser::new(l).unwrap();
         let err = p.parse_type().unwrap_err();
-        assert_eq!(err.msg, "Expected a foreign type name after `Foreign<`");
+        assert_eq!(err.message, "Expected a foreign type name after `Foreign<`");
     }
 
     #[test]
@@ -502,7 +502,7 @@ mod tests {
         let l = Lexer::new(b"Option<>");
         let mut p = Parser::new(l).unwrap();
         let err = p.parse_type().unwrap_err();
-        assert_eq!(err.msg, "Expected a type after `Option<`");
+        assert_eq!(err.message, "Expected a type after `Option<`");
     }
 
     #[test]
@@ -510,7 +510,7 @@ mod tests {
         let l = Lexer::new(b"Array<>");
         let mut p = Parser::new(l).unwrap();
         let err = p.parse_type().unwrap_err();
-        assert_eq!(err.msg, "Expected a type after `Array<`");
+        assert_eq!(err.message, "Expected a type after `Array<`");
     }
 
     macro_rules! table_roots {

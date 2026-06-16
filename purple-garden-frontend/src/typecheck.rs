@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     ast::{Ast, Node, NodeId},
-    err::PgError,
+    diagnostic::{Diagnostic, Help},
     lex::{self, Token},
 };
 use purple_garden_ir::ptype::Type;
@@ -120,7 +120,96 @@ impl<'t> Typechecker<'t> {
             .expect("arg typed before overload selection")
     }
 
-    fn fuse(op: &lex::Token, lhs: &Type<'t>, rhs: &Type<'t>) -> Result<Type<'t>, PgError> {
+    fn node_label(&self, node: NodeId) -> Option<&'t str> {
+        match self.ast.node(node) {
+            Node::Ident {
+                name:
+                    lex::Token {
+                        t: lex::Type::Ident(name),
+                        ..
+                    },
+                ..
+            } => Some(*name),
+            _ => None,
+        }
+    }
+
+    fn redundant_conversion_note(
+        &self,
+        args: &[NodeId],
+        candidates: &[FunctionType<'t>],
+    ) -> Option<String> {
+        if args.len() != 1 {
+            return None;
+        }
+
+        let provided_ty = self.resolved_arg_ty(args[0]);
+        if !candidates
+            .iter()
+            .all(|c| c.args.len() == 1 && &c.ret == provided_ty)
+        {
+            return None;
+        }
+
+        let arg = self.node_label(args[0]).unwrap_or("the argument");
+        Some(format!("`{arg}` is already {provided_ty}"))
+    }
+
+    fn redundant_cast_error(at: &lex::Token, ty: &Type<'t>) -> Diagnostic {
+        Diagnostic::at_token(format!("Can not cast {ty} to {ty}"), at)
+            .with_primary_message("unnecessary cast")
+            .with_note(format!("the expression is already {ty}"))
+            .with_help(Help::new("remove the cast"))
+    }
+
+    fn missing_package_error(&mut self, pkg_name: &'t str, pkg_tok: &lex::Token) -> Diagnostic {
+        let mut err = Diagnostic::at_token(format!("Can't find package `{pkg_name}`"), pkg_tok)
+            .with_primary_message("package used here");
+        if self.resolve_pkg(pkg_name).is_some() {
+            err = err
+                .with_note(format!("package `{pkg_name}` exists but is not imported"))
+                .with_help(Help::new(format!("add `import \"{pkg_name}\"`")));
+        }
+        err
+    }
+
+    fn specialisation_miss_error(
+        &self,
+        pkg_name: &str,
+        inner_name: &str,
+        name: &lex::Token,
+        args: &[NodeId],
+        candidates: &[FunctionType<'t>],
+    ) -> Diagnostic {
+        fn sig<'a, 'b: 'a>(types: impl Iterator<Item = &'a Type<'b>>) -> String {
+            types
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+
+        let provided = || args.iter().map(|&a| self.resolved_arg_ty(a));
+        let avail = candidates
+            .iter()
+            .map(|c| sig(c.args.iter().map(|(_, t)| t)))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let mut err = Diagnostic::at_token(
+            format!(
+                "no specialisation of `{pkg_name}.{inner_name}` accepts ({}); available: {avail}",
+                sig(provided())
+            ),
+            name,
+        );
+        if let Some(note) = self.redundant_conversion_note(args, candidates) {
+            err = err
+                .with_note(note)
+                .with_help(Help::new(format!("remove `{pkg_name}.{inner_name}`")));
+        }
+        err
+    }
+
+    fn fuse(op: &lex::Token, lhs: &Type<'t>, rhs: &Type<'t>) -> Result<Type<'t>, Diagnostic> {
         Ok(match op.t {
             // arithmetics
             lex::Type::Plus | lex::Type::Minus | lex::Type::Asteriks | lex::Type::Slash => {
@@ -128,7 +217,7 @@ impl<'t> Typechecker<'t> {
                     (Type::Int, Type::Int) => Type::Int,
                     (Type::Double, Type::Double) => Type::Double,
                     (_, _) if lhs == rhs => {
-                        return Err(PgError::with_msg(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Unsupported type {} for {:?}, want Int or Double",
                                 lhs,
@@ -138,7 +227,7 @@ impl<'t> Typechecker<'t> {
                         ));
                     }
                     (_, _) => {
-                        return Err(PgError::with_msg(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Incompatible types {} and {} for {:?}",
                                 lhs,
@@ -153,13 +242,13 @@ impl<'t> Typechecker<'t> {
             lex::Type::Percent => match (lhs, rhs) {
                 (Type::Int, Type::Int) => Type::Int,
                 (_, _) if lhs == rhs => {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         format!("Unsupported type {} for {:?}, want Int", lhs, op.t.as_str()),
                         op,
                     ));
                 }
                 (_, _) => {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         format!(
                             "Incompatible types {} and {} for {:?}, want both sides Int",
                             lhs,
@@ -174,7 +263,7 @@ impl<'t> Typechecker<'t> {
                 match (lhs, rhs) {
                     (Type::Int, Type::Int) | (Type::Bool, Type::Bool) => {}
                     (_, _) if lhs == rhs => {
-                        return Err(PgError::with_msg(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Unsupported type {} for {:?}, want Int or Bool",
                                 lhs,
@@ -184,7 +273,7 @@ impl<'t> Typechecker<'t> {
                         ));
                     }
                     (_, _) => {
-                        return Err(PgError::with_msg(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Incompatible types {} and {} for {:?}, want both sides Int or both sides Bool",
                                 lhs,
@@ -201,7 +290,7 @@ impl<'t> Typechecker<'t> {
                 match (lhs, rhs) {
                     (Type::Double, Type::Double) | (Type::Int, Type::Int) => {}
                     (_, _) if lhs == rhs => {
-                        return Err(PgError::with_msg(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Unsupported type {} for {:?}, want Int or Double for both sides",
                                 lhs,
@@ -211,7 +300,7 @@ impl<'t> Typechecker<'t> {
                         ));
                     }
                     (_, _) => {
-                        return Err(PgError::with_msg(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Incompatible types {} and {} for {:?}",
                                 lhs,
@@ -231,18 +320,21 @@ impl<'t> Typechecker<'t> {
         })
     }
 
-    fn cast(at: &lex::Token, i: &Type<'t>, o: &Type<'t>) -> Result<Type<'t>, PgError> {
+    fn cast(at: &lex::Token, i: &Type<'t>, o: &Type<'t>) -> Result<Type<'t>, Diagnostic> {
         Ok(match (i, o) {
             (Type::Int, Type::Double) => Type::Double,
             (Type::Double | Type::Bool, Type::Int) => Type::Int,
             (Type::Int, Type::Bool) => Type::Bool,
+            (_, _) if i == o => {
+                return Err(Self::redundant_cast_error(at, i));
+            }
             (_, _) => {
-                return Err(PgError::with_msg(format!("Can not cast {i} to {o}"), at));
+                return Err(Diagnostic::at_token(format!("Can not cast {i} to {o}"), at));
             }
         })
     }
 
-    fn block_type(&mut self, nodes: &[NodeId]) -> Result<Type<'t>, PgError> {
+    fn block_type(&mut self, nodes: &[NodeId]) -> Result<Type<'t>, Diagnostic> {
         self.env.push(HashMap::new());
         let mut last_type = Type::Void;
         for &node in nodes {
@@ -252,7 +344,7 @@ impl<'t> Typechecker<'t> {
         Ok(last_type)
     }
 
-    pub fn node(&mut self, node_id: NodeId) -> Result<Type<'t>, PgError> {
+    pub fn node(&mut self, node_id: NodeId) -> Result<Type<'t>, Diagnostic> {
         let node = self.ast.node(node_id);
         if let Some(t) = self.already_checked(node_id) {
             return Ok(t);
@@ -276,7 +368,7 @@ impl<'t> Typechecker<'t> {
                 let t = self
                     .env_get(inner_name)
                     .ok_or_else(|| {
-                        PgError::with_msg(format!("binding `{inner_name}` not found"), name)
+                        Diagnostic::at_token(format!("binding `{inner_name}` not found"), name)
                     })?
                     .clone();
 
@@ -296,7 +388,7 @@ impl<'t> Typechecker<'t> {
                     (lex::Type::Plus | lex::Type::Minus, Type::Int) => Type::Int,
                     (lex::Type::Plus | lex::Type::Minus, Type::Double) => Type::Double,
                     _ => {
-                        return Err(PgError::with_msg(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Unary {:?} requires Int or Double, got {}",
                                 op.t.as_str(),
@@ -338,7 +430,7 @@ impl<'t> Typechecker<'t> {
                 };
 
                 if self.functions.contains_key(inner_name) {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         format!("`{inner_name}` is already defined"),
                         name,
                     ));
@@ -371,7 +463,7 @@ impl<'t> Typechecker<'t> {
 
                 let computed_ret = self.block_type(body)?;
                 if ret != computed_ret {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         format!("`{inner_name}` should return {ret}, but returns {computed_ret}"),
                         self.ast.type_token(*return_type),
                     ));
@@ -395,16 +487,15 @@ impl<'t> Typechecker<'t> {
             Node::Call { id, target, args } => {
                 let (tok, inner_name, fun) = match self.ast.node(*target) {
                     Node::Field { target, name, .. } => {
-                        let Node::Ident {
-                            name:
-                                lex::Token {
-                                    t: lex::Type::Ident(pkg_name),
-                                    ..
-                                },
-                            ..
-                        } = self.ast.node(*target)
-                        else {
+                        let Node::Ident { name: pkg_tok, .. } = self.ast.node(*target) else {
                             // TODO: add error handling for non ident call targets
+                            unreachable!();
+                        };
+                        let lex::Token {
+                            t: lex::Type::Ident(pkg_name),
+                            ..
+                        } = pkg_tok
+                        else {
                             unreachable!();
                         };
 
@@ -426,14 +517,11 @@ impl<'t> Typechecker<'t> {
                         }
 
                         let Some(pkg) = self.packages.get(pkg_name) else {
-                            return Err(PgError::with_msg(
-                                format!("Can't find package `{pkg_name}`"),
-                                name,
-                            ));
+                            return Err(self.missing_package_error(pkg_name, pkg_tok));
                         };
 
                         let Some(candidates) = pkg.get(inner_name) else {
-                            return Err(PgError::with_msg(
+                            return Err(Diagnostic::at_token(
                                 format!("Call to undefined function `{pkg_name}.{inner_name}`"),
                                 name,
                             ));
@@ -449,23 +537,8 @@ impl<'t> Typechecker<'t> {
                             let Some(idx) = candidates.iter().position(|c| {
                                 crate::overload_matches(c.args.iter().map(|(_, t)| t), provided())
                             }) else {
-                                // cold path: format the provided/available signatures.
-                                fn sig<'a, 'b: 'a>(
-                                    types: impl Iterator<Item = &'a Type<'b>>,
-                                ) -> String {
-                                    types.map(ToString::to_string).collect::<Vec<_>>().join(", ")
-                                }
-                                let avail = candidates
-                                    .iter()
-                                    .map(|c| sig(c.args.iter().map(|(_, t)| t)))
-                                    .collect::<Vec<_>>()
-                                    .join(" | ");
-                                return Err(PgError::with_msg(
-                                    format!(
-                                        "no specialisation of `{pkg_name}.{inner_name}` accepts ({}); available: {avail}",
-                                        sig(provided())
-                                    ),
-                                    name,
+                                return Err(self.specialisation_miss_error(
+                                    pkg_name, inner_name, name, args, candidates,
                                 ));
                             };
 
@@ -497,7 +570,7 @@ impl<'t> Typechecker<'t> {
                             unreachable!();
                         };
                         let Some(fun) = self.functions.get(inner_name).cloned() else {
-                            return Err(PgError::with_msg(
+                            return Err(Diagnostic::at_token(
                                 format!("Call to undefined function `{inner_name}`"),
                                 name,
                             ));
@@ -508,7 +581,7 @@ impl<'t> Typechecker<'t> {
                 };
 
                 if args.len() != fun.args.len() {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         format!(
                             "`{}` requires {} arguments, got {}",
                             inner_name,
@@ -526,7 +599,7 @@ impl<'t> Typechecker<'t> {
                     let expected_type = &fun.args[i].1;
 
                     if expected_type != &provided_type {
-                        return Err(PgError::with_msg(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "`{inner_name}` arg{i} expected {expected_type}, got {provided_type} instead",
                             ),
@@ -554,7 +627,7 @@ impl<'t> Typechecker<'t> {
                     let condition_type: Type<'t> = self.node(*condition)?;
 
                     if condition_type != Type::Bool {
-                        return Err(PgError::with_msg(
+                        return Err(Diagnostic::at_token(
                             format!("Match conditions must be Bool, got {condition_type} instead"),
                             condition_token,
                         ));
@@ -572,7 +645,7 @@ impl<'t> Typechecker<'t> {
                     let Some((tok, ty)) = cur else { unreachable!() };
 
                     if ty != &first_type {
-                        return Err(PgError::with_msg(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Match cases must resolve to the same type, but got {first_type} and {ty}"
                             ),
@@ -586,7 +659,7 @@ impl<'t> Typechecker<'t> {
             }
             Node::Import { pkgs, src, .. } => {
                 if pkgs.is_empty() {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         "Import without any paths to import is considered invalid",
                         src,
                     ));
@@ -598,7 +671,7 @@ impl<'t> Typechecker<'t> {
                     };
 
                     let Some(pkg) = self.resolve_pkg(pkg_name) else {
-                        return Err(PgError::with_msg(
+                        return Err(Diagnostic::at_token(
                             format!("Wasnt able to find a package named `{pkg_name}`"),
                             pkg_tok,
                         ));

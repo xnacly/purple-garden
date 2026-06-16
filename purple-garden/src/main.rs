@@ -1,6 +1,6 @@
 use purple_garden::{help, input::Input};
 use purple_garden_bc as bc;
-use purple_garden_frontend::{err::PgError, lex::Lexer, lower::Lower, parser::Parser};
+use purple_garden_frontend::{diagnostic::Diagnostic, lex::Lexer, lower::Lower, parser::Parser};
 use purple_garden_runtime::VmConfig;
 use purple_garden_shared::config;
 use purple_garden_std::{self as pstd, Pkg};
@@ -202,7 +202,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = program.run() {
         eprintln!(
             "{}",
-            PgError::from_anomaly(e, &program.debug).render(input_source, input.as_bytes())
+            Diagnostic::from_anomaly(e, &program.debug).render(input_source, input.as_bytes())
         );
 
         if conf.backtrace {

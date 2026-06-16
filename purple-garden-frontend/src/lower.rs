@@ -2,12 +2,12 @@ use std::{collections::HashMap, num};
 
 use crate::{
     ast::{Ast, Node, NodeId, TypeExpr},
-    err::PgError,
+    diagnostic::Diagnostic,
     lex::{self, Token, Type},
     type_from_type_expr,
 };
 use purple_garden_ir::{
-    BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype,
+    ptype, BinOp, Block, Const, Func, Id, Instr, Terminator, TypeId, EMPTY_PARAMS,
 };
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
@@ -42,8 +42,13 @@ pub struct Lower<'lower> {
     functions: Vec<Func<'lower>>,
     func_name_to_id: HashMap<&'lower str, (Id, Option<ptype::Type<'lower>>)>,
     types: Vec<Option<ptype::Type<'lower>>>,
-    packages:
-        HashMap<&'lower str, (&'lower Pkg, HashMap<&'lower str, Vec<&'lower pstd::Fn<'static>>>)>,
+    packages: HashMap<
+        &'lower str,
+        (
+            &'lower Pkg,
+            HashMap<&'lower str, Vec<&'lower pstd::Fn<'static>>>,
+        ),
+    >,
     pkg_cache: HashMap<&'lower str, Option<&'lower Pkg>>,
     libs: Vec<&'lower Pkg>,
 }
@@ -111,7 +116,7 @@ impl<'lower> Lower<'lower> {
         &mut self,
         ast: &'lower Ast<'lower>,
         node_id: NodeId,
-    ) -> Result<Option<Id>, PgError> {
+    ) -> Result<Option<Id>, Diagnostic> {
         let node = ast.node(node_id);
         Ok(match node {
             Node::Atom { raw, .. } => {
@@ -120,15 +125,13 @@ impl<'lower> Lower<'lower> {
                     Type::D(doub) => Const::Double(
                         doub.parse::<f64>()
                             .map_err(|e: num::ParseFloatError| {
-                                PgError::with_msg(e.to_string(), raw)
+                                Diagnostic::at_token(e.to_string(), raw)
                             })?
                             .to_bits(),
                     ),
-                    Type::I(int) => {
-                        Const::Int(int.parse().map_err(|e: num::ParseIntError| {
-                            PgError::with_msg(e.to_string(), raw)
-                        })?)
-                    }
+                    Type::I(int) => Const::Int(int.parse().map_err(|e: num::ParseIntError| {
+                        Diagnostic::at_token(e.to_string(), raw)
+                    })?),
                     Type::True => Const::True,
                     Type::False => Const::False,
                     _ => unreachable!(),
@@ -153,7 +156,10 @@ impl<'lower> Lower<'lower> {
                 if let Some(id) = self.ctx.env.get(i) {
                     Some(*id)
                 } else {
-                    return Err(PgError::with_msg(format!("Undefined variable `{i}`"), name));
+                    return Err(Diagnostic::at_token(
+                        format!("Undefined variable `{i}`"),
+                        name,
+                    ));
                 }
             }
             Node::Bin { op, lhs, rhs, id } => {
@@ -263,7 +269,7 @@ impl<'lower> Lower<'lower> {
                 if let Some(id) = self.lower_node(ast, *rhs)? {
                     self.ctx.env.insert(i, id);
                 } else {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         "RHS of let has to return a value, but it didnt",
                         name,
                     ));
@@ -385,8 +391,11 @@ impl<'lower> Lower<'lower> {
                         } else {
                             // arg types stream by reference from the type map; the
                             // typechecker already proved exactly one variant matches.
-                            let provided =
-                                || args.iter().map(|&n| self.types[ast.value_id(n).unwrap()].as_ref().unwrap());
+                            let provided = || {
+                                args.iter().map(|&n| {
+                                    self.types[ast.value_id(n).unwrap()].as_ref().unwrap()
+                                })
+                            };
                             *candidates
                                 .iter()
                                 .find(|f| crate::overload_matches(f.args.iter(), provided()))
@@ -414,7 +423,7 @@ impl<'lower> Lower<'lower> {
 
                         let Some((target_id, ret)) = self.func_name_to_id.get(inner_name).cloned()
                         else {
-                            return Err(PgError::with_msg(
+                            return Err(Diagnostic::at_token(
                                 format!("Undefined function `{inner_name}`"),
                                 name,
                             ));
@@ -598,7 +607,7 @@ impl<'lower> Lower<'lower> {
     }
 
     /// Lower [ast] into a list of Func nodes, the entry point is always `entry`
-    pub fn ir_from(mut self, ast: &'lower Ast<'lower>) -> Result<Vec<Func<'lower>>, PgError> {
+    pub fn ir_from(mut self, ast: &'lower Ast<'lower>) -> Result<Vec<Func<'lower>>, Diagnostic> {
         let mut typechecker = crate::typecheck::Typechecker::new(ast).with_libs(self.libs.clone());
         for &node in &ast.roots {
             let _t = typechecker.node(node)?;
