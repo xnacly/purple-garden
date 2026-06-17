@@ -4,6 +4,7 @@
 # one huge IR Func (thousands of SSA ids).
 import "testing"
 
+#! Classify one integer through a very wide match table.
 fn classify(n:Int) Int {
     match {
         n == 0 { 1 }
@@ -1010,6 +1011,7 @@ fn classify(n:Int) Int {
     }
 }
 
+#! Sweep across many inputs and accumulate the wide-match results.
 fn sweep(i:Int n:Int acc:Int) Int {
     match {
         i == n { acc }

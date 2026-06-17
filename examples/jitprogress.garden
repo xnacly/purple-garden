@@ -1,5 +1,6 @@
 import "testing"
 
+#! Exercise several dependent integer arithmetic operations in one expression chain.
 fn arithmetics(a:Int b:Int c:Int d:Int) Int {
     let x1 = a + b * c - d
     let x2 = x1 + c * d - b
@@ -7,10 +8,13 @@ fn arithmetics(a:Int b:Int c:Int d:Int) Int {
     let x4 = x3 + x2 * b - d
     x4 + x1 % 2
 }
+
+#! Exercise integer division and modulo code generation.
 fn divs(a:Int b:Int) Int {
     a / 7 + b % 3
 }
 
+#! Return one value for zero and another for any non-zero input.
 fn absish(n:Int) Int {
     match {
         n == 0 { 1 }
@@ -18,6 +22,7 @@ fn absish(n:Int) Int {
     }
 }
 
+#! Tail-recursive factorial used as a progress check for larger integer results.
 fn factorial(n:Int a:Int) Int {
     match {
         n == 0 { a }

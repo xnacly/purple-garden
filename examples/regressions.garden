@@ -1,10 +1,10 @@
 # Regressions for codegen bugs
 import "testing"
 
-# Branch successor-param liveness: if the param-shuffle into the join
-# block's parameter register lands on cond's register, JmpF reads the
-# wrong value and the wrong branch fires. Reproduces when the first arm
-# returns a function parameter (so its shuffle dst matches cond's reg).
+#! Branch successor-param liveness: if the param-shuffle into the join
+#! block's parameter register lands on cond's register, JmpF reads the
+#! wrong value and the wrong branch fires. Reproduces when the first arm
+#! returns a function parameter (so its shuffle dst matches cond's reg).
 fn pick(n:Int a:Int) Int {
     match {
         n == 0 { a }
@@ -15,11 +15,11 @@ testing.assert(pick(0 11) == 11)
 testing.assert(pick(5 22) == 999)
 testing.assert(pick(7 33) == 999)
 
-# Caller-save spill across Call: %v9 (fib(n-1)) lives in r1 across the
-# fib(n-2) call; if pos used the block-local index instead of the global
-# live_set coordinate, the spill check misses r1 and the recursive call
-# clobbers it. Result is wrong unless r1 is actually pushed across the
-# nested call.
+#! Caller-save spill across Call: %v9 (fib(n-1)) lives in r1 across the
+#! fib(n-2) call; if pos used the block-local index instead of the global
+#! live_set coordinate, the spill check misses r1 and the recursive call
+#! clobbers it. Result is wrong unless r1 is actually pushed across the
+#! nested call.
 fn fib(n:Int) Int {
     match {
         n == 0 { 0 }
@@ -29,24 +29,23 @@ fn fib(n:Int) Int {
 }
 testing.assert(fib(10) == 55)
 
-# Parallel-move shuffle on Call args: io.println consumes r0 first, so the
-# regalloc places the next call's args in r1, r0; a swap relative to r0, r1.
-# Sequential `mov` would clobber a still-needed source (and mov_merge would
-# then collapse the swap into nops).
+#! Parallel-move shuffle on Call args: io.println consumes r0 first, so the
+#! regalloc places the next call's args in r1, r0; a swap relative to r0, r1.
+#! Sequential `mov` would clobber a still-needed source (and mov_merge would
+#! then collapse the swap into nops).
 fn diff(a:Int b:Int) Int { a - b }
 testing.assert(true)
 testing.assert(diff(10 3) == 7)
 testing.assert(diff(100 1) == 99)
 
-# block_map collisions across functions: ir block ids restart at 0 per
-# function, so a shared block_map patched at finalize would route a
-# branch in the first function to a block in the second.
+#! First branch function for checking block_map collisions across functions.
 fn first_branch(n:Int) Int {
     match {
         n == 0 { 1 }
         { 2 }
     }
 }
+#! Second branch function for checking block_map collisions across functions.
 fn second_branch(n:Int) Int {
     match {
         n == 0 { 10 }
@@ -58,16 +57,14 @@ testing.assert(first_branch(1) == 2)
 testing.assert(second_branch(0) == 10)
 testing.assert(second_branch(1) == 20)
 
-# Unary +/- on Int and Double. The lowering rewrites `-x` to `0 - x`
-# (ISub/DSub against a freshly emitted zero const) and `+x` to a no-op,
-# so the regression catches an accidental wrong-op routing or a missing
-# zero const for either numeric type.
+#! Negate an integer through subtraction from zero.
 fn neg(x:Int) Int { 0 - x }
 testing.assert(-5 == neg(5))
 testing.assert(-0 == 0)
 testing.assert(+7 == 7)
 testing.assert(- - 3 == 3)
 testing.assert(-(2 + 3) == neg(5))
+#! Apply unary negation before multiplying by two.
 fn double_neg(x:Int) Int { -x * 2 }
 testing.assert(double_neg(4) == neg(8))
 testing.assert(double_neg(-5) == 10)
@@ -76,9 +73,7 @@ testing.assert(-1.5 < 0.0)
 testing.assert(+1.5 > 0.0)
 testing.assert(- - 2.5 > 0.0)
 
-# Typechecker scope stack: function params must be visible inside match arm
-# conditions and bodies; let bindings in one arm must not leak into siblings;
-# outer let must be reachable from nested arms; inner let shadows outer binding.
+#! Pick from function parameters inside match arms to verify parameter scope.
 fn scope_pick(x:Int y:Int) Int {
     match {
         x == 0 { y }
@@ -88,6 +83,7 @@ fn scope_pick(x:Int y:Int) Int {
 testing.assert(scope_pick(0 42) == 42)
 testing.assert(scope_pick(3 7) == 10)
 
+#! Use separate branch-local bindings without leaking between match arms.
 fn scope_sign(x:Int) Int {
     match {
         x > 0 {
@@ -103,6 +99,7 @@ fn scope_sign(x:Int) Int {
 testing.assert(scope_sign(5) == 10)
 testing.assert(scope_sign(-3) == 3)
 
+#! Read an outer let binding from nested match arms.
 fn scope_base(x:Int) Int {
     let base = 100
     match {
@@ -113,6 +110,7 @@ fn scope_base(x:Int) Int {
 testing.assert(scope_base(0) == 100)
 testing.assert(scope_base(5) == 105)
 
+#! Shadow a function parameter inside one match arm only.
 fn scope_shadow(x:Int) Int {
     match {
         x > 0 {

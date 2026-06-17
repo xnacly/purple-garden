@@ -4,6 +4,7 @@
 # loop after the tailcall pass.
 import "testing"
 
+#! Compute Fibonacci numbers with the classic doubly-recursive definition.
 fn fib(n:Int) Int {
     match {
         n == 0 { 0 }
@@ -12,6 +13,7 @@ fn fib(n:Int) Int {
     }
 }
 
+#! Compute Fibonacci numbers with a tail-recursive accumulator pair.
 fn fibt(n:Int a:Int b:Int) Int {
     match {
         n == 0 { a }

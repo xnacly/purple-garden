@@ -3,6 +3,7 @@
 # Each pixel iterates until |z|^2 > 4 or `max` reached, then we sum.
 import "testing"
 
+#! Return the iteration at which one point escapes, or `max` if it remains bounded.
 fn mandel_iter(zr:Double zi:Double cr:Double ci:Double i:Int max:Int) Int {
     match {
         i == max { max }
@@ -11,6 +12,7 @@ fn mandel_iter(zr:Double zi:Double cr:Double ci:Double i:Int max:Int) Int {
     }
 }
 
+#! Sum Mandelbrot escape counts across a horizontal slice of sample points.
 fn slice_sum(i:Int n:Int max:Int acc:Int) Int {
     match {
         i == n { acc }

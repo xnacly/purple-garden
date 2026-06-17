@@ -3,8 +3,8 @@
 # so this stresses parallel-move arg shuffles and caller-save spill.
 import "testing"
 
-# Knuth's `y`-variant of Takeuchi: returns y in the base case.
-# Used as a workload, not a verification of a specific external value.
+#! Knuth's `y`-variant of Takeuchi: returns y in the base case.
+#! Used as a workload, not a verification of a specific external value.
 fn tak(x:Int y:Int z:Int) Int {
     match {
         y < x { tak(tak(x-1 y z) tak(y-1 z x) tak(z-1 x y)) }
