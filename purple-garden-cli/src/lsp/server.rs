@@ -6,8 +6,9 @@ use lsp_server::{
 };
 use lsp_types::{
     CodeActionProviderCapability, CompletionOptions, CompletionResponse, DiagnosticOptions,
-    FullDocumentDiagnosticReport, HoverProviderCapability, InitializeParams, PublishDiagnosticsParams,
-    SaveOptions, ServerCapabilities, TextDocumentSyncKind, TextDocumentSyncOptions, Uri,
+    FullDocumentDiagnosticReport, HoverProviderCapability, InitializeParams,
+    PublishDiagnosticsParams, SaveOptions, ServerCapabilities, TextDocumentSyncKind,
+    TextDocumentSyncOptions, Uri,
     notification::{
         DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
     },
@@ -204,7 +205,12 @@ fn handle_notification(
     match not.method.as_str() {
         "textDocument/didOpen" => match cast_noti::<DidOpenTextDocument>(not) {
             Ok(params) => {
-                update_document(connection, documents, params.text_document.uri, params.text_document.text)?;
+                update_document(
+                    connection,
+                    documents,
+                    params.text_document.uri,
+                    params.text_document.text,
+                )?;
             }
             Err(err) => lsp_log!("failed to parse notification: {}", err),
         },
@@ -276,10 +282,12 @@ fn publish_diagnostics(
         diagnostics,
         version: None,
     };
-    connection.sender.send(Message::Notification(Notification::new(
-        "textDocument/publishDiagnostics".to_owned(),
-        params,
-    )))?;
+    connection
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/publishDiagnostics".to_owned(),
+            params,
+        )))?;
     Ok(())
 }
 

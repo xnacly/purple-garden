@@ -27,6 +27,7 @@ pub(super) struct DocumentState {
 struct DocumentAnalysis {
     diagnostics: Vec<FrontendDiagnostic>,
     hovers: Vec<HoverEntry>,
+    imported_packages: Vec<String>,
     completions: Vec<CompletionEntry>,
 }
 
@@ -106,7 +107,12 @@ impl DocumentState {
 
     pub(super) fn completions_at(&self, position: Position) -> Vec<CompletionItem> {
         let offset = offset_for_position(&self.text, position);
-        completion::items_at(&self.analysis.completions, &self.text, offset)
+        completion::items_at(
+            &self.analysis.completions,
+            &self.analysis.imported_packages,
+            &self.text,
+            offset,
+        )
     }
 }
 
@@ -175,6 +181,16 @@ impl DocumentAnalysis {
     ) {
         self.completions
             .push(CompletionEntry::local(label, kind, detail));
+    }
+
+    fn add_imported_package(&mut self, pkg: &str) {
+        if !self
+            .imported_packages
+            .iter()
+            .any(|imported| imported == pkg)
+        {
+            self.imported_packages.push(pkg.to_owned());
+        }
     }
 }
 
@@ -267,6 +283,7 @@ fn collect_analysis_entries(
         }
         Node::Import { pkgs, .. } => {
             for pkg in pkgs {
+                analysis.add_imported_package(pkg.t.as_str());
                 if let Some(detail) = import_hover(pkg) {
                     analysis.add_resolved_markdown_hover(token_span(pkg), detail);
                 }

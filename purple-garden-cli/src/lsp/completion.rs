@@ -40,9 +40,17 @@ pub(super) fn global_completions() -> &'static [CompletionEntry] {
 
 pub(super) fn items_at(
     completions: &[CompletionEntry],
+    imported_packages: &[String],
     source: &str,
     offset: usize,
 ) -> Vec<CompletionItem> {
+    if let Some(items) = import_string_items(source, offset) {
+        return items;
+    }
+    if let Some(items) = package_member_items(imported_packages, source, offset) {
+        return items;
+    }
+
     let prefix = completion_prefix(source, offset);
     let mut items = completions
         .iter()
@@ -52,6 +60,61 @@ pub(super) fn items_at(
     items.sort_by(|(lhs_key, _), (rhs_key, _)| lhs_key.cmp(rhs_key));
     items.dedup_by(|(_, lhs), (_, rhs)| lhs.label == rhs.label);
     items.into_iter().map(|(_, item)| item).collect()
+}
+
+fn import_string_items(source: &str, offset: usize) -> Option<Vec<CompletionItem>> {
+    let line = line_prefix(source, offset);
+    let quote = line.rfind('"')?;
+    let before_quote = line[..quote].trim_start();
+    if !before_quote.starts_with("import") {
+        return None;
+    }
+
+    let prefix = &line[quote + 1..];
+    Some(
+        package_entries()
+            .iter()
+            .filter(|entry| entry.label.starts_with(prefix))
+            .map(completion_item)
+            .collect(),
+    )
+}
+
+fn package_member_items(
+    imported_packages: &[String],
+    source: &str,
+    offset: usize,
+) -> Option<Vec<CompletionItem>> {
+    let line = line_prefix(source, offset);
+    let dot = line.rfind('.')?;
+    let pkg_start = line[..dot]
+        .char_indices()
+        .rev()
+        .find_map(|(idx, ch)| (!is_completion_char(ch)).then_some(idx + ch.len_utf8()))
+        .unwrap_or(0);
+    let pkg_name = &line[pkg_start..dot];
+    if pkg_name.is_empty() || !imported_packages.iter().any(|pkg| pkg == pkg_name) {
+        return None;
+    }
+
+    let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
+    let prefix = &line[dot + 1..];
+    let mut items = pkg
+        .overload_groups()
+        .into_iter()
+        .filter(|(name, _)| prefix.is_empty() || name.starts_with(prefix))
+        .map(|(name, variants)| {
+            completion_item(&CompletionEntry {
+                label: name.to_owned(),
+                kind: CompletionItemKind::FUNCTION,
+                detail: Some(completion_detail_for_fns(name, &variants)),
+                documentation: function_doc(&format!("{pkg_name}.{name}"), &variants),
+                scope: CompletionScope::Local,
+            })
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(|lhs, rhs| lhs.label.cmp(&rhs.label));
+    Some(items)
 }
 
 pub(super) fn function_signature(name: &str, fun: &purple_garden_runtime::Fn<'_>) -> String {
@@ -95,6 +158,38 @@ fn build_global_completions() -> Vec<CompletionEntry> {
         collect_pkg_completions(pkg, None, &mut completions);
     }
     completions
+}
+
+fn package_entries() -> &'static [CompletionEntry] {
+    static PACKAGES: OnceLock<Vec<CompletionEntry>> = OnceLock::new();
+    PACKAGES.get_or_init(|| {
+        let mut completions = Vec::new();
+        for pkg in purple_garden_std::STD {
+            collect_package_entries(pkg, None, &mut completions);
+        }
+        completions
+    })
+}
+
+fn collect_package_entries(
+    pkg: &'static purple_garden_runtime::Pkg,
+    parent: Option<&str>,
+    completions: &mut Vec<CompletionEntry>,
+) {
+    let path = parent.map_or_else(
+        || pkg.name.to_owned(),
+        |parent| format!("{parent}/{}", pkg.name),
+    );
+    completions.push(CompletionEntry {
+        label: path.clone(),
+        kind: CompletionItemKind::MODULE,
+        detail: Some(format!("import \"{}\"", path)),
+        documentation: package_doc(&path, pkg),
+        scope: CompletionScope::Global,
+    });
+    for sub in pkg.pkgs {
+        collect_package_entries(sub, Some(&path), completions);
+    }
 }
 
 fn collect_pkg_completions(
@@ -179,6 +274,16 @@ fn completion_prefix(source: &str, offset: usize) -> String {
         .find_map(|(idx, ch)| (!is_completion_char(ch)).then_some(idx + ch.len_utf8()))
         .unwrap_or(0);
     source[start..clamped].to_owned()
+}
+
+fn line_prefix(source: &str, offset: usize) -> &str {
+    let clamped = offset.min(source.len());
+    let start = source[..clamped]
+        .as_bytes()
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |idx| idx + 1);
+    &source[start..clamped]
 }
 
 fn is_completion_char(ch: char) -> bool {
