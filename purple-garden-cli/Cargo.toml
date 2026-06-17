@@ -24,6 +24,8 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5.54", features = ["derive"] }
+lsp-server = "=0.7.8"
+lsp-types = "0.97.0"
 purple-garden = { path = "../purple-garden" }
 purple-garden-ir = { path = "../purple-garden-ir" }
 purple-garden-jit = { path = "../purple-garden-jit" }
@@ -33,3 +35,5 @@ purple-garden-opt = { path = "../purple-garden-opt" }
 purple-garden-bc = { path = "../purple-garden-bc" }
 purple-garden-frontend = { path = "../purple-garden-frontend" }
 purple-garden-shared = { path = "../purple-garden-shared", features = ["cli"] }
+serde = "1.0"
+serde_json = "1.0"

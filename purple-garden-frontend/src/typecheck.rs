@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     ast::{Ast, Node, NodeId},
-    diagnostic::{Diagnostic, Help},
+    diagnostic::{Diagnostic, Help, Span},
     lex::{self, Token},
 };
 use purple_garden_ir::ptype::Type;
@@ -420,7 +420,10 @@ impl<'t> Typechecker<'t> {
         if self.resolve_pkg(pkg_name).is_some() {
             err = err
                 .with_note(format!("package `{pkg_name}` exists but is not imported"))
-                .with_help(Help::new(format!("add `import \"{pkg_name}\"`")));
+                .with_help(
+                    Help::new(format!("add `import \"{pkg_name}\"`"))
+                        .with_replacement(Span::new(0, 0), format!("import \"{pkg_name}\"\n")),
+                );
         }
         err
     }
@@ -775,7 +778,13 @@ impl<'t> Typechecker<'t> {
                 }
                 cast
             }
-            Node::Field { .. } => todo!(),
+            Node::Field { name, .. } => {
+                self.report(Diagnostic::at_token(
+                    "field expressions are only supported as package function calls",
+                    name,
+                ));
+                TcType::Poison
+            }
             Node::Call { id, target, args } => {
                 let (tok, inner_name, fun) = match self.ast.node(*target) {
                     Node::Field { target, name, .. } => {

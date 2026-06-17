@@ -1,3 +1,10 @@
+mod analysis;
+mod code_action;
+mod completion;
+mod diagnostic;
+mod server;
+mod source;
+
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    Err("lsp server is not implemented yet".into())
+    server::run()
 }
