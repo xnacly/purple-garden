@@ -6,13 +6,13 @@ use lsp_server::{
 };
 use lsp_types::{
     CodeActionProviderCapability, CompletionOptions, CompletionResponse, DiagnosticOptions,
-    FullDocumentDiagnosticReport, HoverProviderCapability, InitializeParams,
+    FullDocumentDiagnosticReport, HoverProviderCapability, InitializeParams, OneOf,
     PublishDiagnosticsParams, SaveOptions, ServerCapabilities, TextDocumentSyncKind,
     TextDocumentSyncOptions, Uri,
     notification::{
         DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
     },
-    request::{Completion, DocumentDiagnosticRequest, HoverRequest},
+    request::{Completion, DocumentDiagnosticRequest, GotoDefinition, HoverRequest},
 };
 
 use super::analysis::DocumentState;
@@ -65,6 +65,7 @@ fn server_capabilities() -> ServerCapabilities {
                 ..Default::default()
             },
         )),
+        definition_provider: Some(OneOf::Left(true)),
         code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
         text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Options(
             TextDocumentSyncOptions {
@@ -111,6 +112,7 @@ fn handle_request(
     match req.method.as_str() {
         "textDocument/completion" => handle_completion(connection, documents, req),
         "textDocument/hover" => handle_hover(connection, documents, req),
+        "textDocument/definition" => handle_definition(connection, documents, req),
         "textDocument/diagnostic" => handle_diagnostic(connection, documents, req),
         "textDocument/codeAction" => handle_code_action(connection, documents, req),
         _ => send_error(
@@ -171,6 +173,23 @@ fn handle_hover(
         .get(&pos.text_document.uri.to_string())
         .and_then(|state| state.hover_at(pos.position));
     send_response(connection, id, hover)
+}
+
+fn handle_definition(
+    connection: &Connection,
+    documents: &HashMap<String, DocumentState>,
+    req: Request,
+) -> LspResult<()> {
+    let id = req.id.clone();
+    let (id, params) = match cast::<GotoDefinition>(req) {
+        Ok(v) => v,
+        Err(err) => return send_request_error(connection, id, err),
+    };
+    let pos = params.text_document_position_params;
+    let definition = documents
+        .get(&pos.text_document.uri.to_string())
+        .and_then(|state| state.definition_at(pos.text_document.uri, pos.position));
+    send_response(connection, id, definition)
 }
 
 fn handle_diagnostic(
