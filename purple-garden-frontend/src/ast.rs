@@ -53,7 +53,12 @@ impl<'ast> Ast<'ast> {
         self.roots
             .iter()
             .copied()
-            .find(|&node| !matches!(self.node(node), Node::Fn { .. } | Node::Import { .. }))
+            .find(|&node| {
+                !matches!(
+                    self.node(node),
+                    Node::Fn { .. } | Node::Import { .. } | Node::Extern { .. }
+                )
+            })
             .and_then(|node| self.node_start(node))
     }
 
@@ -77,7 +82,9 @@ impl<'ast> Ast<'ast> {
             Node::Call { target, .. } | Node::Field { target, .. } => {
                 self.node_start(*target)? as usize
             }
-            Node::Cast { src, .. } | Node::Import { src, .. } => src.start,
+            Node::Cast { src, .. } | Node::Import { src, .. } | Node::Extern { src, .. } => {
+                src.start
+            }
         } as u32)
     }
 
@@ -188,6 +195,22 @@ pub enum Node<'node> {
         /// list of packages to import as strings
         pkgs: Vec<Token<'node>>,
     },
+
+    /// extern "<pkg name>" { fn <name>(<arg0:type0>) <return_type> }
+    Extern {
+        src: Token<'node>,
+        docs: Vec<Token<'node>>,
+        name: Token<'node>,
+        fns: Vec<ExternFn<'node>>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternFn<'node> {
+    pub docs: Vec<Token<'node>>,
+    pub name: Token<'node>,
+    pub args: Vec<(Token<'node>, TypeExprId)>,
+    pub return_type: TypeExprId,
 }
 
 impl Node<'_> {
@@ -205,7 +228,7 @@ impl Node<'_> {
             | Node::Call { id, .. }
             | Node::Cast { id, .. }
             | Node::Field { id, .. } => *id,
-            Node::Fn { .. } | Node::Import { .. } => return None,
+            Node::Fn { .. } | Node::Import { .. } | Node::Extern { .. } => return None,
         })
     }
 }
@@ -369,6 +392,23 @@ impl Ast<'_> {
                     write!(f, "\"{s}\"")?;
                 }
                 writeln!(f, ")")
+            }
+            Node::Extern { name, fns, .. } => {
+                writeln!(f, "{}(extern {}", pad, name.t.as_str())?;
+                for fun in fns {
+                    write!(f, "{}  (fn {} (", pad, fun.name.t.as_str())?;
+                    for (i, (arg_name, arg_type)) in fun.args.iter().enumerate() {
+                        let Type::Ident(arg_name) = arg_name.t else {
+                            unreachable!();
+                        };
+                        if i > 0 {
+                            write!(f, " ")?;
+                        }
+                        write!(f, "{arg_name}:{}", self.type_display(*arg_type))?;
+                    }
+                    writeln!(f, ")->{})", self.type_display(fun.return_type))?;
+                }
+                writeln!(f, "{pad})")
             }
             Node::Field { target, name, .. } => {
                 writeln!(f, "{pad}(get")?;

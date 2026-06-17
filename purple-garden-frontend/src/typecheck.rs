@@ -191,6 +191,26 @@ impl<'t> TypecheckOutput<'t> {
                     writeln!(out, "{}import {}", "  ".repeat(indent), pkg.t.as_str()).unwrap();
                 }
             }
+            Node::Extern { name, fns, .. } => {
+                use std::fmt::Write as _;
+                writeln!(out, "{}extern {}", "  ".repeat(indent), name.t.as_str()).unwrap();
+                for fun in fns {
+                    let args = fun
+                        .args
+                        .iter()
+                        .map(|(_, ty)| ast.type_display(*ty).to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    writeln!(
+                        out,
+                        "{}fn {}: ({args}) -> {}",
+                        "  ".repeat(indent + 1),
+                        fun.name.t.as_str(),
+                        ast.type_display(fun.return_type)
+                    )
+                    .unwrap();
+                }
+            }
         }
     }
 
@@ -325,8 +345,75 @@ impl<'t> Typechecker<'t> {
         pkg
     }
 
+    fn register_pkg(&mut self, pkg: &'t Pkg) {
+        let mut registered: HashMap<&str, Vec<FunctionType>> = HashMap::new();
+        for f in pkg.fns {
+            let f_type = FunctionType {
+                args: f
+                    .arg_names
+                    .iter()
+                    .copied()
+                    .zip(f.args.iter().cloned())
+                    .collect(),
+                ret: f.ret.clone(),
+            };
+            purple_garden_shared::trace!(
+                "[ir::typecheck::Typechecker::node][{}.{}]: {}",
+                pkg.name,
+                f.name,
+                f_type
+            );
+            registered.entry(f.group_name()).or_default().push(f_type);
+        }
+
+        self.packages.insert(pkg.name, registered);
+    }
+
+    fn register_extern(&mut self, node: NodeId) {
+        let Node::Extern { name, fns, .. } = self.ast.node(node) else {
+            return;
+        };
+        let lex::Type::S(pkg_name) = name.t else {
+            unreachable!();
+        };
+
+        let mut registered: HashMap<&str, Vec<FunctionType>> = HashMap::new();
+        for fun in fns {
+            let lex::Type::Ident(fun_name) = fun.name.t else {
+                unreachable!();
+            };
+            let args = fun
+                .args
+                .iter()
+                .map(|(arg_name, arg_type)| {
+                    let lex::Type::Ident(arg_name) = arg_name.t else {
+                        unreachable!();
+                    };
+                    (arg_name, crate::type_from_type_expr(self.ast, *arg_type))
+                })
+                .collect();
+            let f_type = FunctionType {
+                args,
+                ret: crate::type_from_type_expr(self.ast, fun.return_type),
+            };
+            purple_garden_shared::trace!(
+                "[ir::typecheck::Typechecker::extern][{}.{}]: {}",
+                pkg_name,
+                fun_name,
+                f_type
+            );
+            registered.entry(fun_name).or_default().push(f_type);
+        }
+
+        self.packages.insert(pkg_name, registered);
+    }
+
     #[must_use]
     pub fn check(mut self) -> TypecheckOutput<'t> {
+        for &node in &self.ast.roots {
+            self.register_extern(node);
+        }
+
         // Typechecking is the first frontend pass that can collect multiple
         // diagnostics today. Parsing is still fail-fast, but once we have a
         // valid AST we walk every root and preserve any types that remain
@@ -1013,6 +1100,10 @@ impl<'t> Typechecker<'t> {
                         unreachable!();
                     };
 
+                    if self.packages.contains_key(pkg_name) {
+                        continue;
+                    }
+
                     let Some(pkg) = self.resolve_pkg(pkg_name) else {
                         self.report(Diagnostic::at_token(
                             format!("Wasnt able to find a package named `{pkg_name}`"),
@@ -1023,33 +1114,12 @@ impl<'t> Typechecker<'t> {
 
                     purple_garden_shared::trace!("ty: resolved pkg `{}`", pkg.name);
 
-                    let mut registered: HashMap<&str, Vec<FunctionType>> = HashMap::new();
-                    for f in pkg.fns {
-                        let f_type = FunctionType {
-                            args: f
-                                .arg_names
-                                .iter()
-                                .copied()
-                                .zip(f.args.iter().cloned())
-                                .collect(),
-                            ret: f.ret.clone(),
-                        };
-                        purple_garden_shared::trace!(
-                            "[ir::typecheck::Typechecker::node][{}.{}]: {}",
-                            pkg.name,
-                            f.name,
-                            f_type
-                        );
-                        // group specialisations under their group name; a normal
-                        // fn forms a one-element group keyed by its own name.
-                        registered.entry(f.group_name()).or_default().push(f_type);
-                    }
-
-                    self.packages.insert(pkg.name, registered);
+                    self.register_pkg(pkg);
                 }
 
                 TcType::Known(Type::Void)
             }
+            Node::Extern { .. } => TcType::Known(Type::Void),
             Node::Array { .. } => todo!(),
             Node::Object { .. } => todo!(),
         }

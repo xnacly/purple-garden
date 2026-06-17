@@ -452,9 +452,13 @@ impl<'lower> Lower<'lower> {
                         unreachable!();
                     };
 
-                    // the type checker already checks all packages are valid
                     let Some(pkg) = self.resolve_pkg(as_str) else {
-                        unreachable!()
+                        return Err(Diagnostic::at_token(
+                            format!(
+                                "Package `{as_str}` was declared by extern signatures but has no runtime implementation"
+                            ),
+                            pkg_tok,
+                        ));
                     };
 
                     // group specialisations under their group name, mirroring
@@ -467,6 +471,7 @@ impl<'lower> Lower<'lower> {
                 }
                 None
             }
+            Node::Extern { .. } => None,
             Node::Cast { lhs, rhs, src, .. } => {
                 let src_ty = ast
                     .value_id(*lhs)

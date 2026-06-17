@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Ast, Node, NodeId, TypeExpr, TypeExprId},
+    ast::{Ast, ExternFn, Node, NodeId, TypeExpr, TypeExprId},
     diagnostic::Diagnostic,
     lex::{Lexer, Token, Type},
 };
@@ -125,7 +125,13 @@ impl<'p> Parser<'p> {
     fn is_root_boundary(ty: Type<'_>) -> bool {
         matches!(
             ty,
-            Type::Let | Type::Fn | Type::Import | Type::Match | Type::CurlyRight | Type::Eof
+            Type::Let
+                | Type::Fn
+                | Type::Import
+                | Type::Extern
+                | Type::Match
+                | Type::CurlyRight
+                | Type::Eof
         )
     }
 
@@ -162,12 +168,13 @@ impl<'p> Parser<'p> {
             Type::Import => self.parse_import(),
             Type::Let => self.parse_let(),
             Type::Fn => self.parse_fn(),
+            Type::Extern => self.parse_extern(),
             Type::Eof if !self.pending_docs.is_empty() => Err(Diagnostic::at_token(
                 "documentation is not attached to anything",
                 self.pending_docs.last().expect("pending docs not empty"),
             )),
             _ if !self.pending_docs.is_empty() => Err(Diagnostic::at_token(
-                "documentation can only be attached to `let` or `fn`",
+                "documentation can only be attached to `let`, `fn` or `extern`",
                 self.pending_docs.first().expect("pending docs not empty"),
             )),
             Type::Match => self.parse_match(),
@@ -242,15 +249,7 @@ impl<'p> Parser<'p> {
         self.advance()?;
         let name = self.expect_ident()?;
 
-        self.expect(Type::BraceLeft)?;
-        let mut args = vec![];
-        while !self.at_end() && self.cur().t != Type::BraceRight {
-            let arg_name = self.expect_ident()?;
-            self.expect(Type::Colon)?;
-            let arg_type = self.parse_type()?;
-            args.push((arg_name, arg_type));
-        }
-        self.expect(Type::BraceRight)?;
+        let args = self.parse_args()?;
 
         let return_type = if self.cur().t == Type::CurlyLeft {
             self.push_type(TypeExpr::Atom(Token {
@@ -274,6 +273,80 @@ impl<'p> Parser<'p> {
             args,
             return_type,
             body,
+        }))
+    }
+
+    fn parse_args(&mut self) -> Result<Vec<(Token<'p>, TypeExprId)>, Diagnostic> {
+        self.expect(Type::BraceLeft)?;
+        let mut args = vec![];
+        while !self.at_end() && self.cur().t != Type::BraceRight {
+            let arg_name = self.expect_ident()?;
+            self.expect(Type::Colon)?;
+            let arg_type = self.parse_type()?;
+            args.push((arg_name, arg_type));
+        }
+        self.expect(Type::BraceRight)?;
+        Ok(args)
+    }
+
+    /// extern = "extern" string "{" (doc* "fn" ident args type?)* "}"
+    fn parse_extern(&mut self) -> Result<NodeId, Diagnostic> {
+        let docs = self.take_docs();
+        let src = self.cur.clone();
+        self.expect(Type::Extern)?;
+
+        let name = if matches!(self.cur().t, Type::S(_)) {
+            let name = self.cur().clone();
+            self.advance()?;
+            name
+        } else {
+            return Err(Diagnostic::at_token(
+                "Expected a string package name after `extern`",
+                self.cur(),
+            ));
+        };
+
+        self.expect(Type::CurlyLeft)?;
+        let mut fns = Vec::new();
+        while !self.at_end() && self.cur().t != Type::CurlyRight {
+            while matches!(self.cur().t, Type::Doc(_)) {
+                self.pending_docs.push(self.cur().clone());
+                self.advance()?;
+            }
+
+            if self.cur().t == Type::Extern {
+                return Err(Diagnostic::at_token(
+                    "nested extern declarations are not supported",
+                    self.cur(),
+                ));
+            }
+
+            let fun_docs = self.take_docs();
+            self.expect(Type::Fn)?;
+            let fun_name = self.expect_ident()?;
+            let args = self.parse_args()?;
+            let return_type = if self.cur().t == Type::CurlyRight || self.cur().t == Type::Fn {
+                self.push_type(TypeExpr::Atom(Token {
+                    start: self.cur().start,
+                    t: Type::Void,
+                }))
+            } else {
+                self.parse_type()?
+            };
+            fns.push(ExternFn {
+                docs: fun_docs,
+                name: fun_name,
+                args,
+                return_type,
+            });
+        }
+        self.expect(Type::CurlyRight)?;
+
+        Ok(self.push_node(Node::Extern {
+            src,
+            docs,
+            name,
+            fns,
         }))
     }
 
@@ -472,7 +545,7 @@ impl<'p> Parser<'p> {
                 tt
             }
             // Foreign types: Foreign<Counter>
-            Type::Ident("Foreign") => {
+            Type::Foreign => {
                 self.advance()?;
                 self.expect(Type::LessThan)?;
                 if self.cur().t == Type::GreaterThan {

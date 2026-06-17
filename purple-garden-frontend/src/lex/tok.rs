@@ -174,7 +174,7 @@ define_keywords! {
             name: "extern",
             kind: "keyword",
             doc: concat!(
-                "Declares frontend-only package signatures for typechecking and tooling.\n\n",
+                "Declares external package signatures for typechecking and tooling.\n\n",
                 "## Examples:\n\n",
                 "```garden\n",
                 "extern \"counter\" {\n",
@@ -364,6 +364,23 @@ define_keywords! {
                 "fn log(msg:Str) Void {\n",
                 "    io.println(msg)\n",
                 "}\n",
+                "```"
+            )
+        },
+        Foreign => {
+            name: "Foreign",
+            doc: concat!(
+                "An opaque value owned by an embedded Rust package. Purple Garden can pass it back to the package that created it, but cannot inspect its fields.\n\n",
+                "## Examples:\n\n",
+                "```garden\n",
+                "extern \"counter\" {\n",
+                "    fn new(value: Int) Foreign<Counter>\n",
+                "    fn increment(counter: Foreign<Counter>) Int\n",
+                "}\n",
+                "\n",
+                "import \"counter\"\n",
+                "let c = counter.new(0)\n",
+                "counter.increment(c)\n",
                 "```"
             )
         },
