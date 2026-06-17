@@ -34,6 +34,14 @@ struct DocumentAnalysis {
 struct HoverEntry {
     span: Span,
     contents: String,
+    priority: HoverPriority,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum HoverPriority {
+    Resolved,
+    Lexical,
+    Type,
 }
 
 impl DocumentState {
@@ -85,7 +93,7 @@ impl DocumentState {
             .hovers
             .iter()
             .filter(|entry| span_contains(entry.span, offset))
-            .min_by_key(|entry| entry.span.len)?;
+            .min_by_key(|entry| (entry.span.len, entry.priority))?;
 
         Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
@@ -111,16 +119,44 @@ impl DocumentAnalysis {
     }
 
     fn add_garden_hover(&mut self, span: Span, contents: impl Into<String>) {
+        self.add_garden_hover_with_priority(span, contents, HoverPriority::Type);
+    }
+
+    fn add_resolved_garden_hover(&mut self, span: Span, contents: impl Into<String>) {
+        self.add_garden_hover_with_priority(span, contents, HoverPriority::Resolved);
+    }
+
+    fn add_garden_hover_with_priority(
+        &mut self,
+        span: Span,
+        contents: impl Into<String>,
+        priority: HoverPriority,
+    ) {
         self.hovers.push(HoverEntry {
             span,
             contents: garden_block(contents.into()),
+            priority,
         });
     }
 
     fn add_markdown_hover(&mut self, span: Span, contents: impl Into<String>) {
+        self.add_markdown_hover_with_priority(span, contents, HoverPriority::Lexical);
+    }
+
+    fn add_resolved_markdown_hover(&mut self, span: Span, contents: impl Into<String>) {
+        self.add_markdown_hover_with_priority(span, contents, HoverPriority::Resolved);
+    }
+
+    fn add_markdown_hover_with_priority(
+        &mut self,
+        span: Span,
+        contents: impl Into<String>,
+        priority: HoverPriority,
+    ) {
         self.hovers.push(HoverEntry {
             span,
             contents: contents.into(),
+            priority,
         });
     }
 
@@ -191,7 +227,7 @@ fn collect_analysis_entries(
         }
         Node::Field { target, name, .. } => {
             if let Some((span, detail)) = package_target_hover(ast, *target) {
-                analysis.add_markdown_hover(span, detail);
+                analysis.add_resolved_markdown_hover(span, detail);
             }
             if let Some(ty) = type_for_node(ast, typecheck, node_id) {
                 analysis
@@ -232,11 +268,16 @@ fn collect_analysis_entries(
         Node::Import { pkgs, .. } => {
             for pkg in pkgs {
                 if let Some(detail) = import_hover(pkg) {
-                    analysis.add_markdown_hover(token_span(pkg), detail);
+                    analysis.add_resolved_markdown_hover(token_span(pkg), detail);
                 }
             }
         }
-        Node::Atom { .. } | Node::Ident { .. } => {}
+        Node::Ident { name, .. } => {
+            if let Some(detail) = ident_hover(ast, typecheck, node_id, name) {
+                analysis.add_resolved_garden_hover(token_span(name), detail);
+            }
+        }
+        Node::Atom { .. } => {}
     }
 }
 
@@ -377,6 +418,17 @@ fn call_hover(ast: &Ast<'_>, target: NodeId) -> Option<AnalysisHover> {
         }
         _ => None,
     }
+}
+
+fn ident_hover(
+    ast: &Ast<'_>,
+    typecheck: &TypecheckOutput<'_>,
+    node_id: NodeId,
+    name: &Token<'_>,
+) -> Option<String> {
+    local_function_detail(ast, name.t.as_str()).or_else(|| {
+        type_for_node(ast, typecheck, node_id).map(|ty| format!("{}: {}", name.t.as_str(), ty))
+    })
 }
 
 fn local_function_detail(ast: &Ast<'_>, query: &str) -> Option<String> {
