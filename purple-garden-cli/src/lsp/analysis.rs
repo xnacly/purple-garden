@@ -8,8 +8,7 @@ use purple_garden_frontend::{
     ast::{Ast, Node, NodeId, TypeExprId},
     diagnostic::{Diagnostic as FrontendDiagnostic, Span},
     lex::{Lexer, Token, Type},
-    parser::Parser,
-    typecheck::{TypecheckOutput, Typechecker},
+    typecheck::TypecheckOutput,
 };
 
 use super::{
@@ -72,24 +71,19 @@ enum HoverPriority {
 
 impl DocumentState {
     pub(super) fn analyze(text: String) -> Self {
-        let parse = Parser::new(Lexer::new(text.as_bytes())).parse_collect();
-        let purple_garden_frontend::parser::ParseOutput {
-            ast,
-            mut diagnostics,
-        } = parse;
-
         let mut analysis = DocumentAnalysis::new();
         collect_lexical_hovers(&text, &mut analysis);
-        if let Some(ast) = ast {
-            let typecheck = Typechecker::new(&ast).check();
-            for &root in &ast.roots {
-                collect_analysis_entries(&ast, &typecheck, root, &mut analysis);
+
+        crate::frontend::analyze(text.as_bytes(), Vec::new(), |frontend| {
+            if let (Some(ast), Some(typecheck)) = (frontend.ast, frontend.typecheck) {
+                for &root in &ast.roots {
+                    collect_analysis_entries(ast, typecheck, root, &mut analysis);
+                }
+                analysis.definitions = DefinitionCollector::collect(ast);
+                analysis.add_reference_doc_hovers();
             }
-            analysis.definitions = DefinitionCollector::collect(&ast);
-            analysis.add_reference_doc_hovers();
-            diagnostics.extend(typecheck.diagnostics);
-        }
-        analysis.diagnostics = diagnostics;
+            analysis.diagnostics = frontend.diagnostics.to_vec();
+        });
 
         Self { text, analysis }
     }

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 mod cli;
 mod doc;
+mod frontend;
 mod help;
 mod input;
 mod lsp;
@@ -79,6 +80,11 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(ref cmd) = cli.command {
         match &cmd {
+            Command::Check { target } => {
+                let input = Input::from_file(target)?;
+                check_frontend(target, &input)?;
+                std::process::exit(0);
+            }
             Command::Intro { topic } => {
                 println!(
                     "{}",
@@ -260,6 +266,22 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     purple_garden_shared::trace!("[main] Executed bytecode");
+    Ok(())
+}
+
+fn check_frontend(input_source: &str, input: &Input) -> Result<(), Box<dyn std::error::Error>> {
+    let failed = frontend::analyze(input.as_bytes(), Vec::new(), |analysis| {
+        for diagnostic in analysis.diagnostics {
+            eprintln!(
+                "{}",
+                diagnostic.clone().render(input_source, input.as_bytes())
+            );
+        }
+        analysis.ast.is_none() || !analysis.diagnostics.is_empty()
+    });
+    if failed {
+        std::process::exit(1);
+    }
     Ok(())
 }
 

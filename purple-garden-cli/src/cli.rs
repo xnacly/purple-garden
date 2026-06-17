@@ -42,6 +42,8 @@ pub struct Cli {
 
 #[derive(clap::Subcommand, Debug)]
 pub enum Command {
+    /// Parse and typecheck a file without lowering or running it
+    Check { target: String },
     /// Show documentation for a package or a function
     Doc { pkg_or_function: Option<String> },
     /// An introduction to purple garden
