@@ -3,11 +3,15 @@
 #! The macro expands this module into VM wrappers and package metadata. The
 #! build script reads that metadata and writes `extern.garden` for tooling and
 #! editor integration.
+#!
+#! Meaning for instance: the lsp will show completions for methods in the
+#! counter package, show signatures on hover and diagnostics as if the package were
+#! defined in the interpreter.
 extern "counter" {
     #! Create a new counter from an initial value.
-    new(value: Int) Foreign<Counter>
+    fn new(value: Int) Foreign<Counter>
     #! Increment the counter and return the updated value.
-    increment(counter: Foreign<Counter>) Int
+    fn increment(counter: Foreign<Counter>) Int
     #! Read the current counter value.
-    get(counter: Foreign<Counter>) Int
+    fn get(counter: Foreign<Counter>) Int
 }
