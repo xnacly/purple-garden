@@ -5,9 +5,9 @@
 #! editor integration.
 extern "counter" {
     #! Create a new counter from an initial value.
-    fn new(value: Int) Foreign<Counter>
+    new(value: Int) Foreign<Counter>
     #! Increment the counter and return the updated value.
-    fn increment(counter: Foreign<Counter>) Int
+    increment(counter: Foreign<Counter>) Int
     #! Read the current counter value.
-    fn get(counter: Foreign<Counter>) Int
+    get(counter: Foreign<Counter>) Int
 }

@@ -170,6 +170,19 @@ define_keywords! {
                 "```"
             )
         },
+        Extern => {
+            name: "extern",
+            kind: "keyword",
+            doc: concat!(
+                "Declares frontend-only package signatures for typechecking and tooling.\n\n",
+                "## Examples:\n\n",
+                "```garden\n",
+                "extern \"counter\" {\n",
+                "    fn new(value: Int) Foreign<Counter>\n",
+                "}\n",
+                "```"
+            )
+        },
         Let => {
             name: "let",
             kind: "keyword",
