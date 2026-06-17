@@ -4,19 +4,13 @@ use lsp_types::{
     CompletionItem, CompletionItemKind, GotoDefinitionResponse, Hover, HoverContents, Location,
     MarkupContent, MarkupKind, Position, Uri,
 };
-use purple_garden_frontend::{
-    ast::{Ast, Node, NodeId, TypeExprId},
-    diagnostic::{Diagnostic as FrontendDiagnostic, Span},
-    lex::{Lexer, Token, Type},
-    typecheck::TypecheckOutput,
-};
+use purple_garden_frontend::diagnostic::{Diagnostic as FrontendDiagnostic, Span};
 
 use super::{
     completion::{self, CompletionEntry},
     diagnostic::diagnostic_for_lsp,
-    source::{
-        node_span, offset_for_position, range_for_span, span_contains, token_span, type_expr_span,
-    },
+    hover::{AnalysisHover, HoverMarkup},
+    source::{offset_for_position, range_for_span, span_contains},
 };
 
 #[derive(Default)]
@@ -26,33 +20,33 @@ pub(super) struct DocumentState {
 }
 
 #[derive(Debug, Clone, Default)]
-struct DocumentAnalysis {
-    diagnostics: Vec<FrontendDiagnostic>,
-    hovers: Vec<HoverEntry>,
-    definitions: Vec<DefinitionEntry>,
+pub(super) struct DocumentAnalysis {
+    pub(super) diagnostics: Vec<FrontendDiagnostic>,
+    pub(super) hovers: Vec<HoverEntry>,
+    pub(super) definitions: Vec<DefinitionEntry>,
     declaration_docs: Vec<DeclarationDoc>,
-    package_docs: HashMap<String, PackageDoc>,
-    imported_packages: Vec<String>,
-    completions: Vec<CompletionEntry>,
+    pub(super) package_docs: HashMap<String, PackageDoc>,
+    pub(super) imported_packages: Vec<String>,
+    pub(super) completions: Vec<CompletionEntry>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct PackageDoc {
-    hover: String,
-    functions: HashMap<String, String>,
+pub(super) struct PackageDoc {
+    pub(super) hover: String,
+    pub(super) functions: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
-struct HoverEntry {
-    span: Span,
-    contents: String,
-    priority: HoverPriority,
+pub(super) struct HoverEntry {
+    pub(super) span: Span,
+    pub(super) contents: String,
+    pub(super) priority: HoverPriority,
 }
 
 #[derive(Debug, Clone)]
-struct DefinitionEntry {
-    reference: Span,
-    definition: Span,
+pub(super) struct DefinitionEntry {
+    pub(super) reference: Span,
+    pub(super) definition: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -61,16 +55,8 @@ struct DeclarationDoc {
     contents: String,
 }
 
-#[derive(Debug, Default)]
-struct DefinitionCollector<'src> {
-    scopes: Vec<HashMap<&'src str, Span>>,
-    functions: HashMap<&'src str, Span>,
-    imports: HashMap<&'src str, Span>,
-    entries: Vec<DefinitionEntry>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum HoverPriority {
+pub(super) enum HoverPriority {
     Resolved,
     Lexical,
     Type,
@@ -79,20 +65,17 @@ enum HoverPriority {
 impl DocumentState {
     pub(super) fn analyze(path: Option<PathBuf>, text: String) -> Self {
         let mut analysis = DocumentAnalysis::new();
-        collect_lexical_hovers(&text, &mut analysis);
+        super::hover::collect_lexical_hovers(&text, &mut analysis);
 
-        let analyze = |analysis: &mut DocumentAnalysis| {
-            if let Some(path) = path.as_deref() {
-                crate::frontend::analyze_path(path, text.as_bytes(), Vec::new(), |frontend| {
-                    collect_frontend_analysis(frontend, analysis);
-                });
-            } else {
-                crate::frontend::analyze(text.as_bytes(), Vec::new(), |frontend| {
-                    collect_frontend_analysis(frontend, analysis);
-                });
-            }
-        };
-        analyze(&mut analysis);
+        if let Some(path) = path.as_deref() {
+            crate::frontend::analyze_path(path, text.as_bytes(), Vec::new(), |frontend| {
+                super::collect::collect_frontend_analysis(frontend, &mut analysis);
+            });
+        } else {
+            crate::frontend::analyze(text.as_bytes(), Vec::new(), |frontend| {
+                super::collect::collect_frontend_analysis(frontend, &mut analysis);
+            });
+        }
 
         Self { text, analysis }
     }
@@ -168,54 +151,6 @@ impl DocumentState {
     }
 }
 
-fn collect_frontend_analysis(
-    frontend: crate::frontend::FrontendAnalysis<'_, '_>,
-    analysis: &mut DocumentAnalysis,
-) {
-    if let (Some(ast), Some(typecheck)) = (frontend.ast, frontend.typecheck) {
-        collect_package_docs(ast, analysis);
-        for &root in &ast.roots {
-            collect_analysis_entries(ast, typecheck, root, analysis);
-        }
-        analysis.definitions = DefinitionCollector::collect(ast);
-        analysis.add_reference_doc_hovers();
-    }
-    analysis.diagnostics = frontend.diagnostics.to_vec();
-}
-
-fn collect_package_docs(ast: &Ast<'_>, analysis: &mut DocumentAnalysis) {
-    for &root in &ast.roots {
-        let Node::Extern {
-            docs, name, fns, ..
-        } = ast.node(root)
-        else {
-            continue;
-        };
-        let pkg_name = name.t.as_str();
-        let detail = format!("extern {}", name.t.as_str());
-        let hover = if docs.is_empty() {
-            garden_block(detail)
-        } else {
-            doc_hover(&detail, docs)
-        };
-
-        let mut functions = HashMap::new();
-
-        for fun in fns {
-            let detail = fn_detail(ast, &fun.name, &fun.args, fun.return_type);
-            let query = format!("{}.{}", pkg_name, fun.name.t.as_str());
-            functions.insert(
-                fun.name.t.as_str().to_owned(),
-                declaration_hover(&detail, &fun.docs, &query),
-            );
-        }
-
-        analysis
-            .package_docs
-            .insert(pkg_name.to_owned(), PackageDoc { hover, functions });
-    }
-}
-
 impl DocumentAnalysis {
     fn new() -> Self {
         Self {
@@ -224,11 +159,11 @@ impl DocumentAnalysis {
         }
     }
 
-    fn add_garden_hover(&mut self, span: Span, contents: impl Into<String>) {
+    pub(super) fn add_garden_hover(&mut self, span: Span, contents: impl Into<String>) {
         self.add_garden_hover_with_priority(span, contents, HoverPriority::Type);
     }
 
-    fn add_garden_hover_with_priority(
+    pub(super) fn add_garden_hover_with_priority(
         &mut self,
         span: Span,
         contents: impl Into<String>,
@@ -236,20 +171,20 @@ impl DocumentAnalysis {
     ) {
         self.hovers.push(HoverEntry {
             span,
-            contents: garden_block(contents.into()),
+            contents: super::hover::garden_block(contents.into()),
             priority,
         });
     }
 
-    fn add_markdown_hover(&mut self, span: Span, contents: impl Into<String>) {
+    pub(super) fn add_markdown_hover(&mut self, span: Span, contents: impl Into<String>) {
         self.add_markdown_hover_with_priority(span, contents, HoverPriority::Lexical);
     }
 
-    fn add_resolved_markdown_hover(&mut self, span: Span, contents: impl Into<String>) {
+    pub(super) fn add_resolved_markdown_hover(&mut self, span: Span, contents: impl Into<String>) {
         self.add_markdown_hover_with_priority(span, contents, HoverPriority::Resolved);
     }
 
-    fn add_markdown_hover_with_priority(
+    pub(super) fn add_markdown_hover_with_priority(
         &mut self,
         span: Span,
         contents: impl Into<String>,
@@ -262,14 +197,14 @@ impl DocumentAnalysis {
         });
     }
 
-    fn add_hover(&mut self, hover: AnalysisHover) {
+    pub(super) fn add_hover(&mut self, hover: AnalysisHover) {
         match hover.markup {
             HoverMarkup::Garden(contents) => self.add_garden_hover(hover.span, contents),
             HoverMarkup::Markdown(contents) => self.add_markdown_hover(hover.span, contents),
         }
     }
 
-    fn add_completion(
+    pub(super) fn add_completion(
         &mut self,
         label: impl Into<String>,
         kind: CompletionItemKind,
@@ -279,7 +214,7 @@ impl DocumentAnalysis {
             .push(CompletionEntry::local(label, kind, detail));
     }
 
-    fn add_imported_package(&mut self, pkg: &str) {
+    pub(super) fn add_imported_package(&mut self, pkg: &str) {
         if !self
             .imported_packages
             .iter()
@@ -289,14 +224,14 @@ impl DocumentAnalysis {
         }
     }
 
-    fn add_declaration_doc(&mut self, definition: Span, contents: String) {
+    pub(super) fn add_declaration_doc(&mut self, definition: Span, contents: String) {
         self.declaration_docs.push(DeclarationDoc {
             definition,
             contents,
         });
     }
 
-    fn add_reference_doc_hovers(&mut self) {
+    pub(super) fn add_reference_doc_hovers(&mut self) {
         let mut hovers = Vec::new();
         for entry in &self.definitions {
             if entry.reference == entry.definition {
@@ -314,538 +249,4 @@ impl DocumentAnalysis {
             self.add_resolved_markdown_hover(span, contents);
         }
     }
-}
-
-impl<'src> DefinitionCollector<'src> {
-    fn collect(ast: &Ast<'src>) -> Vec<DefinitionEntry> {
-        let mut collector = Self::default();
-        collector.scopes.push(HashMap::new());
-
-        for &root in &ast.roots {
-            match ast.node(root) {
-                Node::Fn { name, .. } => {
-                    collector
-                        .functions
-                        .insert(name.t.as_str(), token_span(name));
-                }
-                Node::Import { pkgs, .. } => {
-                    for pkg in pkgs {
-                        collector.imports.insert(pkg.t.as_str(), token_span(pkg));
-                    }
-                }
-                Node::Extern { name, .. } => {
-                    collector.imports.insert(name.t.as_str(), token_span(name));
-                }
-                _ => {}
-            }
-        }
-
-        for &root in &ast.roots {
-            collector.node(ast, root);
-        }
-        collector.entries
-    }
-
-    fn node(&mut self, ast: &Ast<'src>, node_id: NodeId) {
-        match ast.node(node_id) {
-            Node::Atom { .. } => {}
-            Node::Ident { name, .. } => self.ident(name),
-            Node::Bin { lhs, rhs, .. } => {
-                self.node(ast, *lhs);
-                self.node(ast, *rhs);
-            }
-            Node::Unary { rhs, .. } => self.node(ast, *rhs),
-            Node::Array { members, .. } => {
-                for &member in members {
-                    self.node(ast, member);
-                }
-            }
-            Node::Object { pairs, .. } => {
-                for &(key, value) in pairs {
-                    self.node(ast, key);
-                    self.node(ast, value);
-                }
-            }
-            Node::Let { name, rhs, .. } => {
-                self.node(ast, *rhs);
-                self.insert_local(name);
-            }
-            Node::Fn {
-                name, args, body, ..
-            } => {
-                self.add_definition(name, token_span(name));
-                self.scopes.push(HashMap::new());
-                for (arg, _) in args {
-                    self.insert_local(arg);
-                }
-                for &node in body {
-                    self.node(ast, node);
-                }
-                self.scopes.pop();
-            }
-            Node::Match { cases, default, .. } => {
-                for &((_, condition), ref body) in cases {
-                    self.node(ast, condition);
-                    self.scopes.push(HashMap::new());
-                    for &node in body {
-                        self.node(ast, node);
-                    }
-                    self.scopes.pop();
-                }
-                self.scopes.push(HashMap::new());
-                for &node in &default.1 {
-                    self.node(ast, node);
-                }
-                self.scopes.pop();
-            }
-            Node::Call { target, args, .. } => {
-                self.node(ast, *target);
-                for &arg in args {
-                    self.node(ast, arg);
-                }
-            }
-            Node::Field { target, .. } => self.node(ast, *target),
-            Node::Cast { lhs, .. } => self.node(ast, *lhs),
-            Node::Import { pkgs, .. } => {
-                for pkg in pkgs {
-                    self.add_definition(pkg, token_span(pkg));
-                }
-            }
-            Node::Extern { name, .. } => {
-                self.add_definition(name, token_span(name));
-            }
-        }
-    }
-
-    fn ident(&mut self, token: &Token<'src>) {
-        let name = token.t.as_str();
-        if let Some(definition) = self
-            .lookup_local(name)
-            .or_else(|| self.functions.get(name).copied())
-            .or_else(|| self.imports.get(name).copied())
-        {
-            self.add_definition(token, definition);
-        }
-    }
-
-    fn insert_local(&mut self, token: &Token<'src>) {
-        let span = token_span(token);
-        self.scopes
-            .last_mut()
-            .expect("definition collector has a scope")
-            .insert(token.t.as_str(), span);
-        self.add_definition(token, span);
-    }
-
-    fn lookup_local(&self, name: &str) -> Option<Span> {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|scope| scope.get(name).copied())
-    }
-
-    fn add_definition(&mut self, token: &Token<'src>, definition: Span) {
-        self.entries.push(DefinitionEntry {
-            reference: token_span(token),
-            definition,
-        });
-    }
-}
-
-fn collect_analysis_entries(
-    ast: &Ast<'_>,
-    typecheck: &TypecheckOutput<'_>,
-    node_id: NodeId,
-    analysis: &mut DocumentAnalysis,
-) {
-    let node = ast.node(node_id);
-    if let (Some(span), Some(ty)) = (
-        node_span(ast, node_id),
-        type_for_node(ast, typecheck, node_id),
-    ) {
-        analysis.add_garden_hover(span, ty);
-    }
-
-    match node {
-        Node::Fn {
-            docs,
-            name,
-            args,
-            return_type,
-            body,
-        } => {
-            let detail = fn_detail(ast, name, args, *return_type);
-            add_decl_hover(analysis, token_span(name), detail.clone(), docs);
-            analysis.add_completion(name.t.as_str(), CompletionItemKind::FUNCTION, Some(detail));
-            for (name, ty) in args {
-                let detail = format!("{}: {}", name.t.as_str(), ast.type_display(*ty));
-                analysis.add_garden_hover(token_span(name), detail.clone());
-                analysis.add_completion(
-                    name.t.as_str(),
-                    CompletionItemKind::VARIABLE,
-                    Some(detail),
-                );
-            }
-            collect_nodes(ast, typecheck, body, analysis);
-        }
-        Node::Let {
-            docs, name, rhs, ..
-        } => {
-            if let Some(ty) = type_for_node(ast, typecheck, *rhs) {
-                let detail = format!("{}: {}", name.t.as_str(), ty);
-                add_decl_hover(analysis, token_span(name), detail.clone(), docs);
-                analysis.add_completion(
-                    name.t.as_str(),
-                    CompletionItemKind::VARIABLE,
-                    Some(detail),
-                );
-            }
-            collect_analysis_entries(ast, typecheck, *rhs, analysis);
-        }
-        Node::Field { target, name, .. } => {
-            if let Some((span, detail)) = package_target_hover(ast, *target, analysis) {
-                analysis.add_resolved_markdown_hover(span, detail);
-            }
-            if let Some(ty) = type_for_node(ast, typecheck, node_id) {
-                analysis
-                    .add_garden_hover(token_span(name), format!(".{}: {}", name.t.as_str(), ty));
-            }
-            collect_analysis_entries(ast, typecheck, *target, analysis);
-        }
-        Node::Cast { lhs, rhs, .. } => {
-            collect_analysis_entries(ast, typecheck, *lhs, analysis);
-            analysis.add_garden_hover(
-                type_expr_span(ast, *rhs),
-                ast.type_display(*rhs).to_string(),
-            );
-        }
-        Node::Bin { lhs, rhs, .. } => collect_nodes(ast, typecheck, &[*lhs, *rhs], analysis),
-        Node::Unary { rhs, .. } => collect_analysis_entries(ast, typecheck, *rhs, analysis),
-        Node::Array { members, .. } => collect_nodes(ast, typecheck, members, analysis),
-        Node::Object { pairs, .. } => {
-            for &(key, value) in pairs {
-                collect_analysis_entries(ast, typecheck, key, analysis);
-                collect_analysis_entries(ast, typecheck, value, analysis);
-            }
-        }
-        Node::Match { cases, default, .. } => {
-            for &((_, condition), ref body) in cases {
-                collect_analysis_entries(ast, typecheck, condition, analysis);
-                collect_nodes(ast, typecheck, body, analysis);
-            }
-            collect_nodes(ast, typecheck, &default.1, analysis);
-        }
-        Node::Call { target, args, .. } => {
-            if let Some(hover) = call_hover(ast, *target, analysis) {
-                analysis.add_hover(hover);
-            }
-            collect_analysis_entries(ast, typecheck, *target, analysis);
-            collect_nodes(ast, typecheck, args, analysis);
-        }
-        Node::Import { pkgs, .. } => {
-            for pkg in pkgs {
-                analysis.add_imported_package(pkg.t.as_str());
-                if let Some(detail) = import_hover(pkg, analysis) {
-                    analysis.add_resolved_markdown_hover(token_span(pkg), detail);
-                }
-            }
-        }
-        Node::Extern {
-            docs, name, fns, ..
-        } => {
-            let detail = format!("extern {}", name.t.as_str());
-            add_decl_hover(analysis, token_span(name), detail, docs);
-            for fun in fns {
-                let detail = fn_detail(ast, &fun.name, &fun.args, fun.return_type);
-                add_decl_hover(analysis, token_span(&fun.name), detail.clone(), &fun.docs);
-                analysis.add_completion(
-                    fun.name.t.as_str(),
-                    CompletionItemKind::FUNCTION,
-                    Some(detail),
-                );
-                for (arg, ty) in &fun.args {
-                    analysis.add_garden_hover(
-                        token_span(arg),
-                        format!("{}: {}", arg.t.as_str(), ast.type_display(*ty)),
-                    );
-                }
-            }
-        }
-        Node::Ident { name, .. } => {
-            if let Some(hover) = ident_hover(ast, typecheck, node_id, name) {
-                analysis.add_hover(AnalysisHover {
-                    span: token_span(name),
-                    markup: hover,
-                });
-            }
-        }
-        Node::Atom { .. } => {}
-    }
-}
-
-fn collect_nodes(
-    ast: &Ast<'_>,
-    typecheck: &TypecheckOutput<'_>,
-    nodes: &[NodeId],
-    analysis: &mut DocumentAnalysis,
-) {
-    for &node in nodes {
-        collect_analysis_entries(ast, typecheck, node, analysis);
-    }
-}
-
-fn collect_lexical_hovers(source: &str, analysis: &mut DocumentAnalysis) {
-    let mut lexer = Lexer::new(source.as_bytes());
-    loop {
-        let token = lexer.one();
-        if token.t == Type::Eof {
-            break;
-        }
-
-        let Some((kind, query)) = language_doc_query(&token) else {
-            continue;
-        };
-        match kind {
-            LanguageDocKind::Keyword => {
-                let Some(doc) = crate::doc::language_doc(query) else {
-                    continue;
-                };
-                analysis.add_markdown_hover(
-                    token_span(&token),
-                    format!(
-                        "{} {}\n\n{}\n\n{}",
-                        doc.kind,
-                        doc.name,
-                        doc.doc,
-                        crate::doc::command(query)
-                    ),
-                );
-            }
-            LanguageDocKind::Type => {
-                let Some(doc) = crate::doc::type_doc(query) else {
-                    continue;
-                };
-                analysis.add_markdown_hover(
-                    token_span(&token),
-                    format!(
-                        "type {}\n\n{}\n\n{}",
-                        doc.name,
-                        doc.doc,
-                        crate::doc::command(query)
-                    ),
-                );
-            }
-        }
-    }
-}
-
-enum LanguageDocKind {
-    Keyword,
-    Type,
-}
-
-fn language_doc_query(token: &Token<'_>) -> Option<(LanguageDocKind, &'static str)> {
-    Some(match token.t {
-        Type::Import => (LanguageDocKind::Keyword, "import"),
-        Type::Extern => (LanguageDocKind::Keyword, "extern"),
-        Type::Let => (LanguageDocKind::Keyword, "let"),
-        Type::Fn => (LanguageDocKind::Keyword, "fn"),
-        Type::Match => (LanguageDocKind::Keyword, "match"),
-        Type::As => (LanguageDocKind::Keyword, "as"),
-        Type::True => (LanguageDocKind::Keyword, "true"),
-        Type::False => (LanguageDocKind::Keyword, "false"),
-        Type::Str => (LanguageDocKind::Type, "Str"),
-        Type::Int => (LanguageDocKind::Type, "Int"),
-        Type::Double => (LanguageDocKind::Type, "Double"),
-        Type::Bool => (LanguageDocKind::Type, "Bool"),
-        Type::Void => (LanguageDocKind::Type, "Void"),
-        Type::Foreign => (LanguageDocKind::Type, "Foreign"),
-        _ => return None,
-    })
-}
-
-fn fn_detail(
-    ast: &Ast<'_>,
-    name: &Token<'_>,
-    args: &[(Token<'_>, TypeExprId)],
-    return_type: TypeExprId,
-) -> String {
-    let args = args
-        .iter()
-        .map(|(name, ty)| format!("{}: {}", name.t.as_str(), ast.type_display(*ty)))
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!(
-        "fn {}({}) {}",
-        name.t.as_str(),
-        args,
-        ast.type_display(return_type)
-    )
-}
-
-fn add_decl_hover(analysis: &mut DocumentAnalysis, span: Span, detail: String, docs: &[Token<'_>]) {
-    if docs.is_empty() {
-        analysis.add_garden_hover(span, detail);
-    } else {
-        let contents = doc_hover(&detail, docs);
-        analysis.add_resolved_markdown_hover(span, contents.clone());
-        analysis.add_declaration_doc(span, contents);
-    }
-}
-
-fn doc_hover(detail: &str, docs: &[Token<'_>]) -> String {
-    format!("{}\n\n{}", garden_block(detail), doc_text(docs))
-}
-
-fn declaration_hover(detail: &str, docs: &[Token<'_>], query: &str) -> String {
-    let body = if docs.is_empty() {
-        garden_block(detail)
-    } else {
-        doc_hover(detail, docs)
-    };
-    format!("{}\n{}", body.trim_end(), crate::doc::command(query))
-}
-
-fn doc_text(docs: &[Token<'_>]) -> String {
-    docs.iter()
-        .map(|doc| doc.t.as_str())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-struct AnalysisHover {
-    span: Span,
-    markup: HoverMarkup,
-}
-
-enum HoverMarkup {
-    Garden(String),
-    Markdown(String),
-}
-
-fn call_hover(ast: &Ast<'_>, target: NodeId, analysis: &DocumentAnalysis) -> Option<AnalysisHover> {
-    match ast.node(target) {
-        Node::Ident { name, .. } => {
-            local_function_hover(ast, name.t.as_str()).map(|markup| AnalysisHover {
-                span: token_span(name),
-                markup,
-            })
-        }
-        Node::Field { target, name, .. } => {
-            let Node::Ident { name: pkg, .. } = ast.node(*target) else {
-                return None;
-            };
-            let pkg_name = pkg.t.as_str();
-            let fn_name = name.t.as_str();
-            function_hover(pkg_name, fn_name, analysis).map(|contents| AnalysisHover {
-                span: token_span(name),
-                markup: HoverMarkup::Markdown(contents),
-            })
-        }
-        _ => None,
-    }
-}
-
-fn ident_hover(
-    ast: &Ast<'_>,
-    typecheck: &TypecheckOutput<'_>,
-    node_id: NodeId,
-    name: &Token<'_>,
-) -> Option<HoverMarkup> {
-    local_function_hover(ast, name.t.as_str()).or_else(|| {
-        type_for_node(ast, typecheck, node_id)
-            .map(|ty| HoverMarkup::Garden(format!("{}: {}", name.t.as_str(), ty)))
-    })
-}
-
-fn local_function_hover(ast: &Ast<'_>, query: &str) -> Option<HoverMarkup> {
-    ast.roots.iter().find_map(|&root| match ast.node(root) {
-        Node::Fn {
-            docs,
-            name,
-            args,
-            return_type,
-            ..
-        } if name.t.as_str() == query => {
-            let detail = fn_detail(ast, name, args, *return_type);
-            Some(if docs.is_empty() {
-                HoverMarkup::Garden(detail)
-            } else {
-                HoverMarkup::Markdown(doc_hover(&detail, docs))
-            })
-        }
-        _ => None,
-    })
-}
-
-fn overload_detail(name: &str, variants: &[&purple_garden_runtime::Fn<'_>]) -> String {
-    let display_name = name.rsplit_once('.').map_or(name, |(_, name)| name);
-    let out = crate::doc::render_function(display_name, variants);
-    format!("{}\n{}", out.trim_end(), crate::doc::command(name))
-}
-
-fn function_hover(pkg_name: &str, fn_name: &str, analysis: &DocumentAnalysis) -> Option<String> {
-    if let Some(contents) = analysis
-        .package_docs
-        .get(pkg_name)
-        .and_then(|pkg| pkg.functions.get(fn_name))
-    {
-        return Some(contents.clone());
-    }
-
-    let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
-    let (_, variants) = pkg
-        .overload_groups()
-        .into_iter()
-        .find(|(name, _)| *name == fn_name)?;
-    Some(overload_detail(&format!("{pkg_name}.{fn_name}"), &variants))
-}
-
-fn import_hover(pkg: &Token<'_>, analysis: &DocumentAnalysis) -> Option<String> {
-    package_hover(pkg.t.as_str(), analysis)
-}
-
-fn package_target_hover(
-    ast: &Ast<'_>,
-    target: NodeId,
-    analysis: &DocumentAnalysis,
-) -> Option<(Span, String)> {
-    let Node::Ident { name, .. } = ast.node(target) else {
-        return None;
-    };
-    package_hover(name.t.as_str(), analysis).map(|detail| (token_span(name), detail))
-}
-
-fn package_hover(pkg_name: &str, analysis: &DocumentAnalysis) -> Option<String> {
-    if let Some(doc) = analysis.package_docs.get(pkg_name) {
-        return Some(format!(
-            "{}\n{}",
-            doc.hover.trim_end(),
-            crate::doc::command(pkg_name)
-        ));
-    }
-
-    let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
-    let header = format!("import \"{pkg_name}\"");
-    let command = crate::doc::command(pkg_name);
-    if pkg.doc.is_empty() {
-        Some(format!("{header}\n\n{command}"))
-    } else {
-        Some(format!("{header}\n\n{}\n\n{command}", pkg.doc))
-    }
-}
-
-fn garden_block(contents: impl std::fmt::Display) -> String {
-    format!("```garden\n{}\n```", contents)
-}
-
-fn type_for_node(
-    ast: &Ast<'_>,
-    typecheck: &TypecheckOutput<'_>,
-    node_id: NodeId,
-) -> Option<String> {
-    ast.value_id(node_id)
-        .and_then(|id| typecheck.types.get(id))
-        .and_then(Option::as_ref)
-        .map(ToString::to_string)
 }
