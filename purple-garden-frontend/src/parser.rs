@@ -12,6 +12,7 @@ pub struct Parser<'p> {
     cur: Token<'p>,
     ast: Ast<'p>,
     diagnostics: Vec<Diagnostic>,
+    pending_docs: Vec<Token<'p>>,
 }
 
 #[derive(Debug)]
@@ -31,6 +32,7 @@ impl<'p> Parser<'p> {
             id: 0,
             ast: Ast::new(),
             diagnostics,
+            pending_docs: Vec::new(),
         }
     }
 
@@ -128,6 +130,7 @@ impl<'p> Parser<'p> {
     }
 
     fn synchronize_root(&mut self) {
+        self.pending_docs.clear();
         while !Self::is_root_boundary(self.cur.t) {
             self.advance().expect("lexing is infallible");
         }
@@ -150,13 +153,30 @@ impl<'p> Parser<'p> {
 
     /// prefix = import | let | fn | match | expr
     fn parse_prefix(&mut self) -> Result<NodeId, Diagnostic> {
+        while matches!(self.cur().t, Type::Doc(_)) {
+            self.pending_docs.push(self.cur().clone());
+            self.advance()?;
+        }
+
         match self.cur().t {
             Type::Import => self.parse_import(),
             Type::Let => self.parse_let(),
             Type::Fn => self.parse_fn(),
+            Type::Eof if !self.pending_docs.is_empty() => Err(Diagnostic::at_token(
+                "documentation is not attached to anything",
+                self.pending_docs.last().expect("pending docs not empty"),
+            )),
+            _ if !self.pending_docs.is_empty() => Err(Diagnostic::at_token(
+                "documentation can only be attached to `let` or `fn`",
+                self.pending_docs.first().expect("pending docs not empty"),
+            )),
             Type::Match => self.parse_match(),
             _ => self.parse_expr(0),
         }
+    }
+
+    fn take_docs(&mut self) -> Vec<Token<'p>> {
+        std::mem::take(&mut self.pending_docs)
     }
 
     /// import = "import" string | "import" "(" string* ")"
@@ -201,17 +221,24 @@ impl<'p> Parser<'p> {
 
     /// let = "let" ident "=" prefix
     fn parse_let(&mut self) -> Result<NodeId, Diagnostic> {
+        let docs = self.take_docs();
         self.expect(Type::Let)?;
         let name = self.expect_ident()?;
         self.expect(Type::Equal)?;
         let rhs = self.parse_prefix()?;
         let id = self.next_id();
 
-        Ok(self.push_node(Node::Let { id, name, rhs }))
+        Ok(self.push_node(Node::Let {
+            id,
+            docs,
+            name,
+            rhs,
+        }))
     }
 
     /// fn = "fn" ident "(" (ident ":" type)* ")" type? "{" prefix* "}"
     fn parse_fn(&mut self) -> Result<NodeId, Diagnostic> {
+        let docs = self.take_docs();
         self.advance()?;
         let name = self.expect_ident()?;
 
@@ -242,6 +269,7 @@ impl<'p> Parser<'p> {
         self.expect(Type::CurlyRight)?;
 
         Ok(self.push_node(Node::Fn {
+            docs,
             name,
             args,
             return_type,

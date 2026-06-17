@@ -46,6 +46,8 @@ macro_rules! define_keywords {
             I(&'t str),
             /// literal identifier
             Ident(&'t str),
+            /// documentation comment
+            Doc(&'t str),
 
             $(
                 $keyword_variant,
@@ -136,6 +138,7 @@ macro_rules! define_keywords {
                     Type::CurlyLeft => "{",
                     Type::CurlyRight => "}",
                     Type::S(s) => s,
+                    Type::Doc(doc) => doc,
                     Type::D(d) => d,
                     Type::I(i) | Type::Ident(i) => i,
                     $(

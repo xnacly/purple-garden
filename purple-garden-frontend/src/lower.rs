@@ -281,6 +281,7 @@ impl<'lower> Lower<'lower> {
                 args,
                 return_type,
                 body,
+                ..
             } => {
                 let old_ctx = std::mem::take(&mut self.ctx);
 

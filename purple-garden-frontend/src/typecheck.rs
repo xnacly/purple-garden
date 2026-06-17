@@ -114,7 +114,7 @@ impl<'t> TypecheckOutput<'t> {
                     self.render_node(ast, value, indent + 1, out);
                 }
             }
-            Node::Let { id, name, rhs } => {
+            Node::Let { id, name, rhs, .. } => {
                 self.render_value(
                     indent,
                     format!("let {}", name.t.as_str()),
@@ -128,6 +128,7 @@ impl<'t> TypecheckOutput<'t> {
                 args,
                 return_type,
                 body,
+                ..
             } => {
                 use std::fmt::Write as _;
                 let args = args
@@ -682,7 +683,7 @@ impl<'t> Typechecker<'t> {
                 };
                 self.set_known(*id, t)
             }
-            Node::Let { id, name, rhs } => {
+            Node::Let { id, name, rhs, .. } => {
                 let lex::Token {
                     t: lex::Type::Ident(inner_name),
                     ..
@@ -704,6 +705,7 @@ impl<'t> Typechecker<'t> {
                 args,
                 return_type,
                 body,
+                ..
             } => {
                 let lex::Token {
                     t: lex::Type::Ident(inner_name),

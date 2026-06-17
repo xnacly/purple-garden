@@ -130,6 +130,7 @@ pub enum Node<'node> {
     /// let <name> = <rhs>
     Let {
         id: usize,
+        docs: Vec<Token<'node>>,
         name: Token<'node>,
         rhs: NodeId,
     },
@@ -138,6 +139,7 @@ pub enum Node<'node> {
     ///     <body>
     /// }
     Fn {
+        docs: Vec<Token<'node>>,
         name: Token<'node>,
         /// (<identifier>, <type>)
         args: Vec<(Token<'node>, TypeExprId)>,
@@ -295,6 +297,7 @@ impl Ast<'_> {
                 args,
                 body,
                 return_type,
+                ..
             } => {
                 write!(f, "{}(fn {} (", pad, name.t.as_str())?;
                 for (i, arg) in args.iter().enumerate() {

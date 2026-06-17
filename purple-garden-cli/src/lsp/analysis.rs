@@ -31,6 +31,7 @@ struct DocumentAnalysis {
     diagnostics: Vec<FrontendDiagnostic>,
     hovers: Vec<HoverEntry>,
     definitions: Vec<DefinitionEntry>,
+    declaration_docs: Vec<DeclarationDoc>,
     imported_packages: Vec<String>,
     completions: Vec<CompletionEntry>,
 }
@@ -46,6 +47,12 @@ struct HoverEntry {
 struct DefinitionEntry {
     reference: Span,
     definition: Span,
+}
+
+#[derive(Debug, Clone)]
+struct DeclarationDoc {
+    definition: Span,
+    contents: String,
 }
 
 #[derive(Debug, Default)]
@@ -79,6 +86,7 @@ impl DocumentState {
                 collect_analysis_entries(&ast, &typecheck, root, &mut analysis);
             }
             analysis.definitions = DefinitionCollector::collect(&ast);
+            analysis.add_reference_doc_hovers();
             diagnostics.extend(typecheck.diagnostics);
         }
         analysis.diagnostics = diagnostics;
@@ -166,10 +174,6 @@ impl DocumentAnalysis {
         self.add_garden_hover_with_priority(span, contents, HoverPriority::Type);
     }
 
-    fn add_resolved_garden_hover(&mut self, span: Span, contents: impl Into<String>) {
-        self.add_garden_hover_with_priority(span, contents, HoverPriority::Resolved);
-    }
-
     fn add_garden_hover_with_priority(
         &mut self,
         span: Span,
@@ -228,6 +232,32 @@ impl DocumentAnalysis {
             .any(|imported| imported == pkg)
         {
             self.imported_packages.push(pkg.to_owned());
+        }
+    }
+
+    fn add_declaration_doc(&mut self, definition: Span, contents: String) {
+        self.declaration_docs.push(DeclarationDoc {
+            definition,
+            contents,
+        });
+    }
+
+    fn add_reference_doc_hovers(&mut self) {
+        let mut hovers = Vec::new();
+        for entry in &self.definitions {
+            if entry.reference == entry.definition {
+                continue;
+            }
+            if let Some(doc) = self
+                .declaration_docs
+                .iter()
+                .find(|doc| doc.definition == entry.definition)
+            {
+                hovers.push((entry.reference, doc.contents.clone()));
+            }
+        }
+        for (span, contents) in hovers {
+            self.add_resolved_markdown_hover(span, contents);
         }
     }
 }
@@ -378,13 +408,14 @@ fn collect_analysis_entries(
 
     match node {
         Node::Fn {
+            docs,
             name,
             args,
             return_type,
             body,
         } => {
             let detail = fn_detail(ast, name, args, *return_type);
-            analysis.add_garden_hover(token_span(name), detail.clone());
+            add_decl_hover(analysis, token_span(name), detail.clone(), docs);
             analysis.add_completion(name.t.as_str(), CompletionItemKind::FUNCTION, Some(detail));
             for (name, ty) in args {
                 let detail = format!("{}: {}", name.t.as_str(), ast.type_display(*ty));
@@ -397,10 +428,12 @@ fn collect_analysis_entries(
             }
             collect_nodes(ast, typecheck, body, analysis);
         }
-        Node::Let { name, rhs, .. } => {
+        Node::Let {
+            docs, name, rhs, ..
+        } => {
             if let Some(ty) = type_for_node(ast, typecheck, *rhs) {
                 let detail = format!("{}: {}", name.t.as_str(), ty);
-                analysis.add_garden_hover(token_span(name), detail.clone());
+                add_decl_hover(analysis, token_span(name), detail.clone(), docs);
                 analysis.add_completion(
                     name.t.as_str(),
                     CompletionItemKind::VARIABLE,
@@ -458,8 +491,11 @@ fn collect_analysis_entries(
             }
         }
         Node::Ident { name, .. } => {
-            if let Some(detail) = ident_hover(ast, typecheck, node_id, name) {
-                analysis.add_resolved_garden_hover(token_span(name), detail);
+            if let Some(hover) = ident_hover(ast, typecheck, node_id, name) {
+                analysis.add_hover(AnalysisHover {
+                    span: token_span(name),
+                    markup: hover,
+                });
             }
         }
         Node::Atom { .. } => {}
@@ -564,6 +600,27 @@ fn fn_detail(
     )
 }
 
+fn add_decl_hover(analysis: &mut DocumentAnalysis, span: Span, detail: String, docs: &[Token<'_>]) {
+    if docs.is_empty() {
+        analysis.add_garden_hover(span, detail);
+    } else {
+        let contents = doc_hover(&detail, docs);
+        analysis.add_resolved_markdown_hover(span, contents.clone());
+        analysis.add_declaration_doc(span, contents);
+    }
+}
+
+fn doc_hover(detail: &str, docs: &[Token<'_>]) -> String {
+    format!("{}\n\n{}", garden_block(detail), doc_text(docs))
+}
+
+fn doc_text(docs: &[Token<'_>]) -> String {
+    docs.iter()
+        .map(|doc| doc.t.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 struct AnalysisHover {
     span: Span,
     markup: HoverMarkup,
@@ -577,9 +634,9 @@ enum HoverMarkup {
 fn call_hover(ast: &Ast<'_>, target: NodeId) -> Option<AnalysisHover> {
     match ast.node(target) {
         Node::Ident { name, .. } => {
-            local_function_detail(ast, name.t.as_str()).map(|detail| AnalysisHover {
+            local_function_hover(ast, name.t.as_str()).map(|markup| AnalysisHover {
                 span: token_span(name),
-                markup: HoverMarkup::Garden(detail),
+                markup,
             })
         }
         Node::Field { target, name, .. } => {
@@ -610,20 +667,29 @@ fn ident_hover(
     typecheck: &TypecheckOutput<'_>,
     node_id: NodeId,
     name: &Token<'_>,
-) -> Option<String> {
-    local_function_detail(ast, name.t.as_str()).or_else(|| {
-        type_for_node(ast, typecheck, node_id).map(|ty| format!("{}: {}", name.t.as_str(), ty))
+) -> Option<HoverMarkup> {
+    local_function_hover(ast, name.t.as_str()).or_else(|| {
+        type_for_node(ast, typecheck, node_id)
+            .map(|ty| HoverMarkup::Garden(format!("{}: {}", name.t.as_str(), ty)))
     })
 }
 
-fn local_function_detail(ast: &Ast<'_>, query: &str) -> Option<String> {
+fn local_function_hover(ast: &Ast<'_>, query: &str) -> Option<HoverMarkup> {
     ast.roots.iter().find_map(|&root| match ast.node(root) {
         Node::Fn {
+            docs,
             name,
             args,
             return_type,
             ..
-        } if name.t.as_str() == query => Some(fn_detail(ast, name, args, *return_type)),
+        } if name.t.as_str() == query => {
+            let detail = fn_detail(ast, name, args, *return_type);
+            Some(if docs.is_empty() {
+                HoverMarkup::Garden(detail)
+            } else {
+                HoverMarkup::Markdown(doc_hover(&detail, docs))
+            })
+        }
         _ => None,
     })
 }

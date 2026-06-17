@@ -92,6 +92,9 @@ impl<'l> Lexer<'l> {
             while p < bytes.len() && class_of(bytes[p]) & WS != 0 {
                 p += 1;
             }
+            if p + 1 < bytes.len() && bytes[p] == b'#' && bytes[p + 1] == b'!' {
+                break;
+            }
             if p < bytes.len() && bytes[p] == b'#' {
                 let end = find_byte(b'\n', &bytes[p..]).map_or(bytes.len(), |i| p + i);
                 p = end;
@@ -123,6 +126,22 @@ impl<'l> Lexer<'l> {
             }
 
             let t = match self.input[start] {
+                b'#' if matches!(self.peek(), Some(b'!')) => {
+                    let body_start = start + 2;
+                    let end = find_byte(b'\n', &self.input[body_start..])
+                        .map_or(self.input.len(), |i| body_start + i);
+                    self.pos = end.saturating_sub(1);
+
+                    let body = &self.input[body_start..end];
+                    let body = body.strip_prefix(b" ").unwrap_or(body);
+                    let Ok(doc) = str::from_utf8(body) else {
+                        self.diagnostics
+                            .push(self.make_err("Invalid utf8 input", start));
+                        continue;
+                    };
+
+                    Self::make_tok(start, Type::Doc(doc))
+                }
                 b'(' => Self::make_tok(start, Type::BraceLeft),
                 b')' => Self::make_tok(start, Type::BraceRight),
                 b'+' => Self::make_tok(start, Type::Plus),
