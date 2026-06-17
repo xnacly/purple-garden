@@ -1,6 +1,7 @@
 ; keywords
 [
   "import"
+  "extern"
   "let"
   "fn"
   "match"
@@ -19,8 +20,9 @@
 
 ; identifiers
 (identifier) @variable
-(field_suffix (identifier) @property)
+(field_expression (identifier) @property)
 (function_declaration (identifier) @function)
+(extern_function_declaration (identifier) @function)
 (parameter (identifier) @variable.parameter)
 (type_identifier) @type
 
@@ -49,10 +51,9 @@
   ")"
   "{"
   "}"
-  "["
-  "]"
   "<"
   ">"
 ] @punctuation.bracket
 
 (comment) @comment
+(doc_comment) @comment.documentation

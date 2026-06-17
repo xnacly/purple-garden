@@ -24,10 +24,15 @@ module.exports = grammar({
       $.import_statement,
       $.let_statement,
       $.function_declaration,
+      $.extern_declaration,
       $.expression,
     ),
 
-    comment: _ => token(seq('#', /.*/)),
+    comment: _ => token(seq('#', /[^!\n].*/)),
+
+    doc_comment: _ => token(seq('#!', /.*/)),
+
+    doc_comments: $ => repeat1($.doc_comment),
 
     import_statement: $ => seq(
       'import',
@@ -38,6 +43,7 @@ module.exports = grammar({
     ),
 
     let_statement: $ => seq(
+      optional($.doc_comments),
       'let',
       $.identifier,
       '=',
@@ -45,6 +51,7 @@ module.exports = grammar({
     ),
 
     function_declaration: $ => seq(
+      optional($.doc_comments),
       'fn',
       $.identifier,
       '(',
@@ -52,6 +59,25 @@ module.exports = grammar({
       ')',
       optional($.type),
       $.block,
+    ),
+
+    extern_declaration: $ => seq(
+      optional($.doc_comments),
+      'extern',
+      $.string,
+      '{',
+      repeat($.extern_function_declaration),
+      '}',
+    ),
+
+    extern_function_declaration: $ => seq(
+      optional($.doc_comments),
+      'fn',
+      $.identifier,
+      '(',
+      repeat($.parameter),
+      ')',
+      optional($.type),
     ),
 
     parameter: $ => seq(
@@ -81,63 +107,42 @@ module.exports = grammar({
     expression: $ => choice(
       $.match_expression,
       $.cast_expression,
-      $.comparison_expression,
-      $.additive_expression,
-      $.multiplicative_expression,
+      $.binary_expression,
       $.unary_expression,
-      $.postfix_expression,
+      $.call_expression,
+      $.field_expression,
       $.primary_expression,
     ),
 
     cast_expression: $ => prec.left(PREC.cast, seq(
-      $.postfix_expression,
+      $.expression,
       'as',
       $.type,
     )),
 
-    comparison_expression: $ => prec.left(PREC.compare, seq(
-      $.additive_expression,
-      choice('==', '!=', '<', '>'),
-      $.additive_expression,
-    )),
-
-    additive_expression: $ => prec.left(PREC.add, seq(
-      $.multiplicative_expression,
-      choice('+', '-'),
-      $.multiplicative_expression,
-    )),
-
-    multiplicative_expression: $ => prec.left(PREC.multiply, seq(
-      $.unary_expression,
-      choice('*', '/', '%'),
-      $.unary_expression,
-    )),
+    binary_expression: $ => choice(
+      prec.left(PREC.compare, seq($.expression, choice('==', '!=', '<', '>'), $.expression)),
+      prec.left(PREC.add, seq($.expression, choice('+', '-'), $.expression)),
+      prec.left(PREC.multiply, seq($.expression, choice('*', '/', '%'), $.expression)),
+    ),
 
     unary_expression: $ => prec.right(PREC.unary, seq(
       choice('+', '-'),
-      choice($.unary_expression, $.postfix_expression),
+      $.expression,
     )),
 
-    postfix_expression: $ => prec.left(PREC.call, seq(
-      $.primary_expression,
-      repeat($.postfix_suffix),
-    )),
-
-    postfix_suffix: $ => choice(
-      $.call_suffix,
-      $.field_suffix,
-    ),
-
-    call_suffix: $ => seq(
+    call_expression: $ => prec.left(PREC.call, seq(
+      $.expression,
       '(',
       repeat($.expression),
       ')',
-    ),
+    )),
 
-    field_suffix: $ => seq(
+    field_expression: $ => prec.left(PREC.call, seq(
+      $.expression,
       '.',
       $.identifier,
-    ),
+    )),
 
     primary_expression: $ => choice(
       $.identifier,
