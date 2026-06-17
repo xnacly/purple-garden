@@ -5,13 +5,13 @@ use lsp_server::{
     ResponseError,
 };
 use lsp_types::{
+    CodeActionProviderCapability, CompletionOptions, CompletionResponse, DiagnosticOptions,
+    FullDocumentDiagnosticReport, HoverProviderCapability, InitializeParams, SaveOptions,
+    ServerCapabilities, TextDocumentSyncKind, TextDocumentSyncOptions,
     notification::{
         DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
     },
     request::{Completion, DocumentDiagnosticRequest, HoverRequest},
-    CodeActionProviderCapability, CompletionOptions, CompletionResponse, DiagnosticOptions,
-    FullDocumentDiagnosticReport, HoverProviderCapability, InitializeParams, SaveOptions,
-    ServerCapabilities, TextDocumentSyncKind, TextDocumentSyncOptions,
 };
 
 use super::analysis::DocumentState;

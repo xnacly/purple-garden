@@ -190,7 +190,8 @@ fn collect_analysis_entries(
                 analysis.add_markdown_hover(span, detail);
             }
             if let Some(ty) = type_for_node(ast, typecheck, node_id) {
-                analysis.add_garden_hover(token_span(name), format!(".{}: {}", name.t.as_str(), ty));
+                analysis
+                    .add_garden_hover(token_span(name), format!(".{}: {}", name.t.as_str(), ty));
             }
             collect_analysis_entries(ast, typecheck, *target, analysis);
         }

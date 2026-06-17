@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Write as _};
 
-pub use purple_garden_ir::{ptype::Type, Fn};
+pub use purple_garden_ir::{Fn, ptype::Type};
 pub use purple_garden_shared::BuiltinFn;
 
 pub mod anomaly;
@@ -15,7 +15,7 @@ pub const REGISTER_COUNT: usize = 64;
 
 pub use crate::anomaly::Anomaly;
 pub use crate::value::{FromVm, IntoVm, PgType, Value};
-pub use crate::vm::{jit_trap_div_zero, syscall_unimplemented, CallFrame, DebugInfo, Vm, VmConfig};
+pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, jit_trap_div_zero, syscall_unimplemented};
 
 #[derive(Debug)]
 pub struct Pkg {

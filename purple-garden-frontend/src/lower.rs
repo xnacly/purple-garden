@@ -7,7 +7,7 @@ use crate::{
     type_from_type_expr,
 };
 use purple_garden_ir::{
-    ptype, BinOp, Block, Const, Func, Id, Instr, Terminator, TypeId, EMPTY_PARAMS,
+    BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype,
 };
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;

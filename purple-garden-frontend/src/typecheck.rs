@@ -878,7 +878,10 @@ impl<'t> Typechecker<'t> {
                                 inner_name,
                                 idx + 1,
                                 candidates.len(),
-                                provided().map(ToString::to_string).collect::<Vec<_>>().join(", "),
+                                provided()
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
                                 ret
                             );
                             return self.set_known(*id, ret);
