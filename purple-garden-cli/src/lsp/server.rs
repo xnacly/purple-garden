@@ -6,8 +6,8 @@ use lsp_server::{
 };
 use lsp_types::{
     CodeActionProviderCapability, CompletionOptions, CompletionResponse, DiagnosticOptions,
-    FullDocumentDiagnosticReport, HoverProviderCapability, InitializeParams, SaveOptions,
-    ServerCapabilities, TextDocumentSyncKind, TextDocumentSyncOptions,
+    FullDocumentDiagnosticReport, HoverProviderCapability, InitializeParams, PublishDiagnosticsParams,
+    SaveOptions, ServerCapabilities, TextDocumentSyncKind, TextDocumentSyncOptions, Uri,
     notification::{
         DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
     },
@@ -94,7 +94,7 @@ fn event_loop(connection: Connection, params: serde_json::Value) -> LspResult<()
                 handle_request(&connection, &documents, req)?;
             }
             Message::Response(_) => {}
-            Message::Notification(not) => handle_notification(&mut documents, not),
+            Message::Notification(not) => handle_notification(&connection, &mut documents, not)?,
         }
     }
 
@@ -195,20 +195,22 @@ fn handle_diagnostic(
     )
 }
 
-fn handle_notification(documents: &mut HashMap<String, DocumentState>, not: Notification) {
+fn handle_notification(
+    connection: &Connection,
+    documents: &mut HashMap<String, DocumentState>,
+    not: Notification,
+) -> LspResult<()> {
     match not.method.as_str() {
         "textDocument/didOpen" => match cast_noti::<DidOpenTextDocument>(not) {
             Ok(params) => {
-                let uri = params.text_document.uri.to_string();
-                documents.insert(uri, DocumentState::analyze(params.text_document.text));
+                update_document(connection, documents, params.text_document.uri, params.text_document.text)?;
             }
             Err(err) => lsp_log!("failed to parse notification: {}", err),
         },
         "textDocument/didChange" => match cast_noti::<DidChangeTextDocument>(not) {
             Ok(params) => {
                 if let Some(change) = params.content_changes.into_iter().next() {
-                    let uri = params.text_document.uri.to_string();
-                    documents.insert(uri, DocumentState::analyze(change.text));
+                    update_document(connection, documents, params.text_document.uri, change.text)?;
                 }
             }
             Err(err) => lsp_log!("failed to parse notification: {}", err),
@@ -216,21 +218,52 @@ fn handle_notification(documents: &mut HashMap<String, DocumentState>, not: Noti
         "textDocument/didSave" => match cast_noti::<DidSaveTextDocument>(not) {
             Ok(params) => {
                 if let Some(text) = params.text {
-                    let uri = params.text_document.uri.to_string();
-                    documents.insert(uri, DocumentState::analyze(text));
+                    update_document(connection, documents, params.text_document.uri, text)?;
                 }
             }
             Err(err) => lsp_log!("failed to parse notification: {}", err),
         },
         "textDocument/didClose" => match cast_noti::<DidCloseTextDocument>(not) {
             Ok(params) => {
-                documents.remove(&params.text_document.uri.to_string());
+                let uri = params.text_document.uri;
+                documents.remove(&uri.to_string());
+                publish_diagnostics(connection, uri, Vec::new())?;
             }
             Err(err) => lsp_log!("failed to parse notification: {}", err),
         },
         "$/cancelRequest" => {}
         _ => lsp_log!("unsupported notification '{}'", not.method),
     }
+    Ok(())
+}
+
+fn update_document(
+    connection: &Connection,
+    documents: &mut HashMap<String, DocumentState>,
+    uri: Uri,
+    text: String,
+) -> LspResult<()> {
+    let state = DocumentState::analyze(text);
+    let diagnostics = state.diagnostics();
+    documents.insert(uri.to_string(), state);
+    publish_diagnostics(connection, uri, diagnostics)
+}
+
+fn publish_diagnostics(
+    connection: &Connection,
+    uri: Uri,
+    diagnostics: Vec<lsp_types::Diagnostic>,
+) -> LspResult<()> {
+    let params = PublishDiagnosticsParams {
+        uri,
+        diagnostics,
+        version: None,
+    };
+    connection.sender.send(Message::Notification(Notification::new(
+        "textDocument/publishDiagnostics".to_owned(),
+        params,
+    )))?;
+    Ok(())
 }
 
 fn send_response<T: serde::Serialize>(
