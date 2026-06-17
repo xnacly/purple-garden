@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use lsp_server::{
     Connection, ErrorCode, ExtractError, Message, Notification, Request, RequestId, Response,
@@ -272,10 +272,44 @@ fn update_document(
     uri: Uri,
     text: String,
 ) -> LspResult<()> {
-    let state = DocumentState::analyze(text);
+    let path = path_from_uri(&uri);
+    let state = DocumentState::analyze(path, text);
     let diagnostics = state.diagnostics();
     documents.insert(uri.to_string(), state);
     publish_diagnostics(connection, uri, diagnostics)
+}
+
+fn path_from_uri(uri: &Uri) -> Option<PathBuf> {
+    let raw = uri.to_string();
+    let path = raw.strip_prefix("file://")?;
+    Some(PathBuf::from(percent_decode(path)?))
+}
+
+fn percent_decode(raw: &str) -> Option<String> {
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hi = *bytes.get(i + 1)?;
+            let lo = *bytes.get(i + 2)?;
+            decoded.push(hex(hi)? * 16 + hex(lo)?);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn change_document(

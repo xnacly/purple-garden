@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use lsp_types::{
     CompletionItem, CompletionItemKind, GotoDefinitionResponse, Hover, HoverContents, Location,
@@ -31,8 +31,15 @@ struct DocumentAnalysis {
     hovers: Vec<HoverEntry>,
     definitions: Vec<DefinitionEntry>,
     declaration_docs: Vec<DeclarationDoc>,
+    package_docs: HashMap<String, PackageDoc>,
     imported_packages: Vec<String>,
     completions: Vec<CompletionEntry>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PackageDoc {
+    hover: String,
+    functions: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -70,20 +77,22 @@ enum HoverPriority {
 }
 
 impl DocumentState {
-    pub(super) fn analyze(text: String) -> Self {
+    pub(super) fn analyze(path: Option<PathBuf>, text: String) -> Self {
         let mut analysis = DocumentAnalysis::new();
         collect_lexical_hovers(&text, &mut analysis);
 
-        crate::frontend::analyze(text.as_bytes(), Vec::new(), |frontend| {
-            if let (Some(ast), Some(typecheck)) = (frontend.ast, frontend.typecheck) {
-                for &root in &ast.roots {
-                    collect_analysis_entries(ast, typecheck, root, &mut analysis);
-                }
-                analysis.definitions = DefinitionCollector::collect(ast);
-                analysis.add_reference_doc_hovers();
+        let analyze = |analysis: &mut DocumentAnalysis| {
+            if let Some(path) = path.as_deref() {
+                crate::frontend::analyze_path(path, text.as_bytes(), Vec::new(), |frontend| {
+                    collect_frontend_analysis(frontend, analysis);
+                });
+            } else {
+                crate::frontend::analyze(text.as_bytes(), Vec::new(), |frontend| {
+                    collect_frontend_analysis(frontend, analysis);
+                });
             }
-            analysis.diagnostics = frontend.diagnostics.to_vec();
-        });
+        };
+        analyze(&mut analysis);
 
         Self { text, analysis }
     }
@@ -92,6 +101,7 @@ impl DocumentState {
         self.analysis
             .diagnostics
             .iter()
+            .filter(|diagnostic| diagnostic.primary.span.start < self.text.len())
             .map(|diagnostic| diagnostic_for_lsp(diagnostic, &self.text))
             .collect()
     }
@@ -114,6 +124,7 @@ impl DocumentState {
             .analysis
             .hovers
             .iter()
+            .filter(|entry| entry.span.start < self.text.len())
             .filter(|entry| span_contains(entry.span, offset))
             .min_by_key(|entry| (entry.span.len, entry.priority))?;
 
@@ -136,6 +147,7 @@ impl DocumentState {
             .analysis
             .definitions
             .iter()
+            .filter(|entry| entry.reference.start < self.text.len())
             .filter(|entry| span_contains(entry.reference, offset))
             .min_by_key(|entry| entry.reference.len)?;
 
@@ -153,6 +165,54 @@ impl DocumentState {
             &self.text,
             offset,
         )
+    }
+}
+
+fn collect_frontend_analysis(
+    frontend: crate::frontend::FrontendAnalysis<'_, '_>,
+    analysis: &mut DocumentAnalysis,
+) {
+    if let (Some(ast), Some(typecheck)) = (frontend.ast, frontend.typecheck) {
+        collect_package_docs(ast, analysis);
+        for &root in &ast.roots {
+            collect_analysis_entries(ast, typecheck, root, analysis);
+        }
+        analysis.definitions = DefinitionCollector::collect(ast);
+        analysis.add_reference_doc_hovers();
+    }
+    analysis.diagnostics = frontend.diagnostics.to_vec();
+}
+
+fn collect_package_docs(ast: &Ast<'_>, analysis: &mut DocumentAnalysis) {
+    for &root in &ast.roots {
+        let Node::Extern {
+            docs, name, fns, ..
+        } = ast.node(root)
+        else {
+            continue;
+        };
+        let pkg_name = name.t.as_str();
+        let detail = format!("extern {}", name.t.as_str());
+        let hover = if docs.is_empty() {
+            garden_block(detail)
+        } else {
+            doc_hover(&detail, docs)
+        };
+
+        let mut functions = HashMap::new();
+
+        for fun in fns {
+            let detail = fn_detail(ast, &fun.name, &fun.args, fun.return_type);
+            let query = format!("{}.{}", pkg_name, fun.name.t.as_str());
+            functions.insert(
+                fun.name.t.as_str().to_owned(),
+                declaration_hover(&detail, &fun.docs, &query),
+            );
+        }
+
+        analysis
+            .package_docs
+            .insert(pkg_name.to_owned(), PackageDoc { hover, functions });
     }
 }
 
@@ -273,6 +333,9 @@ impl<'src> DefinitionCollector<'src> {
                         collector.imports.insert(pkg.t.as_str(), token_span(pkg));
                     }
                 }
+                Node::Extern { name, .. } => {
+                    collector.imports.insert(name.t.as_str(), token_span(name));
+                }
                 _ => {}
             }
         }
@@ -347,6 +410,9 @@ impl<'src> DefinitionCollector<'src> {
                 for pkg in pkgs {
                     self.add_definition(pkg, token_span(pkg));
                 }
+            }
+            Node::Extern { name, .. } => {
+                self.add_definition(name, token_span(name));
             }
         }
     }
@@ -437,7 +503,7 @@ fn collect_analysis_entries(
             collect_analysis_entries(ast, typecheck, *rhs, analysis);
         }
         Node::Field { target, name, .. } => {
-            if let Some((span, detail)) = package_target_hover(ast, *target) {
+            if let Some((span, detail)) = package_target_hover(ast, *target, analysis) {
                 analysis.add_resolved_markdown_hover(span, detail);
             }
             if let Some(ty) = type_for_node(ast, typecheck, node_id) {
@@ -470,7 +536,7 @@ fn collect_analysis_entries(
             collect_nodes(ast, typecheck, &default.1, analysis);
         }
         Node::Call { target, args, .. } => {
-            if let Some(hover) = call_hover(ast, *target) {
+            if let Some(hover) = call_hover(ast, *target, analysis) {
                 analysis.add_hover(hover);
             }
             collect_analysis_entries(ast, typecheck, *target, analysis);
@@ -479,8 +545,29 @@ fn collect_analysis_entries(
         Node::Import { pkgs, .. } => {
             for pkg in pkgs {
                 analysis.add_imported_package(pkg.t.as_str());
-                if let Some(detail) = import_hover(pkg) {
+                if let Some(detail) = import_hover(pkg, analysis) {
                     analysis.add_resolved_markdown_hover(token_span(pkg), detail);
+                }
+            }
+        }
+        Node::Extern {
+            docs, name, fns, ..
+        } => {
+            let detail = format!("extern {}", name.t.as_str());
+            add_decl_hover(analysis, token_span(name), detail, docs);
+            for fun in fns {
+                let detail = fn_detail(ast, &fun.name, &fun.args, fun.return_type);
+                add_decl_hover(analysis, token_span(&fun.name), detail.clone(), &fun.docs);
+                analysis.add_completion(
+                    fun.name.t.as_str(),
+                    CompletionItemKind::FUNCTION,
+                    Some(detail),
+                );
+                for (arg, ty) in &fun.args {
+                    analysis.add_garden_hover(
+                        token_span(arg),
+                        format!("{}: {}", arg.t.as_str(), ast.type_display(*ty)),
+                    );
                 }
             }
         }
@@ -560,6 +647,7 @@ enum LanguageDocKind {
 fn language_doc_query(token: &Token<'_>) -> Option<(LanguageDocKind, &'static str)> {
     Some(match token.t {
         Type::Import => (LanguageDocKind::Keyword, "import"),
+        Type::Extern => (LanguageDocKind::Keyword, "extern"),
         Type::Let => (LanguageDocKind::Keyword, "let"),
         Type::Fn => (LanguageDocKind::Keyword, "fn"),
         Type::Match => (LanguageDocKind::Keyword, "match"),
@@ -571,6 +659,7 @@ fn language_doc_query(token: &Token<'_>) -> Option<(LanguageDocKind, &'static st
         Type::Double => (LanguageDocKind::Type, "Double"),
         Type::Bool => (LanguageDocKind::Type, "Bool"),
         Type::Void => (LanguageDocKind::Type, "Void"),
+        Type::Foreign => (LanguageDocKind::Type, "Foreign"),
         _ => return None,
     })
 }
@@ -608,6 +697,15 @@ fn doc_hover(detail: &str, docs: &[Token<'_>]) -> String {
     format!("{}\n\n{}", garden_block(detail), doc_text(docs))
 }
 
+fn declaration_hover(detail: &str, docs: &[Token<'_>], query: &str) -> String {
+    let body = if docs.is_empty() {
+        garden_block(detail)
+    } else {
+        doc_hover(detail, docs)
+    };
+    format!("{}\n{}", body.trim_end(), crate::doc::command(query))
+}
+
 fn doc_text(docs: &[Token<'_>]) -> String {
     docs.iter()
         .map(|doc| doc.t.as_str())
@@ -625,7 +723,7 @@ enum HoverMarkup {
     Markdown(String),
 }
 
-fn call_hover(ast: &Ast<'_>, target: NodeId) -> Option<AnalysisHover> {
+fn call_hover(ast: &Ast<'_>, target: NodeId, analysis: &DocumentAnalysis) -> Option<AnalysisHover> {
     match ast.node(target) {
         Node::Ident { name, .. } => {
             local_function_hover(ast, name.t.as_str()).map(|markup| AnalysisHover {
@@ -639,17 +737,9 @@ fn call_hover(ast: &Ast<'_>, target: NodeId) -> Option<AnalysisHover> {
             };
             let pkg_name = pkg.t.as_str();
             let fn_name = name.t.as_str();
-            let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
-            let (_, variants) = pkg
-                .overload_groups()
-                .into_iter()
-                .find(|(name, _)| *name == fn_name)?;
-            Some(AnalysisHover {
+            function_hover(pkg_name, fn_name, analysis).map(|contents| AnalysisHover {
                 span: token_span(name),
-                markup: HoverMarkup::Markdown(overload_detail(
-                    &format!("{pkg_name}.{fn_name}"),
-                    &variants,
-                )),
+                markup: HoverMarkup::Markdown(contents),
             })
         }
         _ => None,
@@ -694,18 +784,47 @@ fn overload_detail(name: &str, variants: &[&purple_garden_runtime::Fn<'_>]) -> S
     format!("{}\n{}", out.trim_end(), crate::doc::command(name))
 }
 
-fn import_hover(pkg: &Token<'_>) -> Option<String> {
-    package_hover(pkg.t.as_str())
+fn function_hover(pkg_name: &str, fn_name: &str, analysis: &DocumentAnalysis) -> Option<String> {
+    if let Some(contents) = analysis
+        .package_docs
+        .get(pkg_name)
+        .and_then(|pkg| pkg.functions.get(fn_name))
+    {
+        return Some(contents.clone());
+    }
+
+    let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
+    let (_, variants) = pkg
+        .overload_groups()
+        .into_iter()
+        .find(|(name, _)| *name == fn_name)?;
+    Some(overload_detail(&format!("{pkg_name}.{fn_name}"), &variants))
 }
 
-fn package_target_hover(ast: &Ast<'_>, target: NodeId) -> Option<(Span, String)> {
+fn import_hover(pkg: &Token<'_>, analysis: &DocumentAnalysis) -> Option<String> {
+    package_hover(pkg.t.as_str(), analysis)
+}
+
+fn package_target_hover(
+    ast: &Ast<'_>,
+    target: NodeId,
+    analysis: &DocumentAnalysis,
+) -> Option<(Span, String)> {
     let Node::Ident { name, .. } = ast.node(target) else {
         return None;
     };
-    package_hover(name.t.as_str()).map(|detail| (token_span(name), detail))
+    package_hover(name.t.as_str(), analysis).map(|detail| (token_span(name), detail))
 }
 
-fn package_hover(pkg_name: &str) -> Option<String> {
+fn package_hover(pkg_name: &str, analysis: &DocumentAnalysis) -> Option<String> {
+    if let Some(doc) = analysis.package_docs.get(pkg_name) {
+        return Some(format!(
+            "{}\n{}",
+            doc.hover.trim_end(),
+            crate::doc::command(pkg_name)
+        ));
+    }
+
     let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
     let header = format!("import \"{pkg_name}\"");
     let command = crate::doc::command(pkg_name);

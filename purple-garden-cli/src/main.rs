@@ -4,7 +4,7 @@ use purple_garden_frontend::{
 };
 use purple_garden_runtime::VmConfig;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 mod cli;
 mod doc;
@@ -270,11 +270,12 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn check_frontend(input_source: &str, input: &Input) -> Result<(), Box<dyn std::error::Error>> {
-    let failed = frontend::analyze(input.as_bytes(), Vec::new(), |analysis| {
+    let source_path = Path::new(input_source);
+    let failed = frontend::analyze_path(source_path, input.as_bytes(), Vec::new(), |analysis| {
         for diagnostic in analysis.diagnostics {
             eprintln!(
                 "{}",
-                diagnostic.clone().render(input_source, input.as_bytes())
+                diagnostic.clone().render(input_source, analysis.source)
             );
         }
         analysis.ast.is_none() || !analysis.diagnostics.is_empty()

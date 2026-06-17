@@ -67,6 +67,18 @@ pub(super) fn node_span(ast: &Ast<'_>, node_id: NodeId) -> Option<Span> {
             spans.extend(pkgs.iter().map(token_span));
             Some(cover_spans(&spans))
         }
+        Node::Extern { src, name, fns, .. } => {
+            let mut spans = vec![token_span(src), token_span(name)];
+            for fun in fns {
+                spans.push(token_span(&fun.name));
+                for (arg, ty) in &fun.args {
+                    spans.push(token_span(arg));
+                    spans.push(type_expr_span(ast, *ty));
+                }
+                spans.push(type_expr_span(ast, fun.return_type));
+            }
+            Some(cover_spans(&spans))
+        }
     }
 }
 
