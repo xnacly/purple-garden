@@ -15,6 +15,7 @@ use lsp_types::{
 };
 
 use super::analysis::DocumentState;
+use super::source::apply_content_changes;
 
 type LspResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -67,7 +68,7 @@ fn server_capabilities() -> ServerCapabilities {
         text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Options(
             TextDocumentSyncOptions {
                 open_close: Some(true),
-                change: Some(TextDocumentSyncKind::FULL),
+                change: Some(TextDocumentSyncKind::INCREMENTAL),
                 save: Some(lsp_types::TextDocumentSyncSaveOptions::SaveOptions(
                     SaveOptions {
                         include_text: Some(true),
@@ -209,9 +210,12 @@ fn handle_notification(
         },
         "textDocument/didChange" => match cast_noti::<DidChangeTextDocument>(not) {
             Ok(params) => {
-                if let Some(change) = params.content_changes.into_iter().next() {
-                    update_document(connection, documents, params.text_document.uri, change.text)?;
-                }
+                change_document(
+                    connection,
+                    documents,
+                    params.text_document.uri,
+                    params.content_changes,
+                )?;
             }
             Err(err) => lsp_log!("failed to parse notification: {}", err),
         },
@@ -247,6 +251,19 @@ fn update_document(
     let diagnostics = state.diagnostics();
     documents.insert(uri.to_string(), state);
     publish_diagnostics(connection, uri, diagnostics)
+}
+
+fn change_document(
+    connection: &Connection,
+    documents: &mut HashMap<String, DocumentState>,
+    uri: Uri,
+    changes: Vec<lsp_types::TextDocumentContentChangeEvent>,
+) -> LspResult<()> {
+    let mut text = documents
+        .get(&uri.to_string())
+        .map_or_else(String::new, |state| state.text().to_owned());
+    apply_content_changes(&mut text, changes);
+    update_document(connection, documents, uri, text)
 }
 
 fn publish_diagnostics(

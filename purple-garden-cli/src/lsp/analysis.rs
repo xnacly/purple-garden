@@ -66,6 +66,10 @@ impl DocumentState {
             .collect()
     }
 
+    pub(super) fn text(&self) -> &str {
+        &self.text
+    }
+
     pub(super) fn code_actions(
         &self,
         uri: lsp_types::Uri,

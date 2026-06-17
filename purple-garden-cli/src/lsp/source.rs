@@ -1,4 +1,4 @@
-use lsp_types::{Position, Range};
+use lsp_types::{Position, Range, TextDocumentContentChangeEvent};
 use purple_garden_frontend::{
     ast::{Ast, Node, NodeId, TypeExprId},
     diagnostic::Span,
@@ -122,6 +122,21 @@ pub(super) fn offset_for_position(source: &str, position: Position) -> usize {
         utf16_units += ch.len_utf16() as u32;
     }
     line_end
+}
+
+pub(super) fn apply_content_changes(
+    source: &mut String,
+    changes: Vec<TextDocumentContentChangeEvent>,
+) {
+    for change in changes {
+        if let Some(range) = change.range {
+            let start = offset_for_position(source, range.start);
+            let end = offset_for_position(source, range.end);
+            source.replace_range(start..end, &change.text);
+        } else {
+            *source = change.text;
+        }
+    }
 }
 
 fn cover_node_list(ast: &Ast<'_>, nodes: &[NodeId]) -> Option<Span> {
