@@ -3,10 +3,11 @@ use purple_garden_frontend::{
     diagnostic::Diagnostic, lex::Lexer, lower::Lower, parser::Parser, typecheck::Typechecker,
 };
 use purple_garden_runtime::VmConfig;
-use purple_garden_std::{self as pstd, Pkg};
+
 use std::collections::HashMap;
 
 mod cli;
+mod doc;
 mod help;
 mod input;
 mod lsp;
@@ -87,47 +88,11 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::exit(0);
             }
             Command::Doc { pkg_or_function } => {
-                // with no argument we just print all stdlib packages
-                let Some(pkg_or_function) = pkg_or_function else {
-                    fn print_pkg(pkg: &Pkg) {
-                        println!("{}", pkg.name);
-                        for sub in pkg.pkgs {
-                            print_pkg(sub);
-                        }
-                    }
-                    println!("Purple garden standard library packages:");
-                    for pkg in purple_garden_std::STD {
-                        print_pkg(pkg);
-                    }
-                    std::process::exit(0);
-                };
-
-                let (path, method) = match pkg_or_function.split_once('.') {
-                    Some((path, method)) => (path, Some(method)),
-                    None => (pkg_or_function.as_str(), None),
-                };
-
-                let Some(pkg) = pstd::resolve_pkg(path) else {
-                    return err!(format!("query {} couldnt be resolved to anything", path));
-                };
-
-                if let Some(method) = method {
-                    let Some((name, variants)) = pkg
-                        .overload_groups()
-                        .into_iter()
-                        .find(|(name, _)| *name == method)
-                    else {
-                        return err!(format!("function {}.{} not found", pkg.name, method));
-                    };
-
-                    let mut out = String::new();
-                    purple_garden_runtime::print_overload_group(name, &variants, &mut out)
-                        .expect("writing to a String cannot fail");
-                    print!("{out}");
-                } else {
-                    println!("{pkg}");
-                }
-
+                print!(
+                    "{}",
+                    doc::render_query(pkg_or_function.as_deref())
+                        .map_err(Box::<dyn std::error::Error>::from)?
+                );
                 std::process::exit(0);
             }
             Command::Lsp => return lsp::run(),

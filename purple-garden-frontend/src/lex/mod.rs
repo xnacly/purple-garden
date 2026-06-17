@@ -4,7 +4,7 @@ mod tok;
 use crate::diagnostic::{Diagnostic, Span};
 use byte_search::{find_byte, skip_ident_cont, skip_num_cont};
 
-pub use tok::{Token, Type};
+pub use tok::{keyword_doc, type_doc, KeywordDoc, Token, Type, TypeDoc, KEYWORD_DOCS, TYPE_DOCS};
 
 const IDENT_CONT: u8 = 1 << 0;
 const IDENT_START: u8 = 1 << 1;
@@ -57,21 +57,7 @@ pub struct Lexer<'l> {
 
 #[inline]
 fn as_keyword_type(inner: &str) -> Option<Type<'_>> {
-    Some(match inner {
-        "import" => Type::Import,
-        "as" => Type::As,
-        "true" => Type::True,
-        "false" => Type::False,
-        "let" => Type::Let,
-        "fn" => Type::Fn,
-        "match" => Type::Match,
-        "Str" => Type::Str,
-        "Int" => Type::Int,
-        "Double" => Type::Double,
-        "Bool" => Type::Bool,
-        "Void" => Type::Void,
-        _ => return None,
-    })
+    Type::from_keyword(inner)
 }
 
 impl<'l> Lexer<'l> {
