@@ -226,6 +226,16 @@ impl Terminator {
 #[derive(Debug, Clone)]
 pub struct Block<'b> {
     /// block is dead as a result of optimisation passes
+    ///
+    /// ```text
+    ///        ,-=-.       ______     _
+    ///       /  +  \     />----->  _|1|_
+    ///       | ~~~ |    // -/- /  |_ H _|
+    ///       |R.I.P|   //  /  /     |S|
+    ///  \vV,,|_____|V,//_____/VvV,v,|_|/,,vhjwv/,
+    /// ```
+    ///
+    /// It will not be revived :)
     pub tombstone: bool,
     pub id: Id,
     pub instructions: Vec<Instr<'b>>,
@@ -515,6 +525,201 @@ impl Func<'_> {
             }
             pos += 2;
         }
+    }
+
+    /// Render liveness intervals next to the IR positions that define or use
+    /// them. This is the human-facing counterpart to [`Self::live_set_into`]:
+    /// it uses the same early/late position walk, but keeps the output anchored
+    /// to blocks, instructions, and terminators instead of dumping raw ranges.
+    #[must_use]
+    pub fn liveness_display(&self) -> String {
+        use std::fmt::Write as _;
+
+        fn id_list(ids: &[Id]) -> String {
+            ids.iter()
+                .map(|id| format!("%v{}", id.0))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+
+        fn value(id: Id) -> String {
+            format!("%v{}", id.0)
+        }
+
+        fn value_list(ids: &[Id]) -> String {
+            ids.iter()
+                .map(|id| value(*id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+
+        fn push_instr_uses(instr: &Instr<'_>, out: &mut Vec<Id>) {
+            Func::for_each_use_of_instr(instr, |id| {
+                if !out.contains(&id) {
+                    out.push(id);
+                }
+            });
+        }
+
+        fn term_display(func: &Func<'_>, term: &Terminator) -> String {
+            match term {
+                Terminator::Return {
+                    value: Some(id), ..
+                } => format!("ret %v{}", id.0),
+                Terminator::Return { value: None, .. } => "ret".to_string(),
+                Terminator::Jump { id, params, .. } => {
+                    format!("jmp b{}({})", id.0, id_list(func.params(*params)))
+                }
+                Terminator::Branch { cond, yes, no, .. } => {
+                    let (yes_id, yes_params) = *yes;
+                    let (no_id, no_params) = *no;
+                    format!(
+                        "br %v{}, b{}({}), b{}({})",
+                        cond.0,
+                        yes_id.0,
+                        id_list(func.params(yes_params)),
+                        no_id.0,
+                        id_list(func.params(no_params)),
+                    )
+                }
+                Terminator::BranchCmpImm {
+                    op,
+                    lhs,
+                    imm,
+                    yes,
+                    no,
+                    ..
+                } => {
+                    let (yes_id, yes_params) = *yes;
+                    let (no_id, no_params) = *no;
+                    format!(
+                        "br_imm {:?} %v{}, {}, b{}({}), b{}({})",
+                        op,
+                        lhs.0,
+                        imm,
+                        yes_id.0,
+                        id_list(func.params(yes_params)),
+                        no_id.0,
+                        id_list(func.params(no_params)),
+                    )
+                }
+                Terminator::Tail { func, args, .. } => {
+                    format!("tail f{}({})", func.0, id_list(args))
+                }
+            }
+        }
+
+        fn push_term_lines(out: &mut String, func: &Func<'_>, term: &Terminator) {
+            match term {
+                Terminator::Return {
+                    value: Some(id), ..
+                } => {
+                    writeln!(out, "      use: {}", value(*id)).unwrap();
+                }
+                Terminator::Return { value: None, .. } => {}
+                Terminator::Jump { params, .. } => {
+                    let params = func.params(*params);
+                    if !params.is_empty() {
+                        writeln!(out, "      args: {}", value_list(params)).unwrap();
+                    }
+                }
+                Terminator::Tail { func: _, args, .. } => {
+                    if !args.is_empty() {
+                        writeln!(out, "      args: {}", value_list(args)).unwrap();
+                    }
+                }
+                Terminator::Branch {
+                    cond,
+                    yes: (yes_id, yes_params),
+                    no: (no_id, no_params),
+                    ..
+                } => {
+                    writeln!(out, "      cond: {}", value(*cond)).unwrap();
+                    let yes_params = func.params(*yes_params);
+                    let no_params = func.params(*no_params);
+                    if !yes_params.is_empty() {
+                        writeln!(out, "      yes:  b{}({})", yes_id.0, value_list(yes_params))
+                            .unwrap();
+                    }
+                    if !no_params.is_empty() {
+                        writeln!(out, "      no:   b{}({})", no_id.0, value_list(no_params))
+                            .unwrap();
+                    }
+                }
+                Terminator::BranchCmpImm {
+                    lhs,
+                    yes: (yes_id, yes_params),
+                    no: (no_id, no_params),
+                    ..
+                } => {
+                    writeln!(out, "      lhs:  {}", value(*lhs)).unwrap();
+                    let yes_params = func.params(*yes_params);
+                    let no_params = func.params(*no_params);
+                    if !yes_params.is_empty() {
+                        writeln!(out, "      yes:  b{}({})", yes_id.0, value_list(yes_params))
+                            .unwrap();
+                    }
+                    if !no_params.is_empty() {
+                        writeln!(out, "      no:   b{}({})", no_id.0, value_list(no_params))
+                            .unwrap();
+                    }
+                }
+            }
+        }
+
+        let mut intervals = Vec::new();
+        self.live_set_into(&mut intervals);
+
+        let mut out = String::new();
+        writeln!(&mut out, "// liveness {} (f{})", self.name, self.id.0).unwrap();
+        writeln!(&mut out, "intervals:").unwrap();
+        for (id, &(def, last_use)) in intervals.iter().enumerate() {
+            if def == u32::MAX {
+                continue;
+            }
+            writeln!(&mut out, "  %v{id}: {def}..{last_use}").unwrap();
+        }
+        writeln!(&mut out, "blocks:").unwrap();
+
+        let mut pos = 0;
+        for block in &self.blocks {
+            if block.tombstone {
+                writeln!(&mut out, "  b{} <tombstone>", block.id.0).unwrap();
+                continue;
+            }
+
+            let params = self.params(block.params);
+            writeln!(&mut out, "  b{}({})", block.id.0, id_list(params)).unwrap();
+            if !params.is_empty() {
+                writeln!(&mut out, "    @{pos} params def: {}", value_list(params)).unwrap();
+            }
+            pos += 2;
+
+            for instr in &block.instructions {
+                if !matches!(instr, Instr::Noop) {
+                    writeln!(&mut out, "    @{pos} {instr}").unwrap();
+
+                    let mut uses = Vec::new();
+                    push_instr_uses(instr, &mut uses);
+                    if !uses.is_empty() {
+                        writeln!(&mut out, "      use: {}", value_list(&uses)).unwrap();
+                    }
+
+                    if let Some(def_id) = Self::def_of(instr) {
+                        writeln!(&mut out, "      def: {}", value(def_id)).unwrap();
+                    }
+                }
+                pos += 2;
+            }
+
+            if let Some(term) = &block.term {
+                writeln!(&mut out, "    @{pos} {}", term_display(self, term)).unwrap();
+                push_term_lines(&mut out, self, term);
+            }
+            pos += 2;
+        }
+
+        out
     }
 
     /// Per-SSA register hints for `Ralloc`. Walks every call-shaped

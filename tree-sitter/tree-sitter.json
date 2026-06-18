@@ -1,0 +1,19 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "garden",
+      "camelcase": "Garden",
+      "title": "Garden",
+      "scope": "source.garden",
+      "file-types": ["garden"],
+      "injection-regex": "^garden$",
+      "class-name": "TreeSitterGarden"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Tree-sitter grammar for Purple Garden"
+  }
+}

@@ -1,3 +1,22 @@
+```text
+         ,            ,            ,    
+     /\^/`\       /\^/`\       /\^/`\   
+    | \/   |     | \/   |     | \/   |  
+    | |    |     | |    |     | |    |  
+    \ \    /     \ \    /     \ \    /  
+     '\\//'       '\\//'       '\\//'   
+       ||           ||           ||     
+       ||           ||           ||     
+       ||           ||           ||     
+       ||  ,        ||  ,        ||  ,  
+   |\  ||  |\   |\  ||  |\   |\  ||  |\ 
+   | | ||  | |  | | ||  | |  | | ||  | |
+   | | || / /   | | || / /   | | || / / 
+    \ \||/ /     \ \||/ /     \ \||/ /  
+     `\\//`       `\\//`       `\\//`   
+    ^^^^^^^^     ^^^^^^^^     ^^^^^^^^  
+```
+
 # purple_garden
 
 purple_garden is a lean scripting language designed for performance, with a
@@ -17,7 +36,7 @@ io.println("Hello World")
   [opt](./purple-garden/src/opt/bc/mod.rs) modules
 - JIT compilation for the whole input by default
 - Embeddable with minimal friction for Rust interop via `vm::BuiltinFn`, see
-  [help/embed](./purple-garden/help/embed.txt) for a guide and
+  [help/embed](./help/embed.txt) for a guide and
   [examples/embed-counter/](./examples/embed-counter/) for its real world
   counter part.
 - Memory efficient, with an optional garbage collector and a minimal standard
@@ -40,6 +59,11 @@ For an intro to purple garden see
 git clone git@github.com:xnacly/purple-garden.git
 cargo run -- --help
 ```
+
+## Editor Setup
+
+Tree-sitter and Neovim LSP setup notes live in
+[tree-sitter/README.md](./tree-sitter/README.md).
 
 ### Benchmarks
 

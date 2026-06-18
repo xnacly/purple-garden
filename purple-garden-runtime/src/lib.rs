@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Write as _};
 
-pub use purple_garden_ir::{ptype::Type, Fn};
+pub use purple_garden_ir::{Fn, ptype::Type};
 pub use purple_garden_shared::BuiltinFn;
 
 pub mod anomaly;
@@ -15,7 +15,7 @@ pub const REGISTER_COUNT: usize = 64;
 
 pub use crate::anomaly::Anomaly;
 pub use crate::value::{FromVm, IntoVm, PgType, Value};
-pub use crate::vm::{jit_trap_div_zero, syscall_unimplemented, CallFrame, DebugInfo, Vm, VmConfig};
+pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, jit_trap_div_zero, syscall_unimplemented};
 
 #[derive(Debug)]
 pub struct Pkg {
@@ -67,20 +67,123 @@ pub fn print_overload_group(
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
     if let [single] = variants {
+        print_function_head(single, f)?;
+        if !single.doc.is_empty() {
+            writeln!(f)?;
+            writeln!(f, "{}", single.doc)?;
+        }
+        return Ok(());
+    }
+
+    writeln!(f, "fn {name}:")?;
+    let merged = merge_overload_docs(variants);
+    let sigs = variants.iter().map(|v| variant_sig(v)).collect::<Vec<_>>();
+    let sig_width = sigs.iter().map(String::len).max().unwrap_or(0);
+
+    for sig in sigs {
+        if let Some((_, description)) = merged
+            .descriptions
+            .iter()
+            .find(|(description_sig, _)| description_sig == &sig)
+        {
+            writeln!(f, "    {sig:<sig_width$}  {description}")?;
+        } else {
+            writeln!(f, "    {sig}")?;
+        }
+    }
+
+    if !merged.examples.is_empty() {
+        let examples = merge_example_blocks(&merged.examples);
+        writeln!(f)?;
+        writeln!(f, "## Examples")?;
+        writeln!(f)?;
+        writeln!(f, "```garden")?;
+        writeln!(f, "{examples}")?;
+        writeln!(f, "```")?;
+    }
+
+    Ok(())
+}
+
+struct MergedOverloadDocs {
+    descriptions: Vec<(String, String)>,
+    examples: Vec<String>,
+}
+
+fn merge_overload_docs(variants: &[&Fn<'_>]) -> MergedOverloadDocs {
+    let mut descriptions = Vec::new();
+    let mut examples = Vec::new();
+    for v in variants {
+        if v.doc.is_empty() {
+            continue;
+        }
+        let (description, example) = split_doc_examples(v.doc);
+        if !description.is_empty() {
+            descriptions.push((variant_sig(v), description));
+        }
+        if !example.is_empty() {
+            examples.push(example);
+        }
+    }
+    MergedOverloadDocs {
+        descriptions,
+        examples,
+    }
+}
+
+fn merge_example_blocks(examples: &[String]) -> String {
+    let mut seen = Vec::<&str>::new();
+    let mut out = Vec::new();
+    for example in examples {
+        for line in example.lines() {
+            if !line.is_empty() && seen.contains(&line) {
+                continue;
+            }
+            if line.is_empty() && !out.is_empty() {
+                continue;
+            }
+            if !line.is_empty() {
+                seen.push(line);
+            }
+            out.push(line);
+        }
+    }
+
+    while out.last().is_some_and(|line| line.is_empty()) {
+        out.pop();
+    }
+    out.join("\n")
+}
+
+fn split_doc_examples(doc: &str) -> (String, String) {
+    let Some((description, rest)) = doc.split_once("## Examples") else {
+        return (doc.trim().to_owned(), String::new());
+    };
+
+    let example = rest
+        .trim_start()
+        .strip_prefix("```garden")
+        .and_then(|rest| rest.strip_suffix("```"))
+        .map_or_else(
+            || rest.trim().to_owned(),
+            |example| example.trim().to_owned(),
+        );
+
+    (description.trim().to_owned(), example)
+}
+
+fn print_overload_group_summary(
+    name: &str,
+    variants: &[&Fn<'_>],
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    if let [single] = variants {
         return print_function_head(single, f);
     }
 
     writeln!(f, "fn {name}:")?;
-
-    let variant_sigs = variants.iter().map(|v| variant_sig(v)).collect::<Vec<_>>();
-    let sig_width = variant_sigs.iter().map(String::len).max().unwrap_or(0);
     for v in variants {
-        let sig = variant_sig(v);
-        if v.doc.is_empty() {
-            writeln!(f, "  {sig}")?;
-        } else {
-            writeln!(f, "  {sig:<sig_width$}  {}", v.doc)?;
-        }
+        writeln!(f, "  {}", variant_sig(v))?;
     }
     Ok(())
 }
@@ -100,7 +203,7 @@ impl fmt::Display for Pkg {
         if !self.fns.is_empty() {
             writeln!(f)?;
             for (name, variants) in self.overload_groups() {
-                print_overload_group(name, &variants, f)?;
+                print_overload_group_summary(name, &variants, f)?;
             }
         }
 

@@ -1,6 +1,6 @@
 use crate::{
-    ast::{Ast, Node, NodeId, TypeExpr, TypeExprId},
-    err::PgError,
+    ast::{Ast, ExternFn, Node, NodeId, TypeExpr, TypeExprId},
+    diagnostic::Diagnostic,
     lex::{Lexer, Token, Type},
 };
 
@@ -11,17 +11,29 @@ pub struct Parser<'p> {
     id: usize,
     cur: Token<'p>,
     ast: Ast<'p>,
+    diagnostics: Vec<Diagnostic>,
+    pending_docs: Vec<Token<'p>>,
+}
+
+#[derive(Debug)]
+pub struct ParseOutput<'p> {
+    pub ast: Option<Ast<'p>>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 impl<'p> Parser<'p> {
-    pub fn new(mut lex: Lexer<'p>) -> Result<Self, PgError> {
-        let cur = lex.one()?;
-        Ok(Self {
+    #[must_use]
+    pub fn new(mut lex: Lexer<'p>) -> Self {
+        let cur = lex.one();
+        let diagnostics = std::mem::take(&mut lex.diagnostics);
+        Self {
             cur,
             lex,
             id: 0,
             ast: Ast::new(),
-        })
+            diagnostics,
+            pending_docs: Vec::new(),
+        }
     }
 
     fn next_id(&mut self) -> usize {
@@ -38,11 +50,11 @@ impl<'p> Parser<'p> {
         self.cur.t == Type::Eof
     }
 
-    fn expect(&mut self, ty: Type) -> Result<(), PgError> {
+    fn expect(&mut self, ty: Type) -> Result<(), Diagnostic> {
         if self.cur.t == ty {
             self.advance()?;
         } else {
-            return Err(PgError::with_msg(
+            return Err(Diagnostic::at_token(
                 format!(
                     "Expected `{:?}`, got {}({:?})",
                     ty,
@@ -56,21 +68,23 @@ impl<'p> Parser<'p> {
         Ok(())
     }
 
-    fn expect_ident(&mut self) -> Result<Token<'p>, PgError> {
+    fn expect_ident(&mut self) -> Result<Token<'p>, Diagnostic> {
         if let Type::Ident(_) = self.cur.t {
             let matched = self.cur.clone();
             self.advance()?;
             Ok(matched)
         } else {
-            Err(PgError::with_msg(
+            Err(Diagnostic::at_token(
                 format!("Expected an identifier, got {:?}", self.cur.t),
                 &self.cur,
             ))
         }
     }
 
-    fn advance(&mut self) -> Result<(), PgError> {
-        self.cur = self.lex.one()?;
+    fn advance(&mut self) -> Result<(), Diagnostic> {
+        self.cur = self.lex.one();
+        self.diagnostics
+            .extend(std::mem::take(&mut self.lex.diagnostics));
         Ok(())
     }
 
@@ -83,27 +97,97 @@ impl<'p> Parser<'p> {
     }
 
     /// program = prefix*
-    pub fn parse(mut self) -> Result<Ast<'p>, PgError> {
+    pub fn parse(mut self) -> Result<Ast<'p>, Diagnostic> {
+        self.parse_roots()?;
+        Ok(self.ast)
+    }
+
+    fn parse_roots(&mut self) -> Result<(), Diagnostic> {
         while !self.at_end() {
             let node = self.parse_prefix()?;
             self.ast.roots.push(node);
         }
-        Ok(self.ast)
+        Ok(())
+    }
+
+    fn parse_roots_collect(&mut self) {
+        while !self.at_end() {
+            match self.parse_prefix() {
+                Ok(node) => self.ast.roots.push(node),
+                Err(diagnostic) => {
+                    self.diagnostics.push(diagnostic);
+                    self.synchronize_root();
+                }
+            }
+        }
+    }
+
+    fn is_root_boundary(ty: Type<'_>) -> bool {
+        matches!(
+            ty,
+            Type::Let
+                | Type::Fn
+                | Type::Import
+                | Type::Extern
+                | Type::Match
+                | Type::CurlyRight
+                | Type::Eof
+        )
+    }
+
+    fn synchronize_root(&mut self) {
+        self.pending_docs.clear();
+        while !Self::is_root_boundary(self.cur.t) {
+            self.advance().expect("lexing is infallible");
+        }
+        if self.cur.t == Type::CurlyRight {
+            self.advance().expect("lexing is infallible");
+        }
+    }
+
+    /// Parse while collecting diagnostics. Recovery is intentionally shallow
+    /// for now: a malformed root is dropped, then parsing resumes at the next
+    /// obvious root boundary.
+    pub fn parse_collect(mut self) -> ParseOutput<'p> {
+        self.parse_roots_collect();
+        self.diagnostics.extend(self.lex.into_diagnostics());
+        ParseOutput {
+            ast: Some(self.ast),
+            diagnostics: self.diagnostics,
+        }
     }
 
     /// prefix = import | let | fn | match | expr
-    fn parse_prefix(&mut self) -> Result<NodeId, PgError> {
+    fn parse_prefix(&mut self) -> Result<NodeId, Diagnostic> {
+        while matches!(self.cur().t, Type::Doc(_)) {
+            self.pending_docs.push(self.cur().clone());
+            self.advance()?;
+        }
+
         match self.cur().t {
             Type::Import => self.parse_import(),
             Type::Let => self.parse_let(),
             Type::Fn => self.parse_fn(),
+            Type::Extern => self.parse_extern(),
+            Type::Eof if !self.pending_docs.is_empty() => Err(Diagnostic::at_token(
+                "documentation is not attached to anything",
+                self.pending_docs.last().expect("pending docs not empty"),
+            )),
+            _ if !self.pending_docs.is_empty() => Err(Diagnostic::at_token(
+                "documentation can only be attached to `let`, `fn` or `extern`",
+                self.pending_docs.first().expect("pending docs not empty"),
+            )),
             Type::Match => self.parse_match(),
             _ => self.parse_expr(0),
         }
     }
 
+    fn take_docs(&mut self) -> Vec<Token<'p>> {
+        std::mem::take(&mut self.pending_docs)
+    }
+
     /// import = "import" string | "import" "(" string* ")"
-    fn parse_import(&mut self) -> Result<NodeId, PgError> {
+    fn parse_import(&mut self) -> Result<NodeId, Diagnostic> {
         let src = self.cur.clone();
         // skip Type::Import
         self.advance()?;
@@ -128,7 +212,7 @@ impl<'p> Parser<'p> {
 
         while !self.at_end() && self.cur().t != Type::BraceRight {
             let &Token { t: Type::S(_), .. } = self.cur() else {
-                return Err(PgError::with_msg(
+                return Err(Diagnostic::at_token(
                     "Only strings are allowed as import paths",
                     &self.cur,
                 ));
@@ -143,30 +227,29 @@ impl<'p> Parser<'p> {
     }
 
     /// let = "let" ident "=" prefix
-    fn parse_let(&mut self) -> Result<NodeId, PgError> {
+    fn parse_let(&mut self) -> Result<NodeId, Diagnostic> {
+        let docs = self.take_docs();
         self.expect(Type::Let)?;
         let name = self.expect_ident()?;
         self.expect(Type::Equal)?;
         let rhs = self.parse_prefix()?;
         let id = self.next_id();
 
-        Ok(self.push_node(Node::Let { id, name, rhs }))
+        Ok(self.push_node(Node::Let {
+            id,
+            docs,
+            name,
+            rhs,
+        }))
     }
 
     /// fn = "fn" ident "(" (ident ":" type)* ")" type? "{" prefix* "}"
-    fn parse_fn(&mut self) -> Result<NodeId, PgError> {
+    fn parse_fn(&mut self) -> Result<NodeId, Diagnostic> {
+        let docs = self.take_docs();
         self.advance()?;
         let name = self.expect_ident()?;
 
-        self.expect(Type::BraceLeft)?;
-        let mut args = vec![];
-        while !self.at_end() && self.cur().t != Type::BraceRight {
-            let arg_name = self.expect_ident()?;
-            self.expect(Type::Colon)?;
-            let arg_type = self.parse_type()?;
-            args.push((arg_name, arg_type));
-        }
-        self.expect(Type::BraceRight)?;
+        let args = self.parse_args()?;
 
         let return_type = if self.cur().t == Type::CurlyLeft {
             self.push_type(TypeExpr::Atom(Token {
@@ -185,6 +268,7 @@ impl<'p> Parser<'p> {
         self.expect(Type::CurlyRight)?;
 
         Ok(self.push_node(Node::Fn {
+            docs,
             name,
             args,
             return_type,
@@ -192,8 +276,82 @@ impl<'p> Parser<'p> {
         }))
     }
 
+    fn parse_args(&mut self) -> Result<Vec<(Token<'p>, TypeExprId)>, Diagnostic> {
+        self.expect(Type::BraceLeft)?;
+        let mut args = vec![];
+        while !self.at_end() && self.cur().t != Type::BraceRight {
+            let arg_name = self.expect_ident()?;
+            self.expect(Type::Colon)?;
+            let arg_type = self.parse_type()?;
+            args.push((arg_name, arg_type));
+        }
+        self.expect(Type::BraceRight)?;
+        Ok(args)
+    }
+
+    /// extern = "extern" string "{" (doc* "fn" ident args type?)* "}"
+    fn parse_extern(&mut self) -> Result<NodeId, Diagnostic> {
+        let docs = self.take_docs();
+        let src = self.cur.clone();
+        self.expect(Type::Extern)?;
+
+        let name = if matches!(self.cur().t, Type::S(_)) {
+            let name = self.cur().clone();
+            self.advance()?;
+            name
+        } else {
+            return Err(Diagnostic::at_token(
+                "Expected a string package name after `extern`",
+                self.cur(),
+            ));
+        };
+
+        self.expect(Type::CurlyLeft)?;
+        let mut fns = Vec::new();
+        while !self.at_end() && self.cur().t != Type::CurlyRight {
+            while matches!(self.cur().t, Type::Doc(_)) {
+                self.pending_docs.push(self.cur().clone());
+                self.advance()?;
+            }
+
+            if self.cur().t == Type::Extern {
+                return Err(Diagnostic::at_token(
+                    "nested extern declarations are not supported",
+                    self.cur(),
+                ));
+            }
+
+            let fun_docs = self.take_docs();
+            self.expect(Type::Fn)?;
+            let fun_name = self.expect_ident()?;
+            let args = self.parse_args()?;
+            let return_type = if self.cur().t == Type::CurlyRight || self.cur().t == Type::Fn {
+                self.push_type(TypeExpr::Atom(Token {
+                    start: self.cur().start,
+                    t: Type::Void,
+                }))
+            } else {
+                self.parse_type()?
+            };
+            fns.push(ExternFn {
+                docs: fun_docs,
+                name: fun_name,
+                args,
+                return_type,
+            });
+        }
+        self.expect(Type::CurlyRight)?;
+
+        Ok(self.push_node(Node::Extern {
+            src,
+            docs,
+            name,
+            fns,
+        }))
+    }
+
     /// match = "match" "{" (expr "{" prefix* "}")* "{" prefix* "}" "}"
-    fn parse_match(&mut self) -> Result<NodeId, PgError> {
+    fn parse_match(&mut self) -> Result<NodeId, Diagnostic> {
         self.advance()?;
         let mut cases = vec![];
         let mut default = None;
@@ -226,7 +384,7 @@ impl<'p> Parser<'p> {
         self.expect(Type::CurlyRight)?;
 
         let Some(default) = default else {
-            return Err(PgError::with_msg(
+            return Err(Diagnostic::at_token(
                 "A match statement requires a default branch",
                 &tok,
             ));
@@ -237,7 +395,7 @@ impl<'p> Parser<'p> {
     }
 
     /// expr = atom | ident | "(" expr ")" | prefix-op expr | expr postfix-op | expr infix-op expr
-    fn parse_expr(&mut self, min_bp: u8) -> Result<NodeId, PgError> {
+    fn parse_expr(&mut self, min_bp: u8) -> Result<NodeId, Diagnostic> {
         let mut lhs = match self.cur().t {
             Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => {
                 let raw = self.cur.clone();
@@ -266,7 +424,12 @@ impl<'p> Parser<'p> {
                 let id = self.next_id();
                 self.push_node(Node::Unary { id, op, rhs })
             }
-            _ => todo!("{:?}", self.cur().t),
+            _ => {
+                return Err(Diagnostic::at_token(
+                    format!("Expected expression, got {:?}", self.cur().t),
+                    self.cur(),
+                ));
+            }
         };
 
         // postfix parsing loop
@@ -372,7 +535,7 @@ impl<'p> Parser<'p> {
     }
 
     /// type = atom-type | "Foreign" "<" ident ">" | "Option" "<" type ">" | "Array" "<" type ">"
-    fn parse_type(&mut self) -> Result<TypeExprId, PgError> {
+    fn parse_type(&mut self) -> Result<TypeExprId, Diagnostic> {
         let Token { t, .. } = self.cur();
         Ok(match t {
             // Atom types
@@ -382,11 +545,11 @@ impl<'p> Parser<'p> {
                 tt
             }
             // Foreign types: Foreign<Counter>
-            Type::Ident("Foreign") => {
+            Type::Foreign => {
                 self.advance()?;
                 self.expect(Type::LessThan)?;
                 if self.cur().t == Type::GreaterThan {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         "Expected a foreign type name after `Foreign<`",
                         &self.cur,
                     ));
@@ -400,7 +563,7 @@ impl<'p> Parser<'p> {
                 self.advance()?;
                 self.expect(Type::LessThan)?;
                 if self.cur().t == Type::GreaterThan {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         "Expected a type after `Option<`",
                         &self.cur,
                     ));
@@ -414,7 +577,7 @@ impl<'p> Parser<'p> {
                 self.advance()?;
                 self.expect(Type::LessThan)?;
                 if self.cur().t == Type::GreaterThan {
-                    return Err(PgError::with_msg(
+                    return Err(Diagnostic::at_token(
                         "Expected a type after `Array<`",
                         &self.cur,
                     ));
@@ -424,7 +587,7 @@ impl<'p> Parser<'p> {
                 self.push_type(TypeExpr::Array(inner))
             }
             _ => {
-                return Err(PgError::with_msg(
+                return Err(Diagnostic::at_token(
                     "Bad type, expected one of: Str, Int, Double, Bool, Void, Foreign<name>, Option<type> or Array<type>",
                     self.cur(),
                 ));
@@ -446,7 +609,7 @@ mod tests {
                     #[test]
                     fn $name() {
                         let l = Lexer::new($input.as_bytes());
-                        let mut p = Parser::new(l).unwrap();
+                        let mut p = Parser::new(l);
                         let tt = p.parse_type().unwrap();
                         assert_eq!(p.ast.type_display(tt).to_string(), $expected);
                     }
@@ -492,25 +655,25 @@ mod tests {
     #[test]
     fn empty_foreign_has_specific_error() {
         let l = Lexer::new(b"Foreign<>");
-        let mut p = Parser::new(l).unwrap();
+        let mut p = Parser::new(l);
         let err = p.parse_type().unwrap_err();
-        assert_eq!(err.msg, "Expected a foreign type name after `Foreign<`");
+        assert_eq!(err.message, "Expected a foreign type name after `Foreign<`");
     }
 
     #[test]
     fn empty_option_has_specific_error() {
         let l = Lexer::new(b"Option<>");
-        let mut p = Parser::new(l).unwrap();
+        let mut p = Parser::new(l);
         let err = p.parse_type().unwrap_err();
-        assert_eq!(err.msg, "Expected a type after `Option<`");
+        assert_eq!(err.message, "Expected a type after `Option<`");
     }
 
     #[test]
     fn empty_array_has_specific_error() {
         let l = Lexer::new(b"Array<>");
-        let mut p = Parser::new(l).unwrap();
+        let mut p = Parser::new(l);
         let err = p.parse_type().unwrap_err();
-        assert_eq!(err.msg, "Expected a type after `Array<`");
+        assert_eq!(err.message, "Expected a type after `Array<`");
     }
 
     macro_rules! table_roots {
@@ -522,7 +685,7 @@ mod tests {
                     #[test]
                     fn $name() {
                         let l = Lexer::new($input.as_bytes());
-                        let p = Parser::new(l).unwrap();
+                        let p = Parser::new(l);
                         let ast = p.parse().unwrap();
                         assert_eq!(ast.roots.len(), $root_count);
                         assert!(!ast.nodes.is_empty());
@@ -544,7 +707,7 @@ mod tests {
     #[test]
     fn adjacent_parenthesized_arg_after_atom_is_not_postfix_call() {
         let l = Lexer::new(b"f(0.0 (1.0 + 2.0))");
-        let p = Parser::new(l).unwrap();
+        let p = Parser::new(l);
         let ast = p.parse().unwrap();
         let root = ast.roots[0];
 
@@ -560,8 +723,42 @@ mod tests {
     #[test]
     fn equal_in_expression_terminates() {
         let l = Lexer::new(b"(5 = 6)");
-        let p = Parser::new(l).unwrap();
+        let p = Parser::new(l);
         let result = p.parse();
         assert!(result.is_err(), "expected parse error, got: {result:?}");
+    }
+
+    #[test]
+    fn parse_collect_keeps_valid_roots_after_lexer_error() {
+        let l = Lexer::new(b"import 1.2.3\nlet b = 1");
+        let out = Parser::new(l).parse_collect();
+        let ast = out.ast.expect("parse_collect should keep recovered ast");
+
+        assert_eq!(out.diagnostics.len(), 2);
+        assert_eq!(out.diagnostics[0].message, "Invalid numeric literal");
+        assert_eq!(
+            out.diagnostics[1].message,
+            "Expected `BraceLeft`, got let(Let)"
+        );
+        assert_eq!(ast.roots.len(), 1);
+        let Node::Let { name, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected recovered let root");
+        };
+        assert_eq!(name.t, crate::lex::Type::Ident("b"));
+    }
+
+    #[test]
+    fn parse_collect_keeps_valid_roots_after_parser_error() {
+        let l = Lexer::new(b"let a = 1 +\nlet b = 2");
+        let out = Parser::new(l).parse_collect();
+        let ast = out.ast.expect("parse_collect should keep recovered ast");
+
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(out.diagnostics[0].message, "Expected expression, got Let");
+        assert_eq!(ast.roots.len(), 1);
+        let Node::Let { name, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected recovered let root");
+        };
+        assert_eq!(name.t, crate::lex::Type::Ident("b"));
     }
 }

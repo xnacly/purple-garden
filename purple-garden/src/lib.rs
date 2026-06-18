@@ -5,7 +5,10 @@
 compile_error!("purple-garden currently supports only Linux or macOS on x86_64 or aarch64");
 
 use purple_garden_bc as bc;
-use purple_garden_frontend::{err::PgError, lex, lower, parser};
+use purple_garden_frontend::{
+    diagnostic::{Diagnostic, Span},
+    lex, lower, parser,
+};
 use purple_garden_runtime::{Anomaly, BuiltinFn, DebugInfo};
 pub use purple_garden_shared::config;
 
@@ -14,8 +17,6 @@ pub use purple_garden_runtime::{Fn, FromVm, IntoVm, PgType, Pkg, Type, Value, Vm
 pub use purple_garden_std::{STD, resolve_pkg};
 
 pub mod gc;
-pub mod help;
-pub mod input;
 
 type JitFn = purple_garden_jit::JitFn;
 
@@ -51,7 +52,7 @@ impl<'pg> Pg<'pg> {
         self
     }
 
-    pub fn compile(&self, input: &[u8]) -> Result<Program, PgError> {
+    pub fn compile(&self, input: &[u8]) -> Result<Program, Diagnostic> {
         compile(&self.config, input, &self.libs)
     }
 }
@@ -126,9 +127,14 @@ fn compile<'e>(
     config: &'e config::Config,
     input: &'e [u8],
     libs: &[&'e Pkg],
-) -> Result<Program, PgError> {
-    let lexer = lex::Lexer::new(input);
-    let ast = parser::Parser::new(lexer)?.parse()?;
+) -> Result<Program, Diagnostic> {
+    let parse = parser::Parser::new(lex::Lexer::new(input)).parse_collect();
+    if let Some(diagnostic) = parse.diagnostics.into_iter().next() {
+        return Err(diagnostic);
+    }
+    let ast = parse
+        .ast
+        .expect("parser returned no diagnostics and no AST");
 
     let mut ir = lower::Lower::new().with_libs(libs.to_vec()).ir_from(&ast)?;
     if config.opt >= 1 {
@@ -136,11 +142,9 @@ fn compile<'e>(
     }
 
     let mut cc = bc::Cc::new();
-    let native_pages = cc.compile(config, &ir).map_err(|msg| PgError {
-        msg,
-        start: 0,
-        len: 0,
-    })?;
+    let native_pages = cc
+        .compile(config, &ir)
+        .map_err(|msg| Diagnostic::new(msg, Span::new(0, 0)))?;
     if config.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);
         cc.compact_nops();

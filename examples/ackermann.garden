@@ -3,6 +3,7 @@
 # ack(3, 8) = 2045, ack(3, 9) = 4093.
 import "testing"
 
+#! Compute the Ackermann function for small inputs.
 fn ack(m:Int n:Int) Int {
     match {
         m == 0 { n + 1 }

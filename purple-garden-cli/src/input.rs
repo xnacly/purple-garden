@@ -6,7 +6,6 @@ use std::os::fd::AsRawFd;
 /// mapping file inputs on supported linux targets
 pub enum Input {
     Str(String),
-    File(Vec<u8>),
     MmapedFile {
         /// this needs to be kept so its not dropped while reading
         file: File,
@@ -44,20 +43,9 @@ impl Input {
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             Input::Str(s) => s.as_bytes(),
-            Input::File(buf) => buf,
-            Input::MmapedFile { len, ptr, .. } => unsafe {
+            Input::MmapedFile { file, len, ptr } => unsafe {
+                let _keep_file_alive = file;
                 std::slice::from_raw_parts(ptr.as_ptr(), *len)
-            },
-        }
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        match self {
-            Input::Str(s) => s,
-            Input::File(buf) => str::from_utf8(buf).unwrap(),
-            Input::MmapedFile { len, ptr, .. } => unsafe {
-                str::from_utf8(std::slice::from_raw_parts(ptr.as_ptr(), *len)).unwrap()
             },
         }
     }
@@ -66,7 +54,6 @@ impl Input {
     pub fn size(&self) -> usize {
         match self {
             Input::Str(s) => s.len(),
-            Input::File(bytes) => bytes.len(),
             Input::MmapedFile { len, .. } => *len,
         }
     }
@@ -79,7 +66,8 @@ impl Input {
 
 impl Drop for Input {
     fn drop(&mut self) {
-        if let Input::MmapedFile { len, ptr, .. } = self {
+        if let Input::MmapedFile { file, len, ptr } = self {
+            let _keep_file_alive = file;
             let cpy = *ptr;
             mmap::munmap(cpy, *len).expect("Failed to unmap file");
         }

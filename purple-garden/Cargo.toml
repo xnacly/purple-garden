@@ -3,7 +3,6 @@ name = "purple-garden"
 version = "0.1.0"
 description = "Lean scripting language, designed and implemented with a focus on performance and a low memory profile "
 edition = "2024"
-default-run = "purple-garden"
 
 [features]
 trace = [
@@ -18,7 +17,6 @@ trace = [
 ]
 
 [dependencies]
-clap = { version = "4.5.54", features = ["derive"] }
 purple-garden-ir = { path = "../purple-garden-ir" }
 purple-garden-jit = { path = "../purple-garden-jit" }
 purple-garden-runtime = { path = "../purple-garden-runtime" }

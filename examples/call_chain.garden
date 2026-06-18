@@ -4,17 +4,28 @@
 # values into r0.
 import "testing"
 
+#! Add one to the input at the start of the call chain.
 fn s0(x:Int) Int { x + 1 }
+#! Call `s0` and add one more.
 fn s1(x:Int) Int { s0(x) + 1 }
+#! Call `s1` and add one more.
 fn s2(x:Int) Int { s1(x) + 1 }
+#! Call `s2` and add one more.
 fn s3(x:Int) Int { s2(x) + 1 }
+#! Call `s3` and add one more.
 fn s4(x:Int) Int { s3(x) + 1 }
+#! Call `s4` and add one more.
 fn s5(x:Int) Int { s4(x) + 1 }
+#! Call `s5` and add one more.
 fn s6(x:Int) Int { s5(x) + 1 }
+#! Call `s6` and add one more.
 fn s7(x:Int) Int { s6(x) + 1 }
+#! Call `s7` and add one more.
 fn s8(x:Int) Int { s7(x) + 1 }
+#! Call `s8` and add one more.
 fn s9(x:Int) Int { s8(x) + 1 }
 
+#! Repeatedly run the full call chain and accumulate the results.
 fn drive(i:Int n:Int acc:Int) Int {
     match {
         i == n { acc }

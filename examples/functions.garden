@@ -10,6 +10,7 @@ fn factorial(n:Int a:Int) Int {
 }
 testing.assert(factorial(16 1) == 20922789888000)
 
+#! Compute Fibonacci numbers with a tail-recursive accumulator pair.
 fn fibt(n:Int a:Int b:Int) Int {
     match {
         n == 0 { a }
@@ -19,6 +20,7 @@ fn fibt(n:Int a:Int b:Int) Int {
 }
 testing.assert(fibt(35 0 1) == 9227465)
 
+#! Compute Fibonacci numbers with the classic doubly-recursive definition.
 fn fib(n:Int) Int {
     match {
         n == 0 { 0 }
@@ -30,10 +32,16 @@ fn fib(n:Int) Int {
 testing.assert(fib(35) == 9227465)
 
 # tail calls 
+#! Add one to the input at the start of the tail-call chain.
 fn inc(x:Int) Int {x + 1}
+#! Forward to `inc`.
 fn call1(x:Int) Int {inc(x)}
+#! Forward to `call1`.
 fn call2(x:Int) Int {call1(x)}
+#! Forward to `call2`.
 fn call3(x:Int) Int {call2(x)}
+#! Forward to `call3`.
 fn call4(x:Int) Int {call3(x)}
+#! Forward to `call4`.
 fn call5(x:Int) Int {call4(x)}
 testing.assert(call5(0) == 1)

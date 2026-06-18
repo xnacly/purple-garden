@@ -5,7 +5,7 @@ use purple_garden::Pg;
 
 fn main() {
     // Load the Purple Garden source that will be compiled and executed.
-    let input = include_bytes!("counter.garden");
+    let input = include_bytes!("../counter.garden");
 
     // Register the embedded package so the compiler can resolve `import "counter"` and `counter.*`
     // references in the script against the Rust implementation below.

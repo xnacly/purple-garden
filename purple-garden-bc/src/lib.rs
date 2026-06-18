@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt::Write as _;
 
 pub mod dis;
 mod elf;
@@ -291,16 +290,7 @@ impl<'cc> Cc<'cc> {
 
         for func in ir {
             if config.liveness {
-                let mut intervals = Vec::new();
-                func.live_set_into(&mut intervals);
-                let mut out = String::new();
-                for (id, &(def, last_use)) in intervals.iter().enumerate() {
-                    if def == u32::MAX {
-                        continue;
-                    }
-                    writeln!(out, "{id}: ({def},{last_use})").unwrap();
-                }
-                println!("{out}");
+                print!("{}", func.liveness_display());
             }
             self.cc(func, native_pages.as_mut())?;
         }

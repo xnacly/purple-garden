@@ -13,6 +13,10 @@ pub struct Counter {
 /// The macro expands this module into VM wrappers and package metadata. The
 /// build script reads that metadata and writes `extern.garden` for tooling and
 /// editor integration.
+///
+/// Meaning for instance: the lsp will show completions for methods in the
+/// counter package, show signatures on hover and diagnostics as if the package were
+/// defined in the interpreter.
 #[pg_pkg]
 pub mod counter {
     use super::Counter;

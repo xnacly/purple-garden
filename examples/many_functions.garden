@@ -4,505 +4,1005 @@
 # Cc::functions table. Run cost is just one call up the tower.
 import "testing"
 
+#! Generated call-tower stress step 000.
 fn step_000(x:Int) Int { x + 1 }
+#! Generated call-tower stress step 001.
 fn step_001(x:Int) Int { step_000(x) + 1 }
+#! Generated call-tower stress step 002.
 fn step_002(x:Int) Int { step_001(x) + 1 }
+#! Generated call-tower stress step 003.
 fn step_003(x:Int) Int { step_002(x) + 1 }
+#! Generated call-tower stress step 004.
 fn step_004(x:Int) Int { step_003(x) + 1 }
+#! Generated call-tower stress step 005.
 fn step_005(x:Int) Int { step_004(x) + 1 }
+#! Generated call-tower stress step 006.
 fn step_006(x:Int) Int { step_005(x) + 1 }
+#! Generated call-tower stress step 007.
 fn step_007(x:Int) Int { step_006(x) + 1 }
+#! Generated call-tower stress step 008.
 fn step_008(x:Int) Int { step_007(x) + 1 }
+#! Generated call-tower stress step 009.
 fn step_009(x:Int) Int { step_008(x) + 1 }
+#! Generated call-tower stress step 010.
 fn step_010(x:Int) Int { step_009(x) + 1 }
+#! Generated call-tower stress step 011.
 fn step_011(x:Int) Int { step_010(x) + 1 }
+#! Generated call-tower stress step 012.
 fn step_012(x:Int) Int { step_011(x) + 1 }
+#! Generated call-tower stress step 013.
 fn step_013(x:Int) Int { step_012(x) + 1 }
+#! Generated call-tower stress step 014.
 fn step_014(x:Int) Int { step_013(x) + 1 }
+#! Generated call-tower stress step 015.
 fn step_015(x:Int) Int { step_014(x) + 1 }
+#! Generated call-tower stress step 016.
 fn step_016(x:Int) Int { step_015(x) + 1 }
+#! Generated call-tower stress step 017.
 fn step_017(x:Int) Int { step_016(x) + 1 }
+#! Generated call-tower stress step 018.
 fn step_018(x:Int) Int { step_017(x) + 1 }
+#! Generated call-tower stress step 019.
 fn step_019(x:Int) Int { step_018(x) + 1 }
+#! Generated call-tower stress step 020.
 fn step_020(x:Int) Int { step_019(x) + 1 }
+#! Generated call-tower stress step 021.
 fn step_021(x:Int) Int { step_020(x) + 1 }
+#! Generated call-tower stress step 022.
 fn step_022(x:Int) Int { step_021(x) + 1 }
+#! Generated call-tower stress step 023.
 fn step_023(x:Int) Int { step_022(x) + 1 }
+#! Generated call-tower stress step 024.
 fn step_024(x:Int) Int { step_023(x) + 1 }
+#! Generated call-tower stress step 025.
 fn step_025(x:Int) Int { step_024(x) + 1 }
+#! Generated call-tower stress step 026.
 fn step_026(x:Int) Int { step_025(x) + 1 }
+#! Generated call-tower stress step 027.
 fn step_027(x:Int) Int { step_026(x) + 1 }
+#! Generated call-tower stress step 028.
 fn step_028(x:Int) Int { step_027(x) + 1 }
+#! Generated call-tower stress step 029.
 fn step_029(x:Int) Int { step_028(x) + 1 }
+#! Generated call-tower stress step 030.
 fn step_030(x:Int) Int { step_029(x) + 1 }
+#! Generated call-tower stress step 031.
 fn step_031(x:Int) Int { step_030(x) + 1 }
+#! Generated call-tower stress step 032.
 fn step_032(x:Int) Int { step_031(x) + 1 }
+#! Generated call-tower stress step 033.
 fn step_033(x:Int) Int { step_032(x) + 1 }
+#! Generated call-tower stress step 034.
 fn step_034(x:Int) Int { step_033(x) + 1 }
+#! Generated call-tower stress step 035.
 fn step_035(x:Int) Int { step_034(x) + 1 }
+#! Generated call-tower stress step 036.
 fn step_036(x:Int) Int { step_035(x) + 1 }
+#! Generated call-tower stress step 037.
 fn step_037(x:Int) Int { step_036(x) + 1 }
+#! Generated call-tower stress step 038.
 fn step_038(x:Int) Int { step_037(x) + 1 }
+#! Generated call-tower stress step 039.
 fn step_039(x:Int) Int { step_038(x) + 1 }
+#! Generated call-tower stress step 040.
 fn step_040(x:Int) Int { step_039(x) + 1 }
+#! Generated call-tower stress step 041.
 fn step_041(x:Int) Int { step_040(x) + 1 }
+#! Generated call-tower stress step 042.
 fn step_042(x:Int) Int { step_041(x) + 1 }
+#! Generated call-tower stress step 043.
 fn step_043(x:Int) Int { step_042(x) + 1 }
+#! Generated call-tower stress step 044.
 fn step_044(x:Int) Int { step_043(x) + 1 }
+#! Generated call-tower stress step 045.
 fn step_045(x:Int) Int { step_044(x) + 1 }
+#! Generated call-tower stress step 046.
 fn step_046(x:Int) Int { step_045(x) + 1 }
+#! Generated call-tower stress step 047.
 fn step_047(x:Int) Int { step_046(x) + 1 }
+#! Generated call-tower stress step 048.
 fn step_048(x:Int) Int { step_047(x) + 1 }
+#! Generated call-tower stress step 049.
 fn step_049(x:Int) Int { step_048(x) + 1 }
+#! Generated call-tower stress step 050.
 fn step_050(x:Int) Int { step_049(x) + 1 }
+#! Generated call-tower stress step 051.
 fn step_051(x:Int) Int { step_050(x) + 1 }
+#! Generated call-tower stress step 052.
 fn step_052(x:Int) Int { step_051(x) + 1 }
+#! Generated call-tower stress step 053.
 fn step_053(x:Int) Int { step_052(x) + 1 }
+#! Generated call-tower stress step 054.
 fn step_054(x:Int) Int { step_053(x) + 1 }
+#! Generated call-tower stress step 055.
 fn step_055(x:Int) Int { step_054(x) + 1 }
+#! Generated call-tower stress step 056.
 fn step_056(x:Int) Int { step_055(x) + 1 }
+#! Generated call-tower stress step 057.
 fn step_057(x:Int) Int { step_056(x) + 1 }
+#! Generated call-tower stress step 058.
 fn step_058(x:Int) Int { step_057(x) + 1 }
+#! Generated call-tower stress step 059.
 fn step_059(x:Int) Int { step_058(x) + 1 }
+#! Generated call-tower stress step 060.
 fn step_060(x:Int) Int { step_059(x) + 1 }
+#! Generated call-tower stress step 061.
 fn step_061(x:Int) Int { step_060(x) + 1 }
+#! Generated call-tower stress step 062.
 fn step_062(x:Int) Int { step_061(x) + 1 }
+#! Generated call-tower stress step 063.
 fn step_063(x:Int) Int { step_062(x) + 1 }
+#! Generated call-tower stress step 064.
 fn step_064(x:Int) Int { step_063(x) + 1 }
+#! Generated call-tower stress step 065.
 fn step_065(x:Int) Int { step_064(x) + 1 }
+#! Generated call-tower stress step 066.
 fn step_066(x:Int) Int { step_065(x) + 1 }
+#! Generated call-tower stress step 067.
 fn step_067(x:Int) Int { step_066(x) + 1 }
+#! Generated call-tower stress step 068.
 fn step_068(x:Int) Int { step_067(x) + 1 }
+#! Generated call-tower stress step 069.
 fn step_069(x:Int) Int { step_068(x) + 1 }
+#! Generated call-tower stress step 070.
 fn step_070(x:Int) Int { step_069(x) + 1 }
+#! Generated call-tower stress step 071.
 fn step_071(x:Int) Int { step_070(x) + 1 }
+#! Generated call-tower stress step 072.
 fn step_072(x:Int) Int { step_071(x) + 1 }
+#! Generated call-tower stress step 073.
 fn step_073(x:Int) Int { step_072(x) + 1 }
+#! Generated call-tower stress step 074.
 fn step_074(x:Int) Int { step_073(x) + 1 }
+#! Generated call-tower stress step 075.
 fn step_075(x:Int) Int { step_074(x) + 1 }
+#! Generated call-tower stress step 076.
 fn step_076(x:Int) Int { step_075(x) + 1 }
+#! Generated call-tower stress step 077.
 fn step_077(x:Int) Int { step_076(x) + 1 }
+#! Generated call-tower stress step 078.
 fn step_078(x:Int) Int { step_077(x) + 1 }
+#! Generated call-tower stress step 079.
 fn step_079(x:Int) Int { step_078(x) + 1 }
+#! Generated call-tower stress step 080.
 fn step_080(x:Int) Int { step_079(x) + 1 }
+#! Generated call-tower stress step 081.
 fn step_081(x:Int) Int { step_080(x) + 1 }
+#! Generated call-tower stress step 082.
 fn step_082(x:Int) Int { step_081(x) + 1 }
+#! Generated call-tower stress step 083.
 fn step_083(x:Int) Int { step_082(x) + 1 }
+#! Generated call-tower stress step 084.
 fn step_084(x:Int) Int { step_083(x) + 1 }
+#! Generated call-tower stress step 085.
 fn step_085(x:Int) Int { step_084(x) + 1 }
+#! Generated call-tower stress step 086.
 fn step_086(x:Int) Int { step_085(x) + 1 }
+#! Generated call-tower stress step 087.
 fn step_087(x:Int) Int { step_086(x) + 1 }
+#! Generated call-tower stress step 088.
 fn step_088(x:Int) Int { step_087(x) + 1 }
+#! Generated call-tower stress step 089.
 fn step_089(x:Int) Int { step_088(x) + 1 }
+#! Generated call-tower stress step 090.
 fn step_090(x:Int) Int { step_089(x) + 1 }
+#! Generated call-tower stress step 091.
 fn step_091(x:Int) Int { step_090(x) + 1 }
+#! Generated call-tower stress step 092.
 fn step_092(x:Int) Int { step_091(x) + 1 }
+#! Generated call-tower stress step 093.
 fn step_093(x:Int) Int { step_092(x) + 1 }
+#! Generated call-tower stress step 094.
 fn step_094(x:Int) Int { step_093(x) + 1 }
+#! Generated call-tower stress step 095.
 fn step_095(x:Int) Int { step_094(x) + 1 }
+#! Generated call-tower stress step 096.
 fn step_096(x:Int) Int { step_095(x) + 1 }
+#! Generated call-tower stress step 097.
 fn step_097(x:Int) Int { step_096(x) + 1 }
+#! Generated call-tower stress step 098.
 fn step_098(x:Int) Int { step_097(x) + 1 }
+#! Generated call-tower stress step 099.
 fn step_099(x:Int) Int { step_098(x) + 1 }
+#! Generated call-tower stress step 100.
 fn step_100(x:Int) Int { step_099(x) + 1 }
+#! Generated call-tower stress step 101.
 fn step_101(x:Int) Int { step_100(x) + 1 }
+#! Generated call-tower stress step 102.
 fn step_102(x:Int) Int { step_101(x) + 1 }
+#! Generated call-tower stress step 103.
 fn step_103(x:Int) Int { step_102(x) + 1 }
+#! Generated call-tower stress step 104.
 fn step_104(x:Int) Int { step_103(x) + 1 }
+#! Generated call-tower stress step 105.
 fn step_105(x:Int) Int { step_104(x) + 1 }
+#! Generated call-tower stress step 106.
 fn step_106(x:Int) Int { step_105(x) + 1 }
+#! Generated call-tower stress step 107.
 fn step_107(x:Int) Int { step_106(x) + 1 }
+#! Generated call-tower stress step 108.
 fn step_108(x:Int) Int { step_107(x) + 1 }
+#! Generated call-tower stress step 109.
 fn step_109(x:Int) Int { step_108(x) + 1 }
+#! Generated call-tower stress step 110.
 fn step_110(x:Int) Int { step_109(x) + 1 }
+#! Generated call-tower stress step 111.
 fn step_111(x:Int) Int { step_110(x) + 1 }
+#! Generated call-tower stress step 112.
 fn step_112(x:Int) Int { step_111(x) + 1 }
+#! Generated call-tower stress step 113.
 fn step_113(x:Int) Int { step_112(x) + 1 }
+#! Generated call-tower stress step 114.
 fn step_114(x:Int) Int { step_113(x) + 1 }
+#! Generated call-tower stress step 115.
 fn step_115(x:Int) Int { step_114(x) + 1 }
+#! Generated call-tower stress step 116.
 fn step_116(x:Int) Int { step_115(x) + 1 }
+#! Generated call-tower stress step 117.
 fn step_117(x:Int) Int { step_116(x) + 1 }
+#! Generated call-tower stress step 118.
 fn step_118(x:Int) Int { step_117(x) + 1 }
+#! Generated call-tower stress step 119.
 fn step_119(x:Int) Int { step_118(x) + 1 }
+#! Generated call-tower stress step 120.
 fn step_120(x:Int) Int { step_119(x) + 1 }
+#! Generated call-tower stress step 121.
 fn step_121(x:Int) Int { step_120(x) + 1 }
+#! Generated call-tower stress step 122.
 fn step_122(x:Int) Int { step_121(x) + 1 }
+#! Generated call-tower stress step 123.
 fn step_123(x:Int) Int { step_122(x) + 1 }
+#! Generated call-tower stress step 124.
 fn step_124(x:Int) Int { step_123(x) + 1 }
+#! Generated call-tower stress step 125.
 fn step_125(x:Int) Int { step_124(x) + 1 }
+#! Generated call-tower stress step 126.
 fn step_126(x:Int) Int { step_125(x) + 1 }
+#! Generated call-tower stress step 127.
 fn step_127(x:Int) Int { step_126(x) + 1 }
+#! Generated call-tower stress step 128.
 fn step_128(x:Int) Int { step_127(x) + 1 }
+#! Generated call-tower stress step 129.
 fn step_129(x:Int) Int { step_128(x) + 1 }
+#! Generated call-tower stress step 130.
 fn step_130(x:Int) Int { step_129(x) + 1 }
+#! Generated call-tower stress step 131.
 fn step_131(x:Int) Int { step_130(x) + 1 }
+#! Generated call-tower stress step 132.
 fn step_132(x:Int) Int { step_131(x) + 1 }
+#! Generated call-tower stress step 133.
 fn step_133(x:Int) Int { step_132(x) + 1 }
+#! Generated call-tower stress step 134.
 fn step_134(x:Int) Int { step_133(x) + 1 }
+#! Generated call-tower stress step 135.
 fn step_135(x:Int) Int { step_134(x) + 1 }
+#! Generated call-tower stress step 136.
 fn step_136(x:Int) Int { step_135(x) + 1 }
+#! Generated call-tower stress step 137.
 fn step_137(x:Int) Int { step_136(x) + 1 }
+#! Generated call-tower stress step 138.
 fn step_138(x:Int) Int { step_137(x) + 1 }
+#! Generated call-tower stress step 139.
 fn step_139(x:Int) Int { step_138(x) + 1 }
+#! Generated call-tower stress step 140.
 fn step_140(x:Int) Int { step_139(x) + 1 }
+#! Generated call-tower stress step 141.
 fn step_141(x:Int) Int { step_140(x) + 1 }
+#! Generated call-tower stress step 142.
 fn step_142(x:Int) Int { step_141(x) + 1 }
+#! Generated call-tower stress step 143.
 fn step_143(x:Int) Int { step_142(x) + 1 }
+#! Generated call-tower stress step 144.
 fn step_144(x:Int) Int { step_143(x) + 1 }
+#! Generated call-tower stress step 145.
 fn step_145(x:Int) Int { step_144(x) + 1 }
+#! Generated call-tower stress step 146.
 fn step_146(x:Int) Int { step_145(x) + 1 }
+#! Generated call-tower stress step 147.
 fn step_147(x:Int) Int { step_146(x) + 1 }
+#! Generated call-tower stress step 148.
 fn step_148(x:Int) Int { step_147(x) + 1 }
+#! Generated call-tower stress step 149.
 fn step_149(x:Int) Int { step_148(x) + 1 }
+#! Generated call-tower stress step 150.
 fn step_150(x:Int) Int { step_149(x) + 1 }
+#! Generated call-tower stress step 151.
 fn step_151(x:Int) Int { step_150(x) + 1 }
+#! Generated call-tower stress step 152.
 fn step_152(x:Int) Int { step_151(x) + 1 }
+#! Generated call-tower stress step 153.
 fn step_153(x:Int) Int { step_152(x) + 1 }
+#! Generated call-tower stress step 154.
 fn step_154(x:Int) Int { step_153(x) + 1 }
+#! Generated call-tower stress step 155.
 fn step_155(x:Int) Int { step_154(x) + 1 }
+#! Generated call-tower stress step 156.
 fn step_156(x:Int) Int { step_155(x) + 1 }
+#! Generated call-tower stress step 157.
 fn step_157(x:Int) Int { step_156(x) + 1 }
+#! Generated call-tower stress step 158.
 fn step_158(x:Int) Int { step_157(x) + 1 }
+#! Generated call-tower stress step 159.
 fn step_159(x:Int) Int { step_158(x) + 1 }
+#! Generated call-tower stress step 160.
 fn step_160(x:Int) Int { step_159(x) + 1 }
+#! Generated call-tower stress step 161.
 fn step_161(x:Int) Int { step_160(x) + 1 }
+#! Generated call-tower stress step 162.
 fn step_162(x:Int) Int { step_161(x) + 1 }
+#! Generated call-tower stress step 163.
 fn step_163(x:Int) Int { step_162(x) + 1 }
+#! Generated call-tower stress step 164.
 fn step_164(x:Int) Int { step_163(x) + 1 }
+#! Generated call-tower stress step 165.
 fn step_165(x:Int) Int { step_164(x) + 1 }
+#! Generated call-tower stress step 166.
 fn step_166(x:Int) Int { step_165(x) + 1 }
+#! Generated call-tower stress step 167.
 fn step_167(x:Int) Int { step_166(x) + 1 }
+#! Generated call-tower stress step 168.
 fn step_168(x:Int) Int { step_167(x) + 1 }
+#! Generated call-tower stress step 169.
 fn step_169(x:Int) Int { step_168(x) + 1 }
+#! Generated call-tower stress step 170.
 fn step_170(x:Int) Int { step_169(x) + 1 }
+#! Generated call-tower stress step 171.
 fn step_171(x:Int) Int { step_170(x) + 1 }
+#! Generated call-tower stress step 172.
 fn step_172(x:Int) Int { step_171(x) + 1 }
+#! Generated call-tower stress step 173.
 fn step_173(x:Int) Int { step_172(x) + 1 }
+#! Generated call-tower stress step 174.
 fn step_174(x:Int) Int { step_173(x) + 1 }
+#! Generated call-tower stress step 175.
 fn step_175(x:Int) Int { step_174(x) + 1 }
+#! Generated call-tower stress step 176.
 fn step_176(x:Int) Int { step_175(x) + 1 }
+#! Generated call-tower stress step 177.
 fn step_177(x:Int) Int { step_176(x) + 1 }
+#! Generated call-tower stress step 178.
 fn step_178(x:Int) Int { step_177(x) + 1 }
+#! Generated call-tower stress step 179.
 fn step_179(x:Int) Int { step_178(x) + 1 }
+#! Generated call-tower stress step 180.
 fn step_180(x:Int) Int { step_179(x) + 1 }
+#! Generated call-tower stress step 181.
 fn step_181(x:Int) Int { step_180(x) + 1 }
+#! Generated call-tower stress step 182.
 fn step_182(x:Int) Int { step_181(x) + 1 }
+#! Generated call-tower stress step 183.
 fn step_183(x:Int) Int { step_182(x) + 1 }
+#! Generated call-tower stress step 184.
 fn step_184(x:Int) Int { step_183(x) + 1 }
+#! Generated call-tower stress step 185.
 fn step_185(x:Int) Int { step_184(x) + 1 }
+#! Generated call-tower stress step 186.
 fn step_186(x:Int) Int { step_185(x) + 1 }
+#! Generated call-tower stress step 187.
 fn step_187(x:Int) Int { step_186(x) + 1 }
+#! Generated call-tower stress step 188.
 fn step_188(x:Int) Int { step_187(x) + 1 }
+#! Generated call-tower stress step 189.
 fn step_189(x:Int) Int { step_188(x) + 1 }
+#! Generated call-tower stress step 190.
 fn step_190(x:Int) Int { step_189(x) + 1 }
+#! Generated call-tower stress step 191.
 fn step_191(x:Int) Int { step_190(x) + 1 }
+#! Generated call-tower stress step 192.
 fn step_192(x:Int) Int { step_191(x) + 1 }
+#! Generated call-tower stress step 193.
 fn step_193(x:Int) Int { step_192(x) + 1 }
+#! Generated call-tower stress step 194.
 fn step_194(x:Int) Int { step_193(x) + 1 }
+#! Generated call-tower stress step 195.
 fn step_195(x:Int) Int { step_194(x) + 1 }
+#! Generated call-tower stress step 196.
 fn step_196(x:Int) Int { step_195(x) + 1 }
+#! Generated call-tower stress step 197.
 fn step_197(x:Int) Int { step_196(x) + 1 }
+#! Generated call-tower stress step 198.
 fn step_198(x:Int) Int { step_197(x) + 1 }
+#! Generated call-tower stress step 199.
 fn step_199(x:Int) Int { step_198(x) + 1 }
+#! Generated call-tower stress step 200.
 fn step_200(x:Int) Int { step_199(x) + 1 }
+#! Generated call-tower stress step 201.
 fn step_201(x:Int) Int { step_200(x) + 1 }
+#! Generated call-tower stress step 202.
 fn step_202(x:Int) Int { step_201(x) + 1 }
+#! Generated call-tower stress step 203.
 fn step_203(x:Int) Int { step_202(x) + 1 }
+#! Generated call-tower stress step 204.
 fn step_204(x:Int) Int { step_203(x) + 1 }
+#! Generated call-tower stress step 205.
 fn step_205(x:Int) Int { step_204(x) + 1 }
+#! Generated call-tower stress step 206.
 fn step_206(x:Int) Int { step_205(x) + 1 }
+#! Generated call-tower stress step 207.
 fn step_207(x:Int) Int { step_206(x) + 1 }
+#! Generated call-tower stress step 208.
 fn step_208(x:Int) Int { step_207(x) + 1 }
+#! Generated call-tower stress step 209.
 fn step_209(x:Int) Int { step_208(x) + 1 }
+#! Generated call-tower stress step 210.
 fn step_210(x:Int) Int { step_209(x) + 1 }
+#! Generated call-tower stress step 211.
 fn step_211(x:Int) Int { step_210(x) + 1 }
+#! Generated call-tower stress step 212.
 fn step_212(x:Int) Int { step_211(x) + 1 }
+#! Generated call-tower stress step 213.
 fn step_213(x:Int) Int { step_212(x) + 1 }
+#! Generated call-tower stress step 214.
 fn step_214(x:Int) Int { step_213(x) + 1 }
+#! Generated call-tower stress step 215.
 fn step_215(x:Int) Int { step_214(x) + 1 }
+#! Generated call-tower stress step 216.
 fn step_216(x:Int) Int { step_215(x) + 1 }
+#! Generated call-tower stress step 217.
 fn step_217(x:Int) Int { step_216(x) + 1 }
+#! Generated call-tower stress step 218.
 fn step_218(x:Int) Int { step_217(x) + 1 }
+#! Generated call-tower stress step 219.
 fn step_219(x:Int) Int { step_218(x) + 1 }
+#! Generated call-tower stress step 220.
 fn step_220(x:Int) Int { step_219(x) + 1 }
+#! Generated call-tower stress step 221.
 fn step_221(x:Int) Int { step_220(x) + 1 }
+#! Generated call-tower stress step 222.
 fn step_222(x:Int) Int { step_221(x) + 1 }
+#! Generated call-tower stress step 223.
 fn step_223(x:Int) Int { step_222(x) + 1 }
+#! Generated call-tower stress step 224.
 fn step_224(x:Int) Int { step_223(x) + 1 }
+#! Generated call-tower stress step 225.
 fn step_225(x:Int) Int { step_224(x) + 1 }
+#! Generated call-tower stress step 226.
 fn step_226(x:Int) Int { step_225(x) + 1 }
+#! Generated call-tower stress step 227.
 fn step_227(x:Int) Int { step_226(x) + 1 }
+#! Generated call-tower stress step 228.
 fn step_228(x:Int) Int { step_227(x) + 1 }
+#! Generated call-tower stress step 229.
 fn step_229(x:Int) Int { step_228(x) + 1 }
+#! Generated call-tower stress step 230.
 fn step_230(x:Int) Int { step_229(x) + 1 }
+#! Generated call-tower stress step 231.
 fn step_231(x:Int) Int { step_230(x) + 1 }
+#! Generated call-tower stress step 232.
 fn step_232(x:Int) Int { step_231(x) + 1 }
+#! Generated call-tower stress step 233.
 fn step_233(x:Int) Int { step_232(x) + 1 }
+#! Generated call-tower stress step 234.
 fn step_234(x:Int) Int { step_233(x) + 1 }
+#! Generated call-tower stress step 235.
 fn step_235(x:Int) Int { step_234(x) + 1 }
+#! Generated call-tower stress step 236.
 fn step_236(x:Int) Int { step_235(x) + 1 }
+#! Generated call-tower stress step 237.
 fn step_237(x:Int) Int { step_236(x) + 1 }
+#! Generated call-tower stress step 238.
 fn step_238(x:Int) Int { step_237(x) + 1 }
+#! Generated call-tower stress step 239.
 fn step_239(x:Int) Int { step_238(x) + 1 }
+#! Generated call-tower stress step 240.
 fn step_240(x:Int) Int { step_239(x) + 1 }
+#! Generated call-tower stress step 241.
 fn step_241(x:Int) Int { step_240(x) + 1 }
+#! Generated call-tower stress step 242.
 fn step_242(x:Int) Int { step_241(x) + 1 }
+#! Generated call-tower stress step 243.
 fn step_243(x:Int) Int { step_242(x) + 1 }
+#! Generated call-tower stress step 244.
 fn step_244(x:Int) Int { step_243(x) + 1 }
+#! Generated call-tower stress step 245.
 fn step_245(x:Int) Int { step_244(x) + 1 }
+#! Generated call-tower stress step 246.
 fn step_246(x:Int) Int { step_245(x) + 1 }
+#! Generated call-tower stress step 247.
 fn step_247(x:Int) Int { step_246(x) + 1 }
+#! Generated call-tower stress step 248.
 fn step_248(x:Int) Int { step_247(x) + 1 }
+#! Generated call-tower stress step 249.
 fn step_249(x:Int) Int { step_248(x) + 1 }
+#! Generated call-tower stress step 250.
 fn step_250(x:Int) Int { step_249(x) + 1 }
+#! Generated call-tower stress step 251.
 fn step_251(x:Int) Int { step_250(x) + 1 }
+#! Generated call-tower stress step 252.
 fn step_252(x:Int) Int { step_251(x) + 1 }
+#! Generated call-tower stress step 253.
 fn step_253(x:Int) Int { step_252(x) + 1 }
+#! Generated call-tower stress step 254.
 fn step_254(x:Int) Int { step_253(x) + 1 }
+#! Generated call-tower stress step 255.
 fn step_255(x:Int) Int { step_254(x) + 1 }
+#! Generated call-tower stress step 256.
 fn step_256(x:Int) Int { step_255(x) + 1 }
+#! Generated call-tower stress step 257.
 fn step_257(x:Int) Int { step_256(x) + 1 }
+#! Generated call-tower stress step 258.
 fn step_258(x:Int) Int { step_257(x) + 1 }
+#! Generated call-tower stress step 259.
 fn step_259(x:Int) Int { step_258(x) + 1 }
+#! Generated call-tower stress step 260.
 fn step_260(x:Int) Int { step_259(x) + 1 }
+#! Generated call-tower stress step 261.
 fn step_261(x:Int) Int { step_260(x) + 1 }
+#! Generated call-tower stress step 262.
 fn step_262(x:Int) Int { step_261(x) + 1 }
+#! Generated call-tower stress step 263.
 fn step_263(x:Int) Int { step_262(x) + 1 }
+#! Generated call-tower stress step 264.
 fn step_264(x:Int) Int { step_263(x) + 1 }
+#! Generated call-tower stress step 265.
 fn step_265(x:Int) Int { step_264(x) + 1 }
+#! Generated call-tower stress step 266.
 fn step_266(x:Int) Int { step_265(x) + 1 }
+#! Generated call-tower stress step 267.
 fn step_267(x:Int) Int { step_266(x) + 1 }
+#! Generated call-tower stress step 268.
 fn step_268(x:Int) Int { step_267(x) + 1 }
+#! Generated call-tower stress step 269.
 fn step_269(x:Int) Int { step_268(x) + 1 }
+#! Generated call-tower stress step 270.
 fn step_270(x:Int) Int { step_269(x) + 1 }
+#! Generated call-tower stress step 271.
 fn step_271(x:Int) Int { step_270(x) + 1 }
+#! Generated call-tower stress step 272.
 fn step_272(x:Int) Int { step_271(x) + 1 }
+#! Generated call-tower stress step 273.
 fn step_273(x:Int) Int { step_272(x) + 1 }
+#! Generated call-tower stress step 274.
 fn step_274(x:Int) Int { step_273(x) + 1 }
+#! Generated call-tower stress step 275.
 fn step_275(x:Int) Int { step_274(x) + 1 }
+#! Generated call-tower stress step 276.
 fn step_276(x:Int) Int { step_275(x) + 1 }
+#! Generated call-tower stress step 277.
 fn step_277(x:Int) Int { step_276(x) + 1 }
+#! Generated call-tower stress step 278.
 fn step_278(x:Int) Int { step_277(x) + 1 }
+#! Generated call-tower stress step 279.
 fn step_279(x:Int) Int { step_278(x) + 1 }
+#! Generated call-tower stress step 280.
 fn step_280(x:Int) Int { step_279(x) + 1 }
+#! Generated call-tower stress step 281.
 fn step_281(x:Int) Int { step_280(x) + 1 }
+#! Generated call-tower stress step 282.
 fn step_282(x:Int) Int { step_281(x) + 1 }
+#! Generated call-tower stress step 283.
 fn step_283(x:Int) Int { step_282(x) + 1 }
+#! Generated call-tower stress step 284.
 fn step_284(x:Int) Int { step_283(x) + 1 }
+#! Generated call-tower stress step 285.
 fn step_285(x:Int) Int { step_284(x) + 1 }
+#! Generated call-tower stress step 286.
 fn step_286(x:Int) Int { step_285(x) + 1 }
+#! Generated call-tower stress step 287.
 fn step_287(x:Int) Int { step_286(x) + 1 }
+#! Generated call-tower stress step 288.
 fn step_288(x:Int) Int { step_287(x) + 1 }
+#! Generated call-tower stress step 289.
 fn step_289(x:Int) Int { step_288(x) + 1 }
+#! Generated call-tower stress step 290.
 fn step_290(x:Int) Int { step_289(x) + 1 }
+#! Generated call-tower stress step 291.
 fn step_291(x:Int) Int { step_290(x) + 1 }
+#! Generated call-tower stress step 292.
 fn step_292(x:Int) Int { step_291(x) + 1 }
+#! Generated call-tower stress step 293.
 fn step_293(x:Int) Int { step_292(x) + 1 }
+#! Generated call-tower stress step 294.
 fn step_294(x:Int) Int { step_293(x) + 1 }
+#! Generated call-tower stress step 295.
 fn step_295(x:Int) Int { step_294(x) + 1 }
+#! Generated call-tower stress step 296.
 fn step_296(x:Int) Int { step_295(x) + 1 }
+#! Generated call-tower stress step 297.
 fn step_297(x:Int) Int { step_296(x) + 1 }
+#! Generated call-tower stress step 298.
 fn step_298(x:Int) Int { step_297(x) + 1 }
+#! Generated call-tower stress step 299.
 fn step_299(x:Int) Int { step_298(x) + 1 }
+#! Generated call-tower stress step 300.
 fn step_300(x:Int) Int { step_299(x) + 1 }
+#! Generated call-tower stress step 301.
 fn step_301(x:Int) Int { step_300(x) + 1 }
+#! Generated call-tower stress step 302.
 fn step_302(x:Int) Int { step_301(x) + 1 }
+#! Generated call-tower stress step 303.
 fn step_303(x:Int) Int { step_302(x) + 1 }
+#! Generated call-tower stress step 304.
 fn step_304(x:Int) Int { step_303(x) + 1 }
+#! Generated call-tower stress step 305.
 fn step_305(x:Int) Int { step_304(x) + 1 }
+#! Generated call-tower stress step 306.
 fn step_306(x:Int) Int { step_305(x) + 1 }
+#! Generated call-tower stress step 307.
 fn step_307(x:Int) Int { step_306(x) + 1 }
+#! Generated call-tower stress step 308.
 fn step_308(x:Int) Int { step_307(x) + 1 }
+#! Generated call-tower stress step 309.
 fn step_309(x:Int) Int { step_308(x) + 1 }
+#! Generated call-tower stress step 310.
 fn step_310(x:Int) Int { step_309(x) + 1 }
+#! Generated call-tower stress step 311.
 fn step_311(x:Int) Int { step_310(x) + 1 }
+#! Generated call-tower stress step 312.
 fn step_312(x:Int) Int { step_311(x) + 1 }
+#! Generated call-tower stress step 313.
 fn step_313(x:Int) Int { step_312(x) + 1 }
+#! Generated call-tower stress step 314.
 fn step_314(x:Int) Int { step_313(x) + 1 }
+#! Generated call-tower stress step 315.
 fn step_315(x:Int) Int { step_314(x) + 1 }
+#! Generated call-tower stress step 316.
 fn step_316(x:Int) Int { step_315(x) + 1 }
+#! Generated call-tower stress step 317.
 fn step_317(x:Int) Int { step_316(x) + 1 }
+#! Generated call-tower stress step 318.
 fn step_318(x:Int) Int { step_317(x) + 1 }
+#! Generated call-tower stress step 319.
 fn step_319(x:Int) Int { step_318(x) + 1 }
+#! Generated call-tower stress step 320.
 fn step_320(x:Int) Int { step_319(x) + 1 }
+#! Generated call-tower stress step 321.
 fn step_321(x:Int) Int { step_320(x) + 1 }
+#! Generated call-tower stress step 322.
 fn step_322(x:Int) Int { step_321(x) + 1 }
+#! Generated call-tower stress step 323.
 fn step_323(x:Int) Int { step_322(x) + 1 }
+#! Generated call-tower stress step 324.
 fn step_324(x:Int) Int { step_323(x) + 1 }
+#! Generated call-tower stress step 325.
 fn step_325(x:Int) Int { step_324(x) + 1 }
+#! Generated call-tower stress step 326.
 fn step_326(x:Int) Int { step_325(x) + 1 }
+#! Generated call-tower stress step 327.
 fn step_327(x:Int) Int { step_326(x) + 1 }
+#! Generated call-tower stress step 328.
 fn step_328(x:Int) Int { step_327(x) + 1 }
+#! Generated call-tower stress step 329.
 fn step_329(x:Int) Int { step_328(x) + 1 }
+#! Generated call-tower stress step 330.
 fn step_330(x:Int) Int { step_329(x) + 1 }
+#! Generated call-tower stress step 331.
 fn step_331(x:Int) Int { step_330(x) + 1 }
+#! Generated call-tower stress step 332.
 fn step_332(x:Int) Int { step_331(x) + 1 }
+#! Generated call-tower stress step 333.
 fn step_333(x:Int) Int { step_332(x) + 1 }
+#! Generated call-tower stress step 334.
 fn step_334(x:Int) Int { step_333(x) + 1 }
+#! Generated call-tower stress step 335.
 fn step_335(x:Int) Int { step_334(x) + 1 }
+#! Generated call-tower stress step 336.
 fn step_336(x:Int) Int { step_335(x) + 1 }
+#! Generated call-tower stress step 337.
 fn step_337(x:Int) Int { step_336(x) + 1 }
+#! Generated call-tower stress step 338.
 fn step_338(x:Int) Int { step_337(x) + 1 }
+#! Generated call-tower stress step 339.
 fn step_339(x:Int) Int { step_338(x) + 1 }
+#! Generated call-tower stress step 340.
 fn step_340(x:Int) Int { step_339(x) + 1 }
+#! Generated call-tower stress step 341.
 fn step_341(x:Int) Int { step_340(x) + 1 }
+#! Generated call-tower stress step 342.
 fn step_342(x:Int) Int { step_341(x) + 1 }
+#! Generated call-tower stress step 343.
 fn step_343(x:Int) Int { step_342(x) + 1 }
+#! Generated call-tower stress step 344.
 fn step_344(x:Int) Int { step_343(x) + 1 }
+#! Generated call-tower stress step 345.
 fn step_345(x:Int) Int { step_344(x) + 1 }
+#! Generated call-tower stress step 346.
 fn step_346(x:Int) Int { step_345(x) + 1 }
+#! Generated call-tower stress step 347.
 fn step_347(x:Int) Int { step_346(x) + 1 }
+#! Generated call-tower stress step 348.
 fn step_348(x:Int) Int { step_347(x) + 1 }
+#! Generated call-tower stress step 349.
 fn step_349(x:Int) Int { step_348(x) + 1 }
+#! Generated call-tower stress step 350.
 fn step_350(x:Int) Int { step_349(x) + 1 }
+#! Generated call-tower stress step 351.
 fn step_351(x:Int) Int { step_350(x) + 1 }
+#! Generated call-tower stress step 352.
 fn step_352(x:Int) Int { step_351(x) + 1 }
+#! Generated call-tower stress step 353.
 fn step_353(x:Int) Int { step_352(x) + 1 }
+#! Generated call-tower stress step 354.
 fn step_354(x:Int) Int { step_353(x) + 1 }
+#! Generated call-tower stress step 355.
 fn step_355(x:Int) Int { step_354(x) + 1 }
+#! Generated call-tower stress step 356.
 fn step_356(x:Int) Int { step_355(x) + 1 }
+#! Generated call-tower stress step 357.
 fn step_357(x:Int) Int { step_356(x) + 1 }
+#! Generated call-tower stress step 358.
 fn step_358(x:Int) Int { step_357(x) + 1 }
+#! Generated call-tower stress step 359.
 fn step_359(x:Int) Int { step_358(x) + 1 }
+#! Generated call-tower stress step 360.
 fn step_360(x:Int) Int { step_359(x) + 1 }
+#! Generated call-tower stress step 361.
 fn step_361(x:Int) Int { step_360(x) + 1 }
+#! Generated call-tower stress step 362.
 fn step_362(x:Int) Int { step_361(x) + 1 }
+#! Generated call-tower stress step 363.
 fn step_363(x:Int) Int { step_362(x) + 1 }
+#! Generated call-tower stress step 364.
 fn step_364(x:Int) Int { step_363(x) + 1 }
+#! Generated call-tower stress step 365.
 fn step_365(x:Int) Int { step_364(x) + 1 }
+#! Generated call-tower stress step 366.
 fn step_366(x:Int) Int { step_365(x) + 1 }
+#! Generated call-tower stress step 367.
 fn step_367(x:Int) Int { step_366(x) + 1 }
+#! Generated call-tower stress step 368.
 fn step_368(x:Int) Int { step_367(x) + 1 }
+#! Generated call-tower stress step 369.
 fn step_369(x:Int) Int { step_368(x) + 1 }
+#! Generated call-tower stress step 370.
 fn step_370(x:Int) Int { step_369(x) + 1 }
+#! Generated call-tower stress step 371.
 fn step_371(x:Int) Int { step_370(x) + 1 }
+#! Generated call-tower stress step 372.
 fn step_372(x:Int) Int { step_371(x) + 1 }
+#! Generated call-tower stress step 373.
 fn step_373(x:Int) Int { step_372(x) + 1 }
+#! Generated call-tower stress step 374.
 fn step_374(x:Int) Int { step_373(x) + 1 }
+#! Generated call-tower stress step 375.
 fn step_375(x:Int) Int { step_374(x) + 1 }
+#! Generated call-tower stress step 376.
 fn step_376(x:Int) Int { step_375(x) + 1 }
+#! Generated call-tower stress step 377.
 fn step_377(x:Int) Int { step_376(x) + 1 }
+#! Generated call-tower stress step 378.
 fn step_378(x:Int) Int { step_377(x) + 1 }
+#! Generated call-tower stress step 379.
 fn step_379(x:Int) Int { step_378(x) + 1 }
+#! Generated call-tower stress step 380.
 fn step_380(x:Int) Int { step_379(x) + 1 }
+#! Generated call-tower stress step 381.
 fn step_381(x:Int) Int { step_380(x) + 1 }
+#! Generated call-tower stress step 382.
 fn step_382(x:Int) Int { step_381(x) + 1 }
+#! Generated call-tower stress step 383.
 fn step_383(x:Int) Int { step_382(x) + 1 }
+#! Generated call-tower stress step 384.
 fn step_384(x:Int) Int { step_383(x) + 1 }
+#! Generated call-tower stress step 385.
 fn step_385(x:Int) Int { step_384(x) + 1 }
+#! Generated call-tower stress step 386.
 fn step_386(x:Int) Int { step_385(x) + 1 }
+#! Generated call-tower stress step 387.
 fn step_387(x:Int) Int { step_386(x) + 1 }
+#! Generated call-tower stress step 388.
 fn step_388(x:Int) Int { step_387(x) + 1 }
+#! Generated call-tower stress step 389.
 fn step_389(x:Int) Int { step_388(x) + 1 }
+#! Generated call-tower stress step 390.
 fn step_390(x:Int) Int { step_389(x) + 1 }
+#! Generated call-tower stress step 391.
 fn step_391(x:Int) Int { step_390(x) + 1 }
+#! Generated call-tower stress step 392.
 fn step_392(x:Int) Int { step_391(x) + 1 }
+#! Generated call-tower stress step 393.
 fn step_393(x:Int) Int { step_392(x) + 1 }
+#! Generated call-tower stress step 394.
 fn step_394(x:Int) Int { step_393(x) + 1 }
+#! Generated call-tower stress step 395.
 fn step_395(x:Int) Int { step_394(x) + 1 }
+#! Generated call-tower stress step 396.
 fn step_396(x:Int) Int { step_395(x) + 1 }
+#! Generated call-tower stress step 397.
 fn step_397(x:Int) Int { step_396(x) + 1 }
+#! Generated call-tower stress step 398.
 fn step_398(x:Int) Int { step_397(x) + 1 }
+#! Generated call-tower stress step 399.
 fn step_399(x:Int) Int { step_398(x) + 1 }
+#! Generated call-tower stress step 400.
 fn step_400(x:Int) Int { step_399(x) + 1 }
+#! Generated call-tower stress step 401.
 fn step_401(x:Int) Int { step_400(x) + 1 }
+#! Generated call-tower stress step 402.
 fn step_402(x:Int) Int { step_401(x) + 1 }
+#! Generated call-tower stress step 403.
 fn step_403(x:Int) Int { step_402(x) + 1 }
+#! Generated call-tower stress step 404.
 fn step_404(x:Int) Int { step_403(x) + 1 }
+#! Generated call-tower stress step 405.
 fn step_405(x:Int) Int { step_404(x) + 1 }
+#! Generated call-tower stress step 406.
 fn step_406(x:Int) Int { step_405(x) + 1 }
+#! Generated call-tower stress step 407.
 fn step_407(x:Int) Int { step_406(x) + 1 }
+#! Generated call-tower stress step 408.
 fn step_408(x:Int) Int { step_407(x) + 1 }
+#! Generated call-tower stress step 409.
 fn step_409(x:Int) Int { step_408(x) + 1 }
+#! Generated call-tower stress step 410.
 fn step_410(x:Int) Int { step_409(x) + 1 }
+#! Generated call-tower stress step 411.
 fn step_411(x:Int) Int { step_410(x) + 1 }
+#! Generated call-tower stress step 412.
 fn step_412(x:Int) Int { step_411(x) + 1 }
+#! Generated call-tower stress step 413.
 fn step_413(x:Int) Int { step_412(x) + 1 }
+#! Generated call-tower stress step 414.
 fn step_414(x:Int) Int { step_413(x) + 1 }
+#! Generated call-tower stress step 415.
 fn step_415(x:Int) Int { step_414(x) + 1 }
+#! Generated call-tower stress step 416.
 fn step_416(x:Int) Int { step_415(x) + 1 }
+#! Generated call-tower stress step 417.
 fn step_417(x:Int) Int { step_416(x) + 1 }
+#! Generated call-tower stress step 418.
 fn step_418(x:Int) Int { step_417(x) + 1 }
+#! Generated call-tower stress step 419.
 fn step_419(x:Int) Int { step_418(x) + 1 }
+#! Generated call-tower stress step 420.
 fn step_420(x:Int) Int { step_419(x) + 1 }
+#! Generated call-tower stress step 421.
 fn step_421(x:Int) Int { step_420(x) + 1 }
+#! Generated call-tower stress step 422.
 fn step_422(x:Int) Int { step_421(x) + 1 }
+#! Generated call-tower stress step 423.
 fn step_423(x:Int) Int { step_422(x) + 1 }
+#! Generated call-tower stress step 424.
 fn step_424(x:Int) Int { step_423(x) + 1 }
+#! Generated call-tower stress step 425.
 fn step_425(x:Int) Int { step_424(x) + 1 }
+#! Generated call-tower stress step 426.
 fn step_426(x:Int) Int { step_425(x) + 1 }
+#! Generated call-tower stress step 427.
 fn step_427(x:Int) Int { step_426(x) + 1 }
+#! Generated call-tower stress step 428.
 fn step_428(x:Int) Int { step_427(x) + 1 }
+#! Generated call-tower stress step 429.
 fn step_429(x:Int) Int { step_428(x) + 1 }
+#! Generated call-tower stress step 430.
 fn step_430(x:Int) Int { step_429(x) + 1 }
+#! Generated call-tower stress step 431.
 fn step_431(x:Int) Int { step_430(x) + 1 }
+#! Generated call-tower stress step 432.
 fn step_432(x:Int) Int { step_431(x) + 1 }
+#! Generated call-tower stress step 433.
 fn step_433(x:Int) Int { step_432(x) + 1 }
+#! Generated call-tower stress step 434.
 fn step_434(x:Int) Int { step_433(x) + 1 }
+#! Generated call-tower stress step 435.
 fn step_435(x:Int) Int { step_434(x) + 1 }
+#! Generated call-tower stress step 436.
 fn step_436(x:Int) Int { step_435(x) + 1 }
+#! Generated call-tower stress step 437.
 fn step_437(x:Int) Int { step_436(x) + 1 }
+#! Generated call-tower stress step 438.
 fn step_438(x:Int) Int { step_437(x) + 1 }
+#! Generated call-tower stress step 439.
 fn step_439(x:Int) Int { step_438(x) + 1 }
+#! Generated call-tower stress step 440.
 fn step_440(x:Int) Int { step_439(x) + 1 }
+#! Generated call-tower stress step 441.
 fn step_441(x:Int) Int { step_440(x) + 1 }
+#! Generated call-tower stress step 442.
 fn step_442(x:Int) Int { step_441(x) + 1 }
+#! Generated call-tower stress step 443.
 fn step_443(x:Int) Int { step_442(x) + 1 }
+#! Generated call-tower stress step 444.
 fn step_444(x:Int) Int { step_443(x) + 1 }
+#! Generated call-tower stress step 445.
 fn step_445(x:Int) Int { step_444(x) + 1 }
+#! Generated call-tower stress step 446.
 fn step_446(x:Int) Int { step_445(x) + 1 }
+#! Generated call-tower stress step 447.
 fn step_447(x:Int) Int { step_446(x) + 1 }
+#! Generated call-tower stress step 448.
 fn step_448(x:Int) Int { step_447(x) + 1 }
+#! Generated call-tower stress step 449.
 fn step_449(x:Int) Int { step_448(x) + 1 }
+#! Generated call-tower stress step 450.
 fn step_450(x:Int) Int { step_449(x) + 1 }
+#! Generated call-tower stress step 451.
 fn step_451(x:Int) Int { step_450(x) + 1 }
+#! Generated call-tower stress step 452.
 fn step_452(x:Int) Int { step_451(x) + 1 }
+#! Generated call-tower stress step 453.
 fn step_453(x:Int) Int { step_452(x) + 1 }
+#! Generated call-tower stress step 454.
 fn step_454(x:Int) Int { step_453(x) + 1 }
+#! Generated call-tower stress step 455.
 fn step_455(x:Int) Int { step_454(x) + 1 }
+#! Generated call-tower stress step 456.
 fn step_456(x:Int) Int { step_455(x) + 1 }
+#! Generated call-tower stress step 457.
 fn step_457(x:Int) Int { step_456(x) + 1 }
+#! Generated call-tower stress step 458.
 fn step_458(x:Int) Int { step_457(x) + 1 }
+#! Generated call-tower stress step 459.
 fn step_459(x:Int) Int { step_458(x) + 1 }
+#! Generated call-tower stress step 460.
 fn step_460(x:Int) Int { step_459(x) + 1 }
+#! Generated call-tower stress step 461.
 fn step_461(x:Int) Int { step_460(x) + 1 }
+#! Generated call-tower stress step 462.
 fn step_462(x:Int) Int { step_461(x) + 1 }
+#! Generated call-tower stress step 463.
 fn step_463(x:Int) Int { step_462(x) + 1 }
+#! Generated call-tower stress step 464.
 fn step_464(x:Int) Int { step_463(x) + 1 }
+#! Generated call-tower stress step 465.
 fn step_465(x:Int) Int { step_464(x) + 1 }
+#! Generated call-tower stress step 466.
 fn step_466(x:Int) Int { step_465(x) + 1 }
+#! Generated call-tower stress step 467.
 fn step_467(x:Int) Int { step_466(x) + 1 }
+#! Generated call-tower stress step 468.
 fn step_468(x:Int) Int { step_467(x) + 1 }
+#! Generated call-tower stress step 469.
 fn step_469(x:Int) Int { step_468(x) + 1 }
+#! Generated call-tower stress step 470.
 fn step_470(x:Int) Int { step_469(x) + 1 }
+#! Generated call-tower stress step 471.
 fn step_471(x:Int) Int { step_470(x) + 1 }
+#! Generated call-tower stress step 472.
 fn step_472(x:Int) Int { step_471(x) + 1 }
+#! Generated call-tower stress step 473.
 fn step_473(x:Int) Int { step_472(x) + 1 }
+#! Generated call-tower stress step 474.
 fn step_474(x:Int) Int { step_473(x) + 1 }
+#! Generated call-tower stress step 475.
 fn step_475(x:Int) Int { step_474(x) + 1 }
+#! Generated call-tower stress step 476.
 fn step_476(x:Int) Int { step_475(x) + 1 }
+#! Generated call-tower stress step 477.
 fn step_477(x:Int) Int { step_476(x) + 1 }
+#! Generated call-tower stress step 478.
 fn step_478(x:Int) Int { step_477(x) + 1 }
+#! Generated call-tower stress step 479.
 fn step_479(x:Int) Int { step_478(x) + 1 }
+#! Generated call-tower stress step 480.
 fn step_480(x:Int) Int { step_479(x) + 1 }
+#! Generated call-tower stress step 481.
 fn step_481(x:Int) Int { step_480(x) + 1 }
+#! Generated call-tower stress step 482.
 fn step_482(x:Int) Int { step_481(x) + 1 }
+#! Generated call-tower stress step 483.
 fn step_483(x:Int) Int { step_482(x) + 1 }
+#! Generated call-tower stress step 484.
 fn step_484(x:Int) Int { step_483(x) + 1 }
+#! Generated call-tower stress step 485.
 fn step_485(x:Int) Int { step_484(x) + 1 }
+#! Generated call-tower stress step 486.
 fn step_486(x:Int) Int { step_485(x) + 1 }
+#! Generated call-tower stress step 487.
 fn step_487(x:Int) Int { step_486(x) + 1 }
+#! Generated call-tower stress step 488.
 fn step_488(x:Int) Int { step_487(x) + 1 }
+#! Generated call-tower stress step 489.
 fn step_489(x:Int) Int { step_488(x) + 1 }
+#! Generated call-tower stress step 490.
 fn step_490(x:Int) Int { step_489(x) + 1 }
+#! Generated call-tower stress step 491.
 fn step_491(x:Int) Int { step_490(x) + 1 }
+#! Generated call-tower stress step 492.
 fn step_492(x:Int) Int { step_491(x) + 1 }
+#! Generated call-tower stress step 493.
 fn step_493(x:Int) Int { step_492(x) + 1 }
+#! Generated call-tower stress step 494.
 fn step_494(x:Int) Int { step_493(x) + 1 }
+#! Generated call-tower stress step 495.
 fn step_495(x:Int) Int { step_494(x) + 1 }
+#! Generated call-tower stress step 496.
 fn step_496(x:Int) Int { step_495(x) + 1 }
+#! Generated call-tower stress step 497.
 fn step_497(x:Int) Int { step_496(x) + 1 }
+#! Generated call-tower stress step 498.
 fn step_498(x:Int) Int { step_497(x) + 1 }
+#! Generated call-tower stress step 499.
 fn step_499(x:Int) Int { step_498(x) + 1 }
 
 testing.assert(step_499(0) == 500)

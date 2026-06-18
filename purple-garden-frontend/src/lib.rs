@@ -1,7 +1,7 @@
 #![feature(portable_simd)]
 
 pub mod ast;
-pub mod err;
+pub mod diagnostic;
 pub mod lex;
 pub mod lower;
 pub mod parser;

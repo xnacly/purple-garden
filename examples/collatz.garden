@@ -2,10 +2,12 @@
 # modulo, multiplication.
 import "testing"
 
+#! Return whether `n` is even using modulo arithmetic.
 fn is_even(n:Int) Bool {
     n % 2 == 0
 }
 
+#! Count Collatz steps for `n`, accumulating the total in `acc`.
 fn collatz_steps(n:Int acc:Int) Int {
     match {
         n == 1 { acc }
@@ -14,6 +16,7 @@ fn collatz_steps(n:Int acc:Int) Int {
     }
 }
 
+#! Sum Collatz step counts for every integer from `i` through `n`.
 fn sum_steps(i:Int n:Int acc:Int) Int {
     match {
         i > n { acc }
