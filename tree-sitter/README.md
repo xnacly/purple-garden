@@ -17,51 +17,37 @@ That produces the parser sources under `src/`.
 
 ## Neovim
 
-The grammar can be installed by `nvim-treesitter` from a local checkout. Link
-the grammar into the Neovim config first:
+Link the local grammar into your Neovim config:
 
 ```bash
 mkdir -p ~/.config/nvim/tree-sitter
 ln -sfn /path/to/purple-garden/tree-sitter ~/.config/nvim/tree-sitter/garden
 ```
 
-Register the parser before calling `require('nvim-treesitter').install(...)`:
+Register it before your `nvim-treesitter` setup/install call:
 
 ```lua
-local function register_garden()
-    require('nvim-treesitter.parsers').garden = {
-        install_info = {
-            path = vim.fn.stdpath('config') .. '/tree-sitter/garden',
-            queries = 'queries/garden',
-            generate = true,
-        },
-        -- tier 4 is treated as unsupported by nvim-treesitter's installer.
-        tier = 3,
-    }
-end
-
-register_garden()
-
-vim.api.nvim_create_autocmd('User', {
-    pattern = 'TSUpdate',
-    callback = register_garden,
-})
+require('nvim-treesitter.parsers').garden = {
+    install_info = {
+        path = vim.fn.stdpath('config') .. '/tree-sitter/garden',
+        queries = 'queries/garden',
+        generate = true,
+    },
+    tier = 3,
+}
 
 vim.filetype.add({
-    extension = {
-        garden = 'garden',
-    },
+    extension = { garden = 'garden' },
 })
 ```
 
-Then include `garden` in the parser install list or install it manually:
+Install it:
 
 ```vim
 :lua require('nvim-treesitter').install('garden', { force = true, generate = true }):wait(120000)
 ```
 
-For a current Neovim LSP config, register the language server against the
-`garden` filetype:
+LSP setup:
 
 ```lua
 vim.lsp.config('purple-garden', {
@@ -71,7 +57,16 @@ vim.lsp.config('purple-garden', {
 vim.lsp.enable('purple-garden')
 ```
 
-Build the binary first if the path points at the local debug target:
+The language server currently supports:
+
+- incremental document sync
+- pull diagnostics
+- hover docs for keywords, types, bindings, packages and functions
+- completions for keywords, types, packages and package functions
+- go to definition for local bindings, functions and imports
+- code actions for diagnostics with suggested replacements
+
+Build the binary first if you use the local debug target:
 
 ```bash
 cargo build -p purple-garden-cli

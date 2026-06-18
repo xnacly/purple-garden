@@ -1,10 +1,13 @@
 # Embedding Purple Garden
 
-Purple Garden packages can be exposed from ordinary Rust functions. Most users should write normal Rust types and annotate a module; the macro builds the VM wrappers and package metadata.
+Purple Garden packages can be exposed from ordinary Rust functions. Most users
+should write normal Rust types and annotate a module; the macro builds the VM
+wrappers and package metadata.
 
 ## Defining A Foreign Type
 
-Use the derives for Rust types that should cross the VM boundary as opaque foreign handles:
+Use the derives for Rust types that should cross the VM boundary as opaque
+foreign handles:
 
 ```rust
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -30,7 +33,8 @@ impl Counter {
 }
 ```
 
-The derives map `Counter` to `Foreign<Counter>`. The VM stores an opaque handle; Purple Garden code cannot inspect the fields directly.
+The derives map `Counter` to `Foreign<Counter>`. The VM stores an opaque
+handle; Purple Garden code cannot inspect the fields directly.
 
 ## Defining A Package
 
@@ -61,17 +65,45 @@ pub mod counter {
 }
 ```
 
-The macro generates `counter::PACKAGE`, VM wrappers, docs, argument names, type metadata, and the `pure` flag.
+The macro generates `counter::PACKAGE`, VM wrappers, docs, argument names, type
+metadata, and the `pure` flag.
 
 ## Tooling Signatures
 
-If you want to ship package signatures for tooling, generated package metadata can be rendered into an `extern.garden` file during a build step. The example crate writes `extern.garden` next to the crate so editors and LSP tooling can load it without a custom runtime flag.
+If you want to ship package signatures for tooling, generated package metadata
+can be rendered into an `extern.garden` file during a build step. The example
+crate writes `extern.garden` next to the crate so editors and LSP tooling can
+load it without a custom runtime flag.
 
-The runtime API also exposes `Pkg::extern_source()` for callers that want to generate the file themselves.
+The runtime API also exposes `Pkg::extern_source()` for callers that want to
+generate the file themselves.
+
+For instance the above generates:
+
+```garden
+#! The Purple Garden package exported by this example.
+#!
+#! The macro expands this module into VM wrappers and package metadata. The
+#! build script reads that metadata and writes `extern.garden` for tooling and
+#! editor integration.
+#!
+#! Meaning for instance: the LSP will show completions for methods in the
+#! counter package, show signatures on hover and diagnostics as if the package
+#! were defined in the interpreter.
+extern "counter" {
+    #! Create a new counter from an initial value.
+    fn new(value: Int) Foreign<Counter>
+    #! Increment the counter and return the updated value.
+    fn increment(counter: Foreign<Counter>) Int
+    #! Read the current counter value.
+    fn get(counter: Foreign<Counter>) Int
+}
+```
 
 ## Calling From Purple Garden
 
-Once registered with the embedding API, the package is used like any other package:
+Once registered with the embedding API, the package is used like any other
+package:
 
 ```garden
 import ("counter" "testing")
@@ -93,10 +125,6 @@ let mut program = purple_garden::Pg::new()
 let counter: &Counter = program.run_take()?;
 ```
 
-## Foreign Type Isolation
-
-Foreign type names are part of typechecking. A function expecting `Foreign<Counter>` will not accept a different foreign type.
-
 The complete runnable example lives in `examples/embed-counter`.
 
 Run it with:
@@ -104,4 +132,3 @@ Run it with:
 ```sh
 cargo run -p purple-garden-embed-counter
 ```
-

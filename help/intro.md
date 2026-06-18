@@ -44,10 +44,11 @@ purple-garden --help
 
 ## Standard Library
 
-Use `doc` to inspect packages and methods:
+Use `doc` to inspect packages, methods and language keywords:
 
 ```sh
 purple-garden doc <pkg>[.<method>]
+purple-garden doc <keyword>
 ```
 
 For example:
@@ -55,4 +56,3 @@ For example:
 ```sh
 purple-garden doc io.println
 ```
-
