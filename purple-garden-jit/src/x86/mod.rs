@@ -90,6 +90,12 @@ pub fn compile_func(
     });
     Lowering::new(func, out, regs, scratch).emit()?;
 
+    // we have produced no machine code, so we just RET, this may be the case for fully optimised
+    // (dce) away IR
+    if out.is_empty() {
+        Insn::Ret.encode(out);
+    }
+
     purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
     Some(())
 }
