@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{IsTerminal, Write};
+use std::io::IsTerminal;
 
 use purple_garden_ir::Id;
 use purple_garden_runtime::{BuiltinFn, op::Op};
@@ -414,10 +414,6 @@ impl<'dis> Disassembler<'dis> {
             }
             base += code.len();
         }
-    }
-
-    pub fn dump_native_elf(&self, out: impl Write) -> std::io::Result<()> {
-        crate::elf::write(self.cc.native_code.as_deref().unwrap_or_default(), out)
     }
 
     fn source_line(&self, pc: usize) -> Option<(usize, &'dis str)> {

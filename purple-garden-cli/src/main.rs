@@ -8,6 +8,7 @@ use std::{collections::HashMap, path::Path};
 
 mod cli;
 mod doc;
+mod elf;
 mod frontend;
 mod help;
 mod input;
@@ -224,14 +225,17 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some(ctx) = ctx {
-        let dis =
-            bc::dis::Disassembler::new(&program.vm.bytecode, ctx).with_source(input.as_bytes());
         match conf.disassemble {
             1 => {
+                let dis = bc::dis::Disassembler::new(&program.vm.bytecode, ctx)
+                    .with_source(input.as_bytes());
                 dis.disassemble_bytecode();
                 dis.disassemble_native();
             }
-            _ => dis.dump_native_elf(std::io::stdout().lock())?,
+            _ => elf::write(
+                ctx.native_code.as_deref().unwrap_or_default(),
+                std::io::stdout().lock(),
+            )?,
         }
     }
 

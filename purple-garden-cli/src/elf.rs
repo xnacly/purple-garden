@@ -14,7 +14,7 @@ const EM: u16 = 183;
 const TEXT: u16 = 1;
 const SHSTRTAB: u16 = 4;
 
-pub fn write(native_code: &[(&str, Vec<u8>)], mut out: impl Write) -> io::Result<()> {
+pub(crate) fn write(native_code: &[(&str, Vec<u8>)], mut out: impl Write) -> io::Result<()> {
     let mut buf = vec![0; EHDR];
 
     pad(&mut buf, 16);

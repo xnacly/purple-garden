@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 pub mod dis;
-mod elf;
 mod intern;
 mod regalloc;
 
