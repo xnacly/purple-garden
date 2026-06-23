@@ -144,7 +144,9 @@ fn build_global_completions() -> Vec<CompletionEntry> {
             scope: CompletionScope::Global,
         });
     }
-    for ty in ["Str", "Int", "Double", "Bool", "Void", "Foreign"] {
+    for ty in [
+        "Str", "Int", "Double", "Bool", "Void", "Option", "Array", "Foreign", "Record",
+    ] {
         let doc = crate::doc::type_doc(ty).map(type_completion_doc);
         completions.push(CompletionEntry {
             label: ty.to_owned(),

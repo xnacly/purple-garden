@@ -24,6 +24,14 @@ pub(super) fn node_span(ast: &Ast<'_>, node_id: NodeId) -> Option<Span> {
             }
             (!spans.is_empty()).then(|| cover_spans(&spans))
         }
+        Node::Record { src, fields, .. } => {
+            let mut spans = vec![token_span(src)];
+            for (field, value) in fields {
+                spans.push(token_span(field));
+                spans.push(node_span(ast, *value)?);
+            }
+            Some(cover_spans(&spans))
+        }
         Node::Let { name, rhs, .. } => {
             Some(cover_spans(&[token_span(name), node_span(ast, *rhs)?]))
         }

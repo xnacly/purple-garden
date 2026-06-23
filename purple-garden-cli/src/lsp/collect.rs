@@ -139,6 +139,17 @@ fn collect_node(
                 collect_node(ast, typecheck, value, analysis);
             }
         }
+        Node::Record { fields, .. } => {
+            for (field, value) in fields {
+                if let Some(ty) = type_for_node(ast, typecheck, *value) {
+                    analysis.add_garden_hover(
+                        token_span(field),
+                        format!("{}: {}", field.t.as_str(), ty),
+                    );
+                }
+                collect_node(ast, typecheck, *value, analysis);
+            }
+        }
         Node::Match { cases, default, .. } => {
             for &((_, condition), ref body) in cases {
                 collect_node(ast, typecheck, condition, analysis);
