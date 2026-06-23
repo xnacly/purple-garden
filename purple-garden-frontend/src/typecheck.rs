@@ -86,6 +86,18 @@ impl<'t> TypecheckOutput<'t> {
 
     fn render_node(&self, ast: &Ast<'t>, node_id: NodeId, indent: usize, out: &mut String) {
         match ast.node(node_id) {
+            Node::Record { id, fields, .. } => {
+                use std::fmt::Write as _;
+
+                self.render_value(indent, "record", self.type_at(*id), out);
+                for (field, value) in fields {
+                    let lex::Type::Ident(name) = field.t else {
+                        unreachable!()
+                    };
+                    writeln!(out, "{}field {name}", "  ".repeat(indent + 1)).unwrap();
+                    self.render_node(ast, *value, indent + 2, out);
+                }
+            }
             Node::Atom { id, raw } => {
                 self.render_value(indent, raw.t.as_str(), self.type_at(*id), out);
             }
@@ -414,10 +426,6 @@ impl<'t> Typechecker<'t> {
             self.register_extern(node);
         }
 
-        // Typechecking is the first frontend pass that can collect multiple
-        // diagnostics today. Parsing is still fail-fast, but once we have a
-        // valid AST we walk every root and preserve any types that remain
-        // obvious after an error. Lowering decides whether to bail.
         for &node in &self.ast.roots {
             self.node(node);
         }
@@ -713,6 +721,31 @@ impl<'t> Typechecker<'t> {
         }
 
         match node {
+            Node::Record { id, fields, .. } => {
+                let mut typed_fields = Vec::with_capacity(fields.len());
+                let mut poisoned = false;
+
+                for (key, value) in fields {
+                    let lex::Type::Ident(inner_name) = key.t else {
+                        unreachable!()
+                    };
+
+                    match self.node(*value) {
+                        TcType::Known(ty) => {
+                            typed_fields.push((inner_name, ty));
+                        }
+                        TcType::Poison => {
+                            poisoned = true;
+                        }
+                    }
+                }
+
+                if poisoned {
+                    return TcType::Poison;
+                }
+
+                self.set_known(*id, Type::Record(typed_fields))
+            }
             Node::Atom { id, raw } => {
                 let t = crate::type_from_atom_token_type(&raw.t);
                 self.set_known(*id, t)
