@@ -5,21 +5,21 @@ use crate::Const;
 
 /// Compile time type system,
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum Type<'a> {
+pub enum Type<'t> {
     Void,
     Bool,
     Int,
     Double,
     Str,
-    Option(Box<Type<'a>>),
-    Array(Box<Type<'a>>),
+    Option(Box<Type<'t>>),
+    Array(Box<Type<'t>>),
+    Record(Vec<(&'t str, Type<'t>)>),
     // Foreign type for handling opaque rust data feed into the vm runtime
     //
     // which is useful for something like Foreign<counter> vs
     // Foreign<player> in the typesystem, meaning functions defined on the former can not be
     // called on the latter, resulting in a type error
-    Foreign(&'a str),
-    // TODO: add Record type for structuring data together as fields
+    Foreign(&'t str),
 }
 
 impl Display for Type<'_> {
@@ -33,6 +33,16 @@ impl Display for Type<'_> {
             Type::Foreign(id) => write!(f, "Foreign<{id}>"),
             Type::Option(inner) => write!(f, "Option<{inner}>"),
             Type::Array(inner) => write!(f, "Array<{inner}>"),
+            Type::Record(fields) => {
+                write!(f, "Record<")?;
+                for (i, (key, value)) in fields.iter().enumerate() {
+                    write!(f, "{key}: {value}")?;
+                    if i + 1 != fields.len() {
+                        write!(f, " ")?;
+                    }
+                }
+                write!(f, ">")
+            }
         }
     }
 }
