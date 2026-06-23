@@ -900,12 +900,39 @@ impl<'t> Typechecker<'t> {
                 }
                 cast
             }
-            Node::Field { name, .. } => {
-                self.report(Diagnostic::at_token(
-                    "field expressions are only supported as package function calls",
-                    name,
-                ));
-                TcType::Poison
+            Node::Field { id, target, name } => {
+                let target_type = self.node(*target);
+
+                match target_type {
+                    TcType::Known(ref target @ Type::Record(ref fields)) => {
+                        let lex::Type::Ident(idx_path_end) = name.t else {
+                            unreachable!();
+                        };
+
+                        // PERF: this record path lookup should mabye be a map
+                        let Some((_, ty)) = fields
+                            .iter()
+                            .find(|(field_name, _)| *field_name == idx_path_end)
+                        else {
+                            self.report(Diagnostic::at_token(
+                                format!("{target} does not have a field called {idx_path_end}"),
+                                name,
+                            ));
+                            return TcType::Poison;
+                        };
+
+                        self.set_type(*id, ty.clone());
+                        TcType::Known(ty.clone())
+                    }
+                    TcType::Known(t) => {
+                        self.report(Diagnostic::at_token(
+                            format!("{t} can not be indexed in this way"),
+                            name,
+                        ));
+                        TcType::Poison
+                    }
+                    _ => TcType::Poison,
+                }
             }
             Node::Call { id, target, args } => {
                 let (tok, inner_name, fun) = match self.ast.node(*target) {
@@ -1156,5 +1183,52 @@ impl<'t> Typechecker<'t> {
             Node::Array { .. } => todo!(),
             Node::Object { .. } => todo!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{lex::Lexer, parser::Parser};
+
+    fn parse(source: &[u8]) -> Ast<'_> {
+        Parser::new(Lexer::new(source)).parse().unwrap()
+    }
+
+    fn type_of<'t>(ast: &Ast<'t>, out: &TypecheckOutput<'t>, node: NodeId) -> Option<Type<'t>> {
+        ast.value_id(node)
+            .and_then(|id| out.types.get(id))
+            .cloned()
+            .flatten()
+    }
+
+    #[test]
+    fn record_field_access_resolves_field_type() {
+        let ast = parse(br#"{ name: "teo" age: 23 }.name"#);
+        let out = Typechecker::new(&ast).check();
+
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Str));
+    }
+
+    #[test]
+    fn nested_record_field_access_resolves_inner_field_type() {
+        let ast = parse(br#"{ name: "teo" job: { title: "dev" since: 2024 } }.job.since"#);
+        let out = Typechecker::new(&ast).check();
+
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Int));
+    }
+
+    #[test]
+    fn unknown_record_field_reports_error() {
+        let ast = parse(br#"{ name: "teo" age: 23 }.missing"#);
+        let out = Typechecker::new(&ast).check();
+
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "Record<name: Str age: Int> does not have a field called missing"
+        );
     }
 }

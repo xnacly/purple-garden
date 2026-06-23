@@ -1,6 +1,7 @@
-use std::sync::OnceLock;
+use std::{collections::HashMap, sync::OnceLock};
 
 use lsp_types::{CompletionItem, CompletionItemKind, Documentation};
+use purple_garden_ir::ptype::Type;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum CompletionScope {
@@ -15,6 +16,41 @@ pub(super) struct CompletionEntry {
     detail: Option<String>,
     documentation: Option<String>,
     scope: CompletionScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RecordCompletion {
+    fields: Vec<RecordFieldCompletion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecordFieldCompletion {
+    name: String,
+    ty: String,
+    nested: Option<RecordCompletion>,
+}
+
+impl RecordCompletion {
+    pub(super) fn from_type(ty: &Type<'_>) -> Option<Self> {
+        let Type::Record(fields) = ty else {
+            return None;
+        };
+
+        Some(Self {
+            fields: fields
+                .iter()
+                .map(|(name, ty)| RecordFieldCompletion {
+                    name: (*name).to_owned(),
+                    ty: ty.to_string(),
+                    nested: Self::from_type(ty),
+                })
+                .collect(),
+        })
+    }
+
+    fn field(&self, name: &str) -> Option<&RecordFieldCompletion> {
+        self.fields.iter().find(|field| field.name == name)
+    }
 }
 
 impl CompletionEntry {
@@ -40,11 +76,15 @@ pub(super) fn global_completions() -> &'static [CompletionEntry] {
 
 pub(super) fn items_at(
     completions: &[CompletionEntry],
+    record_completions: &HashMap<String, RecordCompletion>,
     imported_packages: &[String],
     source: &str,
     offset: usize,
 ) -> Vec<CompletionItem> {
     if let Some(items) = import_string_items(source, offset) {
+        return items;
+    }
+    if let Some(items) = record_field_items(record_completions, source, offset) {
         return items;
     }
     if let Some(items) = package_member_items(imported_packages, source, offset) {
@@ -80,25 +120,55 @@ fn import_string_items(source: &str, offset: usize) -> Option<Vec<CompletionItem
     )
 }
 
+fn record_field_items(
+    record_completions: &HashMap<String, RecordCompletion>,
+    source: &str,
+    offset: usize,
+) -> Option<Vec<CompletionItem>> {
+    let (target_path, prefix) = member_access_at(source, offset)?;
+    let record = record_for_path(record_completions, target_path)?;
+    let mut items = record
+        .fields
+        .iter()
+        .filter(|field| prefix.is_empty() || field.name.starts_with(prefix))
+        .map(|field| {
+            completion_item(&CompletionEntry {
+                label: field.name.clone(),
+                kind: CompletionItemKind::FIELD,
+                detail: Some(format!("{}: {}", field.name, field.ty)),
+                documentation: None,
+                scope: CompletionScope::Local,
+            })
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(|lhs, rhs| lhs.label.cmp(&rhs.label));
+    Some(items)
+}
+
+fn record_for_path<'a>(
+    record_completions: &'a HashMap<String, RecordCompletion>,
+    target_path: &str,
+) -> Option<&'a RecordCompletion> {
+    let mut parts = target_path.split('.');
+    let first = parts.next()?;
+    let mut record = record_completions.get(first)?;
+    for part in parts {
+        record = record.field(part)?.nested.as_ref()?;
+    }
+    Some(record)
+}
+
 fn package_member_items(
     imported_packages: &[String],
     source: &str,
     offset: usize,
 ) -> Option<Vec<CompletionItem>> {
-    let line = line_prefix(source, offset);
-    let dot = line.rfind('.')?;
-    let pkg_start = line[..dot]
-        .char_indices()
-        .rev()
-        .find_map(|(idx, ch)| (!is_completion_char(ch)).then_some(idx + ch.len_utf8()))
-        .unwrap_or(0);
-    let pkg_name = &line[pkg_start..dot];
+    let (pkg_name, prefix) = member_access_at(source, offset)?;
     if pkg_name.is_empty() || !imported_packages.iter().any(|pkg| pkg == pkg_name) {
         return None;
     }
 
     let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
-    let prefix = &line[dot + 1..];
     let mut items = pkg
         .overload_groups()
         .into_iter()
@@ -115,6 +185,21 @@ fn package_member_items(
         .collect::<Vec<_>>();
     items.sort_by(|lhs, rhs| lhs.label.cmp(&rhs.label));
     Some(items)
+}
+
+fn member_access_at(source: &str, offset: usize) -> Option<(&str, &str)> {
+    let line = line_prefix(source, offset);
+    let dot = line.rfind('.')?;
+    let target_start = line[..dot]
+        .char_indices()
+        .rev()
+        .find_map(|(idx, ch)| (!is_member_path_char(ch)).then_some(idx + ch.len_utf8()))
+        .unwrap_or(0);
+    let target_path = &line[target_start..dot];
+    if target_path.is_empty() {
+        return None;
+    }
+    Some((target_path, &line[dot + 1..]))
 }
 
 pub(super) fn function_signature(name: &str, fun: &purple_garden_runtime::Fn<'_>) -> String {
@@ -292,6 +377,10 @@ fn is_completion_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '_' | '/' | '.')
 }
 
+fn is_member_path_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '/' | '.')
+}
+
 fn completion_item(entry: &CompletionEntry) -> CompletionItem {
     CompletionItem {
         label: entry.label.clone(),
@@ -310,5 +399,51 @@ fn completion_sort_key(entry: &CompletionEntry) -> String {
     match entry.scope {
         CompletionScope::Local => format!("0_{}", entry.label),
         CompletionScope::Global => format!("1_{}", entry.label),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record<'a>(fields: Vec<(&'a str, Type<'a>)>) -> Type<'a> {
+        Type::Record(fields)
+    }
+
+    #[test]
+    fn completes_fields_for_record_target() {
+        let mut records = HashMap::new();
+        records.insert(
+            "user".to_owned(),
+            RecordCompletion::from_type(&record(vec![("name", Type::Str), ("age", Type::Int)]))
+                .unwrap(),
+        );
+
+        let items = items_at(&[], &records, &[], "user.", 5);
+
+        assert_eq!(
+            items.into_iter().map(|item| item.label).collect::<Vec<_>>(),
+            vec!["age", "name"]
+        );
+    }
+
+    #[test]
+    fn completes_nested_fields_for_record_target() {
+        let mut records = HashMap::new();
+        records.insert(
+            "user".to_owned(),
+            RecordCompletion::from_type(&record(vec![(
+                "job",
+                record(vec![("title", Type::Str), ("since", Type::Int)]),
+            )]))
+            .unwrap(),
+        );
+
+        let items = items_at(&[], &records, &[], "user.job.t", 10);
+
+        assert_eq!(
+            items.into_iter().map(|item| item.label).collect::<Vec<_>>(),
+            vec!["title"]
+        );
     }
 }
