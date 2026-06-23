@@ -367,6 +367,26 @@ define_keywords! {
                 "```"
             )
         },
+        Option => {
+            name: "Option",
+            doc: concat!(
+                "A type that can either contain a value or be empty.\n\n",
+                "## Examples:\n\n",
+                "```garden\n",
+                "fn maybe_name() Option<Str> {}\n",
+                "```"
+            )
+        },
+        Array => {
+            name: "Array",
+            doc: concat!(
+                "A sequence of values that all have the same type.\n\n",
+                "## Examples:\n\n",
+                "```garden\n",
+                "let values = [1 2 3] as Array<Int>\n",
+                "```"
+            )
+        },
         Foreign => {
             name: "Foreign",
             doc: concat!(
@@ -381,6 +401,25 @@ define_keywords! {
                 "import \"counter\"\n",
                 "let c = counter.new(0)\n",
                 "counter.increment(c)\n",
+                "```"
+            )
+        },
+        Record => {
+            name: "Record",
+            doc: concat!(
+                "A type marrying multiple uniqely adressable fields with types into a single value\n\n",
+                "## Examples:\n\n",
+                "```garden\n",
+                "import \"io\"\n",
+                "\n",
+                "#! inferred as Record<name: Str age: Int>\n",
+                "let x = {\n",
+                "    name: \"teo\"\n",
+                "    age: 23\n",
+                "} as Record<name: Str age: Int>\n",
+                "\n",
+                "io.println(x.name)\n",
+                "io.println(x.age)\n",
                 "```"
             )
         },
