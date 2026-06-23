@@ -938,8 +938,11 @@ impl<'t> Typechecker<'t> {
                 let (tok, inner_name, fun) = match self.ast.node(*target) {
                     Node::Field { target, name, .. } => {
                         let Node::Ident { name: pkg_tok, .. } = self.ast.node(*target) else {
-                            // TODO: add error handling for non ident call targets
-                            unreachable!();
+                            self.report(Diagnostic::at_token(
+                                "only package functions can be called through field syntax",
+                                name,
+                            ));
+                            return TcType::Poison;
                         };
                         let lex::Token {
                             t: lex::Type::Ident(pkg_name),
@@ -1229,6 +1232,18 @@ mod tests {
         assert_eq!(
             out.diagnostics[0].message,
             "Record<name: Str age: Int> does not have a field called missing"
+        );
+    }
+
+    #[test]
+    fn field_call_with_non_package_target_reports_error() {
+        let ast = parse(br#"{ job: { run: "nope" } }.job.run()"#);
+        let out = Typechecker::new(&ast).check();
+
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "only package functions can be called through field syntax"
         );
     }
 }

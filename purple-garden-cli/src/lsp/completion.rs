@@ -1,7 +1,9 @@
 use std::{collections::HashMap, sync::OnceLock};
 
-use lsp_types::{CompletionItem, CompletionItemKind, Documentation};
+use lsp_types::{CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind};
 use purple_garden_ir::ptype::Type;
+
+use super::analysis::PackageDoc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum CompletionScope {
@@ -77,6 +79,7 @@ pub(super) fn global_completions() -> &'static [CompletionEntry] {
 pub(super) fn items_at(
     completions: &[CompletionEntry],
     record_completions: &HashMap<String, RecordCompletion>,
+    package_docs: &HashMap<String, PackageDoc>,
     imported_packages: &[String],
     source: &str,
     offset: usize,
@@ -87,7 +90,7 @@ pub(super) fn items_at(
     if let Some(items) = record_field_items(record_completions, source, offset) {
         return items;
     }
-    if let Some(items) = package_member_items(imported_packages, source, offset) {
+    if let Some(items) = package_member_items(package_docs, imported_packages, source, offset) {
         return items;
     }
 
@@ -159,6 +162,7 @@ fn record_for_path<'a>(
 }
 
 fn package_member_items(
+    package_docs: &HashMap<String, PackageDoc>,
     imported_packages: &[String],
     source: &str,
     offset: usize,
@@ -166,6 +170,25 @@ fn package_member_items(
     let (pkg_name, prefix) = member_access_at(source, offset)?;
     if pkg_name.is_empty() || !imported_packages.iter().any(|pkg| pkg == pkg_name) {
         return None;
+    }
+
+    if let Some(doc) = package_docs.get(pkg_name) {
+        let mut items = doc
+            .completions
+            .iter()
+            .filter(|(name, _)| prefix.is_empty() || name.starts_with(prefix))
+            .map(|(name, completion)| {
+                completion_item(&CompletionEntry {
+                    label: name.to_owned(),
+                    kind: CompletionItemKind::FUNCTION,
+                    detail: Some(completion.detail.clone()),
+                    documentation: completion.documentation.clone(),
+                    scope: CompletionScope::Local,
+                })
+            })
+            .collect::<Vec<_>>();
+        items.sort_by(|lhs, rhs| lhs.label.cmp(&rhs.label));
+        return Some(items);
     }
 
     let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
@@ -350,7 +373,11 @@ fn function_doc(name: &str, variants: &[&purple_garden_runtime::Fn<'_>]) -> Opti
     let command = crate::doc::command(name);
     let display_name = name.rsplit_once('.').map_or(name, |(_, name)| name);
     let doc = crate::doc::render_function(display_name, variants);
-    Some(format!("{}\n{command}", doc.trim_end()))
+    Some(format!("{}\n{command}", garden_block(doc.trim_end())))
+}
+
+pub(super) fn garden_block(contents: impl std::fmt::Display) -> String {
+    format!("```garden\n{}\n```", contents)
 }
 
 fn completion_prefix(source: &str, offset: usize) -> String {
@@ -389,7 +416,10 @@ fn completion_item(entry: &CompletionEntry) -> CompletionItem {
         documentation: entry
             .documentation
             .as_ref()
-            .map(|doc| Documentation::String(doc.clone())),
+            .map(|doc| Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: doc.clone(),
+            })),
         sort_text: Some(completion_sort_key(entry)),
         ..Default::default()
     }
@@ -405,6 +435,7 @@ fn completion_sort_key(entry: &CompletionEntry) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lsp::analysis::PackageFunctionCompletion;
 
     fn record<'a>(fields: Vec<(&'a str, Type<'a>)>) -> Type<'a> {
         Type::Record(fields)
@@ -419,7 +450,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let items = items_at(&[], &records, &[], "user.", 5);
+        let items = items_at(&[], &records, &HashMap::new(), &[], "user.", 5);
 
         assert_eq!(
             items.into_iter().map(|item| item.label).collect::<Vec<_>>(),
@@ -439,11 +470,89 @@ mod tests {
             .unwrap(),
         );
 
-        let items = items_at(&[], &records, &[], "user.job.t", 10);
+        let items = items_at(&[], &records, &HashMap::new(), &[], "user.job.t", 10);
 
         assert_eq!(
             items.into_iter().map(|item| item.label).collect::<Vec<_>>(),
             vec!["title"]
         );
+    }
+
+    #[test]
+    fn completes_extern_package_members() {
+        let mut package_docs = HashMap::new();
+        package_docs.insert(
+            "counter".to_owned(),
+            PackageDoc {
+                hover: String::new(),
+                functions: HashMap::new(),
+                completions: HashMap::from([
+                    (
+                        "increment".to_owned(),
+                        PackageFunctionCompletion {
+                            detail: "fn increment(counter: Foreign<Counter>) Int".to_owned(),
+                            documentation: None,
+                        },
+                    ),
+                    (
+                        "get".to_owned(),
+                        PackageFunctionCompletion {
+                            detail: "fn get(counter: Foreign<Counter>) Int".to_owned(),
+                            documentation: None,
+                        },
+                    ),
+                ]),
+            },
+        );
+
+        let items = items_at(
+            &[],
+            &HashMap::new(),
+            &package_docs,
+            &["counter".to_owned()],
+            "counter.i",
+            9,
+        );
+
+        assert_eq!(
+            items.into_iter().map(|item| item.label).collect::<Vec<_>>(),
+            vec!["increment"]
+        );
+    }
+
+    #[test]
+    fn extern_package_member_docs_are_markdown_garden_blocks() {
+        let mut package_docs = HashMap::new();
+        package_docs.insert(
+            "counter".to_owned(),
+            PackageDoc {
+                hover: String::new(),
+                functions: HashMap::new(),
+                completions: HashMap::from([(
+                    "increment".to_owned(),
+                    PackageFunctionCompletion {
+                        detail: "fn increment(counter: Foreign<Counter>) Int".to_owned(),
+                        documentation: Some(garden_block(
+                            "fn increment(counter: Foreign<Counter>) Int",
+                        )),
+                    },
+                )]),
+            },
+        );
+
+        let items = items_at(
+            &[],
+            &HashMap::new(),
+            &package_docs,
+            &["counter".to_owned()],
+            "counter.i",
+            9,
+        );
+
+        let Some(Documentation::MarkupContent(markup)) = &items[0].documentation else {
+            panic!("expected markdown completion documentation");
+        };
+        assert_eq!(markup.kind, MarkupKind::Markdown);
+        assert!(markup.value.contains("```garden"));
     }
 }

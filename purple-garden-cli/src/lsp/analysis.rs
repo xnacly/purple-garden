@@ -36,6 +36,13 @@ pub(super) struct DocumentAnalysis {
 pub(super) struct PackageDoc {
     pub(super) hover: String,
     pub(super) functions: HashMap<String, String>,
+    pub(super) completions: HashMap<String, PackageFunctionCompletion>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct PackageFunctionCompletion {
+    pub(super) detail: String,
+    pub(super) documentation: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -147,6 +154,7 @@ impl DocumentState {
         completion::items_at(
             &self.analysis.completions,
             &self.analysis.record_completions,
+            &self.analysis.package_docs,
             &self.analysis.imported_packages,
             &self.text,
             offset,
