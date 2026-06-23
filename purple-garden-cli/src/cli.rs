@@ -18,7 +18,7 @@ pub struct Cli {
     #[arg(short = 'I', long)]
     pub ir: bool,
 
-    /// Print typechecker output and stop before lowering.
+    /// Print typechecker output.
     ///
     /// -T prints top-level bindings and function signatures.
     ///

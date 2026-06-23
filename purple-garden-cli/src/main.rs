@@ -151,25 +151,17 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     }
+
     if cli.types > 0 {
         if cli.types == 1 {
             print!("{}", typecheck.render_summary(&ast));
         } else {
             print!("{}", typecheck.render_nodes(&ast));
         }
-        if has_type_errors {
-            std::process::exit(1);
-        }
-        if has_parse_errors {
-            std::process::exit(1);
-        }
-
-        let needs_lowered_output = cli.ir || conf.liveness || conf.disassemble > 0;
-        if !needs_lowered_output {
-            std::process::exit(0);
-        }
     }
-    if has_parse_errors || has_type_errors {
+
+    let has_frontend_diagnostics = has_parse_errors || has_type_errors;
+    if has_frontend_diagnostics {
         std::process::exit(1);
     }
 
