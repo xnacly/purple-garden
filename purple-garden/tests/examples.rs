@@ -70,6 +70,7 @@ example_tests! {
     fib => "examples/fib.garden",
     functions => "examples/functions.garden",
     jitprogress => "examples/jitprogress.garden",
+    math => "examples/math.garden",
     mandelbrot => "examples/mandelbrot.garden",
     many_functions => "examples/many_functions.garden",
     regressions => "examples/regressions.garden",

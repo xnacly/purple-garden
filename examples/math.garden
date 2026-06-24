@@ -1,0 +1,26 @@
+import ("math" "testing")
+
+testing.assert(math.abs(-42) == 42)
+testing.assert(math.abs(42) == 42)
+testing.assert(math.abs(-3.5) > 3.4)
+testing.assert(math.abs(-3.5) < 3.6)
+
+testing.assert(math.min(10 20) == 10)
+testing.assert(math.min(20 10) == 10)
+testing.assert(math.min(10.5 20.25) > 10.4)
+testing.assert(math.min(10.5 20.25) < 10.6)
+
+testing.assert(math.max(10 20) == 20)
+testing.assert(math.max(20 10) == 20)
+testing.assert(math.max(10.5 20.25) > 20.2)
+testing.assert(math.max(10.5 20.25) < 20.3)
+
+testing.assert(math.clamp(300 0 255) == 255)
+testing.assert(math.clamp(-1 0 255) == 0)
+testing.assert(math.clamp(128 0 255) == 128)
+testing.assert(math.clamp(1.5 0.0 1.0) > 0.9)
+testing.assert(math.clamp(1.5 0.0 1.0) < 1.1)
+
+testing.assert(math.round(42) == 42)
+testing.assert(math.round(3.5) > 3.9)
+testing.assert(math.round(3.5) < 4.1)

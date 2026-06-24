@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::OnceLock};
 pub use purple_garden_runtime::{Fn, Pkg};
 
 mod io;
+mod math;
 mod strings;
 mod testing;
 
@@ -38,7 +39,12 @@ fn insert_pkg(index: &mut HashMap<String, &'static Pkg>, parent: String, pkg: &'
     }
 }
 
-pub static STD: &[Pkg] = &[io::PACKAGE, strings::PACKAGE, testing::PACKAGE];
+pub static STD: &[Pkg] = &[
+    io::PACKAGE,
+    math::PACKAGE,
+    strings::PACKAGE,
+    testing::PACKAGE,
+];
 
 #[cfg(test)]
 mod tests {
@@ -47,6 +53,7 @@ mod tests {
     #[test]
     fn resolves_root_packages() {
         assert_eq!(resolve_pkg("io").unwrap().name, "io");
+        assert_eq!(resolve_pkg("math").unwrap().name, "math");
         assert_eq!(resolve_pkg("strings").unwrap().name, "strings");
         assert_eq!(resolve_pkg("testing").unwrap().name, "testing");
     }
