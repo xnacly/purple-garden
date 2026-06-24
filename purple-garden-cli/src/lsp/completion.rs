@@ -25,6 +25,21 @@ pub(super) struct RecordCompletion {
     fields: Vec<RecordFieldCompletion>,
 }
 
+struct CompletionContext<'a> {
+    completions: &'a [CompletionEntry],
+    record_completions: &'a HashMap<String, RecordCompletion>,
+    package_docs: &'a HashMap<String, PackageDoc>,
+    imported_packages: &'a [String],
+    source: &'a str,
+    offset: usize,
+}
+
+enum CompletionProvider {
+    ImportString,
+    RecordField,
+    PackageMember,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RecordFieldCompletion {
     name: String,
@@ -84,27 +99,54 @@ pub(super) fn items_at(
     source: &str,
     offset: usize,
 ) -> Vec<CompletionItem> {
-    if let Some(items) = import_string_items(source, offset) {
-        return items;
+    CompletionContext {
+        completions,
+        record_completions,
+        package_docs,
+        imported_packages,
+        source,
+        offset,
     }
-    if let Some(items) = record_field_items(record_completions, source, offset) {
-        return items;
-    }
-    if let Some(items) = package_member_items(package_docs, imported_packages, source, offset) {
-        return items;
-    }
-
-    let prefix = completion_prefix(source, offset);
-    let mut items = completions
-        .iter()
-        .filter(|entry| prefix.is_empty() || entry.label.starts_with(&prefix))
-        .map(|entry| (completion_sort_key(entry), completion_item(entry)))
-        .collect::<Vec<_>>();
-    items.sort_by(|(lhs_key, _), (rhs_key, _)| lhs_key.cmp(rhs_key));
-    items.dedup_by(|(_, lhs), (_, rhs)| lhs.label == rhs.label);
-    items.into_iter().map(|(_, item)| item).collect()
+    .items()
 }
 
+impl CompletionContext<'_> {
+    const CONTEXT_PROVIDERS: [CompletionProvider; 3] = [
+        CompletionProvider::ImportString,
+        CompletionProvider::RecordField,
+        CompletionProvider::PackageMember,
+    ];
+
+    // Order matters: narrow syntactic contexts should suppress the broad global pool.
+    fn items(&self) -> Vec<CompletionItem> {
+        for provider in Self::CONTEXT_PROVIDERS {
+            if let Some(items) = provider.items(self) {
+                return items;
+            }
+        }
+
+        default_completion_items(self.completions, self.source, self.offset)
+    }
+}
+
+impl CompletionProvider {
+    fn items(self, context: &CompletionContext<'_>) -> Option<Vec<CompletionItem>> {
+        match self {
+            Self::ImportString => import_string_items(context.source, context.offset),
+            Self::RecordField => {
+                record_field_items(context.record_completions, context.source, context.offset)
+            }
+            Self::PackageMember => package_member_items(
+                context.package_docs,
+                context.imported_packages,
+                context.source,
+                context.offset,
+            ),
+        }
+    }
+}
+
+// import "..." completes package paths, not general identifiers.
 fn import_string_items(source: &str, offset: usize) -> Option<Vec<CompletionItem>> {
     let line = line_prefix(source, offset);
     let quote = line.rfind('"')?;
@@ -114,15 +156,10 @@ fn import_string_items(source: &str, offset: usize) -> Option<Vec<CompletionItem
     }
 
     let prefix = &line[quote + 1..];
-    Some(
-        package_entries()
-            .iter()
-            .filter(|entry| entry.label.starts_with(prefix))
-            .map(completion_item)
-            .collect(),
-    )
+    Some(package_entries_by_prefix(prefix))
 }
 
+// foo. completes fields when foo has a known record type.
 fn record_field_items(
     record_completions: &HashMap<String, RecordCompletion>,
     source: &str,
@@ -130,7 +167,7 @@ fn record_field_items(
 ) -> Option<Vec<CompletionItem>> {
     let (target_path, prefix) = member_access_at(source, offset)?;
     let record = record_for_path(record_completions, target_path)?;
-    let mut items = record
+    let items = record
         .fields
         .iter()
         .filter(|field| prefix.is_empty() || field.name.starts_with(prefix))
@@ -142,10 +179,8 @@ fn record_field_items(
                 documentation: None,
                 scope: CompletionScope::Local,
             })
-        })
-        .collect::<Vec<_>>();
-    items.sort_by(|lhs, rhs| lhs.label.cmp(&rhs.label));
-    Some(items)
+        });
+    Some(sorted_completion_items(items))
 }
 
 fn record_for_path<'a>(
@@ -161,6 +196,7 @@ fn record_for_path<'a>(
     Some(record)
 }
 
+// pkg. completes members only for packages imported by the current document.
 fn package_member_items(
     package_docs: &HashMap<String, PackageDoc>,
     imported_packages: &[String],
@@ -173,7 +209,7 @@ fn package_member_items(
     }
 
     if let Some(doc) = package_docs.get(pkg_name) {
-        let mut items = doc
+        let items = doc
             .completions
             .iter()
             .filter(|(name, _)| prefix.is_empty() || name.starts_with(prefix))
@@ -185,14 +221,12 @@ fn package_member_items(
                     documentation: completion.documentation.clone(),
                     scope: CompletionScope::Local,
                 })
-            })
-            .collect::<Vec<_>>();
-        items.sort_by(|lhs, rhs| lhs.label.cmp(&rhs.label));
-        return Some(items);
+            });
+        return Some(sorted_completion_items(items));
     }
 
     let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
-    let mut items = pkg
+    let items = pkg
         .overload_groups()
         .into_iter()
         .filter(|(name, _)| prefix.is_empty() || name.starts_with(prefix))
@@ -204,10 +238,40 @@ fn package_member_items(
                 documentation: function_doc(&format!("{pkg_name}.{name}"), &variants),
                 scope: CompletionScope::Local,
             })
-        })
+        });
+    Some(sorted_completion_items(items))
+}
+
+// The default pool is intentionally broad. Context-specific providers above are responsible
+// for replacing it when a position has a narrower meaning.
+fn default_completion_items(
+    completions: &[CompletionEntry],
+    source: &str,
+    offset: usize,
+) -> Vec<CompletionItem> {
+    let prefix = completion_prefix(source, offset);
+    let mut items = completions
+        .iter()
+        .filter(|entry| prefix.is_empty() || entry.label.starts_with(&prefix))
+        .map(|entry| (completion_sort_key(entry), completion_item(entry)))
         .collect::<Vec<_>>();
+    items.sort_by(|(lhs_key, _), (rhs_key, _)| lhs_key.cmp(rhs_key));
+    items.dedup_by(|(_, lhs), (_, rhs)| lhs.label == rhs.label);
+    items.into_iter().map(|(_, item)| item).collect()
+}
+
+fn package_entries_by_prefix(prefix: &str) -> Vec<CompletionItem> {
+    package_entries()
+        .iter()
+        .filter(|entry| entry.label.starts_with(prefix))
+        .map(completion_item)
+        .collect()
+}
+
+fn sorted_completion_items(items: impl Iterator<Item = CompletionItem>) -> Vec<CompletionItem> {
+    let mut items = items.collect::<Vec<_>>();
     items.sort_by(|lhs, rhs| lhs.label.cmp(&rhs.label));
-    Some(items)
+    items
 }
 
 fn member_access_at(source: &str, offset: usize) -> Option<(&str, &str)> {
@@ -413,13 +477,12 @@ fn completion_item(entry: &CompletionEntry) -> CompletionItem {
         label: entry.label.clone(),
         kind: Some(entry.kind),
         detail: entry.detail.clone(),
-        documentation: entry
-            .documentation
-            .as_ref()
-            .map(|doc| Documentation::MarkupContent(MarkupContent {
+        documentation: entry.documentation.as_ref().map(|doc| {
+            Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
                 value: doc.clone(),
-            })),
+            })
+        }),
         sort_text: Some(completion_sort_key(entry)),
         ..Default::default()
     }
