@@ -7,6 +7,7 @@ pub use purple_garden_shared::BuiltinFn;
 
 pub mod anomaly;
 pub mod gc;
+pub mod jit_helpers;
 /// purple garden bytecode virtual machine operations
 pub mod op;
 pub mod value;
@@ -16,8 +17,9 @@ pub const REGISTER_COUNT: usize = 64;
 
 pub use crate::anomaly::Anomaly;
 pub use crate::gc::{AllocType, Gc, Metadata};
+pub use crate::jit_helpers::{jit_alloc, jit_trap_div_zero};
 pub use crate::value::{FromVm, IntoVm, PgType, Value};
-pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, jit_trap_div_zero, syscall_unimplemented};
+pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, syscall_unimplemented};
 
 #[derive(Debug)]
 pub struct Pkg {

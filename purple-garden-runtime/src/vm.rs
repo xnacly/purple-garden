@@ -1,9 +1,14 @@
-use crate::{Anomaly, BuiltinFn, REGISTER_COUNT, Value, gc::Gc, op::Op};
-use std::ffi::c_void;
+use crate::{
+    Anomaly, BuiltinFn, REGISTER_COUNT, Value,
+    gc::{AllocType, Gc},
+    op::Op,
+};
+use std::{alloc::Layout, ffi::c_void};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VmConfig {
     pub backtrace: bool,
+    pub no_gc: bool,
 }
 
 /// Return address of the synthetic root call frame pushed in [`Vm::new`].
@@ -12,6 +17,8 @@ pub struct VmConfig {
 /// run loop exits. `MAX - 1` (not `MAX`) keeps that `+ 1` from overflowing in
 /// debug builds.
 const ROOT_RETURN_ADDR: usize = usize::MAX - 1;
+
+type CollectFn = fn(&mut Vm);
 
 #[derive(Default, Debug)]
 pub struct CallFrame {
@@ -50,14 +57,6 @@ pub unsafe extern "C" fn syscall_unimplemented(vm: *mut c_void) {
     vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
 }
 
-/// Divide-by-zero trap, called from JIT code (enum layout isn't a stable ABI,
-/// so the JIT can't set `pending_trap` itself). `vm.pc` was published before the
-/// `Sys` entering the native function, so it points at the call site.
-pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) {
-    let vm = unsafe { &mut *vm.cast::<Vm>() };
-    vm.trap(Anomaly::DivisionByZero { pc: vm.pc });
-}
-
 #[repr(C)]
 #[derive(Debug)]
 pub struct Vm {
@@ -83,6 +82,8 @@ pub struct Vm {
     pub pending_trap: Option<Anomaly>,
 
     config: VmConfig,
+    /// Called when allocation wants to run a collection pass.
+    collect_fn: CollectFn,
 }
 
 /// trap in the vm; return Err(<anomaly>) if expr == true
@@ -107,6 +108,12 @@ impl Vm {
             #[cfg(debug_assertions)]
             spilled_depth: 0,
         });
+        let collect = if config.no_gc {
+            Self::collect_noop
+        } else {
+            Self::collect
+        };
+
         Self {
             r: [const { Value(0) }; REGISTER_COUNT],
             frames,
@@ -119,11 +126,53 @@ impl Vm {
             spilled: Vec::with_capacity(4096),
             pending_trap: None,
             config,
+            collect_fn: collect,
         }
     }
 
+    fn collect(&mut self) {
+        self.gc.collect();
+    }
+
+    fn collect_noop(&mut self) {}
+
+    pub fn try_alloc(
+        &mut self,
+        alloc_type: AllocType,
+        layout: Layout,
+    ) -> Option<std::ptr::NonNull<u8>> {
+        if let Some(ptr) = self.gc.try_alloc(alloc_type, layout) {
+            return Some(ptr);
+        }
+
+        (self.collect_fn)(self);
+
+        if let Some(ptr) = self.gc.try_alloc(alloc_type, layout) {
+            return Some(ptr);
+        }
+
+        self.gc.grow(layout).ok()?;
+        self.gc.try_alloc(alloc_type, layout)
+    }
+
+    pub fn alloc(&mut self, alloc_type: AllocType, layout: Layout) -> std::ptr::NonNull<u8> {
+        self.try_alloc(alloc_type, layout)
+            .expect("GC allocation failed")
+    }
+
     pub fn new_string(&mut self, s: String) -> Value {
-        self.gc.alloc_string(s.as_bytes())
+        let bytes = s.as_bytes();
+        let len_size = std::mem::size_of::<usize>();
+        let layout = Layout::from_size_align(len_size + bytes.len(), std::mem::align_of::<usize>())
+            .expect("string allocation layout");
+        let payload = self.alloc(AllocType::String, layout).as_ptr();
+
+        unsafe {
+            (payload as *mut usize).write(bytes.len());
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), payload.add(len_size), bytes.len());
+        }
+
+        Value::from_ptr(payload)
     }
 
     pub fn new_const_string(&mut self, s: String) -> Value {

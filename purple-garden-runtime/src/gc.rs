@@ -1,8 +1,6 @@
-use std::{alloc::Layout, ptr, ptr::NonNull};
+use std::{alloc::Layout, ptr::NonNull};
 
 use purple_garden_shared::mmap::{self, MmapFlags, MmapProt};
-
-use crate::Value;
 
 unsafe extern "C" {
     fn getpagesize() -> i32;
@@ -16,7 +14,7 @@ const MARKED_FLAG: u32 = 1 << 3;
 /// Bits 8..31: payload allocation size in bytes.
 const SIZE_SHIFT: u32 = 8;
 /// The metadata word reserves 24 bits for payload allocation size.
-const MAX_ALLOC_SIZE: usize = 0x00ff_ffff;
+pub const MAX_ALLOC_SIZE: usize = 0x00ff_ffff;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -28,6 +26,16 @@ pub enum AllocType {
 }
 
 impl AllocType {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        Some(match value {
+            0 => Self::Record,
+            1 => Self::Array,
+            2 => Self::Option,
+            3 => Self::String,
+            _ => return None,
+        })
+    }
+
     const fn bits(self) -> u32 {
         self as u32
     }
@@ -66,7 +74,7 @@ struct Page {
 }
 
 impl Page {
-    fn new(cap: usize) -> Self {
+    fn new(cap: usize) -> Result<Self, String> {
         let ptr = mmap::mmap(
             None,
             cap,
@@ -74,10 +82,9 @@ impl Page {
             MmapFlags::PRIVATE | MmapFlags::ANONYMOUS,
             -1,
             0,
-        )
-        .expect("anonymous GC page mmap");
+        )?;
 
-        Self { ptr, cap, len: 0 }
+        Ok(Self { ptr, cap, len: 0 })
     }
 
     fn alloc(&mut self, metadata: Metadata, layout: Layout) -> Option<NonNull<u8>> {
@@ -129,12 +136,14 @@ impl Gc {
         Self::default()
     }
 
-    pub fn alloc(&mut self, alloc_type: AllocType, layout: Layout) -> NonNull<u8> {
+    pub fn collect(&mut self) {
+        // Tracing/sweeping will be wired here once the VM passes roots through.
+    }
+
+    pub fn try_alloc(&mut self, alloc_type: AllocType, layout: Layout) -> Option<NonNull<u8>> {
         assert!(layout.size() <= MAX_ALLOC_SIZE);
 
         let metadata = Metadata::new(alloc_type, false, layout.size() as u32);
-        let required = METADATA_SIZE + layout.align() + layout.size();
-        let page_size = align_up(required.max(self.page_size), self.page_size);
 
         if let Some(page) = self.pages.last_mut()
             && let Some(payload) = page.alloc(metadata, layout)
@@ -150,41 +159,17 @@ impl Gc {
                 page.cap,
             );
 
-            return payload;
+            return Some(payload);
         }
 
-        self.pages.push(Page::new(page_size));
-        let page = self.pages.last_mut().expect("page was just inserted");
-        let payload = page
-            .alloc(metadata, layout)
-            .expect("new page must fit allocation");
-
-        #[cfg(feature = "trace_gc")]
-        purple_garden_shared::trace!(
-            "[gc::alloc] type={:?} size={} align={} payload={:#x} page_used={}/{}",
-            alloc_type,
-            layout.size(),
-            layout.align(),
-            payload.as_ptr() as usize,
-            page.len,
-            page.cap,
-        );
-
-        payload
+        None
     }
 
-    pub fn alloc_string(&mut self, bytes: &[u8]) -> Value {
-        let len_size = std::mem::size_of::<usize>();
-        let layout = Layout::from_size_align(len_size + bytes.len(), std::mem::align_of::<usize>())
-            .expect("string allocation layout");
-        let payload = self.alloc(AllocType::String, layout).as_ptr();
-
-        unsafe {
-            (payload as *mut usize).write(bytes.len());
-            ptr::copy_nonoverlapping(bytes.as_ptr(), payload.add(len_size), bytes.len());
-        }
-
-        Value::from_ptr(payload)
+    pub fn grow(&mut self, layout: Layout) -> Result<(), String> {
+        let required = METADATA_SIZE + layout.align() + layout.size();
+        let page_size = align_up(required.max(self.page_size), self.page_size);
+        self.pages.push(Page::new(page_size)?);
+        Ok(())
     }
 }
 

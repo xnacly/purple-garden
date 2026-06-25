@@ -208,6 +208,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     };
     let (vm, syscalls, debug, entry_native_idx) = cc.finalize(VmConfig {
         backtrace: conf.backtrace,
+        no_gc: conf.no_gc,
     });
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let mut program =
