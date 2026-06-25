@@ -307,6 +307,9 @@ impl<'dis> Disassembler<'dis> {
                 Op::Store { base, offset, src } => {
                     format!("store r{base}, #{offset}, r{src}")
                 }
+                Op::Load { dst, base, offset } => {
+                    format!("load r{dst}, r{base}, #{offset}")
+                }
                 Op::Ret => "ret".into(),
                 Op::CastToBool { dst, src } => {
                     format!("cast_to_bool r{dst}, r{src}")

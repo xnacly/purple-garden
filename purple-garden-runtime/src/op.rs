@@ -267,6 +267,11 @@ pub enum Op {
         offset: u32,
         src: u8,
     },
+    Load {
+        dst: u8,
+        base: u8,
+        offset: u32,
+    },
     Ret,
     Nop,
 }
