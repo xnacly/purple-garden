@@ -5,8 +5,6 @@ use purple_garden_ir::Id;
 use purple_garden_runtime::{BuiltinFn, op::Op};
 use purple_garden_std as pstd;
 
-const MAX_STRING_DISPLAY_CHARS: usize = 65;
-
 // ANSI SGR codes, applied only when stdout is a tty and NO_COLOR is unset.
 const ADDR: &str = "90"; // gray   - pc / addresses
 const MNEM: &str = "36"; // cyan   - data mnemonics
@@ -25,19 +23,6 @@ fn paint(on: bool, code: &str, s: &str) -> String {
     } else {
         s.to_string()
     }
-}
-
-fn truncated_string_display(s: &str) -> std::borrow::Cow<'_, str> {
-    if s.chars().count() <= MAX_STRING_DISPLAY_CHARS {
-        return std::borrow::Cow::Borrowed(s);
-    }
-
-    let keep = MAX_STRING_DISPLAY_CHARS - 3;
-    let end = s.char_indices().nth(keep).map_or(s.len(), |(idx, _)| idx);
-    let mut out = String::with_capacity(end + 3);
-    out.push_str(&s[..end]);
-    out.push_str("...");
-    std::borrow::Cow::Owned(out)
 }
 
 /// classifies a single operand token (`r3`, `#5`, `000d`, ...) and wraps it.
@@ -210,7 +195,6 @@ impl<'dis> Disassembler<'dis> {
             .collect();
 
         let globals = self.cc.globals.to_vec();
-        let (str_data, str_spans) = self.cc.strings.into_arena();
         let std_fns = self.cc.std_fns.to_vec();
         let std_mapping = Self::build_fn_map();
         let target_label = |target: u16, cur_func: &crate::CcFunc| -> String {
@@ -239,22 +223,6 @@ impl<'dis> Disassembler<'dis> {
                     "  {}:    {}",
                     paint(color, ADDR, &format!("{i:04}")),
                     paint(color, IMM, &g.to_string())
-                );
-            }
-        }
-
-        if !str_spans.is_empty() {
-            println!("{}", paint(color, SECTION, "strs:"));
-            for (i, &(off, len)) in str_spans.iter().enumerate() {
-                let s = &str_data[off as usize..off as usize + len as usize];
-                println!(
-                    "  {}:    {}",
-                    paint(color, ADDR, &format!("{i:04}")),
-                    paint(
-                        color,
-                        LABEL,
-                        &format!("\"{}\"", truncated_string_display(s))
-                    )
                 );
             }
         }

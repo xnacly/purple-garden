@@ -6,6 +6,7 @@ pub use purple_garden_ir::{Fn, ptype::Type};
 pub use purple_garden_shared::BuiltinFn;
 
 pub mod anomaly;
+pub mod gc;
 /// purple garden bytecode virtual machine operations
 pub mod op;
 pub mod value;
@@ -14,6 +15,7 @@ pub mod vm;
 pub const REGISTER_COUNT: usize = 64;
 
 pub use crate::anomaly::Anomaly;
+pub use crate::gc::{AllocType, Gc, Metadata};
 pub use crate::value::{FromVm, IntoVm, PgType, Value};
 pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, jit_trap_div_zero, syscall_unimplemented};
 

@@ -50,8 +50,8 @@ fn pg_pkg_generates_package_metadata() {
 #[test]
 fn pg_pkg_wrapper_decodes_args_and_encodes_return() {
     let mut vm = Vm::new(VmConfig::default());
-    let idx = vm.new_string("hello".to_owned());
-    *vm.r_mut(0) = Value::from(idx);
+    let s = vm.new_string("hello".to_owned());
+    *vm.r_mut(0) = s;
 
     unsafe { (strings::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
 
@@ -61,13 +61,13 @@ fn pg_pkg_wrapper_decodes_args_and_encodes_return() {
 #[test]
 fn pg_pkg_wrapper_allocates_return_strings() {
     let mut vm = Vm::new(VmConfig::default());
-    let idx = vm.new_string("ha".to_owned());
-    *vm.r_mut(0) = Value::from(idx);
+    let s = vm.new_string("ha".to_owned());
+    *vm.r_mut(0) = s;
     *vm.r_mut(1) = Value::from(3_i64);
 
     unsafe { (strings::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
-    assert_eq!(vm.r(0).as_str(vm.strings(), vm.string_data()), "hahaha");
+    assert_eq!(vm.r(0).as_str(), "hahaha");
 }
 
 #[test]

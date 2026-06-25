@@ -16,8 +16,6 @@ pub use purple_garden_macros::{FromVm, IntoVm, PgType, pg_fn, pg_pkg};
 pub use purple_garden_runtime::{Fn, FromVm, IntoVm, PgType, Pkg, Type, Value, Vm, VmConfig};
 pub use purple_garden_std::{STD, resolve_pkg};
 
-pub mod gc;
-
 type JitFn = purple_garden_jit::JitFn;
 
 #[derive(Debug)]

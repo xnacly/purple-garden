@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 pub mod dis;
@@ -59,7 +58,6 @@ impl From<&CcFunc<'_>> for CcCallTarget {
 pub struct Cc<'cc> {
     pub buf: Vec<Op>,
     pub globals: Interner<Const<'cc>>,
-    pub strings: Interner<Cow<'cc, str>>,
     pub std_fns: Interner<BuiltinFn>,
     pub functions: HashMap<Id, CcFunc<'cc>>,
     /// Native code retained only for diagnostic dumps.
@@ -230,7 +228,6 @@ impl<'cc> Cc<'cc> {
             buf: Vec::with_capacity(64),
             pc_to_span: Vec::with_capacity(64),
             globals: Interner::new(),
-            strings: Interner::new(),
             std_fns: Interner::new(),
             functions: HashMap::new(),
             native_code: None,
@@ -249,12 +246,7 @@ impl<'cc> Cc<'cc> {
     }
 
     fn intern(&mut self, constant: &'cc Const<'cc>) -> u32 {
-        if let Const::Str(str) = constant {
-            let str_pool_idx = self.strings.intern(Cow::Borrowed(str.as_ref()));
-            self.globals.intern(Const::Int(str_pool_idx as i64))
-        } else {
-            self.globals.intern(constant.clone())
-        }
+        self.globals.intern(constant.clone())
     }
 
     fn emit(&mut self, op: Op) -> usize {
@@ -1023,7 +1015,6 @@ impl<'cc> Cc<'cc> {
         let Cc {
             buf,
             globals,
-            strings,
             std_fns,
             functions,
             entry_native_idx,
@@ -1039,11 +1030,11 @@ impl<'cc> Cc<'cc> {
             .or_else(|| functions.get(&ir::Id(0)).and_then(CcFunc::pc))
             .unwrap_or_default();
 
-        let (string_data, strings) = strings.into_arena();
         vm.bytecode = buf;
-        vm.globals = globals.into_vec_fn(Value::from);
-        vm.strings = strings;
-        vm.string_data = string_data;
+        vm.globals = globals.into_vec_map(|constant| match constant {
+            Const::Str(str) => vm.new_const_string(str.into_owned()),
+            constant => Value::from(constant),
+        });
         (
             vm,
             std_fns.into_vec(),

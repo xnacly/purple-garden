@@ -1,4 +1,4 @@
-use crate::{Anomaly, BuiltinFn, REGISTER_COUNT, Value, op::Op};
+use crate::{Anomaly, BuiltinFn, REGISTER_COUNT, Value, gc::Gc, op::Op};
 use std::ffi::c_void;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -70,13 +70,8 @@ pub struct Vm {
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
-    /// `(offset, len)` spans into [`Vm::string_data`]. Indexed by the u64 stored in a [`Value`].
-    /// Compile-time literals are laid out at compile finalization; runtime strings
-    /// are appended via [`Vm::new_string`]. Offsets remain valid across appends because
-    /// they are byte indices, not pointers.
-    pub strings: Vec<(u32, u32)>,
-    /// Flat backing buffer for all string data.
-    pub string_data: String,
+    pub gc: Gc,
+    pub const_strings: Vec<Box<[u8]>>,
 
     /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
     /// function the virtual machine currently executes in, this behaviour only occurs if
@@ -118,8 +113,8 @@ impl Vm {
             pc: 0,
             bytecode: Vec::new(),
             globals: Vec::new(),
-            strings: Vec::new(),
-            string_data: String::new(),
+            gc: Gc::new(),
+            const_strings: Vec::new(),
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(4096),
             pending_trap: None,
@@ -127,23 +122,20 @@ impl Vm {
         }
     }
 
-    pub fn new_string(&mut self, s: String) -> usize {
-        let idx = self.strings.len();
-        let off = self.string_data.len() as u32;
-        let len = s.len() as u32;
-        self.string_data.push_str(&s);
-        self.strings.push((off, len));
-        idx
+    pub fn new_string(&mut self, s: String) -> Value {
+        self.gc.alloc_string(s.as_bytes())
     }
 
-    #[must_use]
-    pub fn strings(&self) -> &[(u32, u32)] {
-        &self.strings
-    }
-
-    #[must_use]
-    pub fn string_data(&self) -> &str {
-        &self.string_data
+    pub fn new_const_string(&mut self, s: String) -> Value {
+        let len_size = std::mem::size_of::<usize>();
+        let mut payload = vec![0u8; len_size + s.len()].into_boxed_slice();
+        unsafe {
+            (payload.as_mut_ptr() as *mut usize).write(s.len());
+            std::ptr::copy_nonoverlapping(s.as_ptr(), payload.as_mut_ptr().add(len_size), s.len());
+        }
+        let value = Value::from_ptr(payload.as_mut_ptr());
+        self.const_strings.push(payload);
+        value
     }
 
     pub fn run(&mut self, syscalls: &[BuiltinFn]) -> Result<(), Anomaly> {
