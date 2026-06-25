@@ -1,3 +1,5 @@
+use crate::AllocType;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     IAdd {
@@ -254,7 +256,12 @@ pub enum Op {
         dst: u8,
         src: u8,
     },
-
+    Alloc {
+        dst: u8,
+        kind: AllocType,
+        size: u32,
+        align: u8,
+    },
     Ret,
     Nop,
 }

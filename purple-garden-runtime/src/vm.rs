@@ -141,18 +141,27 @@ impl Vm {
         alloc_type: AllocType,
         layout: Layout,
     ) -> Option<std::ptr::NonNull<u8>> {
-        if let Some(ptr) = self.gc.try_alloc(alloc_type, layout) {
+        if let Some(ptr) = self.gc.alloc_fast(alloc_type, layout) {
             return Some(ptr);
         }
 
+        self.alloc_slow(alloc_type, layout)
+    }
+
+    #[cold]
+    fn alloc_slow(
+        &mut self,
+        alloc_type: AllocType,
+        layout: Layout,
+    ) -> Option<std::ptr::NonNull<u8>> {
         (self.collect_fn)(self);
 
-        if let Some(ptr) = self.gc.try_alloc(alloc_type, layout) {
+        if let Some(ptr) = self.gc.alloc_fast(alloc_type, layout) {
             return Some(ptr);
         }
 
         self.gc.grow(layout).ok()?;
-        self.gc.try_alloc(alloc_type, layout)
+        self.gc.alloc_fast(alloc_type, layout)
     }
 
     pub fn alloc(&mut self, alloc_type: AllocType, layout: Layout) -> std::ptr::NonNull<u8> {
@@ -462,6 +471,20 @@ impl Vm {
                 },
                 Op::CastToBool { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_bool();
+                },
+                Op::Alloc {
+                    dst,
+                    kind,
+                    size,
+                    align,
+                } => unsafe {
+                    r_mut!(dst) = Value::from_ptr(
+                        self.alloc(
+                            kind,
+                            Layout::from_size_align_unchecked(size as usize, align as usize),
+                        )
+                        .as_ptr(),
+                    );
                 },
                 Op::Nop => {}
             }

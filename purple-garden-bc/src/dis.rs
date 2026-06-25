@@ -298,6 +298,12 @@ impl<'dis> Disassembler<'dis> {
                 Op::Pop { dst } => format!("pop r{dst}"),
                 Op::Pop2 { a, b } => format!("pop2 r{a}, r{b}"),
                 Op::Pop3 { a, b, c } => format!("pop3 r{a}, r{b}, r{c}"),
+                Op::Alloc {
+                    dst,
+                    kind,
+                    size,
+                    align,
+                } => format!("alloc r{dst}, {kind:?}, #{size}, #{align}"),
                 Op::Ret => "ret".into(),
                 Op::CastToBool { dst, src } => {
                     format!("cast_to_bool r{dst}, r{src}")

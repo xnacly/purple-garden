@@ -6,7 +6,7 @@ mod regalloc;
 
 use crate::{intern::Interner, regalloc::Ralloc};
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
-use purple_garden_runtime::{BuiltinFn, DebugInfo, Value, Vm, VmConfig, op::Op};
+use purple_garden_runtime::{AllocType, BuiltinFn, DebugInfo, Value, Vm, VmConfig, op::Op};
 use purple_garden_shared::config::Config;
 
 #[derive(Debug, Clone)]
@@ -755,6 +755,23 @@ impl<'cc> Cc<'cc> {
 
     fn instr(&mut self, live_set: &[(u32, u32)], pos: u32, i: &'cc ir::Instr<'cc>) {
         match i {
+            ir::Instr::Alloc {
+                dst: TypeId { id, ty },
+                layout,
+                ..
+            } => {
+                let dst = self.ensure_register(*id);
+                let Some(kind) = AllocType::from_ty(&ty) else {
+                    unreachable!("alloc attempts to alloc non heap allocated value?");
+                };
+                let (size, align) = (layout.size() as u32, layout.align() as u8);
+                self.emit(Op::Alloc {
+                    dst,
+                    kind,
+                    size,
+                    align,
+                });
+            }
             ir::Instr::Cast {
                 dst: TypeId { id, ty: dst_ty },
                 from:

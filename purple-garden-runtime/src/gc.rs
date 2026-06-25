@@ -26,6 +26,16 @@ pub enum AllocType {
 }
 
 impl AllocType {
+    pub fn from_ty(value: &purple_garden_ir::ptype::Type<'_>) -> Option<Self> {
+        Some(match value {
+            purple_garden_ir::ptype::Type::Str => Self::String,
+            purple_garden_ir::ptype::Type::Option(_) => Self::Option,
+            purple_garden_ir::ptype::Type::Array(_) => Self::Array,
+            purple_garden_ir::ptype::Type::Record(_) => Self::Record,
+            _ => return None,
+        })
+    }
+
     pub fn from_u8(value: u8) -> Option<Self> {
         Some(match value {
             0 => Self::Record,
@@ -86,25 +96,6 @@ impl Page {
 
         Ok(Self { ptr, cap, len: 0 })
     }
-
-    fn alloc(&mut self, metadata: Metadata, layout: Layout) -> Option<NonNull<u8>> {
-        let base = self.ptr.as_ptr() as usize;
-        let metadata_addr = align_up(base.checked_add(self.len)?, METADATA_ALIGN);
-        let payload = metadata_addr
-            .checked_add(METADATA_SIZE)
-            .map(|addr| align_up(addr, layout.align()))?;
-        let end = payload.checked_add(layout.size())?.checked_sub(base)?;
-        if end > self.cap {
-            return None;
-        }
-
-        unsafe {
-            (metadata_addr as *mut u32).write(metadata.bits());
-        }
-        self.len = end;
-
-        Some(unsafe { NonNull::new_unchecked(payload as *mut u8) })
-    }
 }
 
 impl Drop for Page {
@@ -124,7 +115,7 @@ impl Default for Gc {
         let page_size = unsafe { getpagesize() };
         assert!(page_size > 0, "getpagesize returned {page_size}");
         Self {
-            pages: Vec::new(),
+            pages: vec![Page::new(page_size as usize).expect("anonymous GC page mmap")],
             page_size: page_size as usize,
         }
     }
@@ -140,29 +131,39 @@ impl Gc {
         // Tracing/sweeping will be wired here once the VM passes roots through.
     }
 
-    pub fn try_alloc(&mut self, alloc_type: AllocType, layout: Layout) -> Option<NonNull<u8>> {
-        assert!(layout.size() <= MAX_ALLOC_SIZE);
+    pub fn alloc_fast(&mut self, alloc_type: AllocType, layout: Layout) -> Option<NonNull<u8>> {
+        debug_assert!(layout.size() <= MAX_ALLOC_SIZE);
 
         let metadata = Metadata::new(alloc_type, false, layout.size() as u32);
+        let page = unsafe { self.pages.last_mut().unwrap_unchecked() };
+        let base = page.ptr.as_ptr() as usize;
+        let metadata_addr = align_up(base + page.len, METADATA_ALIGN);
+        let payload = align_up(metadata_addr + METADATA_SIZE, layout.align());
+        let end = payload + layout.size() - base;
 
-        if let Some(page) = self.pages.last_mut()
-            && let Some(payload) = page.alloc(metadata, layout)
-        {
-            #[cfg(feature = "trace_gc")]
-            purple_garden_shared::trace!(
-                "[gc::alloc] type={:?} size={} align={} payload={:#x} page_used={}/{}",
-                alloc_type,
-                layout.size(),
-                layout.align(),
-                payload.as_ptr() as usize,
-                page.len,
-                page.cap,
-            );
-
-            return Some(payload);
+        if end > page.cap {
+            return None;
         }
 
-        None
+        unsafe {
+            (metadata_addr as *mut u32).write(metadata.bits());
+        }
+        page.len = end;
+
+        let payload = unsafe { NonNull::new_unchecked(payload as *mut u8) };
+
+        #[cfg(feature = "trace_gc")]
+        purple_garden_shared::trace!(
+            "[gc::alloc] type={:?} size={} align={} payload={:#x} page_used={}/{}",
+            alloc_type,
+            layout.size(),
+            layout.align(),
+            payload.as_ptr() as usize,
+            page.len,
+            page.cap,
+        );
+
+        Some(payload)
     }
 
     pub fn grow(&mut self, layout: Layout) -> Result<(), String> {
