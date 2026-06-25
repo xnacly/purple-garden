@@ -7,7 +7,7 @@ use crate::{
     type_from_type_expr,
 };
 use purple_garden_ir::{
-    BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype,
+    ptype, BinOp, Block, Const, Func, Id, Instr, Terminator, TypeId, EMPTY_PARAMS,
 };
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
@@ -15,6 +15,43 @@ use purple_garden_std as pstd;
 #[derive(Default)]
 struct IdStore {
     values: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use purple_garden_ir::Instr;
+
+    use super::*;
+    use crate::{lex::Lexer, parser::Parser};
+
+    #[test]
+    fn nested_record_literal_stores_inline_fields() {
+        let ast = Parser::new(Lexer::new(
+            br#"{ name: "teo" age: 23 job: { name: "dev" since: 2024 } }"#,
+        ))
+        .parse()
+        .unwrap();
+        let funcs = Lower::new().ir_from(&ast).unwrap();
+        let instructions = &funcs[0].blocks[0].instructions;
+
+        let allocs = instructions
+            .iter()
+            .filter(|instr| matches!(instr, Instr::Alloc { .. }))
+            .count();
+        let stores = instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::Store { base, offset, .. } => Some((*base, *offset)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(allocs, 1);
+        assert_eq!(
+            stores,
+            vec![(Id(0), 0), (Id(0), 8), (Id(0), 16), (Id(0), 24)]
+        );
+    }
 }
 
 impl IdStore {
@@ -110,6 +147,49 @@ impl<'lower> Lower<'lower> {
 
     fn switch_to_block(&mut self, id: Id) {
         self.ctx.block = id;
+    }
+
+    fn lower_record_fields_into(
+        &mut self,
+        ast: &'lower Ast<'lower>,
+        record_ty: &ptype::Type<'lower>,
+        base: Id,
+        base_offset: u32,
+        fields: &[(Token<'lower>, NodeId)],
+    ) -> Result<(), Diagnostic> {
+        for (tok, value) in fields {
+            let lex::Type::Ident(name) = tok.t else {
+                unreachable!();
+            };
+            let offset = base_offset
+                + record_ty
+                    .field_offset(name)
+                    .expect("record field was typechecked") as u32;
+
+            if let Node::Record {
+                id, fields: nested, ..
+            } = ast.node(*value)
+            {
+                let Some(nested_ty) = self.types[*id].clone() else {
+                    unreachable!();
+                };
+                self.lower_record_fields_into(ast, &nested_ty, base, offset, nested)?;
+                continue;
+            }
+
+            let Some(src) = self.lower_node(ast, *value)? else {
+                unreachable!("field doesnt produce a value, compiler error");
+            };
+
+            self.emit(Instr::Store {
+                src,
+                base,
+                offset,
+                span: tok.start as u32,
+            })
+        }
+
+        Ok(())
     }
 
     fn lower_node(
@@ -615,31 +695,16 @@ impl<'lower> Lower<'lower> {
                 let layout = record_ty.layout();
                 let id = self.ctx.id_store.new_value();
                 self.emit(Instr::Alloc {
-                    dst: TypeId { id, ty: record_ty.clone() },
+                    dst: TypeId {
+                        id,
+                        ty: record_ty.clone(),
+                    },
                     layout,
                     span: src.start as u32,
                 });
 
                 let base = id;
-                for (tok, value) in fields {
-                    let lex::Type::Ident(name) = tok.t else {
-                        unreachable!();
-                    };
-                    let offset = record_ty
-                        .field_offset(name)
-                        .expect("record field was typechecked") as u32;
-
-                    let Some(src) = self.lower_node(ast, *value)? else {
-                        unreachable!("field doesnt produce a value, compiler error");
-                    };
-
-                    self.emit(Instr::Store {
-                        src,
-                        base,
-                        offset,
-                        span: tok.start as u32,
-                    })
-                }
+                self.lower_record_fields_into(ast, &record_ty, base, 0, fields)?;
 
                 Some(base)
             }
