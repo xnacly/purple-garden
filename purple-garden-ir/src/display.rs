@@ -50,6 +50,17 @@ impl Display for Id {
 impl Display for Instr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Instr::Alloc { dst, .. } => {
+                let layout = dst.ty.layout();
+                write!(
+                    f,
+                    "%v{} = Alloc {}(size={},align={})",
+                    dst.id,
+                    dst.ty,
+                    layout.size(),
+                    layout.align()
+                )?
+            }
             Instr::Bin {
                 op, dst, lhs, rhs, ..
             } => write!(f, "%v{} = {:?} %v{}, %v{}", dst, op, lhs.0, rhs.0)?,

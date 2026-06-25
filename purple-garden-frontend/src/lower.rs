@@ -608,6 +608,22 @@ impl<'lower> Lower<'lower> {
                 self.block_mut(join).params = join_params;
                 Some(last)
             }
+            Node::Record { id, src, fields } => {
+                let Some(ty) = &self.types[*id] else {
+                    unreachable!();
+                };
+                let layout = ty.layout();
+                let id = self.ctx.id_store.new_value();
+                self.emit(Instr::Alloc {
+                    dst: TypeId { id, ty: ty.clone() },
+                    layout,
+                    span: src.start as u32,
+                });
+                if !fields.is_empty() {
+                    todo!()
+                }
+                Some(id)
+            }
             _ => todo!("{:?}", node),
         })
     }

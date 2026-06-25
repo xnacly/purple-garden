@@ -23,6 +23,8 @@ pub mod constant;
 mod display;
 pub mod ptype;
 
+use std::alloc::Layout;
+
 pub use crate::constant::Const;
 use crate::ptype::Type;
 use purple_garden_shared::BuiltinFn;
@@ -153,6 +155,11 @@ pub enum Instr<'i> {
         from: TypeId<'i>,
         span: u32,
     },
+    Alloc {
+        dst: TypeId<'i>,
+        layout: Layout,
+        span: u32,
+    },
     Noop,
 }
 
@@ -163,6 +170,7 @@ impl Instr<'_> {
     pub fn span(&self) -> u32 {
         match self {
             Instr::Bin { span, .. }
+            | Instr::Alloc { span, .. }
             | Instr::BinImm { span, .. }
             | Instr::LoadConst { span, .. }
             | Instr::Call { span, .. }
@@ -319,7 +327,8 @@ impl Func<'_> {
     #[must_use]
     pub fn def_of(instr: &Instr<'_>) -> Option<Id> {
         match instr {
-            Instr::Bin { dst, .. }
+            Instr::Alloc { dst, .. }
+            | Instr::Bin { dst, .. }
             | Instr::BinImm { dst, .. }
             | Instr::LoadConst { dst, .. }
             | Instr::Call { dst, .. }
@@ -342,7 +351,7 @@ impl Func<'_> {
                 }
             }
             Instr::Cast { from, .. } => f(from.id),
-            Instr::LoadConst { .. } | Instr::Noop => {}
+            Instr::LoadConst { .. } | Instr::Noop | Instr::Alloc { .. } => {}
         }
     }
 
