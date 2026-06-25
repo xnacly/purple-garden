@@ -160,6 +160,18 @@ pub enum Instr<'i> {
         layout: Layout,
         span: u32,
     },
+    Store {
+        src: Id,
+        base: Id,
+        offset: u32,
+        span: u32,
+    },
+    // Load {
+    //     dst: TypeId<'i>,
+    //     base: Id,
+    //     offset: u32,
+    //     span: u32,
+    // },
     Noop,
 }
 
@@ -169,7 +181,8 @@ impl Instr<'_> {
     #[must_use]
     pub fn span(&self) -> u32 {
         match self {
-            Instr::Bin { span, .. }
+            Instr::Store { span, .. }
+            | Instr::Bin { span, .. }
             | Instr::Alloc { span, .. }
             | Instr::BinImm { span, .. }
             | Instr::LoadConst { span, .. }
@@ -334,7 +347,7 @@ impl Func<'_> {
             | Instr::Call { dst, .. }
             | Instr::Sys { dst, .. }
             | Instr::Cast { dst, .. } => Some(dst.id),
-            Instr::Noop => None,
+            Instr::Store { .. } | Instr::Noop => None,
         }
     }
 
@@ -351,6 +364,10 @@ impl Func<'_> {
                 }
             }
             Instr::Cast { from, .. } => f(from.id),
+            Instr::Store { src, base, .. } => {
+                f(*src);
+                f(*base);
+            }
             Instr::LoadConst { .. } | Instr::Noop | Instr::Alloc { .. } => {}
         }
     }

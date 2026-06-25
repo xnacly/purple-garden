@@ -50,6 +50,9 @@ impl Display for Id {
 impl Display for Instr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Instr::Store {
+                src, base, offset, ..
+            } => write!(f, "Store %v{}+{}, %v{}", base, offset, src)?,
             Instr::Alloc { dst, .. } => {
                 let layout = dst.ty.layout();
                 write!(

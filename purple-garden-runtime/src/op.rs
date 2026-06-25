@@ -262,6 +262,11 @@ pub enum Op {
         size: u32,
         align: u8,
     },
+    Store {
+        base: u8,
+        offset: u32,
+        src: u8,
+    },
     Ret,
     Nop,
 }

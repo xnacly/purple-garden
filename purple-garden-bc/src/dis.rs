@@ -304,6 +304,9 @@ impl<'dis> Disassembler<'dis> {
                     size,
                     align,
                 } => format!("alloc r{dst}, {kind:?}, #{size}, #{align}"),
+                Op::Store { base, offset, src } => {
+                    format!("store r{base}, #{offset}, r{src}")
+                }
                 Op::Ret => "ret".into(),
                 Op::CastToBool { dst, src } => {
                     format!("cast_to_bool r{dst}, r{src}")

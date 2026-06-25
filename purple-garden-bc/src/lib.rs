@@ -755,6 +755,17 @@ impl<'cc> Cc<'cc> {
 
     fn instr(&mut self, live_set: &[(u32, u32)], pos: u32, i: &'cc ir::Instr<'cc>) {
         match i {
+            ir::Instr::Store {
+                src, base, offset, ..
+            } => {
+                let src = self.ensure_register(*src);
+                let base = self.ensure_register(*base);
+                self.emit(Op::Store {
+                    base,
+                    offset: *offset,
+                    src,
+                });
+            }
             ir::Instr::Alloc {
                 dst: TypeId { id, ty },
                 layout,

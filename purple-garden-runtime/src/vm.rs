@@ -486,6 +486,9 @@ impl Vm {
                         .as_ptr(),
                     );
                 },
+                Op::Store { base, offset, src } => unsafe {
+                    (r!(base).as_ptr::<u8>().add(offset as usize) as *mut Value).write(*r!(src));
+                },
                 Op::Nop => {}
             }
 
@@ -757,6 +760,28 @@ mod ops {
         ]);
         assert_eq!(vm.r(0).as_int(), 99);
         assert_eq!(vm.r(5).as_int(), 99);
+    }
+
+    #[test]
+    fn alloc_store_writes_payload_offset() {
+        let vm = run(vec![
+            Op::Alloc {
+                dst: 0,
+                kind: AllocType::Record,
+                size: 16,
+                align: 8,
+            },
+            Op::LoadI { dst: 1, value: 42 },
+            Op::Store {
+                base: 0,
+                offset: 8,
+                src: 1,
+            },
+        ]);
+
+        let payload = vm.r(0).as_ptr::<u8>();
+        let stored = unsafe { *(payload.add(8) as *const Value) };
+        assert_eq!(stored.as_int(), 42);
     }
 
     #[test]

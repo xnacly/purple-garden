@@ -609,20 +609,39 @@ impl<'lower> Lower<'lower> {
                 Some(last)
             }
             Node::Record { id, src, fields } => {
-                let Some(ty) = &self.types[*id] else {
+                let Some(record_ty) = self.types[*id].clone() else {
                     unreachable!();
                 };
-                let layout = ty.layout();
+                let layout = record_ty.layout();
                 let id = self.ctx.id_store.new_value();
                 self.emit(Instr::Alloc {
-                    dst: TypeId { id, ty: ty.clone() },
+                    dst: TypeId { id, ty: record_ty.clone() },
                     layout,
                     span: src.start as u32,
                 });
-                if !fields.is_empty() {
-                    todo!()
+
+                let base = id;
+                for (tok, value) in fields {
+                    let lex::Type::Ident(name) = tok.t else {
+                        unreachable!();
+                    };
+                    let offset = record_ty
+                        .field_offset(name)
+                        .expect("record field was typechecked") as u32;
+
+                    let Some(src) = self.lower_node(ast, *value)? else {
+                        unreachable!("field doesnt produce a value, compiler error");
+                    };
+
+                    self.emit(Instr::Store {
+                        src,
+                        base,
+                        offset,
+                        span: tok.start as u32,
+                    })
                 }
-                Some(id)
+
+                Some(base)
             }
             _ => todo!("{:?}", node),
         })
