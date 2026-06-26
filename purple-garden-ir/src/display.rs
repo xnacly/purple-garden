@@ -37,7 +37,7 @@ impl Display for crate::Fn<'_> {
 
 impl Display for TypeId<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{:?}", self.id.0, self.ty)
+        write!(f, "{}:{}", self.id.0, self.ty)
     }
 }
 
