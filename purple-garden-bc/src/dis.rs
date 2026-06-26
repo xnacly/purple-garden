@@ -310,6 +310,9 @@ impl<'dis> Disassembler<'dis> {
                 Op::Load { dst, base, offset } => {
                     format!("load r{dst}, r{base}, #{offset}")
                 }
+                Op::AddrOf { dst, base, offset } => {
+                    format!("addrof r{dst}, r{base}, #{offset}")
+                }
                 Op::Ret => "ret".into(),
                 Op::CastToBool { dst, src } => {
                     format!("cast_to_bool r{dst}, r{src}")

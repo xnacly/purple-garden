@@ -56,6 +56,9 @@ impl Display for Instr<'_> {
             Instr::Load {
                 dst, base, offset, ..
             } => write!(f, "%v{dst} = Load %v{}+{}", base, offset)?,
+            Instr::AddrOf {
+                dst, base, offset, ..
+            } => write!(f, "%v{dst} = AddrOf %v{}+{}", base, offset)?,
             Instr::Alloc { dst, .. } => {
                 let layout = dst.ty.layout();
                 write!(

@@ -272,6 +272,11 @@ pub enum Op {
         base: u8,
         offset: u32,
     },
+    AddrOf {
+        dst: u8,
+        base: u8,
+        offset: u32,
+    },
     Ret,
     Nop,
 }

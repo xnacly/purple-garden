@@ -172,6 +172,12 @@ pub enum Instr<'i> {
         offset: u32,
         span: u32,
     },
+    AddrOf {
+        dst: TypeId<'i>,
+        base: Id,
+        offset: u32,
+        span: u32,
+    },
     Noop,
 }
 
@@ -183,6 +189,7 @@ impl Instr<'_> {
         match self {
             Instr::Store { span, .. }
             | Instr::Load { span, .. }
+            | Instr::AddrOf { span, .. }
             | Instr::Bin { span, .. }
             | Instr::Alloc { span, .. }
             | Instr::BinImm { span, .. }
@@ -343,6 +350,7 @@ impl Func<'_> {
         match instr {
             Instr::Alloc { dst, .. }
             | Instr::Load { dst, .. }
+            | Instr::AddrOf { dst, .. }
             | Instr::Bin { dst, .. }
             | Instr::BinImm { dst, .. }
             | Instr::LoadConst { dst, .. }
@@ -370,7 +378,7 @@ impl Func<'_> {
                 f(*src);
                 f(*base);
             }
-            Instr::Load { base, .. } => f(*base),
+            Instr::Load { base, .. } | Instr::AddrOf { base, .. } => f(*base),
             Instr::LoadConst { .. } | Instr::Noop | Instr::Alloc { .. } => {}
         }
     }

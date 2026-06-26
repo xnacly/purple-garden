@@ -767,6 +767,7 @@ impl<'cc> Cc<'cc> {
                 });
             }
             ir::Instr::Load { .. } => todo!("load lowering"),
+            ir::Instr::AddrOf { .. } => todo!("addrof lowering"),
             ir::Instr::Alloc {
                 dst: TypeId { id, ty },
                 layout,

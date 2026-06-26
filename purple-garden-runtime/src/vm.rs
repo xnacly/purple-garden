@@ -492,6 +492,9 @@ impl Vm {
                 Op::Load { dst, base, offset } => unsafe {
                     r_mut!(dst) = *(r!(base).as_ptr::<u8>().add(offset as usize) as *const Value);
                 },
+                Op::AddrOf { dst, base, offset } => unsafe {
+                    r_mut!(dst) = Value::from_ptr(r!(base).as_ptr::<u8>().add(offset as usize));
+                },
                 Op::Nop => {}
             }
 
@@ -810,6 +813,36 @@ mod ops {
         ]);
 
         assert_eq!(vm.r(2).as_int(), 42);
+    }
+
+    #[test]
+    fn addrof_points_at_payload_offset() {
+        let vm = run(vec![
+            Op::Alloc {
+                dst: 0,
+                kind: AllocType::Record,
+                size: 16,
+                align: 8,
+            },
+            Op::LoadI { dst: 1, value: 42 },
+            Op::Store {
+                base: 0,
+                offset: 8,
+                src: 1,
+            },
+            Op::AddrOf {
+                dst: 2,
+                base: 0,
+                offset: 8,
+            },
+            Op::Load {
+                dst: 3,
+                base: 2,
+                offset: 0,
+            },
+        ]);
+
+        assert_eq!(vm.r(3).as_int(), 42);
     }
 
     #[test]
