@@ -136,7 +136,7 @@ as a call site or as fixed clobbers.
 
 # End-to-end Example
 
-```garden
+```python
 fn access_user(user: Record<name:Str age:Int job:Record<name:Str since:Int>>) Int {
     let job = user.job
     job.since
@@ -146,7 +146,7 @@ fn access_user(user: Record<name:Str age:Int job:Record<name:Str since:Int>>) In
 Invoking the cli with `objdump -d (cargo run --features trace -- -DDd test.garden|psub)` produces:
 
 
-```text
+```shell
 [           0.054us] [input::Input::from_file] mmaped the file
 [          60.625us] [main] Tokenisation and Parsing done
 [         109.430us] [ir::typecheck::Typechecker::node][access_user]: (user: Record<name: Str age: Int job: Record<name: Str since: Int>>) -> Int
@@ -168,7 +168,7 @@ Disassembly of section .text:
 Highlighted as x86-asm:
 
 
-```x86-asm
+```asm
 0000000000000000 <jit_access_user>:
    0:   48 8b 47 00             mov    0x0(%rdi),%rax
    4:   48 8b 40 18             mov    0x18(%rax),%rax
