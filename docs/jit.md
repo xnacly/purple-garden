@@ -37,39 +37,7 @@ If native compilation returns `None`, the bytecode compiler lowers the function
 normally. The reaons for this decision can be inspected in the logs enabled
 when compiling with `--features trace`.
 
-## End-to-end Example
-
-For a nested record accessor like:
-
-```garden
-fn access_user(user: Record<name: Str age: Int job: Record<name: Str since: Int>>) Int {
-    let job = user.job
-    job.since
-}
-```
-
-the optimizer can fuse the intermediate address, and the x86 JIT can lower the
-remaining field load directly:
-
-```text
-[opt::ir::addrof_fold] folded %v1+8 into %v0+24
-[opt::ir::dce] removed dead definition %v1
-[jit::x86] compiled access_user (13 bytes)
-[bc::Cc::cc][access_user] native
-```
-
-The native code is just one VM argument load, one record field load, and the
-return store:
-
-```asm
-0000000000000000 <jit_access_user>:
-   0:   48 8b 47 00             mov    0x0(%rdi),%rax
-   4:   48 8b 40 18             mov    0x18(%rax),%rax
-   8:   48 89 47 00             mov    %rax,0x0(%rdi)
-   c:   c3                      ret
-```
-
-## Native ABI
+### Native ABI
 
 On x86-64, the generated function receives `*mut Vm` in `rdi`.
 
@@ -165,3 +133,48 @@ include:
 Helper calls clobber caller-saved registers. Any instruction lowered as a helper
 call must be represented in the planning pass before register allocation, either
 as a call site or as fixed clobbers.
+
+# End-to-end Example
+
+```garden
+fn access_user(user: Record<name:Str age:Int job:Record<name:Str since:Int>>) Int {
+    let job = user.job
+    job.since
+}
+```
+
+Invoking the cli with `objdump -d (cargo run --features trace -- -DDd test.garden|psub)` produces:
+
+
+```text
+[           0.054us] [input::Input::from_file] mmaped the file
+[          60.625us] [main] Tokenisation and Parsing done
+[         109.430us] [ir::typecheck::Typechecker::node][access_user]: (user: Record<name: Str age: Int job: Record<name: Str since: Int>>) -> Int
+[         152.953us] [main] Lowered AST to IR
+[         178.960us] [opt::ir::addrof_fold] folded %v1+8 into %v0+24
+[         188.802us] [opt::ir::dce] removed dead definition %v1
+[         224.605us] [jit::x86] compiled access_user (13 bytes)
+[         249.224us] [bc::Cc::cc][access_user] native
+[         259.610us] [jit::x86] compiled entry (1 bytes)
+[         273.392us] [bc::Cc::cc][entry] native
+[         281.924us] [main] Lowered IR to bytecode
+
+/tmp/.psub.eaxBgx:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+```
+
+Highlighted as x86-asm:
+
+
+```x86-asm
+0000000000000000 <jit_access_user>:
+   0:   48 8b 47 00             mov    0x0(%rdi),%rax
+   4:   48 8b 40 18             mov    0x18(%rax),%rax
+   8:   48 89 47 00             mov    %rax,0x0(%rdi)
+   c:   c3                      ret
+
+000000000000000d <jit_entry>:
+   d:   c3                      ret
+```
