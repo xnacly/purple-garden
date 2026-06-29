@@ -766,7 +766,17 @@ impl<'cc> Cc<'cc> {
                     src,
                 });
             }
-            ir::Instr::Load { .. } => todo!("load lowering"),
+            ir::Instr::Load {
+                dst, base, offset, ..
+            } => {
+                let dst = self.ensure_register(dst.id);
+                let base = self.ensure_register(*base);
+                self.emit(Op::Load {
+                    dst,
+                    base,
+                    offset: *offset,
+                });
+            }
             ir::Instr::AddrOf { .. } => todo!("addrof lowering"),
             ir::Instr::Alloc {
                 dst: TypeId { id, ty },
@@ -1294,7 +1304,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Ir::Load lowering is implemented in the next commit"]
     fn lowers_load_to_bytecode_load() {
         let ops = compile_one(entry_fun(
             vec![
