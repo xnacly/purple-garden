@@ -5,9 +5,11 @@ use purple_garden_frontend::{
     ast::{Ast, Node, NodeId},
     typecheck::TypecheckOutput,
 };
+use purple_garden_ir::ptype::Type;
 
 use super::{
-    analysis::{DocumentAnalysis, PackageDoc},
+    analysis::{DocumentAnalysis, PackageDoc, PackageFunctionCompletion},
+    completion,
     definition::DefinitionCollector,
     hover::{
         AnalysisHover, add_decl_hover, call_hover, declaration_hover, doc_hover, fn_detail,
@@ -48,6 +50,7 @@ fn collect_package_docs(ast: &Ast<'_>, analysis: &mut DocumentAnalysis) {
         };
 
         let mut functions = HashMap::new();
+        let mut completions = HashMap::new();
         for fun in fns {
             let detail = fn_detail(ast, &fun.name, &fun.args, fun.return_type);
             let query = format!("{}.{}", pkg_name, fun.name.t.as_str());
@@ -55,11 +58,28 @@ fn collect_package_docs(ast: &Ast<'_>, analysis: &mut DocumentAnalysis) {
                 fun.name.t.as_str().to_owned(),
                 declaration_hover(&detail, &fun.docs, &query),
             );
+            let documentation = Some(if fun.docs.is_empty() {
+                completion::garden_block(&detail)
+            } else {
+                doc_hover(&detail, &fun.docs)
+            });
+            completions.insert(
+                fun.name.t.as_str().to_owned(),
+                PackageFunctionCompletion {
+                    detail,
+                    documentation,
+                },
+            );
         }
 
-        analysis
-            .package_docs
-            .insert(pkg_name.to_owned(), PackageDoc { hover, functions });
+        analysis.package_docs.insert(
+            pkg_name.to_owned(),
+            PackageDoc {
+                hover,
+                functions,
+                completions,
+            },
+        );
     }
 }
 
@@ -89,13 +109,15 @@ fn collect_node(
             add_decl_hover(analysis, token_span(name), detail.clone(), docs);
             analysis.add_completion(name.t.as_str(), CompletionItemKind::FUNCTION, Some(detail));
             for (name, ty) in args {
-                let detail = format!("{}: {}", name.t.as_str(), ast.type_display(*ty));
+                let ty = purple_garden_frontend::type_from_type_expr(ast, *ty);
+                let detail = format!("{}: {}", name.t.as_str(), ty);
                 analysis.add_garden_hover(token_span(name), detail.clone());
                 analysis.add_completion(
                     name.t.as_str(),
                     CompletionItemKind::VARIABLE,
                     Some(detail),
                 );
+                analysis.add_record_completion(name.t.as_str(), &ty);
             }
             collect_nodes(ast, typecheck, body, analysis);
         }
@@ -110,6 +132,9 @@ fn collect_node(
                     CompletionItemKind::VARIABLE,
                     Some(detail),
                 );
+            }
+            if let Some(ty) = ty_for_node(ast, typecheck, *rhs) {
+                analysis.add_record_completion(name.t.as_str(), ty);
             }
             collect_node(ast, typecheck, *rhs, analysis);
         }
@@ -137,6 +162,17 @@ fn collect_node(
             for &(key, value) in pairs {
                 collect_node(ast, typecheck, key, analysis);
                 collect_node(ast, typecheck, value, analysis);
+            }
+        }
+        Node::Record { fields, .. } => {
+            for (field, value) in fields {
+                if let Some(ty) = type_for_node(ast, typecheck, *value) {
+                    analysis.add_garden_hover(
+                        token_span(field),
+                        format!("{}: {}", field.t.as_str(), ty),
+                    );
+                }
+                collect_node(ast, typecheck, *value, analysis);
             }
         }
         Node::Match { cases, default, .. } => {
@@ -192,6 +228,16 @@ fn collect_node(
         }
         Node::Atom { .. } => {}
     }
+}
+
+fn ty_for_node<'a>(
+    ast: &Ast<'a>,
+    typecheck: &'a TypecheckOutput<'a>,
+    node_id: NodeId,
+) -> Option<&'a Type<'a>> {
+    ast.value_id(node_id)
+        .and_then(|id| typecheck.types.get(id))
+        .and_then(Option::as_ref)
 }
 
 fn collect_nodes(

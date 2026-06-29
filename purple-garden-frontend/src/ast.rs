@@ -82,9 +82,10 @@ impl<'ast> Ast<'ast> {
             Node::Call { target, .. } | Node::Field { target, .. } => {
                 self.node_start(*target)? as usize
             }
-            Node::Cast { src, .. } | Node::Import { src, .. } | Node::Extern { src, .. } => {
-                src.start
-            }
+            Node::Cast { src, .. }
+            | Node::Import { src, .. }
+            | Node::Extern { src, .. }
+            | Node::Record { src, .. } => src.start,
         } as u32)
     }
 
@@ -98,6 +99,7 @@ impl<'ast> Ast<'ast> {
         match self.ty(id) {
             TypeExpr::Atom(token) | TypeExpr::Foreign(token) => token,
             TypeExpr::Option(inner) | TypeExpr::Array(inner) => self.type_token(*inner),
+            TypeExpr::Record { src, .. } => src,
         }
     }
 }
@@ -203,6 +205,13 @@ pub enum Node<'node> {
         name: Token<'node>,
         fns: Vec<ExternFn<'node>>,
     },
+
+    /// { <field> <value> }
+    Record {
+        id: usize,
+        src: Token<'node>,
+        fields: Vec<(Token<'node>, NodeId)>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,6 +236,7 @@ impl Node<'_> {
             | Node::Match { id, .. }
             | Node::Call { id, .. }
             | Node::Cast { id, .. }
+            | Node::Record { id, .. }
             | Node::Field { id, .. } => *id,
             Node::Fn { .. } | Node::Import { .. } | Node::Extern { .. } => return None,
         })
@@ -235,14 +245,14 @@ impl Node<'_> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeExpr<'te> {
-    /// atom types like: Int, Str, Double, Bool and Void
     Atom(Token<'te>),
-    /// foreign types like `Foreign<Counter>`
     Foreign(Token<'te>),
-    /// optionals work via `Option<type_expr>`
     Option(TypeExprId),
-    /// arrays work via `Array<type_expr>`
     Array(TypeExprId),
+    Record {
+        src: Token<'te>,
+        fields: Vec<(Token<'te>, TypeExprId)>,
+    },
 }
 
 pub struct TypeDisplay<'ast, 'src> {
@@ -259,11 +269,154 @@ impl Display for TypeDisplay<'_, '_> {
                 write!(f, "Option<{}>", self.ast.type_display(*type_expr))
             }
             TypeExpr::Array(type_expr) => write!(f, "Array<{}>", self.ast.type_display(*type_expr)),
+            TypeExpr::Record { fields, .. } => {
+                if fields.is_empty() {
+                    write!(f, "Record<>")
+                } else {
+                    write!(f, "Record<")?;
+                    for (i, (key, value)) in fields.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, " ")?;
+                        }
+                        write!(f, "{}: {}", key.t.as_str(), self.ast.type_display(*value))?;
+                    }
+                    write!(f, ">")
+                }
+            }
         }
     }
 }
 
 impl Ast<'_> {
+    fn fmt_ident_token<'src>(token: &Token<'src>) -> &'src str {
+        let Type::Ident(name) = token.t else {
+            unreachable!();
+        };
+        name
+    }
+
+    fn fmt_arg_list(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        args: &[(Token<'_>, TypeExprId)],
+    ) -> std::fmt::Result {
+        write!(f, "(")?;
+        for (i, (name, ty)) in args.iter().enumerate() {
+            if i > 0 {
+                write!(f, " ")?;
+            }
+            write!(
+                f,
+                "{}: {}",
+                Self::fmt_ident_token(name),
+                self.type_display(*ty)
+            )?;
+        }
+        write!(f, ")")
+    }
+
+    fn fmt_node_inline(&self, id: NodeId, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.node(id) {
+            Node::Record { fields, .. } => {
+                write!(f, "(record")?;
+                for (name, value) in fields {
+                    write!(f, " {}: ", Self::fmt_ident_token(name))?;
+                    self.fmt_node_inline(*value, f)?;
+                }
+                write!(f, ")")
+            }
+            Node::Atom { raw, .. } => match raw.t {
+                Type::S(s) => write!(f, "\"{s}\""),
+                _ => write!(f, "{}", raw.t.as_str()),
+            },
+            Node::Ident { name, .. } => write!(f, "{}", Self::fmt_ident_token(name)),
+            Node::Bin { op, lhs, rhs, .. } => {
+                write!(f, "({} ", op.t.as_str())?;
+                self.fmt_node_inline(*lhs, f)?;
+                write!(f, " ")?;
+                self.fmt_node_inline(*rhs, f)?;
+                write!(f, ")")
+            }
+            Node::Unary { op, rhs, .. } => {
+                write!(f, "({} ", op.t.as_str())?;
+                self.fmt_node_inline(*rhs, f)?;
+                write!(f, ")")
+            }
+            Node::Array { members, .. } => {
+                write!(f, "(array")?;
+                for member in members {
+                    write!(f, " ")?;
+                    self.fmt_node_inline(*member, f)?;
+                }
+                write!(f, ")")
+            }
+            Node::Call { target, args, .. } => {
+                write!(f, "(call target: ")?;
+                self.fmt_node_inline(*target, f)?;
+                for arg in args {
+                    write!(f, " arg: ")?;
+                    self.fmt_node_inline(*arg, f)?;
+                }
+                write!(f, ")")
+            }
+            Node::Cast { lhs, rhs, .. } => {
+                write!(f, "(cast {} ", self.type_display(*rhs))?;
+                self.fmt_node_inline(*lhs, f)?;
+                write!(f, ")")
+            }
+            Node::Field { target, name, .. } => {
+                write!(f, "(field target: ")?;
+                self.fmt_node_inline(*target, f)?;
+                write!(f, " name: {})", Self::fmt_ident_token(name))
+            }
+            Node::Let { name, rhs, .. } => {
+                write!(f, "(let {} ", Self::fmt_ident_token(name))?;
+                self.fmt_node_inline(*rhs, f)?;
+                write!(f, ")")
+            }
+            Node::Object { pairs, .. } => {
+                write!(f, "(object")?;
+                for (key, value) in pairs {
+                    write!(f, " key: ")?;
+                    self.fmt_node_inline(*key, f)?;
+                    write!(f, " value: ")?;
+                    self.fmt_node_inline(*value, f)?;
+                }
+                write!(f, ")")
+            }
+            Node::Match { .. } | Node::Fn { .. } | Node::Import { .. } | Node::Extern { .. } => {
+                unreachable!("record values are expressions")
+            }
+        }
+    }
+
+    fn fmt_record_fields(
+        &self,
+        fields: &[(Token<'_>, NodeId)],
+        f: &mut std::fmt::Formatter<'_>,
+        indent: usize,
+    ) -> std::fmt::Result {
+        let pad = "  ".repeat(indent);
+
+        for (name, value) in fields {
+            write!(f, "{}{}: ", pad, Self::fmt_ident_token(name))?;
+            if let Node::Record { fields, .. } = self.node(*value) {
+                if fields.is_empty() {
+                    writeln!(f, "(record)")?;
+                } else {
+                    writeln!(f, "(record")?;
+                    self.fmt_record_fields(fields, f, indent + 1)?;
+                    writeln!(f, "{pad})")?;
+                }
+            } else {
+                self.fmt_node_inline(*value, f)?;
+                writeln!(f)?;
+            }
+        }
+
+        Ok(())
+    }
+
     fn fmt_node_sexpr(
         &self,
         id: NodeId,
@@ -273,17 +426,24 @@ impl Ast<'_> {
         let pad = "  ".repeat(indent);
 
         match self.node(id) {
+            Node::Record { .. } => {
+                let Node::Record { fields, .. } = self.node(id) else {
+                    unreachable!();
+                };
+
+                if fields.is_empty() {
+                    return writeln!(f, "{pad}(record)");
+                }
+
+                writeln!(f, "{pad}(record")?;
+                self.fmt_record_fields(fields, f, indent + 1)?;
+                writeln!(f, "{pad})")
+            }
             Node::Atom { raw, .. } => match raw.t {
-                Type::S(s) => writeln!(f, "{pad}`{s}`"),
+                Type::S(s) => writeln!(f, "{pad}\"{s}\""),
                 _ => writeln!(f, "{}{}", pad, raw.t.as_str()),
             },
-            Node::Ident { name, .. } => {
-                if let Type::Ident(name) = name.t {
-                    writeln!(f, "{pad}{name}")
-                } else {
-                    unreachable!()
-                }
-            }
+            Node::Ident { name, .. } => writeln!(f, "{}{}", pad, Self::fmt_ident_token(name)),
             Node::Bin { op, lhs, rhs, .. } => {
                 writeln!(f, "{}({}", pad, op.t.as_str())?;
                 self.fmt_node_sexpr(*lhs, f, indent + 1)?;
@@ -296,22 +456,26 @@ impl Ast<'_> {
                 writeln!(f, "{pad})")
             }
             Node::Array { members, .. } => {
-                writeln!(f, "{pad}[")?;
+                writeln!(f, "{pad}(array")?;
                 for member in members {
                     self.fmt_node_sexpr(*member, f, indent + 1)?;
                 }
-                writeln!(f, "{pad}]")
+                writeln!(f, "{pad})")
             }
             Node::Object { pairs, .. } => {
-                writeln!(f, "{pad}{{")?;
+                let child_pad = "  ".repeat(indent + 1);
+
+                writeln!(f, "{pad}(object")?;
                 for (k, v) in pairs {
-                    self.fmt_node_sexpr(*k, f, indent + 1)?;
-                    self.fmt_node_sexpr(*v, f, indent + 1)?;
+                    writeln!(f, "{child_pad}key:")?;
+                    self.fmt_node_sexpr(*k, f, indent + 2)?;
+                    writeln!(f, "{child_pad}value:")?;
+                    self.fmt_node_sexpr(*v, f, indent + 2)?;
                 }
-                writeln!(f, "{pad}}}")
+                writeln!(f, "{pad})")
             }
             Node::Let { name, rhs, .. } => {
-                writeln!(f, "{}(let {}", pad, name.t.as_str())?;
+                writeln!(f, "{}(let {}", pad, Self::fmt_ident_token(name))?;
                 self.fmt_node_sexpr(*rhs, f, indent + 1)?;
                 writeln!(f, "{pad})")
             }
@@ -322,101 +486,82 @@ impl Ast<'_> {
                 return_type,
                 ..
             } => {
-                write!(f, "{}(fn {} (", pad, name.t.as_str())?;
-                for (i, arg) in args.iter().enumerate() {
-                    let Type::Ident(arg_name) = arg.0.t else {
-                        unreachable!();
-                    };
-                    if i == args.len() - 1 {
-                        write!(f, "{arg_name}:{}", self.type_display(arg.1))?;
-                    } else {
-                        write!(f, "{arg_name}:{} ", self.type_display(arg.1))?;
-                    }
-                }
-                write!(f, ")")?;
-                if !args.is_empty() {
-                    writeln!(f)?;
-                }
+                write!(f, "{}(fn {} ", pad, Self::fmt_ident_token(name))?;
+                self.fmt_arg_list(f, args)?;
+                writeln!(f, " -> {}", self.type_display(*return_type))?;
                 for node in body {
                     self.fmt_node_sexpr(*node, f, indent + 1)?;
                 }
-                writeln!(f, "{pad})->{}", self.type_display(*return_type))
+                writeln!(f, "{pad})")
             }
             Node::Call { target, args, .. } => {
-                write!(f, "{pad}(")?;
-                if let Node::Atom {
-                    raw: Token { t, .. },
-                    ..
-                } = self.node(*target)
-                {
-                    write!(f, "{}", t.as_str())?;
-                } else {
-                    writeln!(f)?;
-                    self.fmt_node_sexpr(*target, f, indent + 1)?;
-                }
+                let child_pad = "  ".repeat(indent + 1);
+
+                writeln!(f, "{pad}(call")?;
+                writeln!(f, "{child_pad}target:")?;
+                self.fmt_node_sexpr(*target, f, indent + 2)?;
                 for arg in args {
-                    self.fmt_node_sexpr(*arg, f, indent + 1)?;
+                    writeln!(f, "{child_pad}arg:")?;
+                    self.fmt_node_sexpr(*arg, f, indent + 2)?;
                 }
                 writeln!(f, "{pad})")
             }
             Node::Cast { lhs, rhs, .. } => {
-                let t = crate::type_from_type_expr(self, *rhs);
-                writeln!(f, "{pad}(cast_to_{t}")?;
+                writeln!(f, "{}(cast {}", pad, self.type_display(*rhs))?;
                 self.fmt_node_sexpr(*lhs, f, indent + 1)?;
                 writeln!(f, "{pad})")
             }
             Node::Match { cases, default, .. } => {
-                writeln!(f, "{pad}(match ")?;
+                let case_pad = "  ".repeat(indent + 1);
+                let label_pad = "  ".repeat(indent + 2);
+
+                writeln!(f, "{pad}(match")?;
                 for ((_, condition), body) in cases {
-                    writeln!(f, "{pad} (")?;
-                    self.fmt_node_sexpr(*condition, f, indent + 1)?;
+                    writeln!(f, "{case_pad}(case")?;
+                    writeln!(f, "{label_pad}when:")?;
+                    self.fmt_node_sexpr(*condition, f, indent + 3)?;
+                    writeln!(f, "{label_pad}then:")?;
                     for body_member in body {
-                        self.fmt_node_sexpr(*body_member, f, indent + 1)?;
+                        self.fmt_node_sexpr(*body_member, f, indent + 3)?;
                     }
-                    writeln!(f, "{pad} )")?;
+                    writeln!(f, "{case_pad})")?;
                 }
                 let (_, default) = default;
-                writeln!(f, "{pad} (")?;
+                writeln!(f, "{case_pad}(default")?;
                 for default_member in default {
-                    self.fmt_node_sexpr(*default_member, f, indent + 1)?;
+                    self.fmt_node_sexpr(*default_member, f, indent + 2)?;
                 }
-                writeln!(f, "{pad} )")?;
+                writeln!(f, "{case_pad})")?;
                 writeln!(f, "{pad})")
             }
             Node::Import { pkgs, .. } => {
-                write!(f, "{pad}(import ")?;
+                write!(f, "{pad}(import")?;
                 for pkg in pkgs {
                     let Token { t: Type::S(s), .. } = pkg else {
                         unreachable!();
                     };
-                    write!(f, "\"{s}\"")?;
+                    write!(f, " \"{s}\"")?;
                 }
                 writeln!(f, ")")
             }
             Node::Extern { name, fns, .. } => {
-                writeln!(f, "{}(extern {}", pad, name.t.as_str())?;
+                let child_pad = "  ".repeat(indent + 1);
+
+                writeln!(f, "{}(extern \"{}\"", pad, name.t.as_str())?;
                 for fun in fns {
-                    write!(f, "{}  (fn {} (", pad, fun.name.t.as_str())?;
-                    for (i, (arg_name, arg_type)) in fun.args.iter().enumerate() {
-                        let Type::Ident(arg_name) = arg_name.t else {
-                            unreachable!();
-                        };
-                        if i > 0 {
-                            write!(f, " ")?;
-                        }
-                        write!(f, "{arg_name}:{}", self.type_display(*arg_type))?;
-                    }
-                    writeln!(f, ")->{})", self.type_display(fun.return_type))?;
+                    write!(f, "{}(fn {} ", child_pad, Self::fmt_ident_token(&fun.name))?;
+                    self.fmt_arg_list(f, &fun.args)?;
+                    writeln!(f, " -> {})", self.type_display(fun.return_type))?;
                 }
                 writeln!(f, "{pad})")
             }
             Node::Field { target, name, .. } => {
-                writeln!(f, "{pad}(get")?;
-                self.fmt_node_sexpr(*target, f, indent + 1)?;
-                match name.t {
-                    Type::Ident(name) => writeln!(f, "{}  {}", pad, name)?,
-                    _ => unreachable!(),
-                }
+                let child_pad = "  ".repeat(indent + 1);
+
+                writeln!(f, "{pad}(field")?;
+                writeln!(f, "{child_pad}target:")?;
+                self.fmt_node_sexpr(*target, f, indent + 2)?;
+                writeln!(f, "{}name: {}", child_pad, Self::fmt_ident_token(name))?;
                 writeln!(f, "{pad})")
             }
         }

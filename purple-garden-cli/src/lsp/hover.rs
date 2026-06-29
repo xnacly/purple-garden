@@ -82,7 +82,10 @@ fn language_doc_query(token: &Token<'_>) -> Option<(LanguageDocKind, &'static st
         Type::Double => (LanguageDocKind::Type, "Double"),
         Type::Bool => (LanguageDocKind::Type, "Bool"),
         Type::Void => (LanguageDocKind::Type, "Void"),
+        Type::Option => (LanguageDocKind::Type, "Option"),
+        Type::Array => (LanguageDocKind::Type, "Array"),
         Type::Foreign => (LanguageDocKind::Type, "Foreign"),
+        Type::Record => (LanguageDocKind::Type, "Record"),
         _ => return None,
     })
 }

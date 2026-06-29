@@ -17,6 +17,7 @@ trace = [
     "purple-garden-shared/trace",
     "purple-garden-std/trace",
 ]
+trace_gc = ["purple-garden/trace_gc", "purple-garden-runtime/trace_gc"]
 
 [[bin]]
 name = "purple-garden"

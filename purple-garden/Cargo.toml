@@ -15,6 +15,7 @@ trace = [
     "purple-garden-shared/trace",
     "purple-garden-std/trace",
 ]
+trace_gc = ["purple-garden-runtime/trace_gc"]
 
 [dependencies]
 purple-garden-ir = { path = "../purple-garden-ir" }

@@ -23,6 +23,8 @@ pub mod constant;
 mod display;
 pub mod ptype;
 
+use std::alloc::Layout;
+
 pub use crate::constant::Const;
 use crate::ptype::Type;
 use purple_garden_shared::BuiltinFn;
@@ -153,6 +155,29 @@ pub enum Instr<'i> {
         from: TypeId<'i>,
         span: u32,
     },
+    Alloc {
+        dst: TypeId<'i>,
+        layout: Layout,
+        span: u32,
+    },
+    Store {
+        src: Id,
+        base: Id,
+        offset: u32,
+        span: u32,
+    },
+    Load {
+        dst: TypeId<'i>,
+        base: Id,
+        offset: u32,
+        span: u32,
+    },
+    AddrOf {
+        dst: TypeId<'i>,
+        base: Id,
+        offset: u32,
+        span: u32,
+    },
     Noop,
 }
 
@@ -162,7 +187,11 @@ impl Instr<'_> {
     #[must_use]
     pub fn span(&self) -> u32 {
         match self {
-            Instr::Bin { span, .. }
+            Instr::Store { span, .. }
+            | Instr::Load { span, .. }
+            | Instr::AddrOf { span, .. }
+            | Instr::Bin { span, .. }
+            | Instr::Alloc { span, .. }
             | Instr::BinImm { span, .. }
             | Instr::LoadConst { span, .. }
             | Instr::Call { span, .. }
@@ -319,13 +348,16 @@ impl Func<'_> {
     #[must_use]
     pub fn def_of(instr: &Instr<'_>) -> Option<Id> {
         match instr {
-            Instr::Bin { dst, .. }
+            Instr::Alloc { dst, .. }
+            | Instr::Load { dst, .. }
+            | Instr::AddrOf { dst, .. }
+            | Instr::Bin { dst, .. }
             | Instr::BinImm { dst, .. }
             | Instr::LoadConst { dst, .. }
             | Instr::Call { dst, .. }
             | Instr::Sys { dst, .. }
             | Instr::Cast { dst, .. } => Some(dst.id),
-            Instr::Noop => None,
+            Instr::Store { .. } | Instr::Noop => None,
         }
     }
 
@@ -342,7 +374,12 @@ impl Func<'_> {
                 }
             }
             Instr::Cast { from, .. } => f(from.id),
-            Instr::LoadConst { .. } | Instr::Noop => {}
+            Instr::Store { src, base, .. } => {
+                f(*src);
+                f(*base);
+            }
+            Instr::Load { base, .. } | Instr::AddrOf { base, .. } => f(*base),
+            Instr::LoadConst { .. } | Instr::Noop | Instr::Alloc { .. } => {}
         }
     }
 

@@ -5,9 +5,10 @@ use lsp_types::{
     MarkupContent, MarkupKind, Position, Uri,
 };
 use purple_garden_frontend::diagnostic::{Diagnostic as FrontendDiagnostic, Span};
+use purple_garden_ir::ptype::Type;
 
 use super::{
-    completion::{self, CompletionEntry},
+    completion::{self, CompletionEntry, RecordCompletion},
     diagnostic::diagnostic_for_lsp,
     hover::{AnalysisHover, HoverMarkup},
     source::{offset_for_position, range_for_span, span_contains},
@@ -28,12 +29,20 @@ pub(super) struct DocumentAnalysis {
     pub(super) package_docs: HashMap<String, PackageDoc>,
     pub(super) imported_packages: Vec<String>,
     pub(super) completions: Vec<CompletionEntry>,
+    pub(super) record_completions: HashMap<String, RecordCompletion>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct PackageDoc {
     pub(super) hover: String,
     pub(super) functions: HashMap<String, String>,
+    pub(super) completions: HashMap<String, PackageFunctionCompletion>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct PackageFunctionCompletion {
+    pub(super) detail: String,
+    pub(super) documentation: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +153,8 @@ impl DocumentState {
         let offset = offset_for_position(&self.text, position);
         completion::items_at(
             &self.analysis.completions,
+            &self.analysis.record_completions,
+            &self.analysis.package_docs,
             &self.analysis.imported_packages,
             &self.text,
             offset,
@@ -212,6 +223,12 @@ impl DocumentAnalysis {
     ) {
         self.completions
             .push(CompletionEntry::local(label, kind, detail));
+    }
+
+    pub(super) fn add_record_completion(&mut self, name: impl Into<String>, ty: &Type<'_>) {
+        if let Some(record) = RecordCompletion::from_type(ty) {
+            self.record_completions.insert(name.into(), record);
+        }
     }
 
     pub(super) fn add_imported_package(&mut self, pkg: &str) {

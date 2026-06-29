@@ -16,8 +16,6 @@ pub use purple_garden_macros::{FromVm, IntoVm, PgType, pg_fn, pg_pkg};
 pub use purple_garden_runtime::{Fn, FromVm, IntoVm, PgType, Pkg, Type, Value, Vm, VmConfig};
 pub use purple_garden_std::{STD, resolve_pkg};
 
-pub mod gc;
-
 type JitFn = purple_garden_jit::JitFn;
 
 #[derive(Debug)]
@@ -152,6 +150,7 @@ fn compile<'e>(
 
     let (vm, syscalls, debug, entry_native_idx) = cc.finalize(VmConfig {
         backtrace: config.backtrace,
+        no_gc: config.no_gc,
     });
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let mut program = Program::from_vm(vm, syscalls, debug).with_entry_native(entry_native);

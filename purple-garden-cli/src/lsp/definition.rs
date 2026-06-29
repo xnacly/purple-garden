@@ -48,6 +48,7 @@ impl<'src> DefinitionCollector<'src> {
 
     fn node(&mut self, ast: &Ast<'src>, node_id: NodeId) {
         match ast.node(node_id) {
+            Node::Record { .. } => {}
             Node::Atom { .. } => {}
             Node::Ident { name, .. } => self.ident(name),
             Node::Bin { lhs, rhs, .. } => {

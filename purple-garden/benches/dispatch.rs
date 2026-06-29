@@ -5,7 +5,10 @@ use rand::{RngExt, SeedableRng, rngs::StdRng};
 mod common;
 
 const OP_CODE_SIZE: usize = 10_000_000;
-static CONFIG: VmConfig = VmConfig { backtrace: false };
+static CONFIG: VmConfig = VmConfig {
+    backtrace: false,
+    no_gc: false,
+};
 
 /// benchmark pure virtual machine dispatch / throughput with 10 million Nop's
 pub fn bench_uniform_dispatch(c: &mut Criterion) {
@@ -30,70 +33,70 @@ pub fn bench_uniform_dispatch(c: &mut Criterion) {
 pub fn bench_random_dispatch(c: &mut Criterion) {
     const RANDOM_OPS: &[Op] = &[
         Op::IAdd {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 0,
         },
         Op::ISub {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 0,
         },
         Op::IMul {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 0,
         },
         Op::DAdd {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 0,
         },
         Op::DSub {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 0,
         },
         Op::DMul {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 0,
         },
         Op::ILt {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 1,
         },
         Op::IGt {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 0,
         },
         Op::DLt {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 0,
         },
         Op::DGt {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 0,
         },
         Op::IEq {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 0,
         },
         Op::BEq {
-            dst: 0,
+            dst: 2,
             lhs: 0,
             rhs: 0,
         },
-        Op::Mov { dst: 0, src: 0 },
-        Op::LoadI { dst: 0, value: 0 },
-        Op::CastToInt { dst: 0, src: 0 },
-        Op::CastToDouble { dst: 0, src: 0 },
-        Op::CastToBool { dst: 0, src: 0 },
+        Op::Mov { dst: 2, src: 0 },
+        Op::LoadI { dst: 2, value: 0 },
+        Op::CastToInt { dst: 2, src: 0 },
+        Op::CastToDouble { dst: 2, src: 0 },
+        Op::CastToBool { dst: 2, src: 0 },
         Op::Nop,
     ];
 
@@ -101,8 +104,10 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let mut bc = Vec::with_capacity(OP_CODE_SIZE);
+                bc.push(Op::LoadI { dst: 0, value: 1 });
+                bc.push(Op::LoadI { dst: 1, value: 2 });
                 let mut rng = StdRng::seed_from_u64(0);
-                for _ in 0..OP_CODE_SIZE {
+                for _ in 2..OP_CODE_SIZE {
                     let idx = rng.random_range(0..RANDOM_OPS.len());
                     bc.push(RANDOM_OPS[idx]);
                 }

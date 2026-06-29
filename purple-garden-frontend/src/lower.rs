@@ -112,6 +112,49 @@ impl<'lower> Lower<'lower> {
         self.ctx.block = id;
     }
 
+    fn lower_record_fields_into(
+        &mut self,
+        ast: &'lower Ast<'lower>,
+        record_ty: &ptype::Type<'lower>,
+        base: Id,
+        base_offset: u32,
+        fields: &[(Token<'lower>, NodeId)],
+    ) -> Result<(), Diagnostic> {
+        for (tok, value) in fields {
+            let lex::Type::Ident(name) = tok.t else {
+                unreachable!();
+            };
+            let offset = base_offset
+                + record_ty
+                    .field_offset(name)
+                    .expect("record field was typechecked") as u32;
+
+            if let Node::Record {
+                id, fields: nested, ..
+            } = ast.node(*value)
+            {
+                let Some(nested_ty) = self.types[*id].clone() else {
+                    unreachable!();
+                };
+                self.lower_record_fields_into(ast, &nested_ty, base, offset, nested)?;
+                continue;
+            }
+
+            let Some(src) = self.lower_node(ast, *value)? else {
+                unreachable!("field doesnt produce a value, compiler error");
+            };
+
+            self.emit(Instr::Store {
+                src,
+                base,
+                offset,
+                span: tok.start as u32,
+            })
+        }
+
+        Ok(())
+    }
+
     fn lower_node(
         &mut self,
         ast: &'lower Ast<'lower>,
@@ -161,6 +204,47 @@ impl<'lower> Lower<'lower> {
                         name,
                     ));
                 }
+            }
+            Node::Field { id, target, name } => {
+                let base = self.lower_node(ast, *target)?.unwrap();
+                let target_value_id = ast.value_id(*target).unwrap();
+                let target_type = self.types[target_value_id].clone().unwrap();
+                let ty = self.types[*id].clone().unwrap();
+
+                let ptype::Type::Record(_) = target_type else {
+                    unreachable!();
+                };
+
+                let lex::Type::Ident(field_name) = name.t else {
+                    unreachable!();
+                };
+                let offset = target_type
+                    .field_offset(field_name)
+                    .expect("record field was typechecked") as u32;
+
+                let field_id = self.ctx.id_store.new_value();
+                let dst = TypeId { id: field_id, ty };
+                // The offset is relative to the target record, but the access
+                // mode depends on the field's type: inline nested records are
+                // represented by an interior pointer, while scalar fields are
+                // loaded as VM values.
+                if matches!(dst.ty, ptype::Type::Record(_)) {
+                    self.emit(Instr::AddrOf {
+                        dst,
+                        base,
+                        offset,
+                        span: name.start as u32,
+                    });
+                } else {
+                    self.emit(Instr::Load {
+                        dst,
+                        base,
+                        offset,
+                        span: name.start as u32,
+                    });
+                }
+
+                Some(field_id)
             }
             Node::Bin { op, lhs, rhs, id } => {
                 use BinOp::{
@@ -608,6 +692,26 @@ impl<'lower> Lower<'lower> {
                 self.block_mut(join).params = join_params;
                 Some(last)
             }
+            Node::Record { id, src, fields } => {
+                let Some(record_ty) = self.types[*id].clone() else {
+                    unreachable!();
+                };
+                let layout = record_ty.layout();
+                let id = self.ctx.id_store.new_value();
+                self.emit(Instr::Alloc {
+                    dst: TypeId {
+                        id,
+                        ty: record_ty.clone(),
+                    },
+                    layout,
+                    span: src.start as u32,
+                });
+
+                let base = id;
+                self.lower_record_fields_into(ast, &record_ty, base, 0, fields)?;
+
+                Some(base)
+            }
             _ => todo!("{:?}", node),
         })
     }
@@ -659,5 +763,42 @@ impl<'lower> Lower<'lower> {
         self.functions.push(self.ctx.func);
 
         Ok(self.functions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use purple_garden_ir::Instr;
+
+    use super::*;
+    use crate::{lex::Lexer, parser::Parser};
+
+    #[test]
+    fn nested_record_literal_stores_inline_fields() {
+        let ast = Parser::new(Lexer::new(
+            br#"{ name: "teo" age: 23 job: { name: "dev" since: 2024 } }"#,
+        ))
+        .parse()
+        .unwrap();
+        let funcs = Lower::new().ir_from(&ast).unwrap();
+        let instructions = &funcs[0].blocks[0].instructions;
+
+        let allocs = instructions
+            .iter()
+            .filter(|instr| matches!(instr, Instr::Alloc { .. }))
+            .count();
+        let stores = instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::Store { base, offset, .. } => Some((*base, *offset)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(allocs, 1);
+        assert_eq!(
+            stores,
+            vec![(Id(0), 0), (Id(0), 8), (Id(0), 16), (Id(0), 24)]
+        );
     }
 }
