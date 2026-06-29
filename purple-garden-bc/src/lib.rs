@@ -1091,3 +1091,356 @@ impl Default for Cc<'_> {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ir::BinOp;
+    use ir::{Block, EMPTY_PARAMS, Instr, Terminator, ptype::Type};
+    use std::alloc::Layout;
+
+    fn type_id(id: u32, ty: Type<'static>) -> TypeId<'static> {
+        TypeId { id: Id(id), ty }
+    }
+
+    fn entry_fun(
+        instructions: Vec<Instr<'static>>,
+        ret: Option<(Id, Type<'static>)>,
+    ) -> Func<'static> {
+        let ret_ty = ret.as_ref().map(|(_, ty)| ty.clone());
+        let ret_id = ret.map(|(id, _)| id);
+        let mut fun = Func::new("entry", Id(0), Vec::new(), ret_ty);
+        fun.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params: EMPTY_PARAMS,
+            instructions,
+            term: Some(Terminator::Return {
+                value: ret_id,
+                span: 0,
+            }),
+        });
+        fun
+    }
+
+    fn compile_one(fun: Func<'static>) -> Vec<Op> {
+        let mut cc = Cc::new();
+        let mut config = Config::default();
+        config.no_jit = true;
+        let funcs = [fun];
+        cc.compile(&config, &funcs).unwrap();
+        cc.buf.clone()
+    }
+
+    fn has_op(ops: &[Op], pred: impl Fn(&Op) -> bool) -> bool {
+        ops.iter().any(pred)
+    }
+
+    #[test]
+    fn lowers_int_load_const_to_load_i() {
+        let ops = compile_one(entry_fun(
+            vec![Instr::LoadConst {
+                dst: type_id(0, Type::Int),
+                value: Const::Int(42),
+                span: 0,
+            }],
+            Some((Id(0), Type::Int)),
+        ));
+
+        assert!(
+            has_op(&ops, |op| matches!(
+                op,
+                Op::LoadI { dst: 0, value: 42 }
+            )),
+            "expected int constant to lower to LoadI: {:?}",
+            ops
+        );
+    }
+
+    #[test]
+    fn lowers_non_immediate_load_const_to_load_global() {
+        let ops = compile_one(entry_fun(
+            vec![Instr::LoadConst {
+                dst: type_id(0, Type::Str),
+                value: Const::Str("hello".into()),
+                span: 0,
+            }],
+            Some((Id(0), Type::Str)),
+        ));
+
+        assert!(
+            has_op(&ops, |op| matches!(op, Op::LoadG { dst: 0, idx: 0 })),
+            "expected string constant to lower to LoadG: {:?}",
+            ops
+        );
+    }
+
+    #[test]
+    fn lowers_bin_imm_to_matching_bytecode_op() {
+        let ops = compile_one(entry_fun(
+            vec![
+                Instr::LoadConst {
+                    dst: type_id(0, Type::Int),
+                    value: Const::Int(7),
+                    span: 0,
+                },
+                Instr::BinImm {
+                    op: BinOp::IAdd,
+                    dst: type_id(1, Type::Int),
+                    lhs: Id(0),
+                    imm: 35,
+                    span: 0,
+                },
+            ],
+            Some((Id(1), Type::Int)),
+        ));
+
+        assert!(
+            has_op(&ops, |op| matches!(
+                op,
+                Op::IAddI {
+                    dst: 0,
+                    lhs: 0,
+                    imm: 35
+                } | Op::IAddI {
+                    dst: 1,
+                    lhs: 0,
+                    imm: 35
+                }
+            )),
+            "expected BinImm IAdd to lower to IAddI: {:?}",
+            ops
+        );
+    }
+
+    #[test]
+    fn lowers_cast_to_bytecode_cast() {
+        let ops = compile_one(entry_fun(
+            vec![
+                Instr::LoadConst {
+                    dst: type_id(0, Type::Int),
+                    value: Const::Int(42),
+                    span: 0,
+                },
+                Instr::Cast {
+                    dst: type_id(1, Type::Double),
+                    from: type_id(0, Type::Int),
+                    span: 0,
+                },
+            ],
+            Some((Id(1), Type::Double)),
+        ));
+
+        assert!(
+            has_op(&ops, |op| matches!(
+                op,
+                Op::CastToDouble { dst: 0, src: 0 }
+                    | Op::CastToDouble { dst: 1, src: 0 }
+            )),
+            "expected int-to-double cast to lower to CastToDouble: {:?}",
+            ops
+        );
+    }
+
+    #[test]
+    fn lowers_alloc_and_store() {
+        let ops = compile_one(entry_fun(
+            vec![
+                Instr::Alloc {
+                    dst: type_id(0, Type::Record(Vec::new())),
+                    layout: Layout::from_size_align(16, 8).unwrap(),
+                    span: 0,
+                },
+                Instr::LoadConst {
+                    dst: type_id(1, Type::Int),
+                    value: Const::Int(42),
+                    span: 0,
+                },
+                Instr::Store {
+                    src: Id(1),
+                    base: Id(0),
+                    offset: 8,
+                    span: 0,
+                },
+            ],
+            None,
+        ));
+
+        assert!(
+            has_op(&ops, |op| matches!(
+                op,
+                Op::Alloc {
+                    dst: 0,
+                    kind: AllocType::Record,
+                    size: 16,
+                    align: 8
+                }
+            )),
+            "expected Alloc to lower to bytecode Alloc: {:?}",
+            ops
+        );
+        assert!(
+            has_op(&ops, |op| matches!(
+                op,
+                Op::Store {
+                    base: 0,
+                    offset: 8,
+                    src: 1
+                }
+            )),
+            "expected Store to lower to bytecode Store: {:?}",
+            ops
+        );
+    }
+
+    #[test]
+    #[ignore = "Ir::Load lowering is implemented in the next commit"]
+    fn lowers_load_to_bytecode_load() {
+        let ops = compile_one(entry_fun(
+            vec![
+                Instr::Alloc {
+                    dst: type_id(0, Type::Record(Vec::new())),
+                    layout: Layout::from_size_align(16, 8).unwrap(),
+                    span: 0,
+                },
+                Instr::LoadConst {
+                    dst: type_id(1, Type::Int),
+                    value: Const::Int(42),
+                    span: 0,
+                },
+                Instr::Store {
+                    src: Id(1),
+                    base: Id(0),
+                    offset: 8,
+                    span: 0,
+                },
+                Instr::Load {
+                    dst: type_id(2, Type::Int),
+                    base: Id(0),
+                    offset: 8,
+                    span: 0,
+                },
+            ],
+            Some((Id(2), Type::Int)),
+        ));
+
+        assert!(
+            has_op(&ops, |op| matches!(
+                op,
+                Op::Load {
+                    dst: 0,
+                    base: 0,
+                    offset: 8
+                }
+            )),
+            "expected Load to lower to bytecode Load: {:?}",
+            ops
+        );
+    }
+
+    #[test]
+    #[ignore = "Ir::AddrOf lowering is not implemented yet"]
+    fn lowers_addrof_to_bytecode_addrof() {
+        let ops = compile_one(entry_fun(
+            vec![
+                Instr::Alloc {
+                    dst: type_id(0, Type::Record(Vec::new())),
+                    layout: Layout::from_size_align(16, 8).unwrap(),
+                    span: 0,
+                },
+                Instr::AddrOf {
+                    dst: type_id(1, Type::Foreign("ptr")),
+                    base: Id(0),
+                    offset: 8,
+                    span: 0,
+                },
+            ],
+            Some((Id(1), Type::Foreign("ptr"))),
+        ));
+
+        assert!(
+            has_op(&ops, |op| matches!(
+                op,
+                Op::AddrOf {
+                    dst: 0,
+                    base: 0,
+                    offset: 8
+                }
+            )),
+            "expected AddrOf to lower to bytecode AddrOf: {:?}",
+            ops
+        );
+    }
+
+    #[test]
+    fn lowers_branch_cmp_imm_to_bytecode_branch() {
+        let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Int));
+        fun.blocks = vec![
+            Block {
+                tombstone: false,
+                id: Id(0),
+                params: EMPTY_PARAMS,
+                instructions: vec![Instr::LoadConst {
+                    dst: type_id(0, Type::Int),
+                    value: Const::Int(1),
+                    span: 0,
+                }],
+                term: Some(Terminator::BranchCmpImm {
+                    op: BinOp::IEq,
+                    lhs: Id(0),
+                    imm: 1,
+                    yes: (Id(1), EMPTY_PARAMS),
+                    no: (Id(2), EMPTY_PARAMS),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(1),
+                params: EMPTY_PARAMS,
+                instructions: vec![Instr::LoadConst {
+                    dst: type_id(1, Type::Int),
+                    value: Const::Int(10),
+                    span: 0,
+                }],
+                term: Some(Terminator::Return {
+                    value: Some(Id(1)),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(2),
+                params: EMPTY_PARAMS,
+                instructions: vec![Instr::LoadConst {
+                    dst: type_id(2, Type::Int),
+                    value: Const::Int(20),
+                    span: 0,
+                }],
+                term: Some(Terminator::Return {
+                    value: Some(Id(2)),
+                    span: 0,
+                }),
+            },
+        ];
+
+        let ops = compile_one(fun);
+
+        assert!(
+            has_op(&ops, |op| matches!(
+                op,
+                Op::JmpEqI {
+                    lhs: 0,
+                    imm: 1,
+                    ..
+                } | Op::JmpNeI {
+                    lhs: 0,
+                    imm: 1,
+                    ..
+                }
+            )),
+            "expected BranchCmpImm IEq to lower to an immediate compare jump: {:?}",
+            ops
+        );
+    }
+}
