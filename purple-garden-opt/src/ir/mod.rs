@@ -3,14 +3,14 @@
 //! Each pass lives in its own submodule. Orchestration (which passes
 //! run, in what order) lives in [crate::ir] in `src/opt/mod.rs`.
 
-// TODO: come up with Ir::Alloc, Ir::Store, Ir::Load and Ir::AddrOf optimisations
-
+mod addrof_fold;
 mod branch_cmp;
 mod const_fold;
 mod const_fold_syscalls;
 mod dce;
 mod imm_fold;
 mod indirect_jump;
+mod load_store_fold;
 mod ret_inline;
 mod tailcall;
 
@@ -121,11 +121,13 @@ pub(super) fn record_uses(fun: &ir::Func<'_>, scratch: &mut Scratch<'_>) {
 }
 
 // reexports
+pub use addrof_fold::addrof_fold;
 pub use branch_cmp::branch_cmp;
 pub use const_fold::const_fold;
 pub use const_fold_syscalls::const_fold_syscalls;
 pub use dce::dce;
 pub use imm_fold::imm_fold;
 pub use indirect_jump::indirect_jump;
+pub use load_store_fold::load_store_fold;
 pub use ret_inline::ret_inline;
 pub use tailcall::tailcall;

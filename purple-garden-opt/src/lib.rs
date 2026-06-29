@@ -28,6 +28,8 @@ pub fn ir(ir: &mut [purple_garden_ir::Func]) {
         // becomes a direct Return that tailcall then picks up as Pattern A.
         ir::ret_inline(fun);
         ir::tailcall(fun);
+        ir::addrof_fold(fun, &mut scratch);
+        ir::load_store_fold(fun);
 
         // Order: dead code elimination always last, for the backends having less work (and the reg
         // allocator)
