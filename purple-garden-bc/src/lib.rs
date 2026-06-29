@@ -777,7 +777,17 @@ impl<'cc> Cc<'cc> {
                     offset: *offset,
                 });
             }
-            ir::Instr::AddrOf { .. } => todo!("addrof lowering"),
+            ir::Instr::AddrOf {
+                dst, base, offset, ..
+            } => {
+                let dst = self.ensure_register(dst.id);
+                let base = self.ensure_register(*base);
+                self.emit(Op::AddrOf {
+                    dst,
+                    base,
+                    offset: *offset,
+                });
+            }
             ir::Instr::Alloc {
                 dst: TypeId { id, ty },
                 layout,
@@ -1348,7 +1358,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Ir::AddrOf lowering is not implemented yet"]
     fn lowers_addrof_to_bytecode_addrof() {
         let ops = compile_one(entry_fun(
             vec![
