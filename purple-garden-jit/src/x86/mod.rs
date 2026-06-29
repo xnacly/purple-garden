@@ -1,12 +1,23 @@
 //! x86-64 JIT lowering.
 //!
-//! A peer backend to the bytecode compiler: lowers IR straight to native
-//! code, with SSA values living in real x86 GPRs (its own [`crate::regalloc`]
-//! over the shared IR liveness). The native ABI passes `*mut Vm` in `rdi`, and
-//! since `Vm::r` is the first field, `rdi` is the base of the VM register file.
-//! Args arrive in `vm.r[0..n]`; the result is written back to `vm.r[0]`. Because
-//! all computation happens in GPRs, `vm.r[1..]` is never touched, so the
-//! syscall convention ("a syscall changes only r0") holds for free.
+//! A peer backend to the bytecode compiler: lowers IR straight to native code, with SSA values
+//! living in real x86 GPRs (its own [`crate::regalloc`] over the shared IR liveness). The native
+//! ABI passes `*mut Vm` in `rdi`, and since `Vm::r` is the first field, `rdi` is the base of the VM
+//! register file. Args arrive in `vm.r[0..n]`; the result is written back to `vm.r[0]`. All
+//! computation happens in GPRs, `vm.r[1..]` is never touched, so the syscall convention ("a syscall
+//! changes only r0") holds for free.
+//!
+//! This module combines admission, register planning, lowering, and a tiny encoder.
+//! The first pre-lowering walk collects constraints that must be known before register allocation.
+//! For example, the current `idiv` lowering clobbers `rax`, `rcx`, and `rdx`, so values live across
+//! that IR position must be kept out of those registers.
+//!
+//! The instruction enum contains only the x86-64 forms needed for the current set of pg Ir nodes
+//! the x86 jit supports. VM slot access uses `[rdi + slot * 8]`. Record memory access uses generic
+//! `[base + offset]` addressing where `offset` is the byte offset carried by IR.
+//!
+//! Helper calls, such as traps or future allocation support, use the platform C ABI. Such calls
+//! clobber caller-saved registers and therefore need admission planning before register allocation
 
 use std::fmt;
 
@@ -46,6 +57,10 @@ const IDIV_CLOBBERS: &[u8] = &[RAX, RCX, RDX];
 
 #[derive(Default)]
 struct SupportPlan {
+    entry: Option<ir::Id>,
+    /// Target-specific register hazards discovered before allocation. Each
+    /// entry says that a lowering at `pos` overwrites `regs`; the allocator then
+    /// avoids assigning live-across values to those registers.
     fixed_clobbers: Vec<FixedClobber<'static>>,
 }
 
@@ -56,9 +71,6 @@ pub fn compile_func(
     liveness: &[(u32, u32)],
     allocator: &mut crate::regalloc::Allocator,
 ) -> Option<()> {
-    if first_live_block(func).is_none() {
-        skip!(func, "empty function");
-    }
     if func.params.len() > 32 {
         skip!(
             func,
@@ -68,6 +80,9 @@ pub fn compile_func(
     }
 
     let plan = validate_supported(func)?;
+    let Some(entry) = plan.entry else {
+        skip!(func, "empty function");
+    };
 
     out.reserve(func.params.len() * 4 + func.blocks.len() * 16 + 64);
 
@@ -88,7 +103,7 @@ pub fn compile_func(
             .iter()
             .any(|loc| matches!(loc, ir::Location::Reg(r) if r == candidate))
     });
-    Lowering::new(func, out, regs, scratch).emit()?;
+    Lowering::new(func, out, regs, scratch, entry).emit()?;
 
     // we have produced no machine code, so we just RET, this may be the case for fully optimised
     // (dce) away IR
@@ -134,6 +149,24 @@ pub enum Insn {
     StoreSlot {
         src: u8,
         slot: u8,
+    },
+    /// `mov r{dst}, [r{base} + offset]`
+    LoadMem {
+        dst: u8,
+        base: u8,
+        offset: u32,
+    },
+    /// `mov [r{base} + offset], r{src}`
+    StoreMem {
+        base: u8,
+        offset: u32,
+        src: u8,
+    },
+    /// `lea r{dst}, [r{base} + offset]`
+    LeaMem {
+        dst: u8,
+        base: u8,
+        offset: u32,
     },
     /// `mov r{dst}, r{src}`
     Mov {
@@ -222,6 +255,12 @@ impl Insn {
             Insn::Ret => code.push(0xc3),
             Insn::LoadSlot { dst, slot } => mov_slot(code, 0x8b, dst, slot),
             Insn::StoreSlot { src, slot } => mov_slot(code, 0x89, src, slot),
+            // Record memory ops all use the same ModRM/SIB memory form. The
+            // opcode selects load, store, or address calculation; ModRM.reg is
+            // the register operand for all three encodings.
+            Insn::LoadMem { dst, base, offset } => mem_disp(code, 0x8b, dst, base, offset),
+            Insn::StoreMem { base, offset, src } => mem_disp(code, 0x89, src, base, offset),
+            Insn::LeaMem { dst, base, offset } => mem_disp(code, 0x8d, dst, base, offset),
             // 0x89 = `mov r/m64, r64`.
             // ModRM.reg encodes src; ModRM.r/m encodes dst.
             Insn::Mov { dst, src } => reg_reg(code, 0x89, src, dst),
@@ -355,6 +394,15 @@ impl fmt::Display for Insn {
             Insn::Ret => write!(f, "ret"),
             Insn::LoadSlot { dst, slot } => write!(f, "mov {}, [rdi+{:#x}]", r(dst), slot * 8),
             Insn::StoreSlot { src, slot } => write!(f, "mov [rdi+{:#x}], {}", slot * 8, r(src)),
+            Insn::LoadMem { dst, base, offset } => {
+                write!(f, "mov {}, [{}+{:#x}]", r(dst), r(base), offset)
+            }
+            Insn::StoreMem { base, offset, src } => {
+                write!(f, "mov [{}+{:#x}], {}", r(base), offset, r(src))
+            }
+            Insn::LeaMem { dst, base, offset } => {
+                write!(f, "lea {}, [{}+{:#x}]", r(dst), r(base), offset)
+            }
             Insn::Mov { dst, src } => write!(f, "mov {}, {}", r(dst), r(src)),
             Insn::MovImm { dst, imm } => write!(f, "mov {}, {imm}", r(dst)),
             Insn::Add { dst, src } => write!(f, "add {}, {}", r(dst), r(src)),
@@ -450,6 +498,44 @@ fn mov_slot(code: &mut Vec<u8>, opcode: u8, reg: u8, slot: u8) {
     // ModRM mod=01 (disp8), reg field = GPR, rm = rdi.
     let m = 0x40 | ((reg & 7) << 3) | RDI;
     code.extend_from_slice(&[rex(reg, RDI), opcode, m, slot * 8]);
+}
+
+/// Memory op using `[base + offset]`, where ModRM.reg is the register operand
+/// and ModRM.r/m names the base. Always emits an explicit displacement (disp8
+/// when possible, otherwise disp32), which avoids zero-offset special cases for
+/// rbp/r13. rsp/r12 bases require a SIB byte even with no index.
+///
+/// This helper is intended for record payload access. IR offsets are already
+/// byte offsets, unlike VM register slots, so callers pass the offset through
+/// unchanged.
+fn mem_disp(code: &mut Vec<u8>, opcode: u8, reg: u8, base: u8, offset: u32) {
+    let disp8 = u8::try_from(offset)
+        .ok()
+        .filter(|offset| *offset <= i8::MAX as u8);
+    let mode = if disp8.is_some() { 0x40 } else { 0x80 };
+    // In ModRM, r/m=100 does not mean `rsp` directly; it means a SIB byte
+    // follows. That is mandatory for rsp/r12 bases, even without an index.
+    let rm = if needs_sib(base) { RSP } else { base & 7 };
+    let m = mode | ((reg & 7) << 3) | rm;
+
+    code.extend_from_slice(&[rex(reg, base), opcode, m]);
+    if needs_sib(base) {
+        code.push(sib_no_index(base));
+    }
+    if let Some(disp) = disp8 {
+        code.push(disp);
+    } else {
+        code.extend_from_slice(&offset.to_le_bytes());
+    }
+}
+
+fn needs_sib(base: u8) -> bool {
+    base & 7 == RSP
+}
+
+fn sib_no_index(base: u8) -> u8 {
+    // scale=0, index=100 (none), base=base low bits.
+    0x20 | (base & 7)
 }
 
 /// Emit `r{d} = r{l} <op> r{r}` in place (op is IAdd/ISub/IMul). x86 binops are
@@ -601,15 +687,6 @@ fn emit_param_moves(
     emit_parallel_moves(out, pairs, scratch)
 }
 
-/// Check whether an edge parameter transfer would emit no moves.
-fn params_moves_empty(regs: &[ir::Location], src_params: &[ir::Id], dst_params: &[ir::Id]) -> bool {
-    src_params.len() == dst_params.len()
-        && src_params
-            .iter()
-            .zip(dst_params)
-            .all(|(&src, &dst)| reg_of(regs, src) == reg_of(regs, dst))
-}
-
 /// Return the parameter ids owned by a branch target block.
 fn branch_target_params<'f>(func: &'f ir::Func<'_>, target: ir::Id) -> Option<&'f [ir::Id]> {
     func.blocks
@@ -639,12 +716,18 @@ fn supported_const(value: &ir::Const<'_>) -> bool {
     }
 }
 
+fn supported_mem_offset(offset: u32) -> bool {
+    offset <= i32::MAX as u32
+}
+
 /// Validate that `func` is in the x86 JIT subset and collect lowering constraints.
 fn validate_supported(func: &ir::Func<'_>) -> Option<SupportPlan> {
     let mut plan = SupportPlan::default();
     let mut pos = 0;
 
     for block in func.blocks.iter().filter(|block| !block.tombstone) {
+        plan.entry.get_or_insert(block.id);
+
         // Keep this position walk in lockstep with `Func::live_set_into`.
         pos += 2;
 
@@ -663,6 +746,10 @@ fn validate_supported(func: &ir::Func<'_>) -> Option<SupportPlan> {
                     }
                 }
                 ir::Instr::Bin { op, .. } if supported_bin(*op) => {}
+                ir::Instr::Store { offset, .. }
+                | ir::Instr::Load { offset, .. }
+                | ir::Instr::AddrOf { offset, .. }
+                    if supported_mem_offset(*offset) => {}
                 _ => skip!(func, "unsupported instruction {instr:?}"),
             }
             pos += 2;
@@ -683,14 +770,6 @@ fn validate_supported(func: &ir::Func<'_>) -> Option<SupportPlan> {
     Some(plan)
 }
 
-/// Return the entry block after tombstone removal.
-fn first_live_block(func: &ir::Func<'_>) -> Option<ir::Id> {
-    func.blocks
-        .iter()
-        .find(|block| !block.tombstone)
-        .map(|block| block.id)
-}
-
 /// Per-function x86 lowering state.
 ///
 /// `compile_func` performs admission and register allocation, then hands the
@@ -701,6 +780,7 @@ struct Lowering<'a, 'ir> {
     out: &'a mut Vec<u8>,
     regs: &'a [ir::Location],
     scratch: Option<u8>,
+    entry: ir::Id,
     block_offsets: Vec<usize>,
     patches: Vec<Patch>,
     move_pairs: Vec<(u8, u8)>,
@@ -713,12 +793,14 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         out: &'a mut Vec<u8>,
         regs: &'a [ir::Location],
         scratch: Option<u8>,
+        entry: ir::Id,
     ) -> Self {
         Self {
             func,
             out,
             regs,
             scratch,
+            entry,
             block_offsets: vec![usize::MAX; func.blocks.len()],
             patches: Vec::new(),
             move_pairs: Vec::new(),
@@ -729,17 +811,17 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     fn emit(mut self) -> Option<()> {
         self.emit_entry_loads();
 
-        for block in self.func.blocks.iter().filter(|block| !block.tombstone) {
+        for block in &self.func.blocks {
+            if block.tombstone {
+                continue;
+            }
+
             self.block_offsets[block.id.0 as usize] = self.out.len();
 
             for instr in &block.instructions {
                 self.emit_instr(instr)?;
             }
-            let next_block = self.func.blocks[block.id.0 as usize + 1..]
-                .iter()
-                .find(|block| !block.tombstone)
-                .map(|block| block.id);
-            self.emit_term(block.term.as_ref(), next_block)?;
+            self.emit_term(block.term.as_ref())?;
         }
 
         self.patch_jumps()
@@ -772,8 +854,41 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             ir::Instr::Bin {
                 op, dst, lhs, rhs, ..
             } => self.emit_bin(*op, dst.id, *lhs, *rhs)?,
+            ir::Instr::Store {
+                src, base, offset, ..
+            } => self.emit_store(*src, *base, *offset)?,
+            ir::Instr::Load {
+                dst, base, offset, ..
+            } => self.emit_load(dst.id, *base, *offset)?,
+            ir::Instr::AddrOf {
+                dst, base, offset, ..
+            } => self.emit_addrof(dst.id, *base, *offset)?,
             _ => skip!(self.func, "unsupported instruction {instr:?}"),
         }
+        Some(())
+    }
+
+    fn emit_store(&mut self, src: ir::Id, base: ir::Id, offset: u32) -> Option<()> {
+        let (Some(src), Some(base)) = (reg_of(self.regs, src), reg_of(self.regs, base)) else {
+            skip!(self.func, "unallocated store operand");
+        };
+        emit(self.out, Insn::StoreMem { base, offset, src });
+        Some(())
+    }
+
+    fn emit_load(&mut self, dst: ir::Id, base: ir::Id, offset: u32) -> Option<()> {
+        let (Some(dst), Some(base)) = (reg_of(self.regs, dst), reg_of(self.regs, base)) else {
+            skip!(self.func, "unallocated load operand");
+        };
+        emit(self.out, Insn::LoadMem { dst, base, offset });
+        Some(())
+    }
+
+    fn emit_addrof(&mut self, dst: ir::Id, base: ir::Id, offset: u32) -> Option<()> {
+        let (Some(dst), Some(base)) = (reg_of(self.regs, dst), reg_of(self.regs, base)) else {
+            skip!(self.func, "unallocated addrof operand");
+        };
+        emit(self.out, Insn::LeaMem { dst, base, offset });
         Some(())
     }
 
@@ -873,12 +988,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         emit(self.out, Insn::Sete { dst });
     }
 
-    /// Emit one block terminator, using `next_block` for fallthrough choices.
-    fn emit_term(
-        &mut self,
-        term: Option<&ir::Terminator>,
-        next_block: Option<ir::Id>,
-    ) -> Option<()> {
+    fn emit_term(&mut self, term: Option<&ir::Terminator>) -> Option<()> {
         match term {
             None => {}
             Some(ir::Terminator::Return { value, .. }) => self.emit_return(*value)?,
@@ -895,16 +1005,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 yes: (yes_id, yes_params),
                 no: (no_id, no_params),
                 ..
-            }) => self.emit_branch_cmp_imm(
-                *op,
-                *lhs,
-                *imm,
-                *yes_id,
-                *yes_params,
-                *no_id,
-                *no_params,
-                next_block,
-            )?,
+            }) => self.emit_branch_cmp_imm(*op, *lhs, *imm, *yes_id, *yes_params, *no_id, *no_params)?,
             Some(ir::Terminator::Jump { id, params, .. }) => self.emit_jump(*id, *params)?,
             Some(ir::Terminator::Tail {
                 func: tail_func,
@@ -978,7 +1079,6 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         yes_params: ir::ParamsId,
         no_id: ir::Id,
         no_params: ir::ParamsId,
-        next_block: Option<ir::Id>,
     ) -> Option<()> {
         let Some(yes_dst) = branch_target_params(self.func, yes_id) else {
             skip!(self.func, "bad branch target b{}", yes_id.0);
@@ -988,22 +1088,12 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         };
         let yes_src = self.func.params(yes_params);
         let no_src = self.func.params(no_params);
-        let no_moves_empty = params_moves_empty(self.regs, no_src, no_dst);
 
         self.emit_edge_params(yes_src, yes_dst)?;
         let Some(lhs) = reg_of(self.regs, lhs) else {
             skip!(self.func, "unallocated branch comparison operand");
         };
         self.emit_cmp_imm(op, lhs, imm)?;
-
-        if op == BinOp::IEq && Some(yes_id) == next_block && no_moves_empty {
-            // If the true arm is the next emitted block and the false edge
-            // needs no parameter moves, invert the branch and fall through to
-            // true. This is the shape BranchCmpImm was added for:
-            // `test/cmp; jnz false; true: ...`.
-            self.defer_jnz(no_id);
-            return Some(());
-        }
 
         if op == BinOp::IEq {
             // General case: branch to yes when equal; otherwise resolve the no
@@ -1041,7 +1131,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     /// Lower a self tail-call as edge-parameter moves plus a jump to entry.
     fn emit_self_tail(&mut self, args: &[ir::Id]) -> Option<()> {
         self.emit_edge_params(args, &self.func.params)?;
-        self.defer_jmp(first_live_block(self.func).expect("validated non-empty function"));
+        self.defer_jmp(self.entry);
         Some(())
     }
 
@@ -1123,6 +1213,46 @@ mod tests {
             enc(Insn::LoadSlot { dst: 8, slot: 2 }),
             [0x4c, 0x8b, 0x47, 0x10]
         ); // mov r8,[rdi+16]
+        assert_eq!(
+            enc(Insn::LoadMem {
+                dst: 0,
+                base: 1,
+                offset: 8
+            }),
+            [0x48, 0x8b, 0x41, 0x08]
+        ); // mov rax,[rcx+8]
+        assert_eq!(
+            enc(Insn::StoreMem {
+                base: 1,
+                offset: 8,
+                src: 2
+            }),
+            [0x48, 0x89, 0x51, 0x08]
+        ); // mov [rcx+8],rdx
+        assert_eq!(
+            enc(Insn::LeaMem {
+                dst: 0,
+                base: 1,
+                offset: 8
+            }),
+            [0x48, 0x8d, 0x41, 0x08]
+        ); // lea rax,[rcx+8]
+        assert_eq!(
+            enc(Insn::LoadMem {
+                dst: 8,
+                base: 12,
+                offset: 0
+            }),
+            [0x4d, 0x8b, 0x44, 0x24, 0x00]
+        ); // mov r8,[r12+0]
+        assert_eq!(
+            enc(Insn::LoadMem {
+                dst: 0,
+                base: 1,
+                offset: 128
+            }),
+            [0x48, 0x8b, 0x81, 0x80, 0x00, 0x00, 0x00]
+        ); // mov rax,[rcx+128]
         assert_eq!(enc(Insn::Mov { dst: 0, src: 1 }), [0x48, 0x89, 0xc8]); // mov rax,rcx
         assert_eq!(enc(Insn::Add { dst: 0, src: 2 }), [0x48, 0x01, 0xd0]); // add rax,rdx
         assert_eq!(enc(Insn::Sub { dst: 0, src: 2 }), [0x48, 0x29, 0xd0]); // sub rax,rdx
