@@ -398,6 +398,10 @@ mod tests {
     Double
     Bool
     Void
+    Option
+    Array
+    Foreign
+    Record
     "),
             vec![
                 Type::Import,
@@ -411,6 +415,10 @@ mod tests {
                 Type::Double,
                 Type::Bool,
                 Type::Void,
+                Type::Option,
+                Type::Array,
+                Type::Foreign,
+                Type::Record,
             ]
         );
     }

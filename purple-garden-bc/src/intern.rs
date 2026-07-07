@@ -74,6 +74,10 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
     }
 
     pub fn into_vec_fn<O>(self, modify: fn(T) -> O) -> Vec<O> {
+        self.into_vec_map(modify)
+    }
+
+    pub fn into_vec_map<O>(self, mut modify: impl FnMut(T) -> O) -> Vec<O> {
         let len = self.next_id as usize;
         let mut vec: Vec<MaybeUninit<O>> = Vec::with_capacity(len);
 

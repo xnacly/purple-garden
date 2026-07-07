@@ -394,9 +394,29 @@ impl<'p> Parser<'p> {
         Ok(self.push_node(Node::Match { id, cases, default }))
     }
 
-    /// expr = atom | ident | "(" expr ")" | prefix-op expr | expr postfix-op | expr infix-op expr
+    /// expr = atom | ident | "(" expr ")" | prefix-op expr | expr postfix-op | expr infix-op expr |
+    /// struct
     fn parse_expr(&mut self, min_bp: u8) -> Result<NodeId, Diagnostic> {
         let mut lhs = match self.cur().t {
+            Type::CurlyLeft => {
+                let src = self.cur.clone();
+                // skip Type::CurlyLeft
+                self.advance()?;
+
+                let mut fields = vec![];
+
+                // <key>: <value>
+                while !self.at_end() && self.cur().t != Type::CurlyRight {
+                    let key = self.expect_ident()?;
+                    self.expect(Type::Colon)?;
+                    let value = self.parse_expr(0)?;
+                    fields.push((key, value))
+                }
+
+                self.expect(Type::CurlyRight)?;
+                let id = self.next_id();
+                self.push_node(Node::Record { src, id, fields })
+            }
             Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => {
                 let raw = self.cur.clone();
                 self.advance()?;
@@ -534,17 +554,16 @@ impl<'p> Parser<'p> {
         })
     }
 
-    /// type = atom-type | "Foreign" "<" ident ">" | "Option" "<" type ">" | "Array" "<" type ">"
+    /// type = atom-type | "Foreign" "<" ident ">" | "Option" "<" type ">" | "Array" "<" type ">" |
+    /// "Record" "<" (ident ":" type)* ">"
     fn parse_type(&mut self) -> Result<TypeExprId, Diagnostic> {
         let Token { t, .. } = self.cur();
         Ok(match t {
-            // Atom types
             Type::Str | Type::Int | Type::Bool | Type::Void | Type::Double => {
                 let tt = self.push_type(TypeExpr::Atom(self.cur().clone()));
                 self.advance()?;
                 tt
             }
-            // Foreign types: Foreign<Counter>
             Type::Foreign => {
                 self.advance()?;
                 self.expect(Type::LessThan)?;
@@ -559,7 +578,7 @@ impl<'p> Parser<'p> {
                 self.push_type(TypeExpr::Foreign(inner))
             }
             // Optionals: Option<type>
-            Type::Ident("Option") => {
+            Type::Option => {
                 self.advance()?;
                 self.expect(Type::LessThan)?;
                 if self.cur().t == Type::GreaterThan {
@@ -572,8 +591,7 @@ impl<'p> Parser<'p> {
                 self.expect(Type::GreaterThan)?;
                 self.push_type(TypeExpr::Option(inner))
             }
-            // Arrays: Array<type>
-            Type::Ident("Array") => {
+            Type::Array => {
                 self.advance()?;
                 self.expect(Type::LessThan)?;
                 if self.cur().t == Type::GreaterThan {
@@ -586,9 +604,23 @@ impl<'p> Parser<'p> {
                 self.expect(Type::GreaterThan)?;
                 self.push_type(TypeExpr::Array(inner))
             }
+            Type::Record => {
+                let src = self.cur().clone();
+                self.advance()?;
+                self.expect(Type::LessThan)?;
+                let mut fields = vec![];
+                while !self.at_end() && self.cur().t != Type::GreaterThan {
+                    let field_name = self.expect_ident()?;
+                    self.expect(Type::Colon)?;
+                    let field_type = self.parse_type()?;
+                    fields.push((field_name, field_type));
+                }
+                self.expect(Type::GreaterThan)?;
+                self.push_type(TypeExpr::Record { src, fields })
+            }
             _ => {
                 return Err(Diagnostic::at_token(
-                    "Bad type, expected one of: Str, Int, Double, Bool, Void, Foreign<name>, Option<type> or Array<type>",
+                    "Bad type, expected one of: Str, Int, Double, Bool, Void, Foreign<name>, Option<type>, Array<type> or Record<field: type>",
                     self.cur(),
                 ));
             }
@@ -652,6 +684,14 @@ mod tests {
         (counter, "Foreign<Counter>", "Foreign<Counter>")
     }
 
+    table_parse_types! {
+        parse_types_record,
+        (empty, "Record<>", "Record<>")
+        (fields, "Record<name: Str age: Int>", "Record<name: Str age: Int>")
+        (nested, "Record<name: Str job: Record<title: Str since: Int>>", "Record<name: Str job: Record<title: Str since: Int>>")
+        (generic_fields, "Record<names: Array<Str> maybe_age: Option<Int>>", "Record<names: Array<Str> maybe_age: Option<Int>>")
+    }
+
     #[test]
     fn empty_foreign_has_specific_error() {
         let l = Lexer::new(b"Foreign<>");
@@ -701,7 +741,76 @@ mod tests {
         (function_with_explicit_void, "fn zero_args() {}", 1)
         (function, "fn implicit_void() {}", 1)
         (foreign_function, "fn new(value: Foreign<Counter>) Foreign<Counter> {}", 1)
+        (record_function, "fn new_user(name: Str age: Int) Record<name: Str age: Int> { { name: name age: age } }", 1)
         (expression, "3+0.1415*5/27", 1)
+    }
+
+    #[test]
+    fn parses_empty_record_literal() {
+        let l = Lexer::new(b"{}");
+        let p = Parser::new(l);
+        let ast = p.parse().unwrap();
+
+        assert_eq!(ast.roots.len(), 1);
+        let Node::Record { fields, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected record root, got {:?}", ast.node(ast.roots[0]));
+        };
+        assert!(fields.is_empty());
+    }
+
+    #[test]
+    fn parses_record_literal_fields() {
+        let l = Lexer::new(br#"{ name: "teo" age: 23 }"#);
+        let p = Parser::new(l);
+        let ast = p.parse().unwrap();
+
+        assert_eq!(ast.roots.len(), 1);
+        let Node::Record { fields, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected record root, got {:?}", ast.node(ast.roots[0]));
+        };
+
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].0.t, crate::lex::Type::Ident("name"));
+        assert!(matches!(ast.node(fields[0].1), Node::Atom { .. }));
+        assert_eq!(fields[1].0.t, crate::lex::Type::Ident("age"));
+        assert!(matches!(ast.node(fields[1].1), Node::Atom { .. }));
+    }
+
+    #[test]
+    fn parses_nested_record_literal() {
+        let l = Lexer::new(br#"{ name: "teo" job: { title: "dev" since: 2024 } }"#);
+        let p = Parser::new(l);
+        let ast = p.parse().unwrap();
+
+        let Node::Record { fields, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected record root, got {:?}", ast.node(ast.roots[0]));
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[1].0.t, crate::lex::Type::Ident("job"));
+
+        let Node::Record {
+            fields: nested_fields,
+            ..
+        } = ast.node(fields[1].1)
+        else {
+            panic!("expected nested record, got {:?}", ast.node(fields[1].1));
+        };
+        assert_eq!(nested_fields.len(), 2);
+        assert_eq!(nested_fields[0].0.t, crate::lex::Type::Ident("title"));
+        assert_eq!(nested_fields[1].0.t, crate::lex::Type::Ident("since"));
+    }
+
+    #[test]
+    fn parses_record_field_access() {
+        let l = Lexer::new(br#"{ name: "teo" age: 23 }.name"#);
+        let p = Parser::new(l);
+        let ast = p.parse().unwrap();
+
+        let Node::Field { target, name, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected field access root, got {:?}", ast.node(ast.roots[0]));
+        };
+        assert_eq!(name.t, crate::lex::Type::Ident("name"));
+        assert!(matches!(ast.node(*target), Node::Record { .. }));
     }
 
     #[test]

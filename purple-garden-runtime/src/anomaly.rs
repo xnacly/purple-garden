@@ -6,6 +6,7 @@
 pub enum Anomaly {
     DivisionByZero { pc: usize },
     InvalidSyscall { pc: usize },
+    AllocationFailed { pc: usize },
     Msg { msg: &'static str, pc: usize },
 }
 
@@ -15,6 +16,7 @@ impl Anomaly {
         match self {
             Anomaly::DivisionByZero { .. } => "Division by zero",
             Anomaly::InvalidSyscall { .. } => "InvalidSyscall",
+            Anomaly::AllocationFailed { .. } => "Allocation failed",
             Anomaly::Msg { msg, .. } => msg,
         }
     }
@@ -26,6 +28,7 @@ impl Anomaly {
         match self {
             Anomaly::DivisionByZero { pc }
             | Anomaly::InvalidSyscall { pc }
+            | Anomaly::AllocationFailed { pc }
             | Anomaly::Msg { pc, .. } => *pc,
         }
     }

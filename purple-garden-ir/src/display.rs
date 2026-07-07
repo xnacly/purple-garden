@@ -37,7 +37,7 @@ impl Display for crate::Fn<'_> {
 
 impl Display for TypeId<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{:?}", self.id.0, self.ty)
+        write!(f, "{}:{}", self.id.0, self.ty)
     }
 }
 
@@ -50,6 +50,26 @@ impl Display for Id {
 impl Display for Instr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Instr::Store {
+                src, base, offset, ..
+            } => write!(f, "Store %v{}+{}, %v{}", base, offset, src)?,
+            Instr::Load {
+                dst, base, offset, ..
+            } => write!(f, "%v{dst} = Load %v{}+{}", base, offset)?,
+            Instr::AddrOf {
+                dst, base, offset, ..
+            } => write!(f, "%v{dst} = AddrOf %v{}+{}", base, offset)?,
+            Instr::Alloc { dst, .. } => {
+                let layout = dst.ty.layout();
+                write!(
+                    f,
+                    "%v{} = Alloc {}(size={},align={})",
+                    dst.id,
+                    dst.ty,
+                    layout.size(),
+                    layout.align()
+                )?
+            }
             Instr::Bin {
                 op, dst, lhs, rhs, ..
             } => write!(f, "%v{} = {:?} %v{}, %v{}", dst, op, lhs.0, rhs.0)?,

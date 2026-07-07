@@ -19,13 +19,20 @@ pub fn ir(ir: &mut [purple_garden_ir::Func]) {
         // constant operations, we could have fully merged together at compiletime
         ir::const_fold(fun, &mut scratch);
         ir::const_fold_syscalls(fun, &mut scratch);
+
         ir::imm_fold(fun, &mut scratch);
         ir::branch_cmp(fun, &mut scratch);
         ir::indirect_jump(fun);
+
         // Order: before tailcall, so a Call-then-Jump-to-Ret-join pattern
         // becomes a direct Return that tailcall then picks up as Pattern A.
         ir::ret_inline(fun);
         ir::tailcall(fun);
+        ir::addrof_fold(fun, &mut scratch);
+        ir::load_store_fold(fun);
+
+        // Order: dead code elimination always last, for the backends having less work (and the reg
+        // allocator)
         ir::dce(fun, &mut scratch);
     }
 }

@@ -86,6 +86,18 @@ impl<'t> TypecheckOutput<'t> {
 
     fn render_node(&self, ast: &Ast<'t>, node_id: NodeId, indent: usize, out: &mut String) {
         match ast.node(node_id) {
+            Node::Record { id, fields, .. } => {
+                use std::fmt::Write as _;
+
+                self.render_value(indent, "record", self.type_at(*id), out);
+                for (field, value) in fields {
+                    let lex::Type::Ident(name) = field.t else {
+                        unreachable!()
+                    };
+                    writeln!(out, "{}field {name}", "  ".repeat(indent + 1)).unwrap();
+                    self.render_node(ast, *value, indent + 2, out);
+                }
+            }
             Node::Atom { id, raw } => {
                 self.render_value(indent, raw.t.as_str(), self.type_at(*id), out);
             }
@@ -414,10 +426,6 @@ impl<'t> Typechecker<'t> {
             self.register_extern(node);
         }
 
-        // Typechecking is the first frontend pass that can collect multiple
-        // diagnostics today. Parsing is still fail-fast, but once we have a
-        // valid AST we walk every root and preserve any types that remain
-        // obvious after an error. Lowering decides whether to bail.
         for &node in &self.ast.roots {
             self.node(node);
         }
@@ -713,6 +721,31 @@ impl<'t> Typechecker<'t> {
         }
 
         match node {
+            Node::Record { id, fields, .. } => {
+                let mut typed_fields = Vec::with_capacity(fields.len());
+                let mut poisoned = false;
+
+                for (key, value) in fields {
+                    let lex::Type::Ident(inner_name) = key.t else {
+                        unreachable!()
+                    };
+
+                    match self.node(*value) {
+                        TcType::Known(ty) => {
+                            typed_fields.push((inner_name, ty));
+                        }
+                        TcType::Poison => {
+                            poisoned = true;
+                        }
+                    }
+                }
+
+                if poisoned {
+                    return TcType::Poison;
+                }
+
+                self.set_known(*id, Type::Record(typed_fields))
+            }
             Node::Atom { id, raw } => {
                 let t = crate::type_from_atom_token_type(&raw.t);
                 self.set_known(*id, t)
@@ -867,19 +900,49 @@ impl<'t> Typechecker<'t> {
                 }
                 cast
             }
-            Node::Field { name, .. } => {
-                self.report(Diagnostic::at_token(
-                    "field expressions are only supported as package function calls",
-                    name,
-                ));
-                TcType::Poison
+            Node::Field { id, target, name } => {
+                let target_type = self.node(*target);
+
+                match target_type {
+                    TcType::Known(ref target @ Type::Record(ref fields)) => {
+                        let lex::Type::Ident(idx_path_end) = name.t else {
+                            unreachable!();
+                        };
+
+                        // PERF: this record path lookup should mabye be a map
+                        let Some((_, ty)) = fields
+                            .iter()
+                            .find(|(field_name, _)| *field_name == idx_path_end)
+                        else {
+                            self.report(Diagnostic::at_token(
+                                format!("{target} does not have a field called {idx_path_end}"),
+                                name,
+                            ));
+                            return TcType::Poison;
+                        };
+
+                        self.set_type(*id, ty.clone());
+                        TcType::Known(ty.clone())
+                    }
+                    TcType::Known(t) => {
+                        self.report(Diagnostic::at_token(
+                            format!("{t} can not be indexed in this way"),
+                            name,
+                        ));
+                        TcType::Poison
+                    }
+                    _ => TcType::Poison,
+                }
             }
             Node::Call { id, target, args } => {
                 let (tok, inner_name, fun) = match self.ast.node(*target) {
                     Node::Field { target, name, .. } => {
                         let Node::Ident { name: pkg_tok, .. } = self.ast.node(*target) else {
-                            // TODO: add error handling for non ident call targets
-                            unreachable!();
+                            self.report(Diagnostic::at_token(
+                                "only package functions can be called through field syntax",
+                                name,
+                            ));
+                            return TcType::Poison;
                         };
                         let lex::Token {
                             t: lex::Type::Ident(pkg_name),
@@ -1123,5 +1186,64 @@ impl<'t> Typechecker<'t> {
             Node::Array { .. } => todo!(),
             Node::Object { .. } => todo!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{lex::Lexer, parser::Parser};
+
+    fn parse(source: &[u8]) -> Ast<'_> {
+        Parser::new(Lexer::new(source)).parse().unwrap()
+    }
+
+    fn type_of<'t>(ast: &Ast<'t>, out: &TypecheckOutput<'t>, node: NodeId) -> Option<Type<'t>> {
+        ast.value_id(node)
+            .and_then(|id| out.types.get(id))
+            .cloned()
+            .flatten()
+    }
+
+    #[test]
+    fn record_field_access_resolves_field_type() {
+        let ast = parse(br#"{ name: "teo" age: 23 }.name"#);
+        let out = Typechecker::new(&ast).check();
+
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Str));
+    }
+
+    #[test]
+    fn nested_record_field_access_resolves_inner_field_type() {
+        let ast = parse(br#"{ name: "teo" job: { title: "dev" since: 2024 } }.job.since"#);
+        let out = Typechecker::new(&ast).check();
+
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Int));
+    }
+
+    #[test]
+    fn unknown_record_field_reports_error() {
+        let ast = parse(br#"{ name: "teo" age: 23 }.missing"#);
+        let out = Typechecker::new(&ast).check();
+
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "Record<name: Str age: Int> does not have a field called missing"
+        );
+    }
+
+    #[test]
+    fn field_call_with_non_package_target_reports_error() {
+        let ast = parse(br#"{ job: { run: "nope" } }.job.run()"#);
+        let out = Typechecker::new(&ast).check();
+
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "only package functions can be called through field syntax"
+        );
     }
 }

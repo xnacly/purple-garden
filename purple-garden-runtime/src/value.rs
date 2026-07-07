@@ -36,9 +36,12 @@ impl Value {
 
     #[inline(always)]
     #[must_use]
-    pub fn as_str<'t>(&self, pool: &'t [(u32, u32)], data: &'t str) -> &'t str {
-        let (off, len) = pool[self.0 as usize];
-        &data[off as usize..off as usize + len as usize]
+    pub fn as_str<'t>(&self) -> &'t str {
+        let ptr = self.as_ptr::<u8>();
+        let len_size = std::mem::size_of::<usize>();
+        let len = unsafe { *(ptr as *const usize) };
+        let bytes = unsafe { std::slice::from_raw_parts(ptr.add(len_size), len) };
+        unsafe { std::str::from_utf8_unchecked(bytes) }
     }
 
     #[inline(always)]
@@ -142,14 +145,13 @@ impl<T: PgType + ?Sized> PgType for &mut T {
 
 impl<'vm> FromVm<'vm> for &'vm str {
     fn from_vm(vm: &'vm Vm, idx: usize) -> Self {
-        vm.r(idx).as_str(vm.strings(), vm.string_data())
+        vm.r(idx).as_str()
     }
 }
 
 impl IntoVm for &str {
     fn into_vm(self, vm: &mut Vm) -> Value {
-        let idx = vm.new_string(self.to_owned());
-        Value::from(idx)
+        vm.new_string(self.to_owned())
     }
 }
 
@@ -159,14 +161,13 @@ impl PgType for String {
 
 impl<'vm> FromVm<'vm> for String {
     fn from_vm(vm: &'vm Vm, idx: usize) -> Self {
-        vm.r(idx).as_str(vm.strings(), vm.string_data()).to_owned()
+        vm.r(idx).as_str().to_owned()
     }
 }
 
 impl IntoVm for String {
     fn into_vm(self, vm: &mut Vm) -> Value {
-        let idx = vm.new_string(self);
-        Value::from(idx)
+        vm.new_string(self)
     }
 }
 
@@ -242,8 +243,8 @@ mod tests {
         let mut vm = Vm::new(VmConfig::default());
         let hello = vm.new_string("hello".to_owned());
         let world = vm.new_string("world".to_owned());
-        *vm.r_mut(0) = Value::from(hello);
-        *vm.r_mut(1) = Value::from(world);
+        *vm.r_mut(0) = hello;
+        *vm.r_mut(1) = world;
         *vm.r_mut(2) = Value::from(42_i64);
         *vm.r_mut(3) = Value::from(3.5_f64);
         *vm.r_mut(4) = Value::from(true);
@@ -256,8 +257,9 @@ mod tests {
         assert!(<bool as FromVm>::from_vm(&vm, 4));
         assert_eq!(<String as FromVm>::from_vm(&vm, 0), "hello");
 
-        *vm.r_mut(0) = "returned".into_vm(&mut vm);
-        assert_eq!(vm.r(0).as_str(vm.strings(), vm.string_data()), "returned");
+        let returned = "returned".into_vm(&mut vm);
+        *vm.r_mut(0) = returned;
+        assert_eq!(vm.r(0).as_str(), "returned");
         *vm.r_mut(0) = 7_i64.into_vm(&mut vm);
         assert_eq!(vm.r(0).as_int(), 7);
         *vm.r_mut(0) = 2.25_f64.into_vm(&mut vm);

@@ -1,9 +1,14 @@
-use crate::{Anomaly, BuiltinFn, REGISTER_COUNT, Value, op::Op};
-use std::ffi::c_void;
+use crate::{
+    Anomaly, BuiltinFn, REGISTER_COUNT, Value,
+    gc::{AllocType, Gc},
+    op::Op,
+};
+use std::{alloc::Layout, ffi::c_void};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VmConfig {
     pub backtrace: bool,
+    pub no_gc: bool,
 }
 
 /// Return address of the synthetic root call frame pushed in [`Vm::new`].
@@ -12,6 +17,8 @@ pub struct VmConfig {
 /// run loop exits. `MAX - 1` (not `MAX`) keeps that `+ 1` from overflowing in
 /// debug builds.
 const ROOT_RETURN_ADDR: usize = usize::MAX - 1;
+
+type CollectFn = fn(&mut Vm);
 
 #[derive(Default, Debug)]
 pub struct CallFrame {
@@ -50,14 +57,6 @@ pub unsafe extern "C" fn syscall_unimplemented(vm: *mut c_void) {
     vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
 }
 
-/// Divide-by-zero trap, called from JIT code (enum layout isn't a stable ABI,
-/// so the JIT can't set `pending_trap` itself). `vm.pc` was published before the
-/// `Sys` entering the native function, so it points at the call site.
-pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) {
-    let vm = unsafe { &mut *vm.cast::<Vm>() };
-    vm.trap(Anomaly::DivisionByZero { pc: vm.pc });
-}
-
 #[repr(C)]
 #[derive(Debug)]
 pub struct Vm {
@@ -70,13 +69,8 @@ pub struct Vm {
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
-    /// `(offset, len)` spans into [`Vm::string_data`]. Indexed by the u64 stored in a [`Value`].
-    /// Compile-time literals are laid out at compile finalization; runtime strings
-    /// are appended via [`Vm::new_string`]. Offsets remain valid across appends because
-    /// they are byte indices, not pointers.
-    pub strings: Vec<(u32, u32)>,
-    /// Flat backing buffer for all string data.
-    pub string_data: String,
+    pub gc: Gc,
+    pub const_strings: Vec<Box<[u8]>>,
 
     /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
     /// function the virtual machine currently executes in, this behaviour only occurs if
@@ -88,6 +82,8 @@ pub struct Vm {
     pub pending_trap: Option<Anomaly>,
 
     config: VmConfig,
+    /// Called when allocation wants to run a collection pass.
+    collect_fn: CollectFn,
 }
 
 /// trap in the vm; return Err(<anomaly>) if expr == true
@@ -112,38 +108,92 @@ impl Vm {
             #[cfg(debug_assertions)]
             spilled_depth: 0,
         });
+        let collect = if config.no_gc {
+            Self::collect_noop
+        } else {
+            Self::collect
+        };
+
         Self {
             r: [const { Value(0) }; REGISTER_COUNT],
             frames,
             pc: 0,
             bytecode: Vec::new(),
             globals: Vec::new(),
-            strings: Vec::new(),
-            string_data: String::new(),
+            gc: Gc::new(),
+            const_strings: Vec::new(),
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(4096),
             pending_trap: None,
             config,
+            collect_fn: collect,
         }
     }
 
-    pub fn new_string(&mut self, s: String) -> usize {
-        let idx = self.strings.len();
-        let off = self.string_data.len() as u32;
-        let len = s.len() as u32;
-        self.string_data.push_str(&s);
-        self.strings.push((off, len));
-        idx
+    fn collect(&mut self) {
+        self.gc.collect();
     }
 
-    #[must_use]
-    pub fn strings(&self) -> &[(u32, u32)] {
-        &self.strings
+    fn collect_noop(&mut self) {}
+
+    pub fn try_alloc(
+        &mut self,
+        alloc_type: AllocType,
+        layout: Layout,
+    ) -> Option<std::ptr::NonNull<u8>> {
+        if let Some(ptr) = self.gc.alloc_fast(alloc_type, layout) {
+            return Some(ptr);
+        }
+
+        self.alloc_slow(alloc_type, layout)
     }
 
-    #[must_use]
-    pub fn string_data(&self) -> &str {
-        &self.string_data
+    #[cold]
+    fn alloc_slow(
+        &mut self,
+        alloc_type: AllocType,
+        layout: Layout,
+    ) -> Option<std::ptr::NonNull<u8>> {
+        (self.collect_fn)(self);
+
+        if let Some(ptr) = self.gc.alloc_fast(alloc_type, layout) {
+            return Some(ptr);
+        }
+
+        self.gc.grow(layout).ok()?;
+        self.gc.alloc_fast(alloc_type, layout)
+    }
+
+    pub fn alloc(&mut self, alloc_type: AllocType, layout: Layout) -> std::ptr::NonNull<u8> {
+        self.try_alloc(alloc_type, layout)
+            .expect("GC allocation failed")
+    }
+
+    pub fn new_string(&mut self, s: String) -> Value {
+        let bytes = s.as_bytes();
+        let len_size = std::mem::size_of::<usize>();
+        let layout = Layout::from_size_align(len_size + bytes.len(), std::mem::align_of::<usize>())
+            .expect("string allocation layout");
+        let payload = self.alloc(AllocType::String, layout).as_ptr();
+
+        unsafe {
+            (payload as *mut usize).write(bytes.len());
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), payload.add(len_size), bytes.len());
+        }
+
+        Value::from_ptr(payload)
+    }
+
+    pub fn new_const_string(&mut self, s: String) -> Value {
+        let len_size = std::mem::size_of::<usize>();
+        let mut payload = vec![0u8; len_size + s.len()].into_boxed_slice();
+        unsafe {
+            (payload.as_mut_ptr() as *mut usize).write(s.len());
+            std::ptr::copy_nonoverlapping(s.as_ptr(), payload.as_mut_ptr().add(len_size), s.len());
+        }
+        let value = Value::from_ptr(payload.as_mut_ptr());
+        self.const_strings.push(payload);
+        value
     }
 
     pub fn run(&mut self, syscalls: &[BuiltinFn]) -> Result<(), Anomaly> {
@@ -422,6 +472,29 @@ impl Vm {
                 Op::CastToBool { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_bool();
                 },
+                Op::Alloc {
+                    dst,
+                    kind,
+                    size,
+                    align,
+                } => unsafe {
+                    r_mut!(dst) = Value::from_ptr(
+                        self.alloc(
+                            kind,
+                            Layout::from_size_align_unchecked(size as usize, align as usize),
+                        )
+                        .as_ptr(),
+                    );
+                },
+                Op::Store { base, offset, src } => unsafe {
+                    (r!(base).as_ptr::<u8>().add(offset as usize) as *mut Value).write(*r!(src));
+                },
+                Op::Load { dst, base, offset } => unsafe {
+                    r_mut!(dst) = *(r!(base).as_ptr::<u8>().add(offset as usize) as *const Value);
+                },
+                Op::AddrOf { dst, base, offset } => unsafe {
+                    r_mut!(dst) = Value::from_ptr(r!(base).as_ptr::<u8>().add(offset as usize));
+                },
                 Op::Nop => {}
             }
 
@@ -693,6 +766,83 @@ mod ops {
         ]);
         assert_eq!(vm.r(0).as_int(), 99);
         assert_eq!(vm.r(5).as_int(), 99);
+    }
+
+    #[test]
+    fn alloc_store_writes_payload_offset() {
+        let vm = run(vec![
+            Op::Alloc {
+                dst: 0,
+                kind: AllocType::Record,
+                size: 16,
+                align: 8,
+            },
+            Op::LoadI { dst: 1, value: 42 },
+            Op::Store {
+                base: 0,
+                offset: 8,
+                src: 1,
+            },
+        ]);
+
+        let payload = vm.r(0).as_ptr::<u8>();
+        let stored = unsafe { *(payload.add(8) as *const Value) };
+        assert_eq!(stored.as_int(), 42);
+    }
+
+    #[test]
+    fn alloc_store_load_roundtrip() {
+        let vm = run(vec![
+            Op::Alloc {
+                dst: 0,
+                kind: AllocType::Record,
+                size: 16,
+                align: 8,
+            },
+            Op::LoadI { dst: 1, value: 42 },
+            Op::Store {
+                base: 0,
+                offset: 8,
+                src: 1,
+            },
+            Op::Load {
+                dst: 2,
+                base: 0,
+                offset: 8,
+            },
+        ]);
+
+        assert_eq!(vm.r(2).as_int(), 42);
+    }
+
+    #[test]
+    fn addrof_points_at_payload_offset() {
+        let vm = run(vec![
+            Op::Alloc {
+                dst: 0,
+                kind: AllocType::Record,
+                size: 16,
+                align: 8,
+            },
+            Op::LoadI { dst: 1, value: 42 },
+            Op::Store {
+                base: 0,
+                offset: 8,
+                src: 1,
+            },
+            Op::AddrOf {
+                dst: 2,
+                base: 0,
+                offset: 8,
+            },
+            Op::Load {
+                dst: 3,
+                base: 2,
+                offset: 0,
+            },
+        ]);
+
+        assert_eq!(vm.r(3).as_int(), 42);
     }
 
     #[test]

@@ -1,12 +1,30 @@
 //! Baseline JIT backend.
 //!
-//! This is not an optimizing native-code compiler; it is a dispatch remover.
-//! [`Jit::compile_func`] lowers a supported IR function straight to native code
-//! that reads and writes the VM register file in place. The native ABI passes
-//! `*mut Vm` in the first argument register, and because `Vm::r` is the first
-//! field of `Vm`, generated code treats that pointer as the base of the VM
-//! register slots; scratch native registers (e.g. `rax`) are transient, program
-//! values stay in `Vm::r`.
+//! This is not an optimizing native-code compiler; but rather a dispatch remover.
+//! [`Jit::compile_func`] lowers a supported IR function to native code
+//! thats reading and writing the VM register file in place. The native ABI passes
+//! `*mut Vm` in the first argument register, due to `Vm::r` being the first
+//! field of `Vm`.
+//!
+//! The bytecode backend is the complete backend. Native compilation is an
+//! opportunistic function based fast path: if the target-specific backend returns
+//! `None`, the bytecode compiler lowers the same IR function normally. A
+//! successful native function is retained as executable memory and injected into
+//! the VM as a syscall entry, so the VM can dispatch native and Rust builtins
+//! through the same `Op::Sys` mechanism.
+//!
+//! The high-level pipeline is:
+//!
+//! 1. compute shared IR liveness
+//! 2. ask the active architecture backend to plan the function (based on support, amount of
+//!    registers used, size of function and other heuristics)
+//! 3. allocate physical registers from the liveness and target constraints
+//! 4. emit native code
+//! 5. expose the emitted page as a [`JitFn`]
+//!
+//! The architecture backend owns the supported IR subset. This crate should
+//! therefore be read as a conservative native lowering path, not as a second
+//! semantic implementation of the language.
 
 #[cfg(not(all(
     any(target_os = "linux", target_os = "macos"),
@@ -295,6 +313,82 @@ mod tests_x86 {
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
         assert_eq!(run(jit.code(), [20, 7, 0])[0], 17);
+    }
+
+    #[test]
+    fn loads_record_field_from_pointer_arg() {
+        let record_ty = Type::Record(vec![("first", Type::Int), ("second", Type::Int)]);
+        let mut func = Func::new("field", Id(0), vec![Id(0)], Some(Type::Int));
+        let params = func.intern_params(vec![Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Load {
+                dst: TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+                base: Id(0),
+                offset: 8,
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(1)),
+                span: 0,
+            }),
+        });
+
+        let mut record = [11_u64, 42_u64];
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(run(jit.code(), [record.as_mut_ptr() as u64, 0, 0])[0], 42);
+        drop(record_ty);
+    }
+
+    #[test]
+    fn takes_nested_record_address_and_loads_field() {
+        let record_ty = Type::Record(vec![(
+            "nested",
+            Type::Record(vec![("first", Type::Int), ("second", Type::Int)]),
+        )]);
+        let mut func = Func::new("nested_field", Id(0), vec![Id(0)], Some(Type::Int));
+        let params = func.intern_params(vec![Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::AddrOf {
+                    dst: TypeId {
+                        id: Id(1),
+                        ty: Type::Record(vec![("first", Type::Int), ("second", Type::Int)]),
+                    },
+                    base: Id(0),
+                    offset: 8,
+                    span: 0,
+                },
+                Instr::Load {
+                    dst: TypeId {
+                        id: Id(2),
+                        ty: Type::Int,
+                    },
+                    base: Id(1),
+                    offset: 8,
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+
+        let mut record = [99_u64, 11_u64, 42_u64];
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(run(jit.code(), [record.as_mut_ptr() as u64, 0, 0])[0], 42);
+        drop(record_ty);
     }
 
     #[test]

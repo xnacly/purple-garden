@@ -9,3 +9,4 @@ purple-garden-shared = { path = "../purple-garden-shared" }
 
 [features]
 trace = []
+trace_gc = ["purple-garden-shared/trace"]
