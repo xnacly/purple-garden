@@ -6,22 +6,28 @@ use syn::{
     parse::Parser, parse_macro_input, punctuated::Punctuated, spanned::Spanned,
 };
 
-struct Arg {
+struct FunctionArg {
     name: String,
     binding: Ident,
     ty: Type,
 }
 
-struct Function {
+struct PgFunction {
     ident: Ident,
     wrapper: Ident,
     name: String,
     doc: String,
     pure: bool,
     specialises: Option<String>,
-    args: Vec<Arg>,
+    args: Vec<FunctionArg>,
     ret: Type,
     result: bool,
+}
+
+struct ExpandedFunction {
+    wrapper: TokenStream2,
+    const_eval: Option<TokenStream2>,
+    metadata: TokenStream2,
 }
 
 pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -40,7 +46,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     };
 
-    let mut generated = Vec::new();
+    let mut generated_items = Vec::new();
     let mut metadata = Vec::new();
     let mut errors = TokenStream2::new();
 
@@ -50,12 +56,12 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         };
 
         match expand_function(&api, fun) {
-            Ok((wrapper, eval, meta)) => {
-                generated.push(Item::Verbatim(wrapper));
-                if let Some(eval) = eval {
-                    generated.push(Item::Verbatim(eval));
+            Ok(expanded) => {
+                generated_items.push(Item::Verbatim(expanded.wrapper));
+                if let Some(const_eval) = expanded.const_eval {
+                    generated_items.push(Item::Verbatim(const_eval));
                 }
-                metadata.push(meta);
+                metadata.push(expanded.metadata);
             }
             Err(err) => errors.extend(err.to_compile_error()),
         }
@@ -72,8 +78,8 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         };
     };
 
-    items.extend(generated);
-    items.push(Item::Verbatim(package));
+    generated_items.push(Item::Verbatim(package));
+    items.extend(generated_items);
 
     quote! {
         #module
@@ -112,20 +118,18 @@ fn parse_attr(attr: TokenStream) -> syn::Result<Path> {
     Ok(syn::parse_quote!(::purple_garden))
 }
 
-fn expand_function(
-    api: &Path,
-    fun: &mut ItemFn,
-) -> syn::Result<(TokenStream2, Option<TokenStream2>, TokenStream2)> {
-    let function = Function::parse(fun)?;
-    let eval = function.const_eval()?;
-    Ok((
-        function.wrapper(api),
-        eval.clone(),
-        function.metadata(api, eval.is_some()),
-    ))
+fn expand_function(api: &Path, fun: &mut ItemFn) -> syn::Result<ExpandedFunction> {
+    let function = PgFunction::parse(fun)?;
+    let const_eval = function.const_eval()?;
+
+    Ok(ExpandedFunction {
+        wrapper: function.wrapper(api),
+        metadata: function.metadata(api, const_eval.is_some()),
+        const_eval,
+    })
 }
 
-impl Function {
+impl PgFunction {
     fn parse(fun: &mut ItemFn) -> syn::Result<Self> {
         let ident = fun.sig.ident.clone();
         let (ret, result) = return_type(&fun.sig.output);
@@ -145,44 +149,7 @@ impl Function {
 
     fn wrapper(&self, api: &Path) -> TokenStream2 {
         let wrapper_name = &self.wrapper;
-        let fn_name = &self.ident;
-        let arg_bindings = self.args.iter().enumerate().map(|(idx, arg)| {
-            let binding = &arg.binding;
-            let ty = &arg.ty;
-            quote! {
-                let #binding = <#ty as #api::FromVm>::from_vm(vm, #idx);
-            }
-        });
-        let arg_exprs = self.args.iter().map(|arg| &arg.binding);
-        let ret_ty = &self.ret;
-        let body = match (self.result, returns_unit(ret_ty)) {
-            (false, true) => quote! {
-                #(#arg_bindings)*
-                #fn_name(#(#arg_exprs),*);
-            },
-            (false, false) => quote! {
-                #(#arg_bindings)*
-                let ret = #fn_name(#(#arg_exprs),*);
-                let ret = <#ret_ty as #api::IntoVm>::into_vm(ret, vm);
-                *vm.r_mut(0) = ret;
-            },
-            (true, true) => quote! {
-                #(#arg_bindings)*
-                if let Err(msg) = #fn_name(#(#arg_exprs),*) {
-                    vm.trap(#api::Anomaly::Msg { msg, pc: vm.pc });
-                }
-            },
-            (true, false) => quote! {
-                #(#arg_bindings)*
-                match #fn_name(#(#arg_exprs),*) {
-                    Ok(ret) => {
-                        let ret = <#ret_ty as #api::IntoVm>::into_vm(ret, vm);
-                        *vm.r_mut(0) = ret;
-                    }
-                    Err(msg) => vm.trap(#api::Anomaly::Msg { msg, pc: vm.pc }),
-                }
-            },
-        };
+        let body = self.wrapper_body(api);
 
         quote! {
             unsafe extern "C" fn #wrapper_name(vm: *mut std::ffi::c_void) {
@@ -190,6 +157,88 @@ impl Function {
                 #body
             }
         }
+    }
+
+    fn wrapper_body(&self, api: &Path) -> TokenStream2 {
+        let decode_args = self.vm_arg_decoders(api);
+        let call = self.wrapper_call(api);
+
+        quote! {
+            #(#decode_args)*
+            #call
+        }
+    }
+
+    fn vm_arg_decoders<'a>(&'a self, api: &'a Path) -> impl Iterator<Item = TokenStream2> + 'a {
+        self.args.iter().enumerate().map(move |(idx, arg)| {
+            let binding = &arg.binding;
+            let ty = &arg.ty;
+
+            quote! {
+                let #binding = <#ty as #api::FromVm>::from_vm(vm, #idx);
+            }
+        })
+    }
+
+    fn wrapper_call(&self, api: &Path) -> TokenStream2 {
+        match (self.result, returns_unit(&self.ret)) {
+            (false, true) => self.call_unit_function(),
+            (false, false) => self.call_value_function(api),
+            (true, true) => self.call_unit_result_function(api),
+            (true, false) => self.call_value_result_function(api),
+        }
+    }
+
+    fn call_unit_function(&self) -> TokenStream2 {
+        let fn_name = &self.ident;
+        let args = self.arg_bindings();
+
+        quote! {
+            #fn_name(#(#args),*);
+        }
+    }
+
+    fn call_value_function(&self, api: &Path) -> TokenStream2 {
+        let fn_name = &self.ident;
+        let args = self.arg_bindings();
+        let ret_ty = &self.ret;
+
+        quote! {
+            let ret = #fn_name(#(#args),*);
+            let ret = <#ret_ty as #api::IntoVm>::into_vm(ret, vm);
+            *vm.r_mut(0) = ret;
+        }
+    }
+
+    fn call_unit_result_function(&self, api: &Path) -> TokenStream2 {
+        let fn_name = &self.ident;
+        let args = self.arg_bindings();
+
+        quote! {
+            if let Err(msg) = #fn_name(#(#args),*) {
+                vm.trap(#api::Anomaly::Msg { msg, pc: vm.pc });
+            }
+        }
+    }
+
+    fn call_value_result_function(&self, api: &Path) -> TokenStream2 {
+        let fn_name = &self.ident;
+        let args = self.arg_bindings();
+        let ret_ty = &self.ret;
+
+        quote! {
+            match #fn_name(#(#args),*) {
+                Ok(ret) => {
+                    let ret = <#ret_ty as #api::IntoVm>::into_vm(ret, vm);
+                    *vm.r_mut(0) = ret;
+                }
+                Err(msg) => vm.trap(#api::Anomaly::Msg { msg, pc: vm.pc }),
+            }
+        }
+    }
+
+    fn arg_bindings(&self) -> impl Iterator<Item = &Ident> {
+        self.args.iter().map(|arg| &arg.binding)
     }
 
     fn const_eval(&self) -> syn::Result<Option<TokenStream2>> {
@@ -200,17 +249,17 @@ impl Function {
         let eval_name = format_ident!("__pg_eval_{}", self.ident);
         let fn_name = &self.ident;
         let argc = self.args.len();
-        let mut arg_bindings = Vec::with_capacity(self.args.len());
+        let mut arg_decoders = Vec::with_capacity(self.args.len());
         for (idx, arg) in self.args.iter().enumerate() {
             let Some(expr) = const_arg_expr(&arg.ty, idx) else {
                 return Ok(None);
             };
             let binding = &arg.binding;
-            arg_bindings.push(quote! {
+            arg_decoders.push(quote! {
                 let #binding = #expr;
             });
         }
-        let arg_exprs = self.args.iter().map(|arg| &arg.binding);
+        let arg_exprs = self.arg_bindings();
         let Some(ret_expr) = const_ret_expr(&self.ret) else {
             return Ok(None);
         };
@@ -222,7 +271,7 @@ impl Function {
                 if args.len() != #argc {
                     return None;
                 }
-                #(#arg_bindings)*
+                #(#arg_decoders)*
                 let ret = #fn_name(#(#arg_exprs),*);
                 Some(#ret_expr)
             }
@@ -267,7 +316,7 @@ impl Function {
     }
 }
 
-fn parse_args(inputs: &Punctuated<FnArg, syn::Token![,]>) -> syn::Result<Vec<Arg>> {
+fn parse_args(inputs: &Punctuated<FnArg, syn::Token![,]>) -> syn::Result<Vec<FunctionArg>> {
     inputs
         .iter()
         .enumerate()
@@ -285,7 +334,7 @@ fn parse_args(inputs: &Punctuated<FnArg, syn::Token![,]>) -> syn::Result<Vec<Arg
                 ));
             };
 
-            Ok(Arg {
+            Ok(FunctionArg {
                 name: pat_ident.ident.to_string(),
                 binding: format_ident!("arg{idx}"),
                 ty: arg.ty.as_ref().clone(),
@@ -324,6 +373,7 @@ fn returns_unit(ty: &Type) -> bool {
     matches!(ty, Type::Tuple(tuple) if tuple.elems.is_empty())
 }
 
+#[derive(Default)]
 struct PgFnAttrs {
     /// `#[pg_fn(pure)]`: const-foldable, gets a `__pg_eval_*` companion.
     pure: bool,
@@ -332,11 +382,42 @@ struct PgFnAttrs {
     specialises: Option<String>,
 }
 
+impl PgFnAttrs {
+    fn parse(attr: &Attribute) -> syn::Result<Self> {
+        let mut attrs = Self::default();
+
+        let metas = attr.parse_args_with(Punctuated::<Meta, syn::Token![,]>::parse_terminated)?;
+        for meta in metas {
+            attrs.parse_option(meta)?;
+        }
+
+        Ok(attrs)
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.pure |= other.pure;
+        self.specialises = other.specialises.or_else(|| self.specialises.take());
+    }
+
+    fn parse_option(&mut self, meta: Meta) -> syn::Result<()> {
+        if meta.path().is_ident("pure") {
+            self.pure = true;
+            return Ok(());
+        }
+
+        if meta.path().is_ident("specialises") {
+            self.specialises = Some(parse_specialises_option(meta)?);
+            return Ok(());
+        }
+
+        Err(syn::Error::new(meta.span(), "unknown pg_fn option"))
+    }
+}
+
 /// Strip and parse the `#[pg_fn(..)]` marker off a stdlib fn, leaving its other
 /// attributes intact. Accepts `pure` and `specialises = "group"` in any order.
 fn take_pg_fn_attrs(attrs: &mut Vec<Attribute>) -> syn::Result<PgFnAttrs> {
-    let mut pure = false;
-    let mut specialises = None;
+    let mut pg_fn_attrs = PgFnAttrs::default();
     let mut out = Vec::with_capacity(attrs.len());
 
     for attr in attrs.drain(..) {
@@ -345,36 +426,33 @@ fn take_pg_fn_attrs(attrs: &mut Vec<Attribute>) -> syn::Result<PgFnAttrs> {
             continue;
         }
 
-        let metas = attr.parse_args_with(Punctuated::<Meta, syn::Token![,]>::parse_terminated)?;
-        for meta in metas {
-            if meta.path().is_ident("pure") {
-                pure = true;
-            } else if meta.path().is_ident("specialises") {
-                let Meta::NameValue(name_value) = &meta else {
-                    return Err(syn::Error::new(
-                        meta.span(),
-                        "`specialises` must be `specialises = \"group\"`",
-                    ));
-                };
-                let syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(group),
-                    ..
-                }) = &name_value.value
-                else {
-                    return Err(syn::Error::new(
-                        name_value.value.span(),
-                        "`specialises` must be a string literal",
-                    ));
-                };
-                specialises = Some(group.value());
-            } else {
-                return Err(syn::Error::new(meta.span(), "unknown pg_fn option"));
-            }
-        }
+        pg_fn_attrs.merge(PgFnAttrs::parse(&attr)?);
     }
 
     *attrs = out;
-    Ok(PgFnAttrs { pure, specialises })
+    Ok(pg_fn_attrs)
+}
+
+fn parse_specialises_option(meta: Meta) -> syn::Result<String> {
+    let Meta::NameValue(name_value) = meta else {
+        return Err(syn::Error::new(
+            meta.span(),
+            "`specialises` must be `specialises = \"group\"`",
+        ));
+    };
+
+    let syn::Expr::Lit(syn::ExprLit {
+        lit: syn::Lit::Str(group),
+        ..
+    }) = name_value.value
+    else {
+        return Err(syn::Error::new(
+            name_value.value.span(),
+            "`specialises` must be a string literal",
+        ));
+    };
+
+    Ok(group.value())
 }
 
 fn path_ends_with(path: &Path, ident: &str) -> bool {

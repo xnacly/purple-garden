@@ -19,19 +19,19 @@ pub fn pg_type(item: TokenStream) -> TokenStream {
 pub fn into_vm(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     let api = runtime_path();
-    match expand_into_vm(&api, &input) {
-        Ok(tokens) => tokens.into(),
-        Err(err) => err.to_compile_error().into(),
-    }
+
+    expand_into_vm(&api, &input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
 }
 
 pub fn from_vm(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     let api = runtime_path();
-    match expand_from_vm(&api, &input) {
-        Ok(tokens) => tokens.into(),
-        Err(err) => err.to_compile_error().into(),
-    }
+
+    expand_from_vm(&api, &input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
 }
 
 fn expand_pg_type(api: &Path, input: &DeriveInput) -> TokenStream2 {
