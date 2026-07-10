@@ -1064,7 +1064,7 @@ mod tests {
         assert_eq!(out.diagnostics[0].primary.span, Span::new(4, 3));
         assert_eq!(
             out.diagnostics[0].primary.message.as_deref(),
-            Some("this member is Str")
+            Some("this member is of type Str")
         );
         assert_eq!(
             out.diagnostics[0].notes,

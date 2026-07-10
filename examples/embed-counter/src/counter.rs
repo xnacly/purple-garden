@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicI64;
 use purple_garden::{GardenOpaque, pg_pkg};
 
 #[derive(GardenOpaque, Debug)]
-/// A thread safe counter.
+/// A thread safe (opqaque) counter.
 pub struct Counter {
     value: AtomicI64,
 }
