@@ -10,14 +10,13 @@ fn main() {
     // Register the embedded package so the compiler can resolve `import "counter"` and `counter.*`
     // references in the script against the Rust implementation below.
     let mut program = Pg::new()
-        .with_stdlib()
         .with_lib(&counter_pkg::counter::PACKAGE)
         .compile(input)
         .expect("counter script should compile");
 
     // Run the script and decode its return value as a borrowed Rust handle.
     // The script returns the `Counter` it created, so the VM result is the
-    // same opaque foreign type we defined with `PgType`, `FromVm`, and `IntoVm`.
+    // same opaque foreign type we defined with `GardenOpaque`.
     let counter = program
         .run_take::<&counter_pkg::Counter>()
         .expect("counter script should run");

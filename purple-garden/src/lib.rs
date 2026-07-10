@@ -12,8 +12,12 @@ use purple_garden_frontend::{
 use purple_garden_runtime::{Anomaly, BuiltinFn, DebugInfo};
 pub use purple_garden_shared::config;
 
-pub use purple_garden_macros::{FromVm, IntoVm, PgType, pg_fn, pg_pkg};
+pub use purple_garden_macros::{GardenOpaque, GardenValue, pg_fn, pg_pkg};
+pub use purple_garden_runtime::{Field, RecordFields};
 pub use purple_garden_runtime::{Fn, FromVm, IntoVm, PgType, Pkg, Type, Value, Vm, VmConfig};
+pub use purple_garden_runtime::{
+    alloc_record, copy_record, decode_record_field, encode_record_field,
+};
 pub use purple_garden_std::{STD, resolve_pkg};
 
 type JitFn = purple_garden_jit::JitFn;
@@ -22,6 +26,7 @@ type JitFn = purple_garden_jit::JitFn;
 pub struct Pg<'pg> {
     config: config::Config,
     libs: Vec<&'pg Pkg>,
+    stdlib: bool,
 }
 
 impl<'pg> Pg<'pg> {
@@ -30,6 +35,7 @@ impl<'pg> Pg<'pg> {
         Self {
             config: config::Config::default(),
             libs: Vec::new(),
+            stdlib: true,
         }
     }
 
@@ -40,7 +46,8 @@ impl<'pg> Pg<'pg> {
     }
 
     #[must_use]
-    pub fn with_stdlib(self) -> Self {
+    pub fn without_stdlib(mut self) -> Self {
+        self.stdlib = false;
         self
     }
 
@@ -51,7 +58,7 @@ impl<'pg> Pg<'pg> {
     }
 
     pub fn compile(&self, input: &[u8]) -> Result<Program, Diagnostic> {
-        compile(&self.config, input, &self.libs)
+        compile(&self.config, input, &self.libs, self.stdlib)
     }
 }
 
@@ -117,7 +124,7 @@ impl Program {
     /// script has no final value, use [`Program::run`] instead.
     pub fn run_take<'vm, T: FromVm<'vm>>(&'vm mut self) -> Result<T, Anomaly> {
         self.run()?;
-        Ok(T::from_vm(&self.vm, 0))
+        Ok(T::from_vm(&self.vm, *self.vm.r(0)))
     }
 }
 
@@ -125,6 +132,7 @@ fn compile<'e>(
     config: &'e config::Config,
     input: &'e [u8],
     libs: &[&'e Pkg],
+    stdlib: bool,
 ) -> Result<Program, Diagnostic> {
     let parse = parser::Parser::new(lex::Lexer::new(input)).parse_collect();
     if let Some(diagnostic) = parse.diagnostics.into_iter().next() {
@@ -134,7 +142,10 @@ fn compile<'e>(
         .ast
         .expect("parser returned no diagnostics and no AST");
 
-    let mut ir = lower::Lower::new().with_libs(libs.to_vec()).ir_from(&ast)?;
+    let mut ir = lower::Lower::new()
+        .with_libs(libs.to_vec())
+        .with_stdlib_enabled(stdlib)
+        .ir_from(&ast)?;
     if config.opt >= 1 {
         purple_garden_opt::ir(&mut ir);
     }
