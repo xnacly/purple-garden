@@ -93,12 +93,7 @@ pub(super) fn type_expr_span(ast: &Ast<'_>, id: TypeExprId) -> Span {
 }
 
 pub(super) fn token_span(token: &Token<'_>) -> Span {
-    let len = token.t.as_str().len();
-    if matches!(token.t, purple_garden_frontend::lex::Type::S(_)) {
-        Span::new(token.start.saturating_add(1), len)
-    } else {
-        Span::new(token.start, len)
-    }
+    Span::from_token(token)
 }
 
 pub(super) fn span_contains(span: Span, offset: usize) -> bool {

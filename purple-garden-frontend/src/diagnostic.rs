@@ -10,6 +10,7 @@
 //! the same data.
 
 use crate::lex::Token;
+use crate::lex::Type;
 use purple_garden_runtime::{Anomaly, DebugInfo};
 use std::fmt::Write;
 
@@ -35,7 +36,11 @@ impl Span {
     /// Span the bytes occupied by a token's textual representation.
     #[must_use]
     pub fn from_token(token: &Token<'_>) -> Self {
-        Self::new(token.start, token.t.as_str().len())
+        if matches!(token.t, Type::S(_)) {
+            Self::new(token.start.saturating_add(1), token.t.as_str().len())
+        } else {
+            Self::new(token.start, token.t.as_str().len())
+        }
     }
 }
 

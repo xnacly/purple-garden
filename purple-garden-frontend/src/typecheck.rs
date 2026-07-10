@@ -1302,4 +1302,55 @@ mod tests {
             "only package functions can be called through field syntax"
         );
     }
+
+    #[test]
+    fn homogeneous_array_resolves_element_type() {
+        let ast = parse(b"[1 2 3]");
+        let out = Typechecker::new(&ast).check();
+
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(
+            type_of(&ast, &out, ast.roots[0]),
+            Some(Type::Array(Box::new(Type::Int)))
+        );
+    }
+
+    #[test]
+    fn mixed_array_members_report_error_at_offending_member() {
+        let ast = parse(br#"[1 "two" 3]"#);
+        let out = Typechecker::new(&ast).check();
+
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "Array members must all have the same type, expected Int but got Str"
+        );
+        assert_eq!(out.diagnostics[0].primary.span, Span::new(4, 3));
+        assert_eq!(
+            out.diagnostics[0].primary.message.as_deref(),
+            Some("this member is Str")
+        );
+        assert_eq!(
+            out.diagnostics[0].notes,
+            ["the array element type was inferred as Int from the first member"]
+        );
+    }
+
+    #[test]
+    fn empty_array_reports_inference_error() {
+        let ast = parse(b"[]");
+        let out = Typechecker::new(&ast).check();
+
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "Can not infer the element type of an empty array"
+        );
+        assert_eq!(out.diagnostics[0].primary.span, Span::new(0, 1));
+        assert_eq!(
+            out.diagnostics[0].primary.message.as_deref(),
+            Some("empty array")
+        );
+        assert_eq!(type_of(&ast, &out, ast.roots[0]), None);
+    }
 }
