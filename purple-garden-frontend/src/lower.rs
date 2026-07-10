@@ -36,7 +36,6 @@ struct LowerCtx<'lower> {
     env: HashMap<&'lower str, Id>,
 }
 
-#[derive(Default)]
 pub struct Lower<'lower> {
     ctx: LowerCtx<'lower>,
     functions: Vec<Func<'lower>>,
@@ -51,6 +50,22 @@ pub struct Lower<'lower> {
     >,
     pkg_cache: HashMap<&'lower str, Option<&'lower Pkg>>,
     libs: Vec<&'lower Pkg>,
+    stdlib: bool,
+}
+
+impl Default for Lower<'_> {
+    fn default() -> Self {
+        Self {
+            ctx: LowerCtx::default(),
+            functions: Vec::new(),
+            func_name_to_id: HashMap::new(),
+            types: Vec::new(),
+            packages: HashMap::new(),
+            pkg_cache: HashMap::new(),
+            libs: Vec::new(),
+            stdlib: true,
+        }
+    }
 }
 
 impl<'lower> Lower<'lower> {
@@ -65,6 +80,12 @@ impl<'lower> Lower<'lower> {
         self
     }
 
+    #[must_use]
+    pub fn with_stdlib_enabled(mut self, stdlib: bool) -> Self {
+        self.stdlib = stdlib;
+        self
+    }
+
     fn resolve_pkg(&mut self, query: &'lower str) -> Option<&'lower Pkg> {
         if let Some(pkg) = self.pkg_cache.get(query).copied() {
             return pkg;
@@ -75,7 +96,7 @@ impl<'lower> Lower<'lower> {
             .iter()
             .copied()
             .find(|pkg| pkg.name == query)
-            .or_else(|| pstd::resolve_pkg(query));
+            .or_else(|| self.stdlib.then(|| pstd::resolve_pkg(query)).flatten());
 
         self.pkg_cache.insert(query, pkg);
         pkg
@@ -720,6 +741,7 @@ impl<'lower> Lower<'lower> {
     pub fn ir_from(self, ast: &'lower Ast<'lower>) -> Result<Vec<Func<'lower>>, Diagnostic> {
         let typecheck = crate::typecheck::Typechecker::new(ast)
             .with_libs(self.libs.clone())
+            .with_stdlib_enabled(self.stdlib)
             .check();
         if let Some(diagnostic) = typecheck.diagnostics.into_iter().next() {
             return Err(diagnostic);

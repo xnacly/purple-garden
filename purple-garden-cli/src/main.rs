@@ -1,6 +1,10 @@
 use purple_garden_bc as bc;
 use purple_garden_frontend::{
-    diagnostic::Diagnostic, lex::Lexer, lower::Lower, parser::Parser, typecheck::Typechecker,
+    diagnostic::{Diagnostic, Help, Span},
+    lex::Lexer,
+    lower::Lower,
+    parser::Parser,
+    typecheck::Typechecker,
 };
 use purple_garden_runtime::VmConfig;
 
@@ -83,7 +87,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         match &cmd {
             Command::Check { target } => {
                 let input = Input::from_file(target)?;
-                check_frontend(target, &input)?;
+                check_frontend(target, &input, !conf.no_std)?;
                 std::process::exit(0);
             }
             Command::Intro { topic } => {
@@ -119,18 +123,19 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let parse = Parser::new(Lexer::new(input.as_bytes())).parse_collect();
+    let source = input.as_bytes();
+
+    let parse = Parser::new(Lexer::new(source)).parse_collect();
     let purple_garden_frontend::parser::ParseOutput {
         ast,
         diagnostics: parse_diagnostics,
     } = parse;
     let has_parse_errors = !parse_diagnostics.is_empty();
-    if has_parse_errors {
-        for diagnostic in parse_diagnostics {
-            eprintln!("{}", diagnostic.render(input_source, input.as_bytes()));
-        }
-    }
     let Some(ast) = ast else {
+        print_standalone_extern_diagnostic(input_source, source);
+        for diagnostic in parse_diagnostics {
+            eprintln!("{}", diagnostic.render(input_source, source));
+        }
         std::process::exit(1);
     };
 
@@ -141,16 +146,11 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let libs = Vec::new();
-    let typecheck = Typechecker::new(&ast).with_libs(libs.clone()).check();
+    let typecheck = Typechecker::new(&ast)
+        .with_libs(libs.clone())
+        .with_stdlib_enabled(!conf.no_std)
+        .check();
     let has_type_errors = !typecheck.diagnostics.is_empty();
-    if has_type_errors {
-        for diagnostic in &typecheck.diagnostics {
-            eprintln!(
-                "{}",
-                diagnostic.clone().render(input_source, input.as_bytes())
-            );
-        }
-    }
 
     if cli.types > 0 {
         if cli.types == 1 {
@@ -162,14 +162,23 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     let has_frontend_diagnostics = has_parse_errors || has_type_errors;
     if has_frontend_diagnostics {
+        print_standalone_extern_diagnostic(input_source, source);
+        for diagnostic in parse_diagnostics {
+            eprintln!("{}", diagnostic.render(input_source, source));
+        }
+        for diagnostic in &typecheck.diagnostics {
+            eprintln!("{}", diagnostic.clone().render(input_source, source));
+        }
         std::process::exit(1);
     }
 
-    let lower = Lower::new().with_libs(libs);
+    let lower = Lower::new()
+        .with_libs(libs)
+        .with_stdlib_enabled(!conf.no_std);
     let mut ir = match lower.ir_from_types(&ast, typecheck.types) {
         Ok(v) => v,
         Err(e) => {
-            return err!(e.render(input_source, input.as_bytes()));
+            return err!(e.render(input_source, source));
         }
     };
 
@@ -220,8 +229,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ctx) = ctx {
         match conf.disassemble {
             1 => {
-                let dis = bc::dis::Disassembler::new(&program.vm.bytecode, ctx)
-                    .with_source(input.as_bytes());
+                let dis = bc::dis::Disassembler::new(&program.vm.bytecode, ctx).with_source(source);
                 dis.disassemble_bytecode();
                 dis.disassemble_native();
             }
@@ -239,7 +247,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = program.run() {
         eprintln!(
             "{}",
-            Diagnostic::from_anomaly(e, &program.debug).render(input_source, input.as_bytes())
+            Diagnostic::from_anomaly(e, &program.debug).render(input_source, source)
         );
 
         if conf.backtrace {
@@ -266,21 +274,58 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn check_frontend(input_source: &str, input: &Input) -> Result<(), Box<dyn std::error::Error>> {
+fn check_frontend(
+    input_source: &str,
+    input: &Input,
+    stdlib: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let source_path = Path::new(input_source);
-    let failed = frontend::analyze_path(source_path, input.as_bytes(), Vec::new(), |analysis| {
-        for diagnostic in analysis.diagnostics {
-            eprintln!(
-                "{}",
-                diagnostic.clone().render(input_source, analysis.source)
-            );
-        }
-        analysis.ast.is_none() || !analysis.diagnostics.is_empty()
-    });
+    let failed = frontend::analyze_path(
+        source_path,
+        input.as_bytes(),
+        Vec::new(),
+        stdlib,
+        |analysis| {
+            for diagnostic in analysis.diagnostics {
+                eprintln!(
+                    "{}",
+                    diagnostic.clone().render(input_source, analysis.source)
+                );
+            }
+            analysis.ast.is_none() || !analysis.diagnostics.is_empty()
+        },
+    );
     if failed {
         std::process::exit(1);
     }
     Ok(())
+}
+
+fn print_standalone_extern_diagnostic(input_source: &str, source: &[u8]) {
+    let source_path = Path::new(input_source);
+    let Some(extern_path) = frontend::find_extern_garden(source_path) else {
+        return;
+    };
+
+    eprintln!(
+        "{}",
+        Diagnostic::new(
+            "Standalone execution ignores nearby extern signatures",
+            Span::new(0, first_line_marker_len(source)),
+        )
+        .with_note(format!(
+            "found extern signatures at {}",
+            extern_path.display()
+        ))
+        .with_help(Help::new(format!(
+            "use `purple-garden check {input_source}` to validate this file in an embedding context"
+        )))
+        .render(input_source, source)
+    );
+}
+
+fn first_line_marker_len(source: &[u8]) -> usize {
+    source.iter().position(|&byte| byte == b'\n').unwrap_or(0)
 }
 
 fn main() {

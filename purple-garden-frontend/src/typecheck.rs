@@ -307,6 +307,7 @@ pub struct Typechecker<'t> {
     packages: HashMap<&'t str, HashMap<&'t str, Vec<FunctionType<'t>>>>,
     pkg_cache: HashMap<&'t str, Option<&'t Pkg>>,
     libs: Vec<&'t Pkg>,
+    stdlib: bool,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -321,6 +322,7 @@ impl<'t> Typechecker<'t> {
             packages: HashMap::new(),
             pkg_cache: HashMap::new(),
             libs: Vec::new(),
+            stdlib: true,
             diagnostics: Vec::new(),
         };
         s.env.push(HashMap::new());
@@ -330,6 +332,12 @@ impl<'t> Typechecker<'t> {
     #[must_use]
     pub fn with_libs(mut self, libs: Vec<&'t Pkg>) -> Self {
         self.libs = libs;
+        self
+    }
+
+    #[must_use]
+    pub fn with_stdlib_enabled(mut self, stdlib: bool) -> Self {
+        self.stdlib = stdlib;
         self
     }
 
@@ -351,7 +359,7 @@ impl<'t> Typechecker<'t> {
             .iter()
             .copied()
             .find(|pkg| pkg.name == query)
-            .or_else(|| pstd::resolve_pkg(query));
+            .or_else(|| self.stdlib.then(|| pstd::resolve_pkg(query)).flatten());
 
         self.pkg_cache.insert(query, pkg);
         pkg
