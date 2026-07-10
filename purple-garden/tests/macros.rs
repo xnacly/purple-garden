@@ -1,8 +1,25 @@
-use purple_garden::{FromVm, IntoVm, PgType, Value, Vm, VmConfig, pg_pkg};
+use purple_garden::{FromVm, GardenOpaque, GardenValue, IntoVm, Value, Vm, VmConfig, pg_pkg};
 
-#[derive(PgType, FromVm, IntoVm)]
+#[derive(GardenOpaque)]
 struct Counter {
     value: i64,
+}
+
+#[derive(GardenValue)]
+struct User {
+    name: String,
+    age: i64,
+}
+
+#[derive(GardenValue)]
+struct Profile {
+    name: String,
+}
+
+#[derive(GardenValue)]
+struct Account {
+    profile: Profile,
+    active: bool,
 }
 
 #[pg_pkg]
@@ -33,6 +50,30 @@ mod counters {
     #[purple_garden::pg_fn(pure)]
     pub fn value(counter: &Counter) -> i64 {
         counter.value
+    }
+}
+
+#[pg_pkg]
+mod users {
+    use super::{Account, Profile, User};
+
+    pub fn user_name(user: User) -> String {
+        user.name
+    }
+
+    pub fn make_user(name: String, age: i64) -> User {
+        User { name, age }
+    }
+
+    pub fn profile_name(account: Account) -> String {
+        account.profile.name
+    }
+
+    pub fn make_account(name: String) -> Account {
+        Account {
+            profile: Profile { name },
+            active: true,
+        }
     }
 }
 
@@ -71,7 +112,7 @@ fn pg_pkg_wrapper_allocates_return_strings() {
 }
 
 #[test]
-fn pg_pkg_supports_foreign_derived_types() {
+fn pg_pkg_supports_garden_opaque_types() {
     assert_eq!(
         counters::PACKAGE.fns[0].ret,
         purple_garden::Type::Foreign("Counter")
@@ -88,4 +129,81 @@ fn pg_pkg_supports_foreign_derived_types() {
     unsafe { (counters::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
     assert_eq!(vm.r(0).as_int(), 7);
+}
+
+#[test]
+fn pg_pkg_exposes_record_metadata() {
+    assert_eq!(
+        users::PACKAGE.fns[0].args,
+        &[purple_garden::Type::Record(
+            purple_garden::RecordFields::Static(&[
+                purple_garden::Field {
+                    name: "name",
+                    ty: purple_garden::Type::Str,
+                },
+                purple_garden::Field {
+                    name: "age",
+                    ty: purple_garden::Type::Int,
+                },
+            ])
+        )]
+    );
+    assert!(
+        users::PACKAGE
+            .extern_source()
+            .contains("fn user_name(user: Record<name: Str age: Int>) Str")
+    );
+}
+
+#[test]
+fn pg_pkg_wrapper_decodes_record_arg() {
+    let mut vm = Vm::new(VmConfig::default());
+    let record = User {
+        name: "teo".to_owned(),
+        age: 42,
+    }
+    .into_vm(&mut vm);
+    *vm.r_mut(0) = record;
+
+    unsafe { (users::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
+
+    assert_eq!(vm.r(0).as_str(), "teo");
+}
+
+#[test]
+fn pg_pkg_wrapper_encodes_record_return() {
+    let mut vm = Vm::new(VmConfig::default());
+    let name = vm.new_string("ada".to_owned());
+    *vm.r_mut(0) = name;
+    *vm.r_mut(1) = Value::from(37_i64);
+
+    unsafe { (users::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
+
+    let user = User::from_vm(&vm, *vm.r(0));
+    assert_eq!(user.name, "ada");
+    assert_eq!(user.age, 37);
+}
+
+#[test]
+fn pg_pkg_supports_nested_records() {
+    let mut vm = Vm::new(VmConfig::default());
+    let account = Account {
+        profile: Profile {
+            name: "grace".to_owned(),
+        },
+        active: true,
+    }
+    .into_vm(&mut vm);
+    *vm.r_mut(0) = account;
+
+    unsafe { (users::PACKAGE.fns[2].ptr)((&mut vm as *mut Vm).cast()) };
+
+    assert_eq!(vm.r(0).as_str(), "grace");
+
+    let name = vm.new_string("lin".to_owned());
+    *vm.r_mut(0) = name;
+    unsafe { (users::PACKAGE.fns[3].ptr)((&mut vm as *mut Vm).cast()) };
+    let account = Account::from_vm(&vm, *vm.r(0));
+    assert_eq!(account.profile.name, "lin");
+    assert!(account.active);
 }

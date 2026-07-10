@@ -2,7 +2,10 @@
 
 use std::fmt::{self, Write as _};
 
-pub use purple_garden_ir::{Fn, ptype::Type};
+pub use purple_garden_ir::{
+    Fn,
+    ptype::{Field, RecordFields, Type},
+};
 pub use purple_garden_shared::BuiltinFn;
 
 pub mod anomaly;
@@ -18,7 +21,10 @@ pub const REGISTER_COUNT: usize = 64;
 pub use crate::anomaly::Anomaly;
 pub use crate::gc::{AllocType, Gc, Metadata};
 pub use crate::jit_helpers::{jit_alloc, jit_trap_div_zero};
-pub use crate::value::{FromVm, IntoVm, PgType, Value};
+pub use crate::value::{
+    FromVm, IntoVm, PgType, Value, alloc_record, copy_record, decode_record_field,
+    encode_record_field,
+};
 pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, syscall_unimplemented};
 
 #[derive(Debug)]

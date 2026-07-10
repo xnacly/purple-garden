@@ -175,7 +175,7 @@ impl PgFunction {
             let ty = &arg.ty;
 
             quote! {
-                let #binding = <#ty as #api::FromVm>::from_vm(vm, #idx);
+                let #binding = <#ty as #api::FromVm>::from_vm(vm, *vm.r(#idx));
             }
         })
     }

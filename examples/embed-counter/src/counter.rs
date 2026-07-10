@@ -1,8 +1,8 @@
 use std::sync::atomic::AtomicI64;
 
-use purple_garden::{FromVm, IntoVm, PgType, pg_pkg};
+use purple_garden::{GardenOpaque, pg_pkg};
 
-#[derive(PgType, FromVm, IntoVm, Debug)]
+#[derive(GardenOpaque, Debug)]
 /// A thread safe counter.
 pub struct Counter {
     value: AtomicI64,
