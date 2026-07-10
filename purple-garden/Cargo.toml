@@ -8,6 +8,7 @@ edition = "2024"
 trace = [
     "purple-garden-ir/trace",
     "purple-garden-frontend/trace",
+    "purple-garden-typecheck/trace",
     "purple-garden-opt/trace",
     "purple-garden-bc/trace",
     "purple-garden-jit/trace",
@@ -27,6 +28,7 @@ purple-garden-bc = { path = "../purple-garden-bc" }
 purple-garden-frontend = { path = "../purple-garden-frontend" }
 purple-garden-shared = { path = "../purple-garden-shared" }
 purple-garden-macros = { path = "../purple-garden-macros" }
+purple-garden-typecheck = { path = "../purple-garden-typecheck" }
 
 [dev-dependencies]
 criterion = "0.5"

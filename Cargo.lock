@@ -555,6 +555,7 @@ dependencies = [
  "purple-garden-runtime",
  "purple-garden-shared",
  "purple-garden-std",
+ "purple-garden-typecheck",
  "rand",
 ]
 
@@ -585,6 +586,7 @@ dependencies = [
  "purple-garden-runtime",
  "purple-garden-shared",
  "purple-garden-std",
+ "purple-garden-typecheck",
  "serde",
  "serde_json",
 ]
@@ -656,6 +658,17 @@ dependencies = [
  "purple-garden-ir",
  "purple-garden-macros",
  "purple-garden-runtime",
+]
+
+[[package]]
+name = "purple-garden-typecheck"
+version = "0.1.0"
+dependencies = [
+ "purple-garden-frontend",
+ "purple-garden-ir",
+ "purple-garden-runtime",
+ "purple-garden-shared",
+ "purple-garden-std",
 ]
 
 [[package]]

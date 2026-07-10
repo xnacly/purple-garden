@@ -1,6 +1,9 @@
-use std::{collections::HashMap, fmt::Display};
+mod display;
+mod typedefs;
 
-use crate::{
+use std::collections::HashMap;
+
+use purple_garden_frontend::{
     ast::{Ast, Node, NodeId},
     diagnostic::{Diagnostic, Help, Span},
     lex::{self, Token},
@@ -9,282 +12,8 @@ use purple_garden_ir::ptype::Type;
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
 
-#[derive(Debug, Clone)]
-struct FunctionType<'t> {
-    args: Vec<(&'t str, Type<'t>)>,
-    ret: Type<'t>,
-}
-
-#[derive(Debug)]
-pub struct TypecheckOutput<'t> {
-    /// Node value id -> inferred type. Poisoned nodes stay `None`.
-    ///
-    /// This lets analysis clients use all types that were still knowable after
-    /// errors without pretending the whole file typechecked successfully.
-    pub types: Vec<Option<Type<'t>>>,
-    pub diagnostics: Vec<Diagnostic>,
-}
-
-impl<'t> TypecheckOutput<'t> {
-    /// Render top-level binding and function types for `-T`.
-    #[must_use]
-    pub fn render_summary(&self, ast: &Ast<'t>) -> String {
-        let mut out = String::new();
-        for &node in &ast.roots {
-            match ast.node(node) {
-                Node::Let { id, name, .. } => {
-                    use std::fmt::Write as _;
-                    writeln!(&mut out, "{}: {}", name.t.as_str(), self.type_at(*id)).unwrap();
-                }
-                Node::Fn {
-                    name,
-                    args,
-                    return_type,
-                    ..
-                } => {
-                    use std::fmt::Write as _;
-                    let args = args
-                        .iter()
-                        .map(|(_, ty)| ast.type_display(*ty).to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    writeln!(
-                        &mut out,
-                        "{}: ({args}) -> {}",
-                        name.t.as_str(),
-                        ast.type_display(*return_type)
-                    )
-                    .unwrap();
-                }
-                _ => {}
-            }
-        }
-        out
-    }
-
-    /// Render every typed AST value node for `-TT`.
-    #[must_use]
-    pub fn render_nodes(&self, ast: &Ast<'t>) -> String {
-        let mut out = String::new();
-        for &node in &ast.roots {
-            self.render_node(ast, node, 0, &mut out);
-        }
-        out
-    }
-
-    fn type_at(&self, id: usize) -> String {
-        self.types
-            .get(id)
-            .and_then(Option::as_ref)
-            .map_or_else(|| "<unknown>".to_owned(), ToString::to_string)
-    }
-
-    fn render_value(&self, indent: usize, label: impl Display, ty: String, out: &mut String) {
-        use std::fmt::Write as _;
-        writeln!(out, "{}{}: {ty}", "  ".repeat(indent), label).unwrap();
-    }
-
-    fn render_node(&self, ast: &Ast<'t>, node_id: NodeId, indent: usize, out: &mut String) {
-        match ast.node(node_id) {
-            Node::Record { id, fields, .. } => {
-                use std::fmt::Write as _;
-
-                self.render_value(indent, "record", self.type_at(*id), out);
-                for (field, value) in fields {
-                    let lex::Type::Ident(name) = field.t else {
-                        unreachable!()
-                    };
-                    writeln!(out, "{}field {name}", "  ".repeat(indent + 1)).unwrap();
-                    self.render_node(ast, *value, indent + 2, out);
-                }
-            }
-            Node::Atom { id, raw } => {
-                self.render_value(indent, raw.t.as_str(), self.type_at(*id), out);
-            }
-            Node::Ident { id, name } => {
-                self.render_value(indent, name.t.as_str(), self.type_at(*id), out);
-            }
-            Node::Bin { id, op, lhs, rhs } => {
-                self.render_value(indent, op.t.as_str(), self.type_at(*id), out);
-                self.render_node(ast, *lhs, indent + 1, out);
-                self.render_node(ast, *rhs, indent + 1, out);
-            }
-            Node::Unary { id, op, rhs } => {
-                self.render_value(indent, op.t.as_str(), self.type_at(*id), out);
-                self.render_node(ast, *rhs, indent + 1, out);
-            }
-            Node::Array { id, members, .. } => {
-                self.render_value(indent, "array", self.type_at(*id), out);
-                for &member in members {
-                    self.render_node(ast, member, indent + 1, out);
-                }
-            }
-            Node::Let { id, name, rhs, .. } => {
-                self.render_value(
-                    indent,
-                    format!("let {}", name.t.as_str()),
-                    self.type_at(*id),
-                    out,
-                );
-                self.render_node(ast, *rhs, indent + 1, out);
-            }
-            Node::Fn {
-                name,
-                args,
-                return_type,
-                body,
-                ..
-            } => {
-                use std::fmt::Write as _;
-                let args = args
-                    .iter()
-                    .map(|(_, ty)| ast.type_display(*ty).to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                writeln!(
-                    out,
-                    "{}fn {}: ({args}) -> {}",
-                    "  ".repeat(indent),
-                    name.t.as_str(),
-                    ast.type_display(*return_type)
-                )
-                .unwrap();
-                for &node in body {
-                    self.render_node(ast, node, indent + 1, out);
-                }
-            }
-            Node::Match { id, cases, default } => {
-                self.render_value(indent, "match", self.type_at(*id), out);
-                for &((_, condition), ref body) in cases {
-                    self.render_node(ast, condition, indent + 1, out);
-                    for &node in body {
-                        self.render_node(ast, node, indent + 2, out);
-                    }
-                }
-                for &node in &default.1 {
-                    self.render_node(ast, node, indent + 1, out);
-                }
-            }
-            Node::Call { id, target, args } => {
-                self.render_value(indent, "call", self.type_at(*id), out);
-                self.render_callee(ast, *target, indent + 1, out);
-                for &arg in args {
-                    self.render_node(ast, arg, indent + 1, out);
-                }
-            }
-            Node::Field { id, target, name } => {
-                self.render_value(
-                    indent,
-                    format!(".{}", name.t.as_str()),
-                    self.type_at(*id),
-                    out,
-                );
-                self.render_node(ast, *target, indent + 1, out);
-            }
-            Node::Cast { id, lhs, rhs, .. } => {
-                self.render_value(
-                    indent,
-                    format!("as {}", ast.type_display(*rhs)),
-                    self.type_at(*id),
-                    out,
-                );
-                self.render_node(ast, *lhs, indent + 1, out);
-            }
-            Node::Import { pkgs, .. } => {
-                use std::fmt::Write as _;
-                for pkg in pkgs {
-                    writeln!(out, "{}import {}", "  ".repeat(indent), pkg.t.as_str()).unwrap();
-                }
-            }
-            Node::Extern { name, fns, .. } => {
-                use std::fmt::Write as _;
-                writeln!(out, "{}extern {}", "  ".repeat(indent), name.t.as_str()).unwrap();
-                for fun in fns {
-                    let args = fun
-                        .args
-                        .iter()
-                        .map(|(_, ty)| ast.type_display(*ty).to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    writeln!(
-                        out,
-                        "{}fn {}: ({args}) -> {}",
-                        "  ".repeat(indent + 1),
-                        fun.name.t.as_str(),
-                        ast.type_display(fun.return_type)
-                    )
-                    .unwrap();
-                }
-            }
-        }
-    }
-
-    fn render_callee(&self, ast: &Ast<'t>, node_id: NodeId, indent: usize, out: &mut String) {
-        use std::fmt::Write as _;
-        match ast.node(node_id) {
-            Node::Ident { name, .. } => {
-                writeln!(out, "{}callee {}", "  ".repeat(indent), name.t.as_str()).unwrap();
-            }
-            Node::Field { target, name, .. } => match ast.node(*target) {
-                Node::Ident { name: pkg, .. } => {
-                    writeln!(
-                        out,
-                        "{}callee {}.{}",
-                        "  ".repeat(indent),
-                        pkg.t.as_str(),
-                        name.t.as_str()
-                    )
-                    .unwrap();
-                }
-                _ => self.render_node(ast, node_id, indent, out),
-            },
-            _ => self.render_node(ast, node_id, indent, out),
-        }
-    }
-}
-
-/// Internal typechecking result for one AST node.
-///
-/// `Known` means later nodes can safely use the type. `Poison` means the node
-/// already produced, or depends on, an error and should not cause cascading
-/// follow-up diagnostics. We keep this separate from `purple_garden_ir::Type`
-/// so the IR/runtime type vocabulary does not need an error sentinel.
-#[derive(Debug, Clone)]
-enum TcType<'t> {
-    Known(Type<'t>),
-    Poison,
-}
-
-impl<'t> TcType<'t> {
-    fn known(self) -> Option<Type<'t>> {
-        match self {
-            Self::Known(ty) => Some(ty),
-            Self::Poison => None,
-        }
-    }
-
-    fn as_known(&self) -> Option<&Type<'t>> {
-        match self {
-            Self::Known(ty) => Some(ty),
-            Self::Poison => None,
-        }
-    }
-}
-
-impl Display for FunctionType<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(")?;
-        for (i, (name, t)) in self.args.iter().enumerate() {
-            write!(f, "{name}: {t}")?;
-            if i + 1 == self.args.len() {
-                continue;
-            }
-            write!(f, " ")?;
-        }
-        write!(f, ") -> {}", self.ret)?;
-        Ok(())
-    }
-}
+pub use typedefs::TypecheckOutput;
+use typedefs::{FunctionType, TcType};
 
 #[derive(Debug)]
 pub struct Typechecker<'t> {
@@ -402,12 +131,15 @@ impl<'t> Typechecker<'t> {
                     let lex::Type::Ident(arg_name) = arg_name.t else {
                         unreachable!();
                     };
-                    (arg_name, crate::type_from_type_expr(self.ast, *arg_type))
+                    (
+                        arg_name,
+                        purple_garden_frontend::type_from_type_expr(self.ast, *arg_type),
+                    )
                 })
                 .collect();
             let f_type = FunctionType {
                 args,
-                ret: crate::type_from_type_expr(self.ast, fun.return_type),
+                ret: purple_garden_frontend::type_from_type_expr(self.ast, fun.return_type),
             };
             purple_garden_shared::trace!(
                 "[ir::typecheck::Typechecker::extern][{}.{}]: {}",
@@ -754,7 +486,7 @@ impl<'t> Typechecker<'t> {
                                         ),
                                         span,
                                     )
-                                    .with_primary_message(format!("this member is {ty}"))
+                                    .with_primary_message(format!("this member is of type {ty}"))
                                     .with_note(format!(
                                         "the array element type was inferred as {first_type} from the first member"
                                     )),
@@ -804,7 +536,7 @@ impl<'t> Typechecker<'t> {
                 self.set_known(*id, Type::Record(typed_fields.into()))
             }
             Node::Atom { id, raw } => {
-                let t = crate::type_from_atom_token_type(&raw.t);
+                let t = purple_garden_frontend::type_from_atom_token_type(&raw.t);
                 self.set_known(*id, t)
             }
             Node::Ident { id, name } => {
@@ -913,12 +645,13 @@ impl<'t> Typechecker<'t> {
                     };
                     let inner_name = *inner_name;
 
-                    let t = crate::type_from_type_expr(self.ast, *arg_type);
+                    let t = purple_garden_frontend::type_from_type_expr(self.ast, *arg_type);
                     self.env_insert(inner_name, t.clone());
                     typed_arguments.push((inner_name, t));
                 }
 
-                let ret: Type<'t> = crate::type_from_type_expr(self.ast, *return_type);
+                let ret: Type<'t> =
+                    purple_garden_frontend::type_from_type_expr(self.ast, *return_type);
                 let f_type = FunctionType {
                     args: typed_arguments,
                     ret: ret.clone(),
@@ -946,7 +679,7 @@ impl<'t> Typechecker<'t> {
                 TcType::Known(ret)
             }
             Node::Cast { id, lhs, rhs, src } => {
-                let rhs = crate::type_from_type_expr(self.ast, *rhs);
+                let rhs = purple_garden_frontend::type_from_type_expr(self.ast, *rhs);
                 let lhs = self.node(*lhs);
                 let Some(lhs) = lhs.as_known() else {
                     return TcType::Poison;
@@ -1062,7 +795,10 @@ impl<'t> Typechecker<'t> {
                             let provided = || args.iter().map(|&a| self.resolved_arg_ty(a));
 
                             let Some(idx) = candidates.iter().position(|c| {
-                                crate::overload_matches(c.args.iter().map(|(_, t)| t), provided())
+                                purple_garden_frontend::overload_matches(
+                                    c.args.iter().map(|(_, t)| t),
+                                    provided(),
+                                )
                             }) else {
                                 let err = self.specialisation_miss_error(
                                     pkg_name,
@@ -1248,7 +984,7 @@ impl<'t> Typechecker<'t> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{lex::Lexer, parser::Parser};
+    use purple_garden_frontend::{lex::Lexer, parser::Parser};
 
     fn parse(source: &[u8]) -> Ast<'_> {
         Parser::new(Lexer::new(source)).parse().unwrap()
@@ -1352,5 +1088,39 @@ mod tests {
             Some("empty array")
         );
         assert_eq!(type_of(&ast, &out, ast.roots[0]), None);
+    }
+
+    #[test]
+    fn nested_record_literal_stores_inline_fields() {
+        use purple_garden_frontend::lower::Lower;
+        use purple_garden_ir::{Id, Instr};
+
+        let ast = parse(br#"{ name: "teo" age: 23 job: { name: "dev" since: 2024 } }"#);
+        let typecheck = Typechecker::new(&ast).check();
+        assert!(
+            typecheck.diagnostics.is_empty(),
+            "{:?}",
+            typecheck.diagnostics
+        );
+        let funcs = Lower::new().ir_from_types(&ast, typecheck.types).unwrap();
+        let instructions = &funcs[0].blocks[0].instructions;
+
+        let allocs = instructions
+            .iter()
+            .filter(|instr| matches!(instr, Instr::Alloc { .. }))
+            .count();
+        let stores = instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::Store { base, offset, .. } => Some((*base, *offset)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(allocs, 1);
+        assert_eq!(
+            stores,
+            vec![(Id(0), 0), (Id(0), 8), (Id(0), 16), (Id(0), 24)]
+        );
     }
 }

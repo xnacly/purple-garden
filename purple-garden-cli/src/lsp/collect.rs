@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 
 use lsp_types::CompletionItemKind;
-use purple_garden_frontend::{
-    ast::{Ast, Node, NodeId},
-    typecheck::TypecheckOutput,
-};
+use purple_garden_frontend::ast::{Ast, Node, NodeId};
 use purple_garden_ir::ptype::Type;
+use purple_garden_typecheck::TypecheckOutput;
 
 use super::{
     analysis::{DocumentAnalysis, PackageDoc, PackageFunctionCompletion},

@@ -1,11 +1,6 @@
-use purple_garden_frontend::{
-    ast::Ast,
-    diagnostic::Diagnostic,
-    lex::Lexer,
-    parser::Parser,
-    typecheck::{TypecheckOutput, Typechecker},
-};
+use purple_garden_frontend::{ast::Ast, diagnostic::Diagnostic, lex::Lexer, parser::Parser};
 use purple_garden_runtime::Pkg;
+use purple_garden_typecheck::{TypecheckOutput, Typechecker};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 

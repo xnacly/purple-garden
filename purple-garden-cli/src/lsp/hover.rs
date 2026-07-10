@@ -2,8 +2,8 @@ use purple_garden_frontend::{
     ast::{Ast, Node, NodeId, TypeExprId},
     diagnostic::Span,
     lex::{Lexer, Token, Type},
-    typecheck::TypecheckOutput,
 };
+use purple_garden_typecheck::TypecheckOutput;
 
 use super::{analysis::DocumentAnalysis, source::token_span};
 

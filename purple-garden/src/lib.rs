@@ -11,6 +11,7 @@ use purple_garden_frontend::{
 };
 use purple_garden_runtime::{Anomaly, BuiltinFn, DebugInfo};
 pub use purple_garden_shared::config;
+use purple_garden_typecheck::Typechecker;
 
 pub use purple_garden_macros::{GardenOpaque, GardenValue, pg_fn, pg_pkg};
 pub use purple_garden_runtime::{Field, RecordFields};
@@ -142,10 +143,18 @@ fn compile<'e>(
         .ast
         .expect("parser returned no diagnostics and no AST");
 
+    let typecheck = Typechecker::new(&ast)
+        .with_libs(libs.to_vec())
+        .with_stdlib_enabled(stdlib)
+        .check();
+    if let Some(diagnostic) = typecheck.diagnostics.into_iter().next() {
+        return Err(diagnostic);
+    }
+
     let mut ir = lower::Lower::new()
         .with_libs(libs.to_vec())
         .with_stdlib_enabled(stdlib)
-        .ir_from(&ast)?;
+        .ir_from_types(&ast, typecheck.types)?;
     if config.opt >= 1 {
         purple_garden_opt::ir(&mut ir);
     }

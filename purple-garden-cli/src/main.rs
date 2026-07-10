@@ -4,9 +4,9 @@ use purple_garden_frontend::{
     lex::Lexer,
     lower::Lower,
     parser::Parser,
-    typecheck::Typechecker,
 };
 use purple_garden_runtime::VmConfig;
+use purple_garden_typecheck::Typechecker;
 
 use std::{collections::HashMap, path::Path};
 

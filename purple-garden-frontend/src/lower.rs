@@ -740,24 +740,9 @@ impl<'lower> Lower<'lower> {
         })
     }
 
-    /// Lower [ast] into a list of Func nodes, the entry point is always `entry`
-    pub fn ir_from(self, ast: &'lower Ast<'lower>) -> Result<Vec<Func<'lower>>, Diagnostic> {
-        let typecheck = crate::typecheck::Typechecker::new(ast)
-            .with_libs(self.libs.clone())
-            .with_stdlib_enabled(self.stdlib)
-            .check();
-        if let Some(diagnostic) = typecheck.diagnostics.into_iter().next() {
-            return Err(diagnostic);
-        }
-        purple_garden_shared::trace!("[ir::lower::Lower::ir_from] Finished type checking");
-        self.ir_from_types(ast, typecheck.types)
-    }
-
     /// Lower [ast] using a type map produced by the typechecker.
     ///
-    /// This is primarily for CLI/tooling paths that already typechecked to
-    /// render diagnostics or type information. Reusing the map keeps the
-    /// successful compile path from walking the AST twice.
+    /// The entry point is always `entry`.
     pub fn ir_from_types(
         mut self,
         ast: &'lower Ast<'lower>,
@@ -788,42 +773,5 @@ impl<'lower> Lower<'lower> {
         self.functions.push(self.ctx.func);
 
         Ok(self.functions)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use purple_garden_ir::Instr;
-
-    use super::*;
-    use crate::{lex::Lexer, parser::Parser};
-
-    #[test]
-    fn nested_record_literal_stores_inline_fields() {
-        let ast = Parser::new(Lexer::new(
-            br#"{ name: "teo" age: 23 job: { name: "dev" since: 2024 } }"#,
-        ))
-        .parse()
-        .unwrap();
-        let funcs = Lower::new().ir_from(&ast).unwrap();
-        let instructions = &funcs[0].blocks[0].instructions;
-
-        let allocs = instructions
-            .iter()
-            .filter(|instr| matches!(instr, Instr::Alloc { .. }))
-            .count();
-        let stores = instructions
-            .iter()
-            .filter_map(|instr| match instr {
-                Instr::Store { base, offset, .. } => Some((*base, *offset)),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(allocs, 1);
-        assert_eq!(
-            stores,
-            vec![(Id(0), 0), (Id(0), 8), (Id(0), 16), (Id(0), 24)]
-        );
     }
 }

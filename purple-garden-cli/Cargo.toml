@@ -10,6 +10,7 @@ trace = [
     "purple-garden/trace",
     "purple-garden-ir/trace",
     "purple-garden-frontend/trace",
+    "purple-garden-typecheck/trace",
     "purple-garden-opt/trace",
     "purple-garden-bc/trace",
     "purple-garden-jit/trace",
@@ -36,5 +37,6 @@ purple-garden-opt = { path = "../purple-garden-opt" }
 purple-garden-bc = { path = "../purple-garden-bc" }
 purple-garden-frontend = { path = "../purple-garden-frontend" }
 purple-garden-shared = { path = "../purple-garden-shared", features = ["cli"] }
+purple-garden-typecheck = { path = "../purple-garden-typecheck" }
 serde = "1.0"
 serde_json = "1.0"

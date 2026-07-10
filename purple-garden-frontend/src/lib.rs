@@ -5,7 +5,6 @@ pub mod diagnostic;
 pub mod lex;
 pub mod lower;
 pub mod parser;
-pub mod typecheck;
 
 use ast::{Ast, TypeExpr, TypeExprId};
 use purple_garden_ir::ptype;
