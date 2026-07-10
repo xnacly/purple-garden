@@ -807,7 +807,10 @@ mod tests {
         let ast = p.parse().unwrap();
 
         let Node::Field { target, name, .. } = ast.node(ast.roots[0]) else {
-            panic!("expected field access root, got {:?}", ast.node(ast.roots[0]));
+            panic!(
+                "expected field access root, got {:?}",
+                ast.node(ast.roots[0])
+            );
         };
         assert_eq!(name.t, crate::lex::Type::Ident("name"));
         assert!(matches!(ast.node(*target), Node::Record { .. }));

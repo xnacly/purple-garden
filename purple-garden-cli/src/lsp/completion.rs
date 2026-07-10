@@ -55,11 +55,12 @@ impl RecordCompletion {
 
         Some(Self {
             fields: fields
+                .as_slice()
                 .iter()
-                .map(|(name, ty)| RecordFieldCompletion {
-                    name: (*name).to_owned(),
-                    ty: ty.to_string(),
-                    nested: Self::from_type(ty),
+                .map(|field| RecordFieldCompletion {
+                    name: field.name.to_owned(),
+                    ty: field.ty.to_string(),
+                    nested: Self::from_type(&field.ty),
                 })
                 .collect(),
         })
@@ -501,7 +502,7 @@ mod tests {
     use crate::lsp::analysis::PackageFunctionCompletion;
 
     fn record<'a>(fields: Vec<(&'a str, Type<'a>)>) -> Type<'a> {
-        Type::Record(fields)
+        Type::record(fields)
     }
 
     #[test]

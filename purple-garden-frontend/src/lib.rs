@@ -55,7 +55,7 @@ pub fn type_from_type_expr<'a>(ast: &Ast<'a>, id: TypeExprId) -> ptype::Type<'a>
         TypeExpr::Array(type_expr) => {
             ptype::Type::Array(Box::new(type_from_type_expr(ast, *type_expr)))
         }
-        TypeExpr::Record { fields, .. } => ptype::Type::Record(
+        TypeExpr::Record { fields, .. } => ptype::Type::record(
             fields
                 .iter()
                 .map(|(key, value)| (key.t.as_str(), type_from_type_expr(ast, *value)))

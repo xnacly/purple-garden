@@ -317,7 +317,7 @@ mod tests_x86 {
 
     #[test]
     fn loads_record_field_from_pointer_arg() {
-        let record_ty = Type::Record(vec![("first", Type::Int), ("second", Type::Int)]);
+        let record_ty = Type::record(vec![("first", Type::Int), ("second", Type::Int)]);
         let mut func = Func::new("field", Id(0), vec![Id(0)], Some(Type::Int));
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
@@ -348,9 +348,9 @@ mod tests_x86 {
 
     #[test]
     fn takes_nested_record_address_and_loads_field() {
-        let record_ty = Type::Record(vec![(
+        let record_ty = Type::record(vec![(
             "nested",
-            Type::Record(vec![("first", Type::Int), ("second", Type::Int)]),
+            Type::record(vec![("first", Type::Int), ("second", Type::Int)]),
         )]);
         let mut func = Func::new("nested_field", Id(0), vec![Id(0)], Some(Type::Int));
         let params = func.intern_params(vec![Id(0)]);
@@ -362,7 +362,7 @@ mod tests_x86 {
                 Instr::AddrOf {
                     dst: TypeId {
                         id: Id(1),
-                        ty: Type::Record(vec![("first", Type::Int), ("second", Type::Int)]),
+                        ty: Type::record(vec![("first", Type::Int), ("second", Type::Int)]),
                     },
                     base: Id(0),
                     offset: 8,

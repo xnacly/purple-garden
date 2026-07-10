@@ -159,7 +159,7 @@ mod tests {
     fn folds_load_through_single_use_addrof() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::Record(Vec::new())),
+                dst: type_id(1, Type::record(Vec::new())),
                 base: Id(0),
                 offset: 8,
                 span: 0,
@@ -188,7 +188,7 @@ mod tests {
     fn folds_store_through_single_use_addrof() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::Record(Vec::new())),
+                dst: type_id(1, Type::record(Vec::new())),
                 base: Id(0),
                 offset: 8,
                 span: 0,
@@ -217,13 +217,13 @@ mod tests {
     fn folds_nested_single_use_addrof_chain() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::Record(Vec::new())),
+                dst: type_id(1, Type::record(Vec::new())),
                 base: Id(0),
                 offset: 8,
                 span: 0,
             },
             Instr::AddrOf {
-                dst: type_id(2, Type::Record(Vec::new())),
+                dst: type_id(2, Type::record(Vec::new())),
                 base: Id(1),
                 offset: 4,
                 span: 0,
@@ -260,7 +260,7 @@ mod tests {
     fn leaves_multi_use_addrof_base_alone() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::Record(Vec::new())),
+                dst: type_id(1, Type::record(Vec::new())),
                 base: Id(0),
                 offset: 8,
                 span: 0,
@@ -295,7 +295,7 @@ mod tests {
     fn leaves_addrof_used_by_terminator_alone() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::Record(Vec::new())),
+                dst: type_id(1, Type::record(Vec::new())),
                 base: Id(0),
                 offset: 8,
                 span: 0,
@@ -328,7 +328,7 @@ mod tests {
     fn leaves_overflowing_offset_alone() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::Record(Vec::new())),
+                dst: type_id(1, Type::record(Vec::new())),
                 base: Id(0),
                 offset: u32::MAX,
                 span: 0,
@@ -363,7 +363,7 @@ mod tests {
             id: Id(0),
             params: entry_params,
             instructions: vec![Instr::AddrOf {
-                dst: type_id(1, Type::Record(Vec::new())),
+                dst: type_id(1, Type::record(Vec::new())),
                 base: Id(0),
                 offset: 8,
                 span: 0,

@@ -732,7 +732,10 @@ impl<'t> Typechecker<'t> {
 
                     match self.node(*value) {
                         TcType::Known(ty) => {
-                            typed_fields.push((inner_name, ty));
+                            typed_fields.push(purple_garden_ir::ptype::Field {
+                                name: inner_name,
+                                ty,
+                            });
                         }
                         TcType::Poison => {
                             poisoned = true;
@@ -744,7 +747,7 @@ impl<'t> Typechecker<'t> {
                     return TcType::Poison;
                 }
 
-                self.set_known(*id, Type::Record(typed_fields))
+                self.set_known(*id, Type::Record(typed_fields.into()))
             }
             Node::Atom { id, raw } => {
                 let t = crate::type_from_atom_token_type(&raw.t);
@@ -910,9 +913,10 @@ impl<'t> Typechecker<'t> {
                         };
 
                         // PERF: this record path lookup should mabye be a map
-                        let Some((_, ty)) = fields
+                        let Some(field) = fields
+                            .as_slice()
                             .iter()
-                            .find(|(field_name, _)| *field_name == idx_path_end)
+                            .find(|field| field.name == idx_path_end)
                         else {
                             self.report(Diagnostic::at_token(
                                 format!("{target} does not have a field called {idx_path_end}"),
@@ -921,8 +925,8 @@ impl<'t> Typechecker<'t> {
                             return TcType::Poison;
                         };
 
-                        self.set_type(*id, ty.clone());
-                        TcType::Known(ty.clone())
+                        self.set_type(*id, field.ty.clone());
+                        TcType::Known(field.ty.clone())
                     }
                     TcType::Known(t) => {
                         self.report(Diagnostic::at_token(

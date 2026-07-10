@@ -1,5 +1,5 @@
 //! Purple garden type system
-use std::{alloc::Layout, fmt::Display};
+use std::{alloc::Layout, fmt::Display, hash::Hash};
 
 use crate::Const;
 
@@ -16,7 +16,7 @@ pub enum Type<'t> {
     Str,
     Option(Box<Type<'t>>),
     Array(Box<Type<'t>>),
-    Record(Vec<(&'t str, Type<'t>)>),
+    Record(RecordFields<'t>),
     // Foreign type for handling opaque rust data feed into the vm runtime
     //
     // which is useful for something like Foreign<counter> vs
@@ -25,7 +25,69 @@ pub enum Type<'t> {
     Foreign(&'t str),
 }
 
+#[derive(Debug, Clone)]
+pub enum RecordFields<'t> {
+    Static(&'t [Field<'t>]),
+    Owned(Vec<Field<'t>>),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct Field<'t> {
+    pub name: &'t str,
+    pub ty: Type<'t>,
+}
+
+impl<'t> RecordFields<'t> {
+    #[must_use]
+    pub const fn static_fields(fields: &'t [Field<'t>]) -> Self {
+        Self::Static(fields)
+    }
+
+    #[must_use]
+    pub fn owned(fields: Vec<Field<'t>>) -> Self {
+        Self::Owned(fields)
+    }
+
+    #[must_use]
+    pub fn as_slice(&self) -> &[Field<'t>] {
+        match self {
+            Self::Static(fields) => fields,
+            Self::Owned(fields) => fields,
+        }
+    }
+}
+
+impl PartialEq for RecordFields<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl Eq for RecordFields<'_> {}
+
+impl Hash for RecordFields<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_slice().hash(state);
+    }
+}
+
+impl<'t> From<Vec<Field<'t>>> for RecordFields<'t> {
+    fn from(value: Vec<Field<'t>>) -> Self {
+        Self::Owned(value)
+    }
+}
+
 impl<'t> Type<'t> {
+    #[must_use]
+    pub fn record(fields: Vec<(&'t str, Type<'t>)>) -> Self {
+        Self::Record(RecordFields::owned(
+            fields
+                .into_iter()
+                .map(|(name, ty)| Field { name, ty })
+                .collect(),
+        ))
+    }
+
     /// Runtime payload layout for values of this type.
     ///
     /// Records are inline: nested record fields contribute their full payload
@@ -38,9 +100,7 @@ impl<'t> Type<'t> {
     pub fn size(&self) -> usize {
         match self {
             Type::Void => 0,
-            Type::Record(fields) => fields
-                .last()
-                .map_or(0, |(name, ty)| self.field_offset(name).unwrap() + ty.size()),
+            Type::Record(fields) => record_size(fields.as_slice()),
             Type::Bool
             | Type::Int
             | Type::Double
@@ -55,8 +115,9 @@ impl<'t> Type<'t> {
         match self {
             Type::Void => 1,
             Type::Record(fields) => fields
+                .as_slice()
                 .iter()
-                .map(|(_, ty)| ty.align())
+                .map(|field| field.ty.align())
                 .max()
                 .unwrap_or(WORD_ALIGN),
             _ => WORD_ALIGN,
@@ -68,17 +129,27 @@ impl<'t> Type<'t> {
             return None;
         };
 
-        let mut offset = 0;
-        for (field, ty) in fields {
-            offset = align_up(offset, ty.align());
-            if *field == name {
-                return Some(offset);
-            }
-            offset += ty.size();
-        }
-
-        None
+        field_offset(fields.as_slice(), name)
     }
+}
+
+fn record_size(fields: &[Field<'_>]) -> usize {
+    fields.iter().fold(0, |offset, field| {
+        align_up(offset, field.ty.align()) + field.ty.size()
+    })
+}
+
+fn field_offset(fields: &[Field<'_>], name: &str) -> Option<usize> {
+    let mut offset = 0;
+    for field in fields {
+        offset = align_up(offset, field.ty.align());
+        if field.name == name {
+            return Some(offset);
+        }
+        offset += field.ty.size();
+    }
+
+    None
 }
 
 fn align_up(value: usize, align: usize) -> usize {
@@ -99,9 +170,9 @@ impl Display for Type<'_> {
             Type::Array(inner) => write!(f, "Array<{inner}>"),
             Type::Record(fields) => {
                 write!(f, "Record<")?;
-                for (i, (key, value)) in fields.iter().enumerate() {
-                    write!(f, "{key}: {value}")?;
-                    if i + 1 != fields.len() {
+                for (i, field) in fields.as_slice().iter().enumerate() {
+                    write!(f, "{}: {}", field.name, field.ty)?;
+                    if i + 1 != fields.as_slice().len() {
                         write!(f, " ")?;
                     }
                 }
@@ -125,7 +196,7 @@ impl<'a> From<Const<'a>> for Type<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::Type;
+    use super::{Field, RecordFields, Type};
 
     #[test]
     fn scalars_are_one_vm_word() {
@@ -144,11 +215,11 @@ mod tests {
         //       | a      | nested | nested | d      |
         //       |        | .b     | .c     |        |
         //       +--------+--------+--------+--------+
-        let ty = Type::Record(vec![
+        let ty = Type::record(vec![
             ("a", Type::Bool),
             (
                 "nested",
-                Type::Record(vec![("b", Type::Str), ("c", Type::Int)]),
+                Type::record(vec![("b", Type::Str), ("c", Type::Int)]),
             ),
             ("d", Type::Double),
         ]);
@@ -159,5 +230,24 @@ mod tests {
         assert_eq!(ty.field_offset("nested"), Some(8));
         assert_eq!(ty.field_offset("d"), Some(24));
         assert_eq!(ty.field_offset("missing"), None);
+    }
+
+    #[test]
+    fn record_fields_compare_structurally() {
+        static FIELDS: &[Field<'static>] = &[
+            Field {
+                name: "name",
+                ty: Type::Str,
+            },
+            Field {
+                name: "age",
+                ty: Type::Int,
+            },
+        ];
+
+        let static_record = Type::Record(RecordFields::static_fields(FIELDS));
+        let owned_record = Type::Record(RecordFields::owned(FIELDS.to_vec()));
+
+        assert_eq!(static_record, owned_record);
     }
 }

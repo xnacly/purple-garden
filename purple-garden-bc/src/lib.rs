@@ -1168,10 +1168,7 @@ mod tests {
         ));
 
         assert!(
-            has_op(&ops, |op| matches!(
-                op,
-                Op::LoadI { dst: 0, value: 42 }
-            )),
+            has_op(&ops, |op| matches!(op, Op::LoadI { dst: 0, value: 42 })),
             "expected int constant to lower to LoadI: {:?}",
             ops
         );
@@ -1254,8 +1251,7 @@ mod tests {
         assert!(
             has_op(&ops, |op| matches!(
                 op,
-                Op::CastToDouble { dst: 0, src: 0 }
-                    | Op::CastToDouble { dst: 1, src: 0 }
+                Op::CastToDouble { dst: 0, src: 0 } | Op::CastToDouble { dst: 1, src: 0 }
             )),
             "expected int-to-double cast to lower to CastToDouble: {:?}",
             ops
@@ -1267,7 +1263,7 @@ mod tests {
         let ops = compile_one(entry_fun(
             vec![
                 Instr::Alloc {
-                    dst: type_id(0, Type::Record(Vec::new())),
+                    dst: type_id(0, Type::record(Vec::new())),
                     layout: Layout::from_size_align(16, 8).unwrap(),
                     span: 0,
                 },
@@ -1318,7 +1314,7 @@ mod tests {
         let ops = compile_one(entry_fun(
             vec![
                 Instr::Alloc {
-                    dst: type_id(0, Type::Record(Vec::new())),
+                    dst: type_id(0, Type::record(Vec::new())),
                     layout: Layout::from_size_align(16, 8).unwrap(),
                     span: 0,
                 },
@@ -1362,7 +1358,7 @@ mod tests {
         let ops = compile_one(entry_fun(
             vec![
                 Instr::Alloc {
-                    dst: type_id(0, Type::Record(Vec::new())),
+                    dst: type_id(0, Type::record(Vec::new())),
                     layout: Layout::from_size_align(16, 8).unwrap(),
                     span: 0,
                 },
@@ -1447,15 +1443,7 @@ mod tests {
         assert!(
             has_op(&ops, |op| matches!(
                 op,
-                Op::JmpEqI {
-                    lhs: 0,
-                    imm: 1,
-                    ..
-                } | Op::JmpNeI {
-                    lhs: 0,
-                    imm: 1,
-                    ..
-                }
+                Op::JmpEqI { lhs: 0, imm: 1, .. } | Op::JmpNeI { lhs: 0, imm: 1, .. }
             )),
             "expected BranchCmpImm IEq to lower to an immediate compare jump: {:?}",
             ops

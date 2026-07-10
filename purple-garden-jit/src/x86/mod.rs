@@ -1005,7 +1005,9 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 yes: (yes_id, yes_params),
                 no: (no_id, no_params),
                 ..
-            }) => self.emit_branch_cmp_imm(*op, *lhs, *imm, *yes_id, *yes_params, *no_id, *no_params)?,
+            }) => {
+                self.emit_branch_cmp_imm(*op, *lhs, *imm, *yes_id, *yes_params, *no_id, *no_params)?
+            }
             Some(ir::Terminator::Jump { id, params, .. }) => self.emit_jump(*id, *params)?,
             Some(ir::Terminator::Tail {
                 func: tail_func,
