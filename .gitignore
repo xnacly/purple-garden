@@ -3,3 +3,6 @@ build/*
 # benchmarking
 examples/bench.*
 target
+
+# local planning notes
+plans/
