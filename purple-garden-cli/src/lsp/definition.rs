@@ -48,7 +48,11 @@ impl<'src> DefinitionCollector<'src> {
 
     fn node(&mut self, ast: &Ast<'src>, node_id: NodeId) {
         match ast.node(node_id) {
-            Node::Record { .. } => {}
+            Node::Record { fields, .. } => {
+                for &(_, value) in fields {
+                    self.node(ast, value);
+                }
+            }
             Node::Atom { .. } => {}
             Node::Ident { name, .. } => self.ident(name),
             Node::Bin { lhs, rhs, .. } => {
@@ -59,12 +63,6 @@ impl<'src> DefinitionCollector<'src> {
             Node::Array { members, .. } => {
                 for &member in members {
                     self.node(ast, member);
-                }
-            }
-            Node::Object { pairs, .. } => {
-                for &(key, value) in pairs {
-                    self.node(ast, key);
-                    self.node(ast, value);
                 }
             }
             Node::Let { name, rhs, .. } => {

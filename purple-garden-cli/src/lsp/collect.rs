@@ -158,12 +158,6 @@ fn collect_node(
         Node::Bin { lhs, rhs, .. } => collect_nodes(ast, typecheck, &[*lhs, *rhs], analysis),
         Node::Unary { rhs, .. } => collect_node(ast, typecheck, *rhs, analysis),
         Node::Array { members, .. } => collect_nodes(ast, typecheck, members, analysis),
-        Node::Object { pairs, .. } => {
-            for &(key, value) in pairs {
-                collect_node(ast, typecheck, key, analysis);
-                collect_node(ast, typecheck, value, analysis);
-            }
-        }
         Node::Record { fields, .. } => {
             for (field, value) in fields {
                 if let Some(ty) = type_for_node(ast, typecheck, *value) {

@@ -71,9 +71,6 @@ impl<'ast> Ast<'ast> {
             Node::Array { members, .. } => {
                 members.first().and_then(|&node| self.node_start(node))? as usize
             }
-            Node::Object { pairs, .. } => {
-                pairs.first().and_then(|(key, _)| self.node_start(*key))? as usize
-            }
             Node::Let { name, .. } | Node::Fn { name, .. } => name.start,
             Node::Match { cases, default, .. } => cases
                 .first()
@@ -125,15 +122,6 @@ pub enum Node<'node> {
         id: usize,
         op: Token<'node>,
         rhs: NodeId,
-    },
-
-    /// [<member0> <member1>]
-    Array { id: usize, members: Vec<NodeId> },
-
-    /// { <key0>: <value0> <key1>: <value1> }
-    Object {
-        id: usize,
-        pairs: Vec<(NodeId, NodeId)>,
     },
 
     /// let <name> = <rhs>
@@ -212,6 +200,13 @@ pub enum Node<'node> {
         src: Token<'node>,
         fields: Vec<(Token<'node>, NodeId)>,
     },
+
+    /// [<member>]
+    Array {
+        id: usize,
+        src: Token<'node>,
+        members: Vec<NodeId>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,7 +226,6 @@ impl Node<'_> {
             | Node::Bin { id, .. }
             | Node::Unary { id, .. }
             | Node::Array { id, .. }
-            | Node::Object { id, .. }
             | Node::Let { id, .. }
             | Node::Match { id, .. }
             | Node::Call { id, .. }
@@ -374,16 +368,6 @@ impl Ast<'_> {
                 self.fmt_node_inline(*rhs, f)?;
                 write!(f, ")")
             }
-            Node::Object { pairs, .. } => {
-                write!(f, "(object")?;
-                for (key, value) in pairs {
-                    write!(f, " key: ")?;
-                    self.fmt_node_inline(*key, f)?;
-                    write!(f, " value: ")?;
-                    self.fmt_node_inline(*value, f)?;
-                }
-                write!(f, ")")
-            }
             Node::Match { .. } | Node::Fn { .. } | Node::Import { .. } | Node::Extern { .. } => {
                 unreachable!("record values are expressions")
             }
@@ -459,18 +443,6 @@ impl Ast<'_> {
                 writeln!(f, "{pad}(array")?;
                 for member in members {
                     self.fmt_node_sexpr(*member, f, indent + 1)?;
-                }
-                writeln!(f, "{pad})")
-            }
-            Node::Object { pairs, .. } => {
-                let child_pad = "  ".repeat(indent + 1);
-
-                writeln!(f, "{pad}(object")?;
-                for (k, v) in pairs {
-                    writeln!(f, "{child_pad}key:")?;
-                    self.fmt_node_sexpr(*k, f, indent + 2)?;
-                    writeln!(f, "{child_pad}value:")?;
-                    self.fmt_node_sexpr(*v, f, indent + 2)?;
                 }
                 writeln!(f, "{pad})")
             }

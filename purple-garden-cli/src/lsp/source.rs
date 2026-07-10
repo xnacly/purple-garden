@@ -15,14 +15,12 @@ pub(super) fn node_span(ast: &Ast<'_>, node_id: NodeId) -> Option<Span> {
             node_span(ast, *rhs)?,
         ])),
         Node::Unary { op, rhs, .. } => Some(cover_spans(&[token_span(op), node_span(ast, *rhs)?])),
-        Node::Array { members, .. } => cover_node_list(ast, members),
-        Node::Object { pairs, .. } => {
-            let mut spans = Vec::new();
-            for &(key, value) in pairs {
-                spans.push(node_span(ast, key)?);
-                spans.push(node_span(ast, value)?);
+        Node::Array { src, members, .. } => {
+            let mut spans = vec![token_span(src)];
+            for &member in members {
+                spans.push(node_span(ast, member)?);
             }
-            (!spans.is_empty()).then(|| cover_spans(&spans))
+            Some(cover_spans(&spans))
         }
         Node::Record { src, fields, .. } => {
             let mut spans = vec![token_span(src)];

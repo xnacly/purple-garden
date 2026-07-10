@@ -394,8 +394,15 @@ impl<'p> Parser<'p> {
         Ok(self.push_node(Node::Match { id, cases, default }))
     }
 
-    /// expr = atom | ident | "(" expr ")" | prefix-op expr | expr postfix-op | expr infix-op expr |
-    /// struct
+    /// expr =
+    ///     atom |
+    ///     ident |
+    ///     "(" expr ")" |
+    ///     prefix-op expr |
+    ///     expr postfix-op |
+    ///     expr infix-op expr |
+    ///     { ident ":" expr } |
+    ///     "[" expr "]"
     fn parse_expr(&mut self, min_bp: u8) -> Result<NodeId, Diagnostic> {
         let mut lhs = match self.cur().t {
             Type::CurlyLeft => {
@@ -416,6 +423,22 @@ impl<'p> Parser<'p> {
                 self.expect(Type::CurlyRight)?;
                 let id = self.next_id();
                 self.push_node(Node::Record { src, id, fields })
+            }
+            Type::BraketLeft => {
+                let src = self.cur.clone();
+                // skip Type::BraketLeft
+                self.advance()?;
+
+                let mut members = vec![];
+                while !self.at_end() && self.cur().t != Type::BraketRight {
+                    let member = self.parse_expr(0)?;
+                    members.push(member);
+                }
+
+                self.expect(Type::BraketRight)?;
+
+                let id = self.next_id();
+                self.push_node(Node::Array { id, src, members })
             }
             Type::S(_) | Type::I(_) | Type::D(_) | Type::True | Type::False => {
                 let raw = self.cur.clone();
@@ -798,6 +821,60 @@ mod tests {
         assert_eq!(nested_fields.len(), 2);
         assert_eq!(nested_fields[0].0.t, crate::lex::Type::Ident("title"));
         assert_eq!(nested_fields[1].0.t, crate::lex::Type::Ident("since"));
+    }
+
+    #[test]
+    fn parses_empty_array_literal() {
+        let l = Lexer::new(b"[]");
+        let p = Parser::new(l);
+        let ast = p.parse().unwrap();
+
+        assert_eq!(ast.roots.len(), 1);
+        let Node::Array { src, members, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected array root, got {:?}", ast.node(ast.roots[0]));
+        };
+        assert_eq!(src.t, crate::lex::Type::BraketLeft);
+        assert!(members.is_empty());
+    }
+
+    #[test]
+    fn parses_array_literal_members() {
+        let l = Lexer::new(br#"[1 "two" true]"#);
+        let p = Parser::new(l);
+        let ast = p.parse().unwrap();
+
+        assert_eq!(ast.roots.len(), 1);
+        let Node::Array { members, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected array root, got {:?}", ast.node(ast.roots[0]));
+        };
+
+        assert_eq!(members.len(), 3);
+        assert!(matches!(ast.node(members[0]), Node::Atom { .. }));
+        assert!(matches!(ast.node(members[1]), Node::Atom { .. }));
+        assert!(matches!(ast.node(members[2]), Node::Atom { .. }));
+    }
+
+    #[test]
+    fn parses_nested_array_literal() {
+        let l = Lexer::new(b"[1 [2 3] 4]");
+        let p = Parser::new(l);
+        let ast = p.parse().unwrap();
+
+        let Node::Array { members, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected array root, got {:?}", ast.node(ast.roots[0]));
+        };
+        assert_eq!(members.len(), 3);
+
+        let Node::Array {
+            members: nested_members,
+            ..
+        } = ast.node(members[1])
+        else {
+            panic!("expected nested array, got {:?}", ast.node(members[1]));
+        };
+        assert_eq!(nested_members.len(), 2);
+        assert!(matches!(ast.node(nested_members[0]), Node::Atom { .. }));
+        assert!(matches!(ast.node(nested_members[1]), Node::Atom { .. }));
     }
 
     #[test]

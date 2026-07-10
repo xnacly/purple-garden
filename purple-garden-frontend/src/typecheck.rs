@@ -113,17 +113,10 @@ impl<'t> TypecheckOutput<'t> {
                 self.render_value(indent, op.t.as_str(), self.type_at(*id), out);
                 self.render_node(ast, *rhs, indent + 1, out);
             }
-            Node::Array { id, members } => {
+            Node::Array { id, members, .. } => {
                 self.render_value(indent, "array", self.type_at(*id), out);
                 for &member in members {
                     self.render_node(ast, member, indent + 1, out);
-                }
-            }
-            Node::Object { id, pairs } => {
-                self.render_value(indent, "object", self.type_at(*id), out);
-                for &(key, value) in pairs {
-                    self.render_node(ast, key, indent + 1, out);
-                    self.render_node(ast, value, indent + 1, out);
                 }
             }
             Node::Let { id, name, rhs, .. } => {
@@ -1196,7 +1189,6 @@ impl<'t> Typechecker<'t> {
             }
             Node::Extern { .. } => TcType::Known(Type::Void),
             Node::Array { .. } => todo!(),
-            Node::Object { .. } => todo!(),
         }
     }
 }
