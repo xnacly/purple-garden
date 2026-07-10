@@ -12,6 +12,7 @@ It also has non-primitive type forms:
 
 - `Option<T>`
 - `Array<T>`
+- `Record<key: T>`
 - `Foreign<identifier>`
 
 ## Examples
@@ -21,6 +22,8 @@ let attempts = 3
 let scale = 0.5
 let ready = true
 let label = "garden"
+let user = { name: "xnacly" age: 23 }
+let jobs = ["senior software engineer" "thinker"]
 
 fn print_once(message:Str) Void {
     io.println(message)

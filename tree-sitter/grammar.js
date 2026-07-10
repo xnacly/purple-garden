@@ -149,7 +149,27 @@ module.exports = grammar({
       $.string,
       $.number,
       $.boolean,
+      $.array,
+      $.record,
       seq('(', $.expression, ')'),
+    ),
+
+    array: $ => seq(
+      '[',
+      repeat($.expression),
+      ']',
+    ),
+
+    record: $ => seq(
+      '{',
+      repeat($.record_field),
+      '}',
+    ),
+
+    record_field: $ => seq(
+      $.identifier,
+      ':',
+      $.expression,
     ),
 
     boolean: $ => choice('true', 'false'),
@@ -175,6 +195,7 @@ module.exports = grammar({
       $.foreign_type,
       $.option_type,
       $.array_type,
+      $.record_type,
     ),
 
     type_atom: $ => choice('Str', 'Int', 'Double', 'Bool', 'Void'),
@@ -198,6 +219,19 @@ module.exports = grammar({
       '<',
       $.type,
       '>',
+    ),
+
+    record_type: $ => seq(
+      'Record',
+      '<',
+      repeat($.record_type_field),
+      '>',
+    ),
+
+    record_type_field: $ => seq(
+      $.identifier,
+      ':',
+      $.type,
     ),
 
     type_identifier: $ => $.identifier,

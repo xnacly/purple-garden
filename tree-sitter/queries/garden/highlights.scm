@@ -16,6 +16,7 @@
   "Foreign"
   "Option"
   "Array"
+  "Record"
 ] @keyword
 
 ; identifiers
@@ -24,6 +25,8 @@
 (function_declaration (identifier) @function)
 (extern_function_declaration (identifier) @function)
 (parameter (identifier) @variable.parameter)
+(record_field (identifier) @property)
+(record_type_field (identifier) @property)
 (type_identifier) @type
 
 ; literals
@@ -51,6 +54,8 @@
   ")"
   "{"
   "}"
+  "["
+  "]"
   "<"
   ">"
 ] @punctuation.bracket
