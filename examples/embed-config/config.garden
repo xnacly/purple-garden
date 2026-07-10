@@ -1,0 +1,11 @@
+import ("config")
+
+config.summary({
+    service: "api"
+    workers: 4
+    debug: true
+    retry: {
+        attempts: 3
+        backoff_ms: 250
+    }
+})

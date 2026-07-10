@@ -1,0 +1,16 @@
+[package]
+name = "purple-garden-embed-config"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+trace = ["purple-garden/trace"]
+
+[dependencies]
+purple-garden = { path = "../../purple-garden" }
+
+[build-dependencies]
+purple-garden = { path = "../../purple-garden" }

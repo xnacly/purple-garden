@@ -1,0 +1,5 @@
+#! Configuration helpers backed by Rust.
+extern "config" {
+    #! Render a compact deployment summary from a Garden record.
+    fn summary(config: Record<service: Str workers: Int debug: Bool retry: Record<attempts: Int backoff_ms: Int>>) Str
+}

@@ -42,6 +42,29 @@ fn embed_counter_example() {
     );
 }
 
+#[test]
+fn embed_config_example() {
+    let manifest_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/embed-config");
+    let output = Command::new(env!("CARGO"))
+        .args(["run", "--quiet"])
+        .current_dir(manifest_dir)
+        .output()
+        .expect("failed to run embed-config example");
+
+    assert!(
+        output.status.success(),
+        "embed-config failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("api: workers=4 mode=debug retry=3x/250ms"),
+        "embed-config output did not include the config summary\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
 macro_rules! example_tests {
     ($($name:ident => $path:literal,)*) => {
         $(
