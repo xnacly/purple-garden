@@ -1,6 +1,9 @@
 use std::fmt::Display;
 
-use crate::lex::{Token, Type};
+use crate::{
+    diagnostic::Span,
+    lex::{Token, Type},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub usize);
@@ -46,6 +49,93 @@ impl<'ast> Ast<'ast> {
     #[must_use]
     pub fn value_id(&self, id: NodeId) -> Option<usize> {
         self.node(id).value_id()
+    }
+
+    #[must_use]
+    pub fn span(&self, id: NodeId) -> Option<Span> {
+        match self.node(id) {
+            Node::Atom { raw, .. } | Node::Ident { name: raw, .. } => Some(Span::from_token(raw)),
+            Node::Bin { op, lhs, rhs, .. } => Some(Self::cover_spans(&[
+                self.span(*lhs)?,
+                Span::from_token(op),
+                self.span(*rhs)?,
+            ])),
+            Node::Unary { op, rhs, .. } => {
+                Some(Self::cover_spans(&[Span::from_token(op), self.span(*rhs)?]))
+            }
+            Node::Let { name, rhs, .. } => Some(Self::cover_spans(&[
+                Span::from_token(name),
+                self.span(*rhs)?,
+            ])),
+            Node::Fn { name, body, .. } => Some(if let Some(body_span) = self.span_nodes(body) {
+                Self::cover_spans(&[Span::from_token(name), body_span])
+            } else {
+                Span::from_token(name)
+            }),
+            Node::Match { cases, default, .. } => {
+                let mut spans = Vec::new();
+                for ((token, condition), body) in cases {
+                    spans.push(Span::from_token(token));
+                    spans.push(self.span(*condition)?);
+                    if let Some(body_span) = self.span_nodes(body) {
+                        spans.push(body_span);
+                    }
+                }
+                spans.push(Span::from_token(&default.0));
+                if let Some(default_span) = self.span_nodes(&default.1) {
+                    spans.push(default_span);
+                }
+                Some(Self::cover_spans(&spans))
+            }
+            Node::Call { target, args, .. } => {
+                let mut spans = vec![self.span(*target)?];
+                for &arg in args {
+                    spans.push(self.span(arg)?);
+                }
+                Some(Self::cover_spans(&spans))
+            }
+            Node::Field { target, name, .. } => Some(Self::cover_spans(&[
+                self.span(*target)?,
+                Span::from_token(name),
+            ])),
+            Node::Cast { src, lhs, rhs, .. } => Some(Self::cover_spans(&[
+                self.span(*lhs)?,
+                Span::from_token(src),
+                self.type_span(*rhs),
+            ])),
+            Node::Import { src, pkgs, .. } => {
+                let mut spans = vec![Span::from_token(src)];
+                spans.extend(pkgs.iter().map(Span::from_token));
+                Some(Self::cover_spans(&spans))
+            }
+            Node::Extern { src, name, fns, .. } => {
+                let mut spans = vec![Span::from_token(src), Span::from_token(name)];
+                for fun in fns {
+                    spans.push(Span::from_token(&fun.name));
+                    for (arg, ty) in &fun.args {
+                        spans.push(Span::from_token(arg));
+                        spans.push(self.type_span(*ty));
+                    }
+                    spans.push(self.type_span(fun.return_type));
+                }
+                Some(Self::cover_spans(&spans))
+            }
+            Node::Record { src, fields, .. } => {
+                let mut spans = vec![Span::from_token(src)];
+                for (field, value) in fields {
+                    spans.push(Span::from_token(field));
+                    spans.push(self.span(*value)?);
+                }
+                Some(Self::cover_spans(&spans))
+            }
+            Node::Array { src, members, .. } => {
+                let mut spans = vec![Span::from_token(src)];
+                for &member in members {
+                    spans.push(self.span(member)?);
+                }
+                Some(Self::cover_spans(&spans))
+            }
+        }
     }
 
     #[must_use]
@@ -98,6 +188,34 @@ impl<'ast> Ast<'ast> {
             TypeExpr::Option(inner) | TypeExpr::Array(inner) => self.type_token(*inner),
             TypeExpr::Record { src, .. } => src,
         }
+    }
+
+    #[must_use]
+    pub fn type_span(&self, id: TypeExprId) -> Span {
+        Span::from_token(self.type_token(id))
+    }
+
+    fn span_nodes(&self, nodes: &[NodeId]) -> Option<Span> {
+        let spans = nodes
+            .iter()
+            .copied()
+            .map(|node| self.span(node))
+            .collect::<Option<Vec<_>>>()?;
+        (!spans.is_empty()).then(|| Self::cover_spans(&spans))
+    }
+
+    fn cover_spans(spans: &[Span]) -> Span {
+        let start = spans
+            .iter()
+            .map(|span| span.start)
+            .min()
+            .unwrap_or_default();
+        let end = spans
+            .iter()
+            .map(|span| span.start.saturating_add(span.len))
+            .max()
+            .unwrap_or(start);
+        Span::new(start, end.saturating_sub(start))
     }
 }
 

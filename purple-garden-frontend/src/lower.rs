@@ -713,6 +713,9 @@ impl<'lower> Lower<'lower> {
                 self.block_mut(join).params = join_params;
                 Some(last)
             }
+            Node::Array { id, src, members } => {
+                todo!("arr")
+            }
             Node::Record { id, src, fields } => {
                 let Some(record_ty) = self.types[*id].clone() else {
                     unreachable!();

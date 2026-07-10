@@ -722,6 +722,59 @@ impl<'t> Typechecker<'t> {
         }
 
         match node {
+            Node::Array { id, members, src } => {
+                let Some(first_member) = members.first() else {
+                    self.report(
+                        Diagnostic::at_token(
+                            "Can not infer the element type of an empty array",
+                            src,
+                        )
+                        .with_primary_message("empty array"),
+                    );
+                    return TcType::Poison;
+                };
+
+                let (first_type, mut poisoned) = match self.node(*first_member) {
+                    TcType::Known(ty) => (ty, false),
+                    TcType::Poison => (Type::Void, true),
+                };
+
+                for member in members {
+                    match self.node(*member) {
+                        TcType::Known(ty) => {
+                            if ty != first_type {
+                                let span = self
+                                    .ast
+                                    .span(*member)
+                                    .unwrap_or_else(|| Span::from_token(src));
+                                self.report(
+                                    Diagnostic::new(
+                                        format!(
+                                            "Array members must all have the same type, expected {first_type} but got {ty}"
+                                        ),
+                                        span,
+                                    )
+                                    .with_primary_message(format!("this member is {ty}"))
+                                    .with_note(format!(
+                                        "the array element type was inferred as {first_type} from the first member"
+                                    )),
+                                );
+
+                                return TcType::Poison;
+                            }
+                        }
+                        TcType::Poison => {
+                            poisoned = true;
+                        }
+                    }
+                }
+
+                if poisoned {
+                    return TcType::Poison;
+                }
+
+                self.set_known(*id, Type::Array(Box::new(first_type)))
+            }
             Node::Record { id, fields, .. } => {
                 let mut typed_fields = Vec::with_capacity(fields.len());
                 let mut poisoned = false;
@@ -1188,7 +1241,6 @@ impl<'t> Typechecker<'t> {
                 TcType::Known(Type::Void)
             }
             Node::Extern { .. } => TcType::Known(Type::Void),
-            Node::Array { .. } => todo!(),
         }
     }
 }
