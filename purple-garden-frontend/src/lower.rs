@@ -1,4 +1,4 @@
-use std::{collections::HashMap, num};
+use std::{alloc::Layout, collections::HashMap, num};
 
 use crate::{
     ast::{Ast, Node, NodeId, TypeExpr},
@@ -23,6 +23,11 @@ impl IdStore {
         self.values += 1;
         Id(val as u32)
     }
+}
+
+fn align_up(value: usize, align: usize) -> usize {
+    debug_assert!(align.is_power_of_two());
+    (value + align - 1) & !(align - 1)
 }
 
 #[derive(Default)]
@@ -133,45 +138,43 @@ impl<'lower> Lower<'lower> {
         self.ctx.block = id;
     }
 
-    fn lower_record_fields_into(
+    fn lower_node_into(
         &mut self,
         ast: &'lower Ast<'lower>,
-        record_ty: &ptype::Type<'lower>,
+        node_id: NodeId,
+        ty: &ptype::Type<'lower>,
         base: Id,
-        base_offset: u32,
-        fields: &[(Token<'lower>, NodeId)],
+        offset: u32,
+        span: u32,
     ) -> Result<(), Diagnostic> {
-        for (tok, value) in fields {
-            let lex::Type::Ident(name) = tok.t else {
-                unreachable!();
+        if let Node::Record { fields, .. } = ast.node(node_id) {
+            let ptype::Type::Record(_) = ty else {
+                unreachable!("record literal was typechecked as non-record")
             };
-            let offset = base_offset
-                + record_ty
-                    .field_offset(name)
-                    .expect("record field was typechecked") as u32;
 
-            if let Node::Record {
-                id, fields: nested, ..
-            } = ast.node(*value)
-            {
-                let Some(nested_ty) = self.types[*id].clone() else {
+            for (tok, value) in fields {
+                let lex::Type::Ident(name) = tok.t else {
                     unreachable!();
                 };
-                self.lower_record_fields_into(ast, &nested_ty, base, offset, nested)?;
-                continue;
+                let field_offset =
+                    offset + ty.field_offset(name).expect("record field was typechecked") as u32;
+                let field_ty = self.types[ast.value_id(*value).unwrap()].clone().unwrap();
+                self.lower_node_into(ast, *value, &field_ty, base, field_offset, tok.start as u32)?;
             }
 
-            let Some(src) = self.lower_node(ast, *value)? else {
-                unreachable!("field doesnt produce a value, compiler error");
-            };
-
-            self.emit(Instr::Store {
-                src,
-                base,
-                offset,
-                span: tok.start as u32,
-            })
+            return Ok(());
         }
+
+        let Some(src) = self.lower_node(ast, node_id)? else {
+            unreachable!("node lowered into memory must produce a value");
+        };
+
+        self.emit(Instr::Store {
+            src,
+            base,
+            offset,
+            span,
+        });
 
         Ok(())
     }
@@ -714,7 +717,64 @@ impl<'lower> Lower<'lower> {
                 Some(last)
             }
             Node::Array { id, src, members } => {
-                todo!("arr")
+                let Some(ty) = self.types[*id].clone() else {
+                    unreachable!();
+                };
+
+                // we need the inner type T of Array<T> to compute its size and its alignment and
+                // multiply it up with the size of the array, since all arrays in pg are immutable
+                let ptype::Type::Array(ref inner) = ty else {
+                    unreachable!();
+                };
+
+                let inner = inner.as_ref().clone();
+                let word_size = std::mem::size_of::<purple_garden_runtime::Value>();
+                let header_size = align_up(word_size, inner.align());
+                let member_size = align_up(inner.size(), inner.align());
+                let layout_size = header_size + member_size * members.len();
+                let layout_align = word_size.max(inner.align());
+                let layout = Layout::from_size_align(layout_size, layout_align)
+                    .expect("array allocation layout");
+
+                let array_id = self.ctx.id_store.new_value();
+                self.emit(Instr::Alloc {
+                    dst: TypeId { id: array_id, ty },
+                    layout,
+                    span: src.start as u32,
+                });
+
+                // PERF: replace this with StoreImm
+                let len_id = self.ctx.id_store.new_value();
+                self.emit(Instr::LoadConst {
+                    dst: TypeId {
+                        id: len_id,
+                        ty: ptype::Type::Int,
+                    },
+                    value: i64::try_from(members.len())
+                        .expect("Too large of an array, sorry mate")
+                        .into(),
+                    span: src.start as u32,
+                });
+                self.emit(Instr::Store {
+                    src: len_id,
+                    base: array_id,
+                    offset: 0,
+                    span: src.start as u32,
+                });
+
+                for (i, member) in members.iter().enumerate() {
+                    let offset = header_size + member_size * i;
+                    self.lower_node_into(
+                        ast,
+                        *member,
+                        &inner,
+                        array_id,
+                        offset as u32,
+                        src.start as u32,
+                    )?;
+                }
+
+                Some(array_id)
             }
             Node::Record { id, src, fields } => {
                 let Some(record_ty) = self.types[*id].clone() else {
@@ -732,11 +792,20 @@ impl<'lower> Lower<'lower> {
                 });
 
                 let base = id;
-                self.lower_record_fields_into(ast, &record_ty, base, 0, fields)?;
+                for (tok, value) in fields {
+                    let lex::Type::Ident(name) = tok.t else {
+                        unreachable!();
+                    };
+                    let offset = record_ty
+                        .field_offset(name)
+                        .expect("record field was typechecked")
+                        as u32;
+                    let field_ty = self.types[ast.value_id(*value).unwrap()].clone().unwrap();
+                    self.lower_node_into(ast, *value, &field_ty, base, offset, tok.start as u32)?;
+                }
 
                 Some(base)
             }
-            _ => todo!("{:?}", node),
         })
     }
 

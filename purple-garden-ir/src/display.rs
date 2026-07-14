@@ -59,17 +59,14 @@ impl Display for Instr<'_> {
             Instr::AddrOf {
                 dst, base, offset, ..
             } => write!(f, "%v{dst} = AddrOf %v{}+{}", base, offset)?,
-            Instr::Alloc { dst, .. } => {
-                let layout = dst.ty.layout();
-                write!(
-                    f,
-                    "%v{} = Alloc {}(size={},align={})",
-                    dst.id,
-                    dst.ty,
-                    layout.size(),
-                    layout.align()
-                )?
-            }
+            Instr::Alloc { dst, layout, .. } => write!(
+                f,
+                "%v{} = Alloc {}(size={},align={})",
+                dst.id,
+                dst.ty,
+                layout.size(),
+                layout.align()
+            )?,
             Instr::Bin {
                 op, dst, lhs, rhs, ..
             } => write!(f, "%v{} = {:?} %v{}, %v{}", dst, op, lhs.0, rhs.0)?,

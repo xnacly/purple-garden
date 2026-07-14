@@ -1123,4 +1123,114 @@ mod tests {
             vec![(Id(0), 0), (Id(0), 8), (Id(0), 16), (Id(0), 24)]
         );
     }
+
+    #[test]
+    fn array_literal_stores_length_and_members_inline() {
+        use purple_garden_frontend::lower::Lower;
+        use purple_garden_ir::{Const, Id, Instr};
+
+        let ast = parse(b"[1 2]");
+        let typecheck = Typechecker::new(&ast).check();
+        assert!(
+            typecheck.diagnostics.is_empty(),
+            "{:?}",
+            typecheck.diagnostics
+        );
+        let funcs = Lower::new().ir_from_types(&ast, typecheck.types).unwrap();
+        let instructions = &funcs[0].blocks[0].instructions;
+
+        let alloc = instructions
+            .iter()
+            .find_map(|instr| match instr {
+                Instr::Alloc { dst, layout, .. } => Some((dst.id, dst.ty.clone(), *layout)),
+                _ => None,
+            })
+            .expect("array literal should allocate");
+        let consts = instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::LoadConst { dst, value, .. } => Some((dst.id, value.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let stores = instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::Store {
+                    src, base, offset, ..
+                } => Some((*src, *base, *offset)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(alloc.0, Id(0));
+        assert_eq!(alloc.1, Type::Array(Box::new(Type::Int)));
+        assert_eq!(alloc.2.size(), 24);
+        assert_eq!(alloc.2.align(), 8);
+        assert_eq!(
+            consts,
+            vec![
+                (Id(1), Const::Int(2)),
+                (Id(2), Const::Int(1)),
+                (Id(3), Const::Int(2))
+            ]
+        );
+        assert_eq!(
+            stores,
+            vec![(Id(1), Id(0), 0), (Id(2), Id(0), 8), (Id(3), Id(0), 16)]
+        );
+    }
+
+    #[test]
+    fn array_literal_stores_record_members_inline() {
+        use purple_garden_frontend::lower::Lower;
+        use purple_garden_ir::{Id, Instr};
+
+        let ast = parse(b"[{ x: 1 y: 2 } { x: 3 y: 4 }]");
+        let typecheck = Typechecker::new(&ast).check();
+        assert!(
+            typecheck.diagnostics.is_empty(),
+            "{:?}",
+            typecheck.diagnostics
+        );
+        let funcs = Lower::new().ir_from_types(&ast, typecheck.types).unwrap();
+        let instructions = &funcs[0].blocks[0].instructions;
+
+        let allocs = instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::Alloc { dst, layout, .. } => Some((dst.id, dst.ty.clone(), *layout)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let stores = instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::Store { base, offset, .. } => Some((*base, *offset)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(allocs.len(), 1);
+        assert_eq!(allocs[0].0, Id(0));
+        assert_eq!(
+            allocs[0].1,
+            Type::Array(Box::new(Type::record(vec![
+                ("x", Type::Int),
+                ("y", Type::Int),
+            ])))
+        );
+        assert_eq!(allocs[0].2.size(), 40);
+        assert_eq!(allocs[0].2.align(), 8);
+        assert_eq!(
+            stores,
+            vec![
+                (Id(0), 0),
+                (Id(0), 8),
+                (Id(0), 16),
+                (Id(0), 24),
+                (Id(0), 32)
+            ]
+        );
+    }
 }
