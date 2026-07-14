@@ -3,6 +3,7 @@ use std::{alloc::Layout, fmt::Display, hash::Hash};
 
 use crate::Const;
 
+// TODO: replace with mem::{size_of,align_of}
 const WORD_SIZE: usize = 8;
 const WORD_ALIGN: usize = 8;
 
@@ -88,11 +89,31 @@ impl<'t> Type<'t> {
         ))
     }
 
-    /// Runtime payload layout for values of this type.
+    /// Runtime payload layout for a value of this type.
     ///
     /// Records are inline: nested record fields contribute their full payload
-    /// size, not one pointer-sized slot. Recursive layout does not need cycle
-    /// detection because record types are anonymous structural values.
+    /// size, not one pointer-sized slot. For example:
+    ///
+    /// ```text
+    /// Record<a: Int b: Record<c: Bool d: Str> e: Double>
+    ///
+    /// byte  0        8        16       24       32
+    ///       +--------+--------+--------+--------+
+    ///       | a      | b.c    | b.d    | e      |
+    ///       +--------+--------+--------+--------+
+    /// ```
+    ///
+    /// Arrays are pointer-sized values. The heap payload behind an `Array<T>`
+    /// is contiguous and starts with a length word:
+    ///
+    /// ```text
+    /// Array<Record<x: Int y: Bool>> with len = 2
+    ///
+    /// byte  0        8        16       24       32       40
+    ///       +--------+--------+--------+--------+--------+
+    ///       | len    | [0].x  | [0].y  | [1].x  | [1].y  |
+    ///       +--------+--------+--------+--------+--------+
+    /// ```
     pub fn layout(&self) -> Layout {
         Layout::from_size_align(self.size(), self.align()).expect("type layout")
     }
@@ -230,6 +251,14 @@ mod tests {
         assert_eq!(ty.field_offset("nested"), Some(8));
         assert_eq!(ty.field_offset("d"), Some(24));
         assert_eq!(ty.field_offset("missing"), None);
+    }
+
+    #[test]
+    fn array_values_are_pointers_to_payloads() {
+        let ty = Type::Array(Box::new(Type::Int));
+
+        assert_eq!(ty.size(), 8);
+        assert_eq!(ty.align(), 8);
     }
 
     #[test]
