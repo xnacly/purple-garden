@@ -18,3 +18,51 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --all-targets --locked
       - run: cargo test --workspace --locked
+
+  tree-sitter:
+    name: tree-sitter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check whether tree-sitter changed
+        id: changes
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          else
+            base_sha="${{ github.event.before }}"
+          fi
+
+          if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$base_sha" "${{ github.sha }}" -- tree-sitter | grep -q .; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.changed == 'true'
+        with:
+          node-version: 22
+
+      - name: Install tree-sitter CLI
+        if: steps.changes.outputs.changed == 'true'
+        run: npm install --global tree-sitter-cli@0.26.9
+
+      - name: Generate parser
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: tree-sitter
+        run: tree-sitter generate
+
+      - name: Check generated parser is current
+        if: steps.changes.outputs.changed == 'true'
+        run: git diff --exit-code -- tree-sitter/src
+
+      - name: Parse examples
+        if: steps.changes.outputs.changed == 'true'
+        run: tree-sitter parse --grammar-path tree-sitter -q --stat examples/*.garden examples/embed-config/*.garden examples/embed-counter/*.garden

@@ -1,4 +1,5 @@
 const PREC = {
+  block: 1,
   cast: 1,
   compare: 2,
   add: 3,
@@ -86,11 +87,11 @@ module.exports = grammar({
       $.type,
     ),
 
-    block: $ => seq(
+    block: $ => prec(PREC.block, seq(
       '{',
       repeat($._item),
       '}',
-    ),
+    )),
 
     match_expression: $ => seq(
       'match',
@@ -132,7 +133,10 @@ module.exports = grammar({
     )),
 
     call_expression: $ => prec.left(PREC.call, seq(
-      $.expression,
+      choice(
+        $.identifier,
+        $.field_expression,
+      ),
       '(',
       repeat($.expression),
       ')',
