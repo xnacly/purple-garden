@@ -1,21 +1,17 @@
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct Config {
-    /// Set optimisation level. Higher levels increase compile time.
+    /// Set optimisation level. Higher levels may increase compile time.
     ///
-    /// 0: Baseline lowering with no optimisation passes.
+    /// Though pgs passes are small, efficient and targetted.
     ///
-    /// 1: Local IR and bytecode optimisations:
-    ///    constant folding and propagation, arithmetic simplification,
-    ///    peephole bytecode cleanup, redundant load elimination.
+    /// O0  No optimization.
     ///
-    /// 2: Global IR optimisations:
-    ///    control-flow aware dead code elimination,
-    ///    register lifetime minimisation, copy propagation.
+    /// O1  Fast local optimizations.
     ///
-    /// 3: Aggressive compile-time optimisations:
-    ///    function inlining, guarded operator specialisation,
-    ///    constant hoisting, aggressive register reuse.
+    /// O2  Whole-function optimization.
+    ///
+    /// O3  Aggressive optimization prioritizing runtime performance.
     #[cfg_attr(feature = "cli", arg(short = 'O', default_value_t = 1))]
     pub opt: usize,
 
