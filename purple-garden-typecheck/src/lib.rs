@@ -99,12 +99,6 @@ impl<'t> Typechecker<'t> {
                     .collect(),
                 ret: f.ret.clone(),
             };
-            purple_garden_shared::trace!(
-                "[ir::typecheck::Typechecker::node][{}.{}]: {}",
-                pkg.name,
-                f.name,
-                f_type
-            );
             registered.entry(f.group_name()).or_default().push(f_type);
         }
 
@@ -969,7 +963,10 @@ impl<'t> Typechecker<'t> {
                         continue;
                     };
 
-                    purple_garden_shared::trace!("ty: resolved pkg `{}`", pkg.name);
+                    purple_garden_shared::trace!(
+                        "[ir::typecheck::Typechecker::node] resolved pkg `{}`",
+                        pkg.name
+                    );
 
                     self.register_pkg(pkg);
                 }
