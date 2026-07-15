@@ -471,7 +471,7 @@ impl<'t> Typechecker<'t> {
                     TcType::Poison => (Type::Void, true),
                 };
 
-                for member in members {
+                for member in members.iter().skip(1) {
                     match self.node(*member) {
                         TcType::Known(ty) => {
                             if ty != first_type {
@@ -1088,6 +1088,15 @@ mod tests {
             Some("empty array")
         );
         assert_eq!(type_of(&ast, &out, ast.roots[0]), None);
+    }
+
+    #[test]
+    fn array_typecheck_does_not_report_first_member_errors_twice() {
+        let ast = parse(br#"[{ jobs: ["opfer"] } { jobs: [opfer] }]"#);
+        let out = Typechecker::new(&ast).check();
+
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(out.diagnostics[0].message, "binding `opfer` not found");
     }
 
     #[test]
