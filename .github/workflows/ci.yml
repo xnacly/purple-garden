@@ -14,10 +14,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check whether anything outside NRFC changed
+        id: changes
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          else
+            base_sha="${{ github.event.before }}"
+          fi
+
+          if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$base_sha" "${{ github.sha }}" -- . ':!NRFC' | grep -q .; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.changes.outputs.changed == 'true'
       - uses: Swatinem/rust-cache@v2
+        if: steps.changes.outputs.changed == 'true'
       - run: cargo build --workspace --all-targets --locked
+        if: steps.changes.outputs.changed == 'true'
       - run: cargo test --workspace --locked
+        if: steps.changes.outputs.changed == 'true'
 
   tree-sitter:
     name: tree-sitter
