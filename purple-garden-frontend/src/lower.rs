@@ -492,12 +492,13 @@ impl<'lower> Lower<'lower> {
 
                         // both unwrappable because the typechecker makes sure everything is fine
                         let candidates = &self.packages.get(pkg_name).unwrap().1[inner_name];
-                        // Single candidate: take it. Overload group: pick the
-                        // specialisation matching the arg types with the same
-                        // predicate the typechecker used.
+                        // Single candidate: no specialisation.
                         let fun = if candidates.len() == 1 {
                             candidates[0]
                         } else {
+                            // specialisation group: pick the impl matching the arg types with the
+                            // same predicate the typechecker used.
+
                             // arg types stream by reference from the type map; the
                             // typechecker already proved exactly one variant matches.
                             let provided = || {
