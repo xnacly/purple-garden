@@ -97,8 +97,57 @@ pub mod counter {
 }
 ```
 
-> The `#[pg_fn(pure)]` enables the purple garden optimiser to constant fold the function call if its arguments are constant
-> / known at compile time
+### Function Options
+
+Package functions are exported automatically. Use `#[pg_fn(...)]` when a
+function needs options beyond the default wrapper behavior.
+
+`#[pg_fn(pure)]` marks a function as deterministic and side-effect-free for
+constant inputs. The optimizer may constant-fold calls to pure functions when
+all arguments are known at compile time. Pure functions cannot use
+`#[pg_fn(unsafe)]` because VM access can observe or mutate runtime state.
+
+```rust
+#[pg_fn(pure)]
+pub fn get(counter: &Counter) -> i64 {
+    counter.get()
+}
+```
+
+`#[pg_fn(specialises = "name")]` exports a function as one overload variant of
+`name` instead of under its Rust function name. All variants in the same group
+are shown and resolved as one Garden function, with dispatch based on argument
+types.
+
+```rust
+#[pg_fn(specialises = "print")]
+pub fn print_str(value: &str) {
+    print!("{value}");
+}
+
+#[pg_fn(specialises = "print")]
+pub fn print_int(value: i64) {
+    print!("{value}");
+}
+```
+
+`#[pg_fn(unsafe)]` passes `&mut Vm` as the first Rust argument while exposing
+only the remaining Rust arguments to Garden. The wrapper still decodes those
+remaining arguments and encodes the return value normally. Use this for runtime
+introspection or low-level functions that need direct VM access.
+
+```rust
+use purple_garden::Vm;
+
+#[pg_fn(unsafe)]
+pub fn register_plus(vm: &mut Vm, value: i64) -> i64 {
+    vm.r(0).as_int() + value
+}
+```
+
+Options can be combined where meaningful, for example
+`#[pg_fn(unsafe, specialises = "stats")]`. `pure` and `unsafe` are mutually
+exclusive.
 
 The generated wrapper uses the embedding traits at the rust/purple garden
 function boundary:
