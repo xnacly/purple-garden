@@ -182,7 +182,7 @@ fn split_doc_examples(doc: &str) -> (String, String) {
     (description.trim().to_owned(), example)
 }
 
-fn print_overload_group_summary(
+pub fn print_overload_group_summary(
     name: &str,
     variants: &[&Fn<'_>],
     f: &mut dyn fmt::Write,
