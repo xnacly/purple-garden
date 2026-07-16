@@ -22,6 +22,7 @@ struct PgFunction {
     args: Vec<FunctionArg>,
     ret: Type,
     result: bool,
+    raw: bool,
 }
 
 struct ExpandedFunction {
@@ -48,32 +49,36 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let mut generated_items = Vec::new();
     let mut metadata = Vec::new();
+    let mut subpackages = Vec::new();
     let mut errors = TokenStream2::new();
 
     for item in items.iter_mut() {
-        let Item::Fn(fun) = item else {
-            continue;
-        };
-
-        match expand_function(&api, fun) {
-            Ok(expanded) => {
-                generated_items.push(Item::Verbatim(expanded.wrapper));
-                if let Some(const_eval) = expanded.const_eval {
-                    generated_items.push(Item::Verbatim(const_eval));
+        match item {
+            Item::Fn(fun) => match expand_function(&api, fun) {
+                Ok(expanded) => {
+                    generated_items.push(Item::Verbatim(expanded.wrapper));
+                    if let Some(const_eval) = expanded.const_eval {
+                        generated_items.push(Item::Verbatim(const_eval));
+                    }
+                    metadata.push(expanded.metadata);
                 }
-                metadata.push(expanded.metadata);
+                Err(err) => errors.extend(err.to_compile_error()),
+            },
+            Item::Mod(submodule) if has_pg_pkg_attr(&submodule.attrs) => {
+                let ident = &submodule.ident;
+                subpackages.push(quote!(#ident::PACKAGE));
             }
-            Err(err) => errors.extend(err.to_compile_error()),
+            _ => {}
         }
     }
 
-    let pkg_name = module.ident.to_string();
+    let pkg_name = package_name(&module.ident);
     let pkg_doc = doc_string(&module.attrs);
     let package = quote! {
         pub const PACKAGE: #api::Pkg = #api::Pkg {
             name: #pkg_name,
             doc: #pkg_doc,
-            pkgs: &[],
+            pkgs: &[#(#subpackages),*],
             fns: &[#(#metadata),*],
         };
     };
@@ -86,6 +91,20 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
         #errors
     }
     .into()
+}
+
+fn has_pg_pkg_attr(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path()
+            .segments
+            .last()
+            .is_some_and(|seg| seg.ident == "pg_pkg")
+    })
+}
+
+fn package_name(ident: &Ident) -> String {
+    let raw = ident.to_string();
+    raw.strip_prefix("r#").unwrap_or(&raw).to_owned()
 }
 
 fn parse_attr(attr: TokenStream) -> syn::Result<Path> {
@@ -134,22 +153,41 @@ impl PgFunction {
         let ident = fun.sig.ident.clone();
         let (ret, result) = return_type(&fun.sig.output);
         let attrs = take_pg_fn_attrs(&mut fun.attrs)?;
+
+        if attrs.raw && attrs.pure {
+            return Err(syn::Error::new(
+                ident.span(),
+                "pg_fn(unsafe) functions cannot be marked pure",
+            ));
+        }
+
+        let args = if attrs.raw {
+            parse_unsafe_args(&fun.sig.inputs)?
+        } else {
+            parse_args(&fun.sig.inputs)?
+        };
+
         Ok(Self {
             wrapper: format_ident!("__pg_wrapper_{ident}"),
             name: ident.to_string(),
             doc: doc_string(&fun.attrs),
             pure: attrs.pure,
             specialises: attrs.specialises,
-            args: parse_args(&fun.sig.inputs)?,
+            args,
             ret,
             result,
+            raw: attrs.raw,
             ident,
         })
     }
 
     fn wrapper(&self, api: &Path) -> TokenStream2 {
         let wrapper_name = &self.wrapper;
-        let body = self.wrapper_body(api);
+        let body = if self.raw {
+            self.unsafe_wrapper_body(api)
+        } else {
+            self.wrapper_body(api)
+        };
 
         quote! {
             unsafe extern "C" fn #wrapper_name(vm: *mut std::ffi::c_void) {
@@ -186,6 +224,25 @@ impl PgFunction {
             (false, false) => self.call_value_function(api),
             (true, true) => self.call_unit_result_function(api),
             (true, false) => self.call_value_result_function(api),
+        }
+    }
+
+    fn unsafe_wrapper_body(&self, api: &Path) -> TokenStream2 {
+        let decode_args = self.vm_arg_decoders(api);
+        let call = self.unsafe_wrapper_call(api);
+
+        quote! {
+            #(#decode_args)*
+            #call
+        }
+    }
+
+    fn unsafe_wrapper_call(&self, api: &Path) -> TokenStream2 {
+        match (self.result, returns_unit(&self.ret)) {
+            (false, true) => self.call_unsafe_unit_function(),
+            (false, false) => self.call_unsafe_value_function(api),
+            (true, true) => self.call_unsafe_unit_result_function(api),
+            (true, false) => self.call_unsafe_value_result_function(api),
         }
     }
 
@@ -237,8 +294,65 @@ impl PgFunction {
         }
     }
 
+    fn call_unsafe_unit_function(&self) -> TokenStream2 {
+        let fn_name = &self.ident;
+        let args = self.unsafe_arg_bindings();
+
+        quote! {
+            #fn_name(#(#args),*);
+        }
+    }
+
+    fn call_unsafe_value_function(&self, api: &Path) -> TokenStream2 {
+        let fn_name = &self.ident;
+        let args = self.unsafe_arg_bindings();
+        let ret_ty = &self.ret;
+
+        quote! {
+            let ret = #fn_name(#(#args),*);
+            let ret = <#ret_ty as #api::IntoVm>::into_vm(ret, vm);
+            *vm.r_mut(0) = ret;
+        }
+    }
+
+    fn call_unsafe_unit_result_function(&self, api: &Path) -> TokenStream2 {
+        let fn_name = &self.ident;
+        let args = self.unsafe_arg_bindings();
+
+        quote! {
+            if let Err(msg) = #fn_name(#(#args),*) {
+                vm.trap(#api::Anomaly::Msg { msg, pc: vm.pc });
+            }
+        }
+    }
+
+    fn call_unsafe_value_result_function(&self, api: &Path) -> TokenStream2 {
+        let fn_name = &self.ident;
+        let args = self.unsafe_arg_bindings();
+        let ret_ty = &self.ret;
+
+        quote! {
+            match #fn_name(#(#args),*) {
+                Ok(ret) => {
+                    let ret = <#ret_ty as #api::IntoVm>::into_vm(ret, vm);
+                    *vm.r_mut(0) = ret;
+                }
+                Err(msg) => vm.trap(#api::Anomaly::Msg { msg, pc: vm.pc }),
+            }
+        }
+    }
+
     fn arg_bindings(&self) -> impl Iterator<Item = &Ident> {
         self.args.iter().map(|arg| &arg.binding)
+    }
+
+    fn unsafe_arg_bindings(&self) -> Vec<TokenStream2> {
+        std::iter::once(quote!(vm))
+            .chain(self.args.iter().map(|arg| {
+                let binding = &arg.binding;
+                quote!(#binding)
+            }))
+            .collect()
     }
 
     fn const_eval(&self) -> syn::Result<Option<TokenStream2>> {
@@ -317,30 +431,65 @@ impl PgFunction {
 }
 
 fn parse_args(inputs: &Punctuated<FnArg, syn::Token![,]>) -> syn::Result<Vec<FunctionArg>> {
-    inputs
-        .iter()
-        .enumerate()
-        .map(|(idx, input)| {
-            let FnArg::Typed(arg) = input else {
-                return Err(syn::Error::new(
-                    input.span(),
-                    "pg_pkg functions cannot take self",
-                ));
-            };
-            let Pat::Ident(pat_ident) = arg.pat.as_ref() else {
-                return Err(syn::Error::new(
-                    arg.pat.span(),
-                    "pg_pkg function arguments must be simple identifiers",
-                ));
-            };
+    parse_garden_args(inputs.iter().enumerate())
+}
 
-            Ok(FunctionArg {
-                name: pat_ident.ident.to_string(),
-                binding: format_ident!("arg{idx}"),
-                ty: arg.ty.as_ref().clone(),
-            })
+fn parse_unsafe_args(inputs: &Punctuated<FnArg, syn::Token![,]>) -> syn::Result<Vec<FunctionArg>> {
+    let Some(first) = inputs.first() else {
+        return Err(syn::Error::new(
+            inputs.span(),
+            "pg_fn(unsafe) functions must take `&mut Vm` as their first argument",
+        ));
+    };
+
+    let FnArg::Typed(arg) = first else {
+        return Err(syn::Error::new(
+            first.span(),
+            "pg_fn(unsafe) functions cannot take self",
+        ));
+    };
+
+    let Type::Reference(reference) = arg.ty.as_ref() else {
+        return Err(syn::Error::new(
+            arg.ty.span(),
+            "pg_fn(unsafe) first argument must be `&mut Vm`",
+        ));
+    };
+
+    if reference.mutability.is_none() {
+        return Err(syn::Error::new(
+            reference.span(),
+            "pg_fn(unsafe) first argument must be mutable",
+        ));
+    }
+
+    parse_garden_args(inputs.iter().skip(1).enumerate())
+}
+
+fn parse_garden_args<'a>(
+    args: impl Iterator<Item = (usize, &'a FnArg)>,
+) -> syn::Result<Vec<FunctionArg>> {
+    args.map(|(idx, input)| {
+        let FnArg::Typed(arg) = input else {
+            return Err(syn::Error::new(
+                input.span(),
+                "pg_pkg functions cannot take self",
+            ));
+        };
+        let Pat::Ident(pat_ident) = arg.pat.as_ref() else {
+            return Err(syn::Error::new(
+                arg.pat.span(),
+                "pg_pkg function arguments must be simple identifiers",
+            ));
+        };
+
+        Ok(FunctionArg {
+            name: pat_ident.ident.to_string(),
+            binding: format_ident!("arg{idx}"),
+            ty: arg.ty.as_ref().clone(),
         })
-        .collect()
+    })
+    .collect()
 }
 
 fn return_type(output: &ReturnType) -> (Type, bool) {
@@ -377,6 +526,9 @@ fn returns_unit(ty: &Type) -> bool {
 struct PgFnAttrs {
     /// `#[pg_fn(pure)]`: const-foldable, gets a `__pg_eval_*` companion.
     pure: bool,
+    /// `#[pg_fn(unsafe)]`: passes `&mut Vm` as the first Rust argument while
+    /// exposing only the remaining Rust arguments to Garden.
+    raw: bool,
     /// `#[pg_fn(specialises = "group")]`: one variant of an overload group; the
     /// fn is reachable only via `group`, never its own name.
     specialises: Option<String>,
@@ -396,12 +548,18 @@ impl PgFnAttrs {
 
     fn merge(&mut self, other: Self) {
         self.pure |= other.pure;
+        self.raw |= other.raw;
         self.specialises = other.specialises.or_else(|| self.specialises.take());
     }
 
     fn parse_option(&mut self, meta: Meta) -> syn::Result<()> {
         if meta.path().is_ident("pure") {
             self.pure = true;
+            return Ok(());
+        }
+
+        if meta.path().is_ident("unsafe") {
+            self.raw = true;
             return Ok(());
         }
 
@@ -415,7 +573,8 @@ impl PgFnAttrs {
 }
 
 /// Strip and parse the `#[pg_fn(..)]` marker off a stdlib fn, leaving its other
-/// attributes intact. Accepts `pure` and `specialises = "group"` in any order.
+/// attributes intact. Accepts `pure`, `unsafe`, and `specialises = "group"` in
+/// any order.
 fn take_pg_fn_attrs(attrs: &mut Vec<Attribute>) -> syn::Result<PgFnAttrs> {
     let mut pg_fn_attrs = PgFnAttrs::default();
     let mut out = Vec::with_capacity(attrs.len());

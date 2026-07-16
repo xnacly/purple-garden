@@ -131,6 +131,14 @@ impl Gc {
         // Tracing/sweeping will be wired here once the VM passes roots through.
     }
 
+    pub fn total_used(&self) -> usize {
+        self.pages.iter().map(|p| p.len).sum()
+    }
+
+    pub fn total_alloc(&self) -> usize {
+        self.pages.iter().map(|p| p.cap).sum()
+    }
+
     pub fn alloc_fast(&mut self, alloc_type: AllocType, layout: Layout) -> Option<NonNull<u8>> {
         debug_assert!(layout.size() <= MAX_ALLOC_SIZE);
 

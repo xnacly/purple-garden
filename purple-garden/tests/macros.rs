@@ -41,6 +41,8 @@ mod strings {
 
 #[pg_pkg]
 mod counters {
+    use purple_garden::Vm;
+
     use super::Counter;
 
     pub fn new_counter(value: i64) -> Counter {
@@ -50,6 +52,11 @@ mod counters {
     #[purple_garden::pg_fn(pure)]
     pub fn value(counter: &Counter) -> i64 {
         counter.value
+    }
+
+    #[purple_garden::pg_fn(unsafe)]
+    pub fn add_register_zero(vm: &mut Vm, value: i64) -> i64 {
+        vm.r(0).as_int() + value
     }
 }
 
@@ -77,6 +84,23 @@ mod users {
     }
 }
 
+#[pg_pkg]
+mod tools {
+    pub fn root() -> i64 {
+        1
+    }
+
+    #[purple_garden::pg_pkg]
+    pub mod math {
+        pub fn double(n: i64) -> i64 {
+            n * 2
+        }
+    }
+
+    #[purple_garden::pg_pkg]
+    pub mod r#unsafe {}
+}
+
 #[test]
 fn pg_pkg_generates_package_metadata() {
     assert_eq!(strings::PACKAGE.name, "strings");
@@ -86,6 +110,16 @@ fn pg_pkg_generates_package_metadata() {
     assert_eq!(strings::PACKAGE.fns[0].arg_names, &["s"]);
     assert!(!strings::PACKAGE.fns[1].pure);
     assert_eq!(strings::PACKAGE.fns[1].arg_names, &["s", "n"]);
+}
+
+#[test]
+fn pg_pkg_generates_subpackage_metadata() {
+    assert_eq!(tools::PACKAGE.name, "tools");
+    assert_eq!(tools::PACKAGE.fns.len(), 1);
+    assert_eq!(tools::PACKAGE.pkgs.len(), 2);
+    assert_eq!(tools::PACKAGE.pkgs[0].name, "math");
+    assert_eq!(tools::PACKAGE.pkgs[0].fns[0].name, "double");
+    assert_eq!(tools::PACKAGE.pkgs[1].name, "unsafe");
 }
 
 #[test]
@@ -129,6 +163,22 @@ fn pg_pkg_supports_garden_opaque_types() {
     unsafe { (counters::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
     assert_eq!(vm.r(0).as_int(), 7);
+}
+
+#[test]
+fn pg_fn_unsafe_passes_vm_and_exposes_remaining_signature() {
+    let fun = &counters::PACKAGE.fns[2];
+    assert_eq!(fun.name, "add_register_zero");
+    assert_eq!(fun.arg_names, &["value"]);
+    assert_eq!(fun.args, &[purple_garden::Type::Int]);
+    assert_eq!(fun.ret, purple_garden::Type::Int);
+
+    let mut vm = Vm::new(VmConfig::default());
+    *vm.r_mut(0) = Value::from(40_i64);
+
+    unsafe { (fun.ptr)((&mut vm as *mut Vm).cast()) };
+
+    assert_eq!(vm.r(0).as_int(), 80);
 }
 
 #[test]

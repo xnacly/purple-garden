@@ -7,10 +7,10 @@
   - [ ] read
   - [ ] write
   - [ ] create
-- [ ] runtime/gc
-  - [ ] cycle
-  - [ ] stop
-  - [ ] stats
+- [ ] unsafe/runtime
+  - [ ] cycles
+  - [ ] allocs
+- [ ] unsafe/syscall
 - [ ] string
   - [x] contains
   - [x] idx

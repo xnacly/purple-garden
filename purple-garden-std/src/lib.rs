@@ -6,6 +6,7 @@ mod io;
 mod math;
 mod strings;
 mod testing;
+mod r#unsafe;
 
 /// `resolve_pkg` searches for a package in the standard library by its name, for instance "io/fs",
 /// "runtime/gc" or "encoding/json"
@@ -44,6 +45,7 @@ pub static STD: &[Pkg] = &[
     math::PACKAGE,
     strings::PACKAGE,
     testing::PACKAGE,
+    r#unsafe::PACKAGE,
 ];
 
 #[cfg(test)]
@@ -56,6 +58,14 @@ mod tests {
         assert_eq!(resolve_pkg("math").unwrap().name, "math");
         assert_eq!(resolve_pkg("strings").unwrap().name, "strings");
         assert_eq!(resolve_pkg("testing").unwrap().name, "testing");
+        assert_eq!(resolve_pkg("unsafe").unwrap().name, "unsafe");
+    }
+
+    #[test]
+    fn resolves_nested_packages() {
+        let pkg = resolve_pkg("unsafe/runtime").unwrap();
+
+        assert_eq!(pkg.name, "runtime");
     }
 
     #[test]
@@ -64,5 +74,7 @@ mod tests {
         assert!(resolve_pkg("missing").is_none());
         assert!(resolve_pkg("io/").is_none());
         assert!(resolve_pkg("io/missing").is_none());
+        assert!(resolve_pkg("unsafe/").is_none());
+        assert!(resolve_pkg("unsafe/missing").is_none());
     }
 }

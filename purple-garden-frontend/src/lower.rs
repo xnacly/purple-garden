@@ -576,7 +576,7 @@ impl<'lower> Lower<'lower> {
                     for f in pkg.fns {
                         fns.entry(f.group_name()).or_default().push(f);
                     }
-                    self.packages.insert(as_str, (pkg, fns));
+                    self.packages.insert(pkg.name, (pkg, fns));
                 }
                 None
             }
