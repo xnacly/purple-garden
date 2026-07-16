@@ -77,13 +77,24 @@ impl DocumentState {
         super::hover::collect_lexical_hovers(&text, &mut analysis);
 
         if let Some(path) = path.as_deref() {
-            crate::frontend::analyze_path(path, text.as_bytes(), Vec::new(), true, |frontend| {
-                super::collect::collect_frontend_analysis(frontend, &mut analysis);
-            });
+            crate::frontend::analyze_path(
+                path,
+                text.as_bytes(),
+                Vec::new(),
+                purple_garden_std::STD,
+                |frontend| {
+                    super::collect::collect_frontend_analysis(frontend, &mut analysis);
+                },
+            );
         } else {
-            crate::frontend::analyze(text.as_bytes(), Vec::new(), true, |frontend| {
-                super::collect::collect_frontend_analysis(frontend, &mut analysis);
-            });
+            crate::frontend::analyze(
+                text.as_bytes(),
+                Vec::new(),
+                purple_garden_std::STD,
+                |frontend| {
+                    super::collect::collect_frontend_analysis(frontend, &mut analysis);
+                },
+            );
         }
 
         Self { text, analysis }

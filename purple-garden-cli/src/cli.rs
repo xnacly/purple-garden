@@ -10,6 +10,18 @@ pub struct Cli {
     #[arg(short = 'd', long)]
     pub dry: bool,
 
+    /// Disable the standard library
+    #[arg(long)]
+    pub no_std: bool,
+
+    /// Disable the unsafe/ standard library namespace
+    #[arg(long)]
+    pub no_unsafe: bool,
+
+    /// Skip importing of env variables
+    #[arg(long)]
+    pub no_env: bool,
+
     /// Readable abstract syntax tree
     #[arg(short = 'A', long)]
     pub ast: bool,

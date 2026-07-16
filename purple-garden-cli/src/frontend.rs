@@ -14,7 +14,7 @@ pub(crate) struct FrontendAnalysis<'a, 'src> {
 pub(crate) fn analyze<'src, R>(
     source: &'src [u8],
     libs: Vec<&'src Pkg>,
-    stdlib: bool,
+    stdlib: &'src [Pkg],
     f: impl for<'a> FnOnce(FrontendAnalysis<'a, '_>) -> R,
 ) -> R {
     let parse = Parser::new(Lexer::new(source)).parse_collect();
@@ -34,7 +34,7 @@ pub(crate) fn analyze<'src, R>(
 
     let typecheck = Typechecker::new(&ast)
         .with_libs(libs)
-        .with_stdlib_enabled(stdlib)
+        .with_stdlib(stdlib)
         .check();
     diagnostics.extend(typecheck.diagnostics.iter().cloned());
 
@@ -50,7 +50,7 @@ pub(crate) fn analyze_path<R>(
     source_path: &Path,
     source: &[u8],
     libs: Vec<&Pkg>,
-    stdlib: bool,
+    stdlib: &'static [Pkg],
     f: impl for<'a> FnOnce(FrontendAnalysis<'a, '_>) -> R,
 ) -> R {
     let source = source_with_extern(source_path, source);

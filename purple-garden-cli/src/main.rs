@@ -87,7 +87,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         match &cmd {
             Command::Check { target } => {
                 let input = Input::from_file(target)?;
-                check_frontend(target, &input, !conf.no_std)?;
+                check_frontend(target, &input, stdlib_packages(&cli))?;
                 std::process::exit(0);
             }
             Command::Intro { topic } => {
@@ -148,7 +148,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let libs = Vec::new();
     let typecheck = Typechecker::new(&ast)
         .with_libs(libs.clone())
-        .with_stdlib_enabled(!conf.no_std)
+        .with_stdlib(stdlib_packages(&cli))
         .check();
     let has_type_errors = !typecheck.diagnostics.is_empty();
 
@@ -174,7 +174,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     let lower = Lower::new()
         .with_libs(libs)
-        .with_stdlib_enabled(!conf.no_std);
+        .with_stdlib(stdlib_packages(&cli));
     let mut ir = match lower.ir_from_types(&ast, typecheck.types) {
         Ok(v) => v,
         Err(e) => {
@@ -277,7 +277,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 fn check_frontend(
     input_source: &str,
     input: &Input,
-    stdlib: bool,
+    stdlib: &'static [purple_garden_runtime::Pkg],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source_path = Path::new(input_source);
     let failed = frontend::analyze_path(
@@ -299,6 +299,18 @@ fn check_frontend(
         std::process::exit(1);
     }
     Ok(())
+}
+
+fn stdlib_packages(cli: &Cli) -> &'static [purple_garden_runtime::Pkg] {
+    if cli.no_std {
+        return &[];
+    }
+
+    if cli.no_unsafe {
+        purple_garden_std::SAFE_STD
+    } else {
+        purple_garden_std::STD
+    }
 }
 
 fn print_standalone_extern_diagnostic(input_source: &str, source: &[u8]) {

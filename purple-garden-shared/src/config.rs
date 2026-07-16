@@ -39,14 +39,6 @@ pub struct Config {
     #[cfg_attr(feature = "cli", arg(short = 'B', long))]
     pub backtrace: bool,
 
-    /// Limit the standard library to necessities
-    #[cfg_attr(feature = "cli", arg(long))]
-    pub no_std: bool,
-
-    /// Skip importing of env variables
-    #[cfg_attr(feature = "cli", arg(long))]
-    pub no_env: bool,
-
     /// Disable garbage collection
     #[cfg_attr(feature = "cli", arg(long))]
     pub no_gc: bool,
@@ -63,8 +55,6 @@ impl Config {
             opt: 0,
             disassemble: 0,
             backtrace: false,
-            no_std: false,
-            no_env: false,
             no_gc: false,
             no_jit: false,
             liveness: false,
