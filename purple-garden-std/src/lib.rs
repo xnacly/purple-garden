@@ -1,10 +1,17 @@
 use std::{collections::HashMap, sync::OnceLock};
 
-pub use purple_garden_runtime::{Fn, Pkg};
+extern crate self as purple_garden;
+
+pub use purple_garden_runtime::{
+    Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Type, Value, Vm, alloc_record,
+    copy_record, decode_record_field, encode_record_field,
+};
 
 mod io;
 mod math;
 mod strings;
+#[macro_use]
+mod syscall_macros;
 mod testing;
 mod r#unsafe;
 
@@ -66,6 +73,10 @@ mod tests {
         let pkg = resolve_pkg("unsafe/runtime").unwrap();
 
         assert_eq!(pkg.name, "runtime");
+
+        let pkg = resolve_pkg("unsafe/syscall").unwrap();
+
+        assert_eq!(pkg.name, "syscall");
     }
 
     #[test]
@@ -76,5 +87,44 @@ mod tests {
         assert!(resolve_pkg("io/missing").is_none());
         assert!(resolve_pkg("unsafe/").is_none());
         assert!(resolve_pkg("unsafe/missing").is_none());
+    }
+
+    #[test]
+    fn syscall_uname_exposes_record_metadata() {
+        let pkg = resolve_pkg("unsafe/syscall").unwrap();
+        let fun = pkg.fns.iter().find(|fun| fun.name == "uname").unwrap();
+        let Type::Record(fields) = &fun.ret else {
+            panic!("uname should return a record, got {}", fun.ret);
+        };
+        let fields = fields.as_slice();
+
+        assert!(fun.args.is_empty());
+        assert_eq!(fields[0].name, "sysname");
+        assert_eq!(fields[1].name, "nodename");
+        assert_eq!(fields[2].name, "release");
+        assert_eq!(fields[3].name, "version");
+        assert_eq!(fields[4].name, "machine");
+        assert!(fields.iter().all(|field| field.ty == Type::Str));
+
+        #[cfg(target_os = "linux")]
+        assert_eq!(fields[5].name, "domainname");
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(fields.len(), 5);
+    }
+
+    #[test]
+    fn syscall_uname_wrapper_returns_decodable_record() {
+        let pkg = resolve_pkg("unsafe/syscall").unwrap();
+        let fun = pkg.fns.iter().find(|fun| fun.name == "uname").unwrap();
+        let mut vm = Vm::new(purple_garden_runtime::VmConfig::default());
+
+        unsafe { (fun.ptr)((&mut vm as *mut Vm).cast()) };
+
+        assert!(vm.pending_trap.is_none());
+        let uname = crate::r#unsafe::r#unsafe::syscall::uname::from_vm(&vm, *vm.r(0));
+        assert!(!uname.sysname.is_empty());
+        assert!(!uname.release.is_empty());
+        assert!(!uname.machine.is_empty());
     }
 }
