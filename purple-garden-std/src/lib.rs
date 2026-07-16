@@ -22,6 +22,18 @@ pub fn resolve_pkg(query: &str) -> Option<&Pkg> {
     std_pkg_index().get(query).copied()
 }
 
+#[must_use]
+pub fn resolve_pkg_in<'pkg>(pkgs: &'pkg [Pkg], query: &str) -> Option<&'pkg Pkg> {
+    let (head, tail) = query.split_once('/').unwrap_or((query, ""));
+    let pkg = pkgs.iter().find(|pkg| pkg.name == head)?;
+
+    if tail.is_empty() {
+        return Some(pkg);
+    }
+
+    resolve_pkg_in(pkg.pkgs, tail)
+}
+
 fn std_pkg_index() -> &'static HashMap<String, &'static Pkg> {
     static INDEX: OnceLock<HashMap<String, &'static Pkg>> = OnceLock::new();
     INDEX.get_or_init(|| {
@@ -46,6 +58,13 @@ fn insert_pkg(index: &mut HashMap<String, &'static Pkg>, parent: String, pkg: &'
         insert_pkg(index, path.clone(), sub);
     }
 }
+
+pub static SAFE_STD: &[Pkg] = &[
+    io::PACKAGE,
+    math::PACKAGE,
+    strings::PACKAGE,
+    testing::PACKAGE,
+];
 
 pub static STD: &[Pkg] = &[
     io::PACKAGE,

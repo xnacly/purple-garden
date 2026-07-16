@@ -55,7 +55,7 @@ pub struct Lower<'lower> {
     >,
     pkg_cache: HashMap<&'lower str, Option<&'lower Pkg>>,
     libs: Vec<&'lower Pkg>,
-    stdlib: bool,
+    stdlib: &'lower [purple_garden_runtime::Pkg],
 }
 
 impl Default for Lower<'_> {
@@ -68,7 +68,7 @@ impl Default for Lower<'_> {
             packages: HashMap::new(),
             pkg_cache: HashMap::new(),
             libs: Vec::new(),
-            stdlib: true,
+            stdlib: pstd::STD,
         }
     }
 }
@@ -87,6 +87,12 @@ impl<'lower> Lower<'lower> {
 
     #[must_use]
     pub fn with_stdlib_enabled(mut self, stdlib: bool) -> Self {
+        self.stdlib = if stdlib { pstd::STD } else { &[] };
+        self
+    }
+
+    #[must_use]
+    pub fn with_stdlib(mut self, stdlib: &'lower [Pkg]) -> Self {
         self.stdlib = stdlib;
         self
     }
@@ -101,7 +107,7 @@ impl<'lower> Lower<'lower> {
             .iter()
             .copied()
             .find(|pkg| pkg.name == query)
-            .or_else(|| self.stdlib.then(|| pstd::resolve_pkg(query)).flatten());
+            .or_else(|| pstd::resolve_pkg_in(self.stdlib, query));
 
         self.pkg_cache.insert(query, pkg);
         pkg

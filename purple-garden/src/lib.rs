@@ -28,6 +28,7 @@ pub struct Pg<'pg> {
     config: config::Config,
     libs: Vec<&'pg Pkg>,
     stdlib: bool,
+    unsafe_stdlib: bool,
 }
 
 impl<'pg> Pg<'pg> {
@@ -36,7 +37,8 @@ impl<'pg> Pg<'pg> {
         Self {
             config: config::Config::default(),
             libs: Vec::new(),
-            stdlib: true,
+            stdlib: false,
+            unsafe_stdlib: false,
         }
     }
 
@@ -47,8 +49,14 @@ impl<'pg> Pg<'pg> {
     }
 
     #[must_use]
-    pub fn without_stdlib(mut self) -> Self {
-        self.stdlib = false;
+    pub fn with_stdlib(mut self) -> Self {
+        self.stdlib = true;
+        self
+    }
+
+    #[must_use]
+    pub fn with_unsafe_stdlib(mut self) -> Self {
+        self.unsafe_stdlib = true;
         self
     }
 
@@ -59,7 +67,13 @@ impl<'pg> Pg<'pg> {
     }
 
     pub fn compile(&self, input: &[u8]) -> Result<Program, Diagnostic> {
-        compile(&self.config, input, &self.libs, self.stdlib)
+        compile(
+            &self.config,
+            input,
+            &self.libs,
+            self.stdlib,
+            self.unsafe_stdlib,
+        )
     }
 }
 
@@ -134,6 +148,7 @@ fn compile<'e>(
     input: &'e [u8],
     libs: &[&'e Pkg],
     stdlib: bool,
+    unsafe_stdlib: bool,
 ) -> Result<Program, Diagnostic> {
     let parse = parser::Parser::new(lex::Lexer::new(input)).parse_collect();
     if let Some(diagnostic) = parse.diagnostics.into_iter().next() {
@@ -143,9 +158,11 @@ fn compile<'e>(
         .ast
         .expect("parser returned no diagnostics and no AST");
 
+    let stdlib = stdlib_packages(stdlib, unsafe_stdlib);
+
     let typecheck = Typechecker::new(&ast)
         .with_libs(libs.to_vec())
-        .with_stdlib_enabled(stdlib)
+        .with_stdlib(stdlib)
         .check();
     if let Some(diagnostic) = typecheck.diagnostics.into_iter().next() {
         return Err(diagnostic);
@@ -153,7 +170,7 @@ fn compile<'e>(
 
     let mut ir = lower::Lower::new()
         .with_libs(libs.to_vec())
-        .with_stdlib_enabled(stdlib)
+        .with_stdlib(stdlib)
         .ir_from_types(&ast, typecheck.types)?;
     if config.opt >= 1 {
         purple_garden_opt::ir(&mut ir);
@@ -178,4 +195,16 @@ fn compile<'e>(
         program.jit = native_pages;
     }
     Ok(program)
+}
+
+fn stdlib_packages(enabled: bool, unsafe_enabled: bool) -> &'static [Pkg] {
+    if !enabled {
+        return &[];
+    }
+
+    if unsafe_enabled {
+        purple_garden_std::STD
+    } else {
+        purple_garden_std::SAFE_STD
+    }
 }

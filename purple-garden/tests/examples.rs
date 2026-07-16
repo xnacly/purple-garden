@@ -4,6 +4,8 @@ use std::process::Command;
 fn run_source(input: &[u8]) {
     let config = Config::default();
     let mut program = purple_garden::Pg::new()
+        .with_stdlib()
+        .with_unsafe_stdlib()
         .config(config)
         .compile(input)
         .expect("compilation failed");
@@ -14,6 +16,8 @@ fn run_source_opt(input: &[u8]) {
     let mut config = Config::default();
     config.opt = 3;
     let mut program = purple_garden::Pg::new()
+        .with_stdlib()
+        .with_unsafe_stdlib()
         .config(config)
         .compile(input)
         .expect("compilation failed");
