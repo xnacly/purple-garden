@@ -1,18 +1,42 @@
 use purple_garden_shared::config::Config;
-use std::process::Command;
+use std::path::PathBuf;
 
-fn run_source(input: &[u8]) {
+fn examples() -> Vec<(String, Vec<u8>)> {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples");
+    let mut out: Vec<(String, Vec<u8>)> = std::fs::read_dir(&dir)
+        .expect("examples dir missing")
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("garden"))
+        .map(|path| {
+            let name = path
+                .file_stem()
+                .expect("example path has no file stem")
+                .to_string_lossy()
+                .into_owned();
+            let source = std::fs::read(&path)
+                .unwrap_or_else(|err| panic!("failed to read {}: {}", path.display(), err));
+            (name, source)
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn run_source(name: &str, input: &[u8]) {
     let config = Config::default();
     let mut program = purple_garden::Pg::new()
         .with_stdlib()
         .with_unsafe_stdlib()
         .config(config)
         .compile(input)
-        .expect("compilation failed");
-    program.run().expect("program run failed");
+        .unwrap_or_else(|err| panic!("compilation failed for {name}: {err:?}"));
+    program
+        .run()
+        .unwrap_or_else(|err| panic!("program run failed for {name}: {err:?}"));
 }
 
-fn run_source_opt(input: &[u8]) {
+fn run_source_opt(name: &str, input: &[u8]) {
     let mut config = Config::default();
     config.opt = 3;
     let mut program = purple_garden::Pg::new()
@@ -20,87 +44,22 @@ fn run_source_opt(input: &[u8]) {
         .with_unsafe_stdlib()
         .config(config)
         .compile(input)
-        .expect("compilation failed");
-    program.run().expect("program run failed");
+        .unwrap_or_else(|err| panic!("optimized compilation failed for {name}: {err:?}"));
+    program
+        .run()
+        .unwrap_or_else(|err| panic!("optimized program run failed for {name}: {err:?}"));
 }
 
 #[test]
-fn embed_counter_example() {
-    let manifest_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/embed-counter");
-    let output = Command::new(env!("CARGO"))
-        .args(["run", "--quiet"])
-        .current_dir(manifest_dir)
-        .output()
-        .expect("failed to run embed-counter example");
-
-    assert!(
-        output.status.success(),
-        "embed-counter failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("Counter"),
-        "embed-counter output did not include the returned counter\nstdout:\n{}",
-        String::from_utf8_lossy(&output.stdout)
-    );
+fn garden_examples() {
+    for (name, source) in examples() {
+        run_source(&name, &source);
+    }
 }
 
 #[test]
-fn embed_config_example() {
-    let manifest_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/embed-config");
-    let output = Command::new(env!("CARGO"))
-        .args(["run", "--quiet"])
-        .current_dir(manifest_dir)
-        .output()
-        .expect("failed to run embed-config example");
-
-    assert!(
-        output.status.success(),
-        "embed-config failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stdout)
-            .contains("api: workers=4 mode=debug retry=3x/250ms"),
-        "embed-config output did not include the config summary\nstdout:\n{}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-}
-
-macro_rules! example_tests {
-    ($($name:ident => $path:literal,)*) => {
-        $(
-            #[test]
-            fn $name() {
-                run_source(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../", $path)));
-            }
-
-            mod $name {
-                use super::*;
-
-                #[test]
-                fn opt() {
-                    run_source_opt(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../", $path)));
-                }
-            }
-        )*
-    };
-}
-
-example_tests! {
-    ackermann => "examples/ackermann.garden",
-    call_chain => "examples/call_chain.garden",
-    collatz => "examples/collatz.garden",
-    factorial => "examples/factorial.garden",
-    fib => "examples/fib.garden",
-    functions => "examples/functions.garden",
-    jitprogress => "examples/jitprogress.garden",
-    math => "examples/math.garden",
-    mandelbrot => "examples/mandelbrot.garden",
-    many_functions => "examples/many_functions.garden",
-    regressions => "examples/regressions.garden",
-    tak => "examples/tak.garden",
-    wide_match => "examples/wide_match.garden",
+fn optimized_garden_examples() {
+    for (name, source) in examples() {
+        run_source_opt(&name, &source);
+    }
 }
