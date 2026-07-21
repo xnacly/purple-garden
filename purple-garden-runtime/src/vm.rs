@@ -408,6 +408,10 @@ impl Vm {
                             "syscall idx={idx} wrote r{i}; convention only permits writes to r0"
                         );
                     }
+
+                    if std::hint::unlikely(self.pending_trap.is_some()) {
+                        return Err(self.pending_trap.take().unwrap());
+                    }
                 },
                 Op::Ret => {
                     if std::hint::unlikely(self.config.backtrace) {
@@ -534,6 +538,21 @@ impl Vm {
 #[cfg(test)]
 mod ops {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static SIDE_EFFECTS: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn trap_syscall(vm: *mut std::ffi::c_void) {
+        let vm = unsafe { &mut *vm.cast::<Vm>() };
+        vm.trap(Anomaly::Msg {
+            msg: "trap_syscall",
+            pc: vm.pc,
+        });
+    }
+
+    unsafe extern "C" fn side_effect_syscall(_: *mut std::ffi::c_void) {
+        SIDE_EFFECTS.fetch_add(1, Ordering::SeqCst);
+    }
 
     fn run(bytecode: Vec<Op>) -> Vm {
         let mut vm = Vm::new(VmConfig::default());
@@ -546,6 +565,26 @@ mod ops {
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;
         vm.run(&[]).expect_err("vm run unexpectedly succeeded")
+    }
+
+    #[test]
+    fn syscall_trap_stops_before_next_side_effect() {
+        SIDE_EFFECTS.store(0, Ordering::SeqCst);
+
+        let mut vm = Vm::new(VmConfig::default());
+        vm.bytecode = vec![Op::Sys { idx: 0 }, Op::Sys { idx: 1 }];
+        let err = vm
+            .run(&[trap_syscall, side_effect_syscall])
+            .expect_err("trapping syscall should stop execution");
+
+        assert!(matches!(
+            err,
+            Anomaly::Msg {
+                msg: "trap_syscall",
+                pc: 0
+            }
+        ));
+        assert_eq!(SIDE_EFFECTS.load(Ordering::SeqCst), 0);
     }
 
     #[test]
