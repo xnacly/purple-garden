@@ -170,6 +170,10 @@ impl Vm {
     }
 
     pub fn new_string(&mut self, s: String) -> Value {
+        self.new_string_from_str(&s)
+    }
+
+    pub fn new_string_from_str(&mut self, s: &str) -> Value {
         let bytes = s.as_bytes();
         let len_size = std::mem::size_of::<usize>();
         let layout = Layout::from_size_align(len_size + bytes.len(), std::mem::align_of::<usize>())
