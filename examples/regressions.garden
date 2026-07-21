@@ -55,6 +55,21 @@ fn shuffle_scratch_keeps_positioned_arg(op:Int lhs:Int rhs:Int) Int {
 testing.assert(shuffle_scratch_keeps_positioned_arg(43 1 2) == 3)
 testing.assert(shuffle_scratch_keeps_positioned_arg(45 9 4) == 5)
 
+#! Tail calls to a wider arg zone must not restore callee-saved regs after
+#! shuffling those target args into place.
+fn wide_tail_sum(a:Int b:Int c:Int d:Int e:Int) Int {
+    a + b + c + d + e
+}
+fn tail_to_wider_args(seed:Int) Int {
+    let a = seed + 1
+    let b = seed + 2
+    let c = seed + 3
+    let d = seed + 4
+    let e = seed + 5
+    wide_tail_sum(a b c d e)
+}
+testing.assert(tail_to_wider_args(10) == 65)
+
 #! First branch function for checking block_map collisions across functions.
 fn first_branch(n:Int) Int {
     match {

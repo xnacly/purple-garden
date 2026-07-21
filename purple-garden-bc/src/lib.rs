@@ -737,17 +737,31 @@ impl<'cc> Cc<'cc> {
                     unreachable!();
                 };
 
-                // Arg shuffle first (reads computed values from callee-saved regs),
-                // then epilogue (restores r{lo}..r{max_reg}, which is above the arg
-                // zone r0..r{nparams-1}; no overlap for ta <= nparams, the common case).
+                // If the tail target needs a wider argument zone than this
+                // function owns, the shuffle would write into registers that
+                // this function still owes back to its caller. Fall back to a
+                // normal call so the epilogue can restore them after the
+                // callee returns.
+                let tail_clobbers_callee_saved = args.len() as u8 > lo;
                 self.emit_arg_shuffle(args);
-                self.emit_epilogue(lo, max_reg);
 
-                match target {
-                    CcCallTarget::Bc { pc } => self.emit(Op::Tail { func: pc as u32 }),
-                    CcCallTarget::Native { idx } => {
-                        self.emit(Op::Sys { idx });
-                        self.emit(Op::Ret)
+                if tail_clobbers_callee_saved {
+                    match target {
+                        CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
+                        CcCallTarget::Native { idx } => self.emit(Op::Sys { idx }),
+                    };
+                    self.emit_epilogue(lo, max_reg);
+                    self.emit(Op::Ret);
+                } else {
+                    self.emit_epilogue(lo, max_reg);
+                    match target {
+                        CcCallTarget::Bc { pc } => {
+                            self.emit(Op::Tail { func: pc as u32 });
+                        }
+                        CcCallTarget::Native { idx } => {
+                            self.emit(Op::Sys { idx });
+                            self.emit(Op::Ret);
+                        }
                     }
                 };
             }
