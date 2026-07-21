@@ -24,6 +24,42 @@ fn run_source_opt(input: &[u8]) {
     program.run().expect("program run failed");
 }
 
+fn run_source_no_jit(input: &[u8]) {
+    let mut config = Config::default();
+    config.no_jit = true;
+    let mut program = purple_garden::Pg::new()
+        .with_stdlib()
+        .with_unsafe_stdlib()
+        .config(config)
+        .compile(input)
+        .expect("compilation failed");
+    program.run().expect("program run failed");
+}
+
+#[test]
+fn bytecode_arg_shuffle_preserves_positioned_arg() {
+    run_source_no_jit(
+        br#"
+import "testing"
+
+fn apply(op:Int lhs:Int rhs:Int) Int {
+    match {
+        op == 43 { lhs + rhs }
+        op == 45 { lhs - rhs }
+        { 0 }
+    }
+}
+
+fn calculate(op:Int lhs:Int rhs:Int) Int {
+    apply(op lhs rhs) + 0
+}
+
+testing.assert(calculate(43 1 2) == 3)
+testing.assert(calculate(45 9 4) == 5)
+"#,
+    );
+}
+
 #[test]
 fn embed_counter_example() {
     let manifest_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/embed-counter");

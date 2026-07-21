@@ -38,6 +38,23 @@ testing.assert(true)
 testing.assert(diff(10 3) == 7)
 testing.assert(diff(100 1) == 99)
 
+#! Arg-shuffle scratch register must not clobber already-positioned args.
+#! This call shape has the second argument already in r1, while r0/r2 need
+#! shuffling for the call. The cycle breaker used to pick r1 as scratch and
+#! overwrite the preserved middle argument.
+fn apply(op:Int lhs:Int rhs:Int) Int {
+    match {
+        op == 43 { lhs + rhs }
+        op == 45 { lhs - rhs }
+        { 0 }
+    }
+}
+fn shuffle_scratch_keeps_positioned_arg(op:Int lhs:Int rhs:Int) Int {
+    apply(op lhs rhs) + 0
+}
+testing.assert(shuffle_scratch_keeps_positioned_arg(43 1 2) == 3)
+testing.assert(shuffle_scratch_keeps_positioned_arg(45 9 4) == 5)
+
 #! First branch function for checking block_map collisions across functions.
 fn first_branch(n:Int) Int {
     match {

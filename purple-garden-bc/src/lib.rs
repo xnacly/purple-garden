@@ -501,8 +501,9 @@ impl<'cc> Cc<'cc> {
             // All remaining moves form cycles. Find a callee-saved register
             // that isn't a src or dst in any pending move and use it to break
             // one cycle at a time without touching the spill stack.
+            let arg_end = args.len() as u8;
             let scratch = (self.cur_lo..=self.cur_max_reg)
-                .find(|&r| !todo.iter().any(|(s, d)| *s == r || *d == r));
+                .find(|&r| r >= arg_end && !todo.iter().any(|(s, d)| *s == r || *d == r));
 
             if let Some(scratch) = scratch {
                 // Break the first cycle: save its head into scratch, walk
