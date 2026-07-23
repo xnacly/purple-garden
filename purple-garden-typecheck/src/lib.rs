@@ -469,6 +469,7 @@ impl<'t> Typechecker<'t> {
                 let (first_type, mut poisoned) = match self.node(*first_member) {
                     TcType::Known(ty) => (ty, false),
                     TcType::Poison => (Type::Void, true),
+                    _ => unreachable!(),
                 };
 
                 for member in members.iter().skip(1) {
@@ -498,6 +499,8 @@ impl<'t> Typechecker<'t> {
                         TcType::Poison => {
                             poisoned = true;
                         }
+
+                        _ => unreachable!(),
                     }
                 }
 
@@ -526,6 +529,7 @@ impl<'t> Typechecker<'t> {
                         TcType::Poison => {
                             poisoned = true;
                         }
+                        _ => unreachable!(),
                     }
                 }
 
@@ -722,6 +726,7 @@ impl<'t> Typechecker<'t> {
                         ));
                         TcType::Poison
                     }
+                    TcType::Variable(_) => unreachable!(),
                     _ => TcType::Poison,
                 }
             }
@@ -750,6 +755,8 @@ impl<'t> Typechecker<'t> {
                         else {
                             unreachable!();
                         };
+
+                        // TODO: add type variable as valid argument type here
 
                         // Type args up front: overload selection reads them back
                         // by reference, and `node` memoises so the single-candidate

@@ -19,13 +19,16 @@ pub struct TypecheckOutput<'t> {
 
 /// Internal typechecking result for one AST node.
 ///
-/// `Known` means later nodes can safely use the type. `Poison` means the node
-/// already produced, or depends on, an error and should not cause cascading
-/// follow-up diagnostics. We keep this separate from `purple_garden_ir::Type`
+/// `Known` means later nodes can safely use the type. `Poison` means the node already produced, or
+/// depends on, an error and should not cause cascading follow-up diagnostics. `Variable` enables
+/// monomorphism based generic embedding side generics.
+///
+/// We keep this separate from `purple_garden_ir::Type`
 /// so the IR/runtime type vocabulary does not need an error sentinel.
 #[derive(Debug, Clone)]
 pub(super) enum TcType<'t> {
     Known(Type<'t>),
+    Variable(char),
     Poison,
 }
 
@@ -33,14 +36,14 @@ impl<'t> TcType<'t> {
     pub(super) fn known(self) -> Option<Type<'t>> {
         match self {
             Self::Known(ty) => Some(ty),
-            Self::Poison => None,
+            Self::Poison | Self::Variable(_) => None,
         }
     }
 
     pub(super) fn as_known(&self) -> Option<&Type<'t>> {
         match self {
             Self::Known(ty) => Some(ty),
-            Self::Poison => None,
+            Self::Poison | Self::Variable(_) => None,
         }
     }
 }
