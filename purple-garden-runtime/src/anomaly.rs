@@ -10,6 +10,14 @@ pub enum Anomaly {
     Msg { msg: &'static str, pc: usize },
 }
 
+impl std::fmt::Display for Anomaly {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::error::Error for Anomaly {}
+
 impl Anomaly {
     #[must_use]
     pub fn as_str(&self) -> &str {

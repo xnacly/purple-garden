@@ -141,6 +141,21 @@ impl Program {
         self.run()?;
         Ok(T::from_vm(&self.vm, *self.vm.r(0)))
     }
+
+    /// Queries the purple garden runtime for a function named [name]
+    pub fn discover_fn(&self, name: &str) -> Option<()> {
+        todo!()
+    }
+
+    /// Executes a single purple garden function with the given [args], returning the resulting
+    /// value coverted into a rust type
+    pub fn run_fn<'vm, I: IntoVm, O: FromVm<'vm>>(
+        &'vm mut self,
+        pgfun: (),
+        args: &[I],
+    ) -> Result<O, Anomaly> {
+        todo!()
+    }
 }
 
 fn compile<'e>(
