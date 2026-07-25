@@ -1,0 +1,9 @@
+import "io"
+
+fn identity(i: Int) Int {
+    i
+}
+
+fn dispatch(i: Int) {
+    io.println(i)
+}
