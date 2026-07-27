@@ -5,7 +5,7 @@ use purple_garden_frontend::{
     lower::Lower,
     parser::Parser,
 };
-use purple_garden_runtime::VmConfig;
+use purple_garden_runtime::{Vm, VmConfig};
 use purple_garden_typecheck::Typechecker;
 
 use std::{collections::HashMap, path::Path};
@@ -215,21 +215,19 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    let (vm, syscalls, debug, entry_native_idx) = cc.finalize(VmConfig {
+    let (mut vm, syscalls, debug, entry_native_idx) = cc.finalize(VmConfig {
         backtrace: conf.backtrace,
         no_gc: conf.no_gc,
     });
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
-    let mut program =
-        purple_garden::Program::from_vm(vm, syscalls, debug).with_entry_native(entry_native);
-    if !conf.no_jit {
-        program.jit = native_pages;
-    }
+    let entry = vm.pc;
+    // Keep executable JIT pages alive until execution has completed.
+    let _native_pages = native_pages;
 
     if let Some(ctx) = ctx {
         match conf.disassemble {
             1 => {
-                let dis = bc::dis::Disassembler::new(&program.vm.bytecode, ctx).with_source(source);
+                let dis = bc::dis::Disassembler::new(&vm.bytecode, ctx).with_source(source);
                 dis.disassemble_bytecode();
                 dis.disassemble_native();
             }
@@ -244,10 +242,18 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    if let Err(e) = program.run() {
+    vm.prepare_run(entry);
+    let run = if let Some(entry_native) = entry_native {
+        unsafe { entry_native((&mut vm as *mut Vm).cast()) };
+        vm.take_trap().map_or(Ok(()), Err)
+    } else {
+        vm.run(&syscalls)
+    };
+
+    if let Err(e) = run {
         eprintln!(
             "{}",
-            Diagnostic::from_anomaly(e, &program.debug).render(input_source, source)
+            Diagnostic::from_anomaly(e, &debug).render(input_source, source)
         );
 
         if conf.backtrace {
@@ -256,11 +262,11 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
                 .find(|(_, name)| name.as_str() == "entry")
                 .map(|(pc, _)| *pc)
             {
-                program.vm.backtrace.insert(0, entry_point_pc);
+                vm.backtrace.insert(0, entry_point_pc);
             }
 
             eprintln!("at:");
-            for (idx, trace_id) in program.vm.backtrace.iter().enumerate() {
+            for (idx, trace_id) in vm.backtrace.iter().enumerate() {
                 if let Some(name) = function_table.get(trace_id) {
                     eprintln!(" #{idx} {name}");
                 }

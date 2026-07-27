@@ -100,14 +100,7 @@ impl Vm {
     #[must_use]
     pub fn new(config: VmConfig) -> Self {
         let mut frames = Vec::with_capacity(64);
-        // Synthetic root frame: the VM enters the entry function directly, so
-        // its trailing Op::Ret needs a frame to pop. Popping it ends the run
-        // (see ROOT_RETURN_ADDR) and drains any pending trap.
-        frames.push(CallFrame {
-            return_to: ROOT_RETURN_ADDR,
-            #[cfg(debug_assertions)]
-            spilled_depth: 0,
-        });
+        frames.push(Self::root_frame());
         let collect = if config.no_gc {
             Self::collect_noop
         } else {
@@ -128,6 +121,31 @@ impl Vm {
             config,
             collect_fn: collect,
         }
+    }
+
+    fn root_frame() -> CallFrame {
+        // The VM enters a top-level function directly, so its trailing Op::Ret
+        // needs a frame to pop. Popping this synthetic frame ends the run (see
+        // ROOT_RETURN_ADDR) and drains any pending trap.
+        CallFrame {
+            return_to: ROOT_RETURN_ADDR,
+            #[cfg(debug_assertions)]
+            spilled_depth: 0,
+        }
+    }
+
+    /// Prepare the VM to enter a bytecode function directly at `pc`.
+    ///
+    /// [`Self::run`] consumes the synthetic root frame when the entered
+    /// function returns. Call this before every independent top-level
+    /// invocation; it also discards call state left behind by a trapped run.
+    pub fn prepare_run(&mut self, pc: usize) {
+        self.pc = pc;
+        self.frames.clear();
+        self.frames.push(Self::root_frame());
+        self.spilled.clear();
+        self.backtrace.clear();
+        self.pending_trap = None;
     }
 
     fn collect(&mut self) {
@@ -569,6 +587,43 @@ mod ops {
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;
         vm.run(&[]).expect_err("vm run unexpectedly succeeded")
+    }
+
+    #[test]
+    fn prepare_run_reinstalls_root_frame_after_return() {
+        let mut vm = Vm::new(VmConfig::default());
+        vm.bytecode = vec![Op::LoadI { dst: 0, value: 42 }, Op::Ret];
+
+        vm.prepare_run(0);
+        vm.run(&[]).expect("first invocation should succeed");
+        assert_eq!(vm.r(0).as_int(), 42);
+
+        vm.prepare_run(0);
+        vm.run(&[]).expect("second invocation should succeed");
+        assert_eq!(vm.r(0).as_int(), 42);
+    }
+
+    #[test]
+    fn prepare_run_discards_frames_left_by_a_trap() {
+        let mut vm = Vm::new(VmConfig::default());
+        vm.bytecode = vec![
+            Op::LoadI { dst: 0, value: 1 },
+            Op::LoadI { dst: 1, value: 0 },
+            Op::IDiv {
+                dst: 0,
+                lhs: 0,
+                rhs: 1,
+            },
+            Op::Ret,
+        ];
+
+        vm.prepare_run(0);
+        assert!(matches!(vm.run(&[]), Err(Anomaly::DivisionByZero { .. })));
+
+        vm.bytecode[2] = Op::LoadI { dst: 0, value: 7 };
+        vm.prepare_run(0);
+        vm.run(&[]).expect("invocation after a trap should succeed");
+        assert_eq!(vm.r(0).as_int(), 7);
     }
 
     #[test]
