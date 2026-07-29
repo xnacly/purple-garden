@@ -4,6 +4,8 @@
 )))]
 compile_error!("purple-garden currently supports only Linux or macOS on x86_64 or aarch64");
 
+use std::collections::HashMap;
+
 use purple_garden_bc as bc;
 use purple_garden_frontend::{
     diagnostic::{Diagnostic, Span},
@@ -11,7 +13,7 @@ use purple_garden_frontend::{
 };
 use purple_garden_runtime::{Anomaly, BuiltinFn};
 pub use purple_garden_shared::config;
-use purple_garden_typecheck::Typechecker;
+use purple_garden_typecheck::{FunctionType, Typechecker};
 
 pub use purple_garden_macros::{GardenOpaque, GardenValue, pg_fn, pg_pkg};
 /// Types and traits used when embedding Rust values and packages.
@@ -196,7 +198,7 @@ impl<'pg> Pg<'pg> {
     /// assert_eq!(program.run_take::<i64>()?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn compile(&self, input: &[u8]) -> Result<Program, Diagnostic> {
+    pub fn compile(&self, input: &'pg [u8]) -> Result<Program<'pg>, Diagnostic> {
         compile(
             &self.config,
             input,
@@ -230,15 +232,24 @@ impl Default for Pg<'_> {
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug)]
-pub struct Program {
+pub struct Program<'p> {
     vm: Vm,
     entry: usize,
     entry_native: Option<BuiltinFn>,
     syscalls: Vec<BuiltinFn>,
     jit: Vec<JitFn>,
+    funcs: HashMap<&'p str, FunctionType<'p>>,
 }
 
-impl Program {
+/// A handle to a purple garden function extracted from [`Program`] via [`Program::function`], invokable using [`Program::function`]
+pub struct Function<'fun> {
+    ft: FunctionType<'fun>,
+    // TODO: this needs:
+    //  - handle or pointer, depending on bc or jit, this needs to be encoded somehow
+    //  - I/O type info
+}
+
+impl<'p> Program<'p> {
     fn from_vm(vm: Vm, syscalls: Vec<BuiltinFn>) -> Self {
         let entry = vm.pc;
         Self {
@@ -247,6 +258,7 @@ impl Program {
             entry_native: None,
             syscalls,
             jit: Vec::new(),
+            funcs: HashMap::new(),
         }
     }
 
@@ -323,7 +335,7 @@ impl Program {
     /// assert_eq!(program.call::<i64, i64>(identity, &[42])?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn function(&self, _name: &str) -> Option<()> {
+    pub fn function(&self, name: &str) -> Option<Function<'p>> {
         todo!()
     }
 
@@ -347,22 +359,23 @@ impl Program {
     /// let _: () = program.call(print, &[42])?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn call<'vm, I: IntoVm, O: FromVm<'vm>>(
-        &'vm mut self,
-        _pgfun: (),
-        _args: &[I],
+    pub fn call<I: IntoVm, O: FromVm<'p>>(
+        &'p mut self,
+        fun: Function<'p>,
+        args: &[I],
     ) -> Result<O, Anomaly> {
+        let _ = (fun, args);
         todo!()
     }
 }
 
-fn compile<'e>(
-    config: &'e config::Config,
-    input: &'e [u8],
-    libs: &[&'e Pkg],
+fn compile<'c, 'i, 'l>(
+    config: &'c config::Config,
+    input: &'i [u8],
+    libs: &[&'l Pkg],
     stdlib: bool,
     unsafe_stdlib: bool,
-) -> Result<Program, Diagnostic> {
+) -> Result<Program<'i>, Diagnostic> {
     let parse = parser::Parser::new(lex::Lexer::new(input)).parse_collect();
     if let Some(diagnostic) = parse.diagnostics.into_iter().next() {
         return Err(diagnostic);

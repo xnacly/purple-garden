@@ -1025,6 +1025,8 @@ impl<'cc> Cc<'cc> {
             return;
         }
 
+        // PERF: do classification of possible targets with simd
+
         // Skip the whole pass when peephole produced nothing to compact.
         // Avoids the remap allocation and second walk in the common no-op case.
         if !bc.iter().any(|op| matches!(op, Op::Nop)) {
@@ -1076,6 +1078,8 @@ impl<'cc> Cc<'cc> {
         }
     }
 
+    /// Returns the vm, a list of syscalls, debug info, and the entry point to the native page, if
+    /// jitted
     pub fn finalize(self, config: VmConfig) -> (Vm, Vec<BuiltinFn>, DebugInfo, Option<u16>) {
         let Cc {
             buf,

@@ -1,0 +1,3 @@
+import ("io" "strings")
+io.println(strings.get("hola" 2))
+io.println(strings.get("hola" 10))

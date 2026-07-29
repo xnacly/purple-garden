@@ -12,8 +12,9 @@ use purple_garden_ir::ptype::Type;
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
 
+pub use typedefs::FunctionType;
+use typedefs::TcType;
 pub use typedefs::TypecheckOutput;
-use typedefs::{FunctionType, TcType};
 
 #[derive(Debug)]
 pub struct Typechecker<'t> {
@@ -165,6 +166,7 @@ impl<'t> Typechecker<'t> {
 
         TypecheckOutput {
             types: self.map,
+            functions: self.functions,
             diagnostics: self.diagnostics,
         }
     }
