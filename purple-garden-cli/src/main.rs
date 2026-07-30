@@ -242,11 +242,12 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    vm.prepare_run(entry);
+    vm.reset();
     let run = if let Some(entry_native) = entry_native {
         unsafe { entry_native((&mut vm as *mut Vm).cast()) };
         vm.take_trap().map_or(Ok(()), Err)
     } else {
+        vm.pc = entry;
         vm.run(&syscalls)
     };
 

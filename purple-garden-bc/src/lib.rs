@@ -39,8 +39,8 @@ impl<'fun> CcFunc<'fun> {
     }
 }
 
-#[derive(Clone, Copy)]
-enum CcCallTarget {
+#[derive(Clone, Copy, Debug)]
+pub enum CcCallTarget {
     Bc { pc: usize },
     Native { idx: u16 },
 }

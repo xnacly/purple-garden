@@ -17,8 +17,8 @@ use typedefs::TcType;
 pub use typedefs::TypecheckOutput;
 
 #[derive(Debug)]
-pub struct Typechecker<'t> {
-    ast: &'t Ast<'t>,
+pub struct Typechecker<'a, 't> {
+    ast: &'a Ast<'t>,
     /// Node id -> Type. Indexed by id; Node ids are dense from the parser.
     map: Vec<Option<Type<'t>>>,
     /// scope stack; innermost frame last; lookups walk from top to bottom
@@ -34,9 +34,9 @@ pub struct Typechecker<'t> {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl<'t> Typechecker<'t> {
+impl<'a, 't> Typechecker<'a, 't> {
     #[must_use]
-    pub fn new(ast: &'t Ast<'t>) -> Self {
+    pub fn new(ast: &'a Ast<'t>) -> Self {
         let mut s = Self {
             ast,
             map: Vec::new(),
@@ -1000,6 +1000,20 @@ mod tests {
             .and_then(|id| out.types.get(id))
             .cloned()
             .flatten()
+    }
+
+    #[test]
+    fn output_outlives_the_ast_it_was_checked_against() {
+        fn check(source: &[u8]) -> TypecheckOutput<'_> {
+            let ast = parse(source);
+            Typechecker::new(&ast).check()
+        }
+
+        let out = check(br#"fn wrap(value:Int) Record<value: Int> { { value: value } }"#);
+        let wrap = out.functions.get("wrap").expect("fn is registered");
+
+        assert_eq!(wrap.args, vec![("value", Type::Int)]);
+        assert_eq!(wrap.ret, Type::record(vec![("value", Type::Int)]));
     }
 
     #[test]

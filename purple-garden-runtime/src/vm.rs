@@ -134,13 +134,16 @@ impl Vm {
         }
     }
 
-    /// Prepare the VM to enter a bytecode function directly at `pc`.
+    /// Prepare the VM for a new execution
     ///
-    /// [`Self::run`] consumes the synthetic root frame when the entered
-    /// function returns. Call this before every independent top-level
-    /// invocation; it also discards call state left behind by a trapped run.
-    pub fn prepare_run(&mut self, pc: usize) {
-        self.pc = pc;
+    /// [`Self::run`] consumes the synthetic root frame when the entered function returns. Call this
+    /// before every independent invocation; it also discards call state left behind by a trapped
+    /// run.
+    pub fn reset(&mut self) {
+        // poison le well in debugging so we know whats going on
+        #[cfg(debug_assertions)]
+        self.r.fill(Value(0xDEAD_AFFE_DEAD_AFFE));
+        self.pc = ROOT_RETURN_ADDR;
         self.frames.clear();
         self.frames.push(Self::root_frame());
         self.spilled.clear();
@@ -594,11 +597,13 @@ mod ops {
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = vec![Op::LoadI { dst: 0, value: 42 }, Op::Ret];
 
-        vm.prepare_run(0);
+        vm.reset();
+        vm.pc = 0;
         vm.run(&[]).expect("first invocation should succeed");
         assert_eq!(vm.r(0).as_int(), 42);
 
-        vm.prepare_run(0);
+        vm.pc = 0;
+        vm.reset();
         vm.run(&[]).expect("second invocation should succeed");
         assert_eq!(vm.r(0).as_int(), 42);
     }
@@ -617,11 +622,13 @@ mod ops {
             Op::Ret,
         ];
 
-        vm.prepare_run(0);
+        vm.reset();
+        vm.pc = 0;
         assert!(matches!(vm.run(&[]), Err(Anomaly::DivisionByZero { .. })));
 
         vm.bytecode[2] = Op::LoadI { dst: 0, value: 7 };
-        vm.prepare_run(0);
+        vm.reset();
+        vm.pc = 0;
         vm.run(&[]).expect("invocation after a trap should succeed");
         assert_eq!(vm.r(0).as_int(), 7);
     }

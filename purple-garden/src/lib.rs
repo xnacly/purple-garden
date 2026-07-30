@@ -6,7 +6,7 @@ compile_error!("purple-garden currently supports only Linux or macOS on x86_64 o
 
 use std::collections::HashMap;
 
-use purple_garden_bc as bc;
+use purple_garden_bc::{self as bc, CcCallTarget};
 use purple_garden_frontend::{
     diagnostic::{Diagnostic, Span},
     lex, lower, parser,
@@ -14,6 +14,8 @@ use purple_garden_frontend::{
 use purple_garden_runtime::{Anomaly, BuiltinFn};
 pub use purple_garden_shared::config;
 use purple_garden_typecheck::{FunctionType, Typechecker};
+mod rust_to_pg;
+pub use rust_to_pg::CallArgs;
 
 pub use purple_garden_macros::{GardenOpaque, GardenValue, pg_fn, pg_pkg};
 /// Types and traits used when embedding Rust values and packages.
@@ -32,7 +34,7 @@ pub mod embed {
     };
 }
 
-use embed::{FromVm, IntoVm, Pkg, Vm, VmConfig};
+use embed::{FromVm, Pkg, Vm, VmConfig};
 
 type JitFn = purple_garden_jit::JitFn;
 
@@ -238,15 +240,17 @@ pub struct Program<'p> {
     entry_native: Option<BuiltinFn>,
     syscalls: Vec<BuiltinFn>,
     jit: Vec<JitFn>,
-    funcs: HashMap<&'p str, FunctionType<'p>>,
+    funcs: HashMap<&'p str, (CcCallTarget, FunctionType<'p>)>,
 }
 
+// TODO: update all examples for Program::{function,call}() to new signatures
+
 /// A handle to a purple garden function extracted from [`Program`] via [`Program::function`], invokable using [`Program::function`]
-pub struct Function<'fun> {
-    ft: FunctionType<'fun>,
-    // TODO: this needs:
-    //  - handle or pointer, depending on bc or jit, this needs to be encoded somehow
-    //  - I/O type info
+#[derive(Debug)]
+pub struct Function {
+    handle: CcCallTarget,
+    // TODO: represent argument and return types, maybe extracted / returned from lower.rs
+    _signature: (Vec<()>, ()),
 }
 
 impl<'p> Program<'p> {
@@ -285,7 +289,7 @@ impl<'p> Program<'p> {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn run(&mut self) -> Result<(), Anomaly> {
-        self.vm.prepare_run(self.entry);
+        self.vm.reset();
         if let Some(entry) = self.entry_native {
             unsafe { entry((&mut self.vm as *mut Vm).cast()) };
             if let Some(anomaly) = self.vm.take_trap() {
@@ -293,6 +297,7 @@ impl<'p> Program<'p> {
             }
             return Ok(());
         }
+        self.vm.pc = self.entry;
         self.vm.run(&self.syscalls)
     }
 
@@ -313,7 +318,7 @@ impl<'p> Program<'p> {
     /// assert_eq!(value, "violet");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn run_take<'vm, T: FromVm<'vm>>(&'vm mut self) -> Result<T, Anomaly> {
+    pub fn run_take<'pg, T: FromVm<'pg>>(&'pg mut self) -> Result<T, Anomaly> {
         self.run()?;
         Ok(T::from_vm(&self.vm, *self.vm.r(0)))
     }
@@ -335,8 +340,10 @@ impl<'p> Program<'p> {
     /// assert_eq!(program.call::<i64, i64>(identity, &[42])?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn function(&self, name: &str) -> Option<Function<'p>> {
+    pub fn function(&self, name: &str) -> Option<Function> {
+        let _ft = self.funcs.get(name)?.clone();
         todo!()
+        // Some(Function { ft })
     }
 
     /// Invokes a function returned by [`Program::function`] with homogeneous
@@ -348,31 +355,42 @@ impl<'p> Program<'p> {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    /// use purple_garden::Pg;
-    ///
-    /// let mut program = Pg::new()
-    ///     .with_stdlib()
-    ///     .compile(br#"import "io"
-    /// fn print(value: Int) { io.println(value) }"#)?;
-    /// let print = program.function("print").expect("function exists");
-    /// let _: () = program.call(print, &[42])?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn call<I: IntoVm, O: FromVm<'p>>(
-        &'p mut self,
-        fun: Function<'p>,
-        args: &[I],
-    ) -> Result<O, Anomaly> {
-        let _ = (fun, args);
-        todo!()
+    pub fn call<'vm, Args, Ret>(
+        &'vm mut self,
+        function: &Function,
+        args: Args,
+    ) -> Result<Ret, Anomaly>
+    where
+        Args: CallArgs,
+        Ret: FromVm<'vm>,
+    {
+        // TODO: verify signature (args+ret) match somewhere inside here, idk how :)
+
+        self.vm.reset();
+
+        for (i, arg) in args.inner(&mut self.vm).iter().enumerate() {
+            *self.vm.r_mut(i) = *arg;
+        }
+
+        match function.handle {
+            CcCallTarget::Bc { pc } => {
+                self.vm.pc = pc;
+                self.vm.run(&self.syscalls)?;
+            }
+            CcCallTarget::Native { idx } => {
+                unsafe { self.syscalls[idx as usize]((&mut self.vm as *mut Vm).cast()) };
+            }
+        };
+
+        let result = Ret::from_vm(&self.vm, *self.vm.r(0));
+        Ok(result)
     }
 }
 
-fn compile<'c, 'i, 'l>(
-    config: &'c config::Config,
+fn compile<'i>(
+    config: &config::Config,
     input: &'i [u8],
-    libs: &[&'l Pkg],
+    libs: &[&'i Pkg],
     stdlib: bool,
     unsafe_stdlib: bool,
 ) -> Result<Program<'i>, Diagnostic> {
@@ -411,12 +429,22 @@ fn compile<'c, 'i, 'l>(
         cc.compact_nops();
     }
 
+    let funcs: HashMap<_, _> = cc
+        .functions
+        .values()
+        .filter_map(|f| {
+            let (name, ft) = typecheck.functions.get_key_value(f.name())?;
+            Some((*name, (CcCallTarget::from(f), ft.clone())))
+        })
+        .collect();
+
     let (vm, syscalls, _debug, entry_native_idx) = cc.finalize(VmConfig {
         backtrace: config.backtrace,
         no_gc: config.no_gc,
     });
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let mut program = Program::from_vm(vm, syscalls).with_entry_native(entry_native);
+    program.funcs = funcs;
     if !config.no_jit {
         program.jit = native_pages;
     }
@@ -450,5 +478,28 @@ mod tests {
 
         assert_eq!(program.run_take::<i64>().unwrap(), 42);
         assert_eq!(program.run_take::<i64>().unwrap(), 42);
+    }
+
+    #[test]
+    fn compile_collects_signatures_for_bytecode_and_native_targets() {
+        for (no_jit, want_native) in [(true, false), (false, true)] {
+            let mut config = config::Config::default();
+            config.no_jit = no_jit;
+            let program = Pg::new()
+                .config(config)
+                .compile(b"fn used(value:Int) Int { value }\nfn unused(a:Str) Str { a }\nused(1)")
+                .expect("program should compile");
+
+            let (target, signature) = program.funcs.get("used").expect("`used` is collected");
+            assert_eq!(
+                matches!(target, CcCallTarget::Native { .. }),
+                want_native,
+                "no_jit={no_jit}"
+            );
+            assert_eq!(signature.args, vec![("value", embed::Type::Int)]);
+            assert_eq!(signature.ret, embed::Type::Int);
+            assert!(program.funcs.contains_key("unused"));
+            assert!(!program.funcs.contains_key("entry"));
+        }
     }
 }
