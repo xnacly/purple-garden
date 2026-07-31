@@ -13,11 +13,13 @@ use purple_garden_frontend::{
 };
 use purple_garden_runtime::{Anomaly, BuiltinFn};
 pub use purple_garden_shared::config;
+use purple_garden_shared::trace;
 use purple_garden_typecheck::{FunctionType, Typechecker};
 mod rust_to_pg;
 pub use rust_to_pg::CallArgs;
 
 pub use purple_garden_macros::{GardenOpaque, GardenValue, pg_fn, pg_pkg};
+
 /// Types and traits used when embedding Rust values and packages.
 ///
 /// Most applications only need [`Pg`], the derive macros, and `#[pg_pkg]`.
@@ -243,14 +245,15 @@ pub struct Program<'p> {
     funcs: HashMap<&'p str, (CcCallTarget, FunctionType<'p>)>,
 }
 
+// TODO: introduce .call_unchecked() for non signature checked pg invokation
 // TODO: update all examples for Program::{function,call}() to new signatures
+#[allow(unused)]
 
 /// A handle to a purple garden function extracted from [`Program`] via [`Program::function`], invokable using [`Program::function`]
 #[derive(Debug)]
-pub struct Function {
+pub struct Function<'f> {
     handle: CcCallTarget,
-    // TODO: represent argument and return types, maybe extracted / returned from lower.rs
-    _signature: (Vec<()>, ()),
+    signature: FunctionType<'f>,
 }
 
 impl<'p> Program<'p> {
@@ -340,10 +343,12 @@ impl<'p> Program<'p> {
     /// assert_eq!(program.call::<i64, i64>(identity, &[42])?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn function(&self, name: &str) -> Option<Function> {
-        let _ft = self.funcs.get(name)?.clone();
-        todo!()
-        // Some(Function { ft })
+    pub fn function(&self, name: &str) -> Option<Function<'p>> {
+        self.funcs.get(name).cloned().map(|(handle, signature)| {
+            let f = Function { handle, signature };
+            trace!("extracted `{}` handle: {:?}", name, f);
+            return f;
+        })
     }
 
     /// Invokes a function returned by [`Program::function`] with homogeneous
