@@ -602,8 +602,8 @@ mod ops {
         vm.run(&[]).expect("first invocation should succeed");
         assert_eq!(vm.r(0).as_int(), 42);
 
-        vm.pc = 0;
         vm.reset();
+        vm.pc = 0;
         vm.run(&[]).expect("second invocation should succeed");
         assert_eq!(vm.r(0).as_int(), 42);
     }

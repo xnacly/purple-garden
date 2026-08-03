@@ -19,7 +19,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .function("identity")
         .expect("Wasnt able to find `identity` function");
 
-    assert_eq!(pg.call::<_, i64>(&identity_function, 256)?, 256);
+    assert_eq!(
+        unsafe { pg.call_unchecked(&identity_function, &[256i64.into()])? },
+        256i64.into()
+    );
 
     let dispatch_function = pg
         .function("dispatch")

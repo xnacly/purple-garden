@@ -11,7 +11,7 @@ use purple_garden_frontend::{
     diagnostic::{Diagnostic, Span},
     lex, lower, parser,
 };
-use purple_garden_runtime::{Anomaly, BuiltinFn};
+use purple_garden_runtime::{Anomaly, BuiltinFn, Value};
 pub use purple_garden_shared::config;
 use purple_garden_shared::trace;
 use purple_garden_typecheck::{FunctionType, Typechecker};
@@ -340,7 +340,7 @@ impl<'p> Program<'p> {
     /// let mut program = Pg::new()
     ///     .compile(br#"fn identity(value: Int) Int { value }"#)?;
     /// let identity = program.function("identity").expect("function exists");
-    /// assert_eq!(program.call::<i64, i64>(identity, &[42])?, 42);
+    /// assert_eq!(program.call::<i64, i64>(&identity, 42)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn function(&self, name: &str) -> Option<Function<'p>> {
@@ -349,6 +349,40 @@ impl<'p> Program<'p> {
             trace!("extracted `{}` handle: {:?}", name, f);
             return f;
         })
+    }
+
+    /// Invokes a function returned by [`Program::function`] with homogeneous arguments and decodes
+    /// its return value into a Rust type. Does NOT check the rust types matching the purple garden
+    /// types
+    ///
+    /// Arguments are passed through [`IntoVm`] and the result through
+    /// [`FromVm`]. The function must accept the supplied number and type of
+    /// arguments.
+    ///
+    /// # Examples
+    ///
+    pub unsafe fn call_unchecked<'vm>(
+        &'vm mut self,
+        function: &Function,
+        args: &[Value],
+    ) -> Result<Value, Anomaly> {
+        self.vm.reset();
+
+        for (i, a) in args.iter().enumerate() {
+            *self.vm.r_mut(i) = *a;
+        }
+
+        match function.handle {
+            CcCallTarget::Bc { pc } => {
+                self.vm.pc = pc;
+                self.vm.run(&self.syscalls)?;
+            }
+            CcCallTarget::Native { idx } => {
+                unsafe { self.syscalls[idx as usize]((&mut self.vm as *mut Vm).cast()) };
+            }
+        };
+
+        Ok(*self.vm.r(0))
     }
 
     /// Invokes a function returned by [`Program::function`] with homogeneous
@@ -370,24 +404,9 @@ impl<'p> Program<'p> {
         Ret: FromVm<'vm>,
     {
         // TODO: verify signature (args+ret) match somewhere inside here, idk how :)
-
-        self.vm.reset();
-
-        for (i, arg) in args.inner(&mut self.vm).iter().enumerate() {
-            *self.vm.r_mut(i) = *arg;
-        }
-
-        match function.handle {
-            CcCallTarget::Bc { pc } => {
-                self.vm.pc = pc;
-                self.vm.run(&self.syscalls)?;
-            }
-            CcCallTarget::Native { idx } => {
-                unsafe { self.syscalls[idx as usize]((&mut self.vm as *mut Vm).cast()) };
-            }
-        };
-
-        let result = Ret::from_vm(&self.vm, *self.vm.r(0));
+        let args = args.inner(&mut self.vm).into_iter().collect::<Vec<_>>();
+        let ret = unsafe { self.call_unchecked(function, &args)? };
+        let result = Ret::from_vm(&self.vm, ret);
         Ok(result)
     }
 }
