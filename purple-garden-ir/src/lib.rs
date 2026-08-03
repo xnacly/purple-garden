@@ -132,6 +132,13 @@ pub enum Instr<'i> {
         imm: i32,
         span: u32,
     },
+    BinImmD {
+        op: BinOp,
+        dst: TypeId<'i>,
+        lhs: Id,
+        bits: u64,
+        span: u32,
+    },
     LoadConst {
         dst: TypeId<'i>,
         value: Const<'i>,
@@ -193,6 +200,7 @@ impl Instr<'_> {
             | Instr::Bin { span, .. }
             | Instr::Alloc { span, .. }
             | Instr::BinImm { span, .. }
+            | Instr::BinImmD { span, .. }
             | Instr::LoadConst { span, .. }
             | Instr::Call { span, .. }
             | Instr::Sys { span, .. }
@@ -353,6 +361,7 @@ impl Func<'_> {
             | Instr::AddrOf { dst, .. }
             | Instr::Bin { dst, .. }
             | Instr::BinImm { dst, .. }
+            | Instr::BinImmD { dst, .. }
             | Instr::LoadConst { dst, .. }
             | Instr::Call { dst, .. }
             | Instr::Sys { dst, .. }
@@ -367,7 +376,7 @@ impl Func<'_> {
                 f(*lhs);
                 f(*rhs);
             }
-            Instr::BinImm { lhs, .. } => f(*lhs),
+            Instr::BinImm { lhs, .. } | Instr::BinImmD { lhs, .. } => f(*lhs),
             Instr::Call { args, .. } | Instr::Sys { args, .. } => {
                 for &a in args {
                     f(a);

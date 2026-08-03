@@ -312,14 +312,29 @@ impl Vm {
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l + r);
                 },
+                Op::DAddI { dst, lhs, idx } => unsafe {
+                    let l = r!(lhs).as_f64();
+                    let r = (*globals.add(idx as usize)).as_f64();
+                    r_mut!(dst) = Value::from(l + r);
+                },
                 Op::DSub { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l - r);
                 },
+                Op::DSubI { dst, lhs, idx } => unsafe {
+                    let l = r!(lhs).as_f64();
+                    let r = (*globals.add(idx as usize)).as_f64();
+                    r_mut!(dst) = Value::from(l - r);
+                },
                 Op::DMul { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
+                    r_mut!(dst) = Value::from(l * r);
+                },
+                Op::DMulI { dst, lhs, idx } => unsafe {
+                    let l = r!(lhs).as_f64();
+                    let r = (*globals.add(idx as usize)).as_f64();
                     r_mut!(dst) = Value::from(l * r);
                 },
                 Op::DDiv { dst, lhs, rhs } => unsafe {
@@ -328,14 +343,29 @@ impl Vm {
                     trap_if!(r == 0 as f64, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l / r);
                 },
+                Op::DDivI { dst, lhs, idx } => unsafe {
+                    let l = r!(lhs).as_f64();
+                    let r = (*globals.add(idx as usize)).as_f64();
+                    r_mut!(dst) = Value::from(l / r);
+                },
                 Op::DGt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l > r);
                 },
+                Op::DGtI { dst, lhs, idx } => unsafe {
+                    let l = r!(lhs).as_f64();
+                    let r = (*globals.add(idx as usize)).as_f64();
+                    r_mut!(dst) = Value::from(l > r);
+                },
                 Op::DLt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
+                    r_mut!(dst) = Value::from(l < r);
+                },
+                Op::DLtI { dst, lhs, idx } => unsafe {
+                    let l = r!(lhs).as_f64();
+                    let r = (*globals.add(idx as usize)).as_f64();
                     r_mut!(dst) = Value::from(l < r);
                 },
                 Op::BEq { dst, lhs, rhs } => unsafe {
@@ -999,6 +1029,135 @@ mod ops {
         ]);
         assert_eq!(vm.r(1).as_int(), 7);
         assert_eq!(vm.r(2).as_int(), 99);
+    }
+
+    #[test]
+    fn double_immediate_arith() {
+        let mut vm = Vm::new(VmConfig::default());
+        vm.globals.push(Value::from(2.0_f64));
+        vm.globals.push(Value::from(4.0_f64));
+        vm.bytecode = vec![
+            Op::LoadG { dst: 0, idx: 1 },
+            Op::DAddI {
+                dst: 1,
+                lhs: 0,
+                idx: 0,
+            },
+            Op::DSubI {
+                dst: 2,
+                lhs: 0,
+                idx: 0,
+            },
+            Op::DMulI {
+                dst: 3,
+                lhs: 0,
+                idx: 0,
+            },
+            Op::DDivI {
+                dst: 4,
+                lhs: 0,
+                idx: 0,
+            },
+        ];
+        vm.run(&[]).expect("double immediate arithmetic");
+
+        assert_eq!(vm.r(1).as_f64(), 6.0);
+        assert_eq!(vm.r(2).as_f64(), 2.0);
+        assert_eq!(vm.r(3).as_f64(), 8.0);
+        assert_eq!(vm.r(4).as_f64(), 2.0);
+    }
+
+    #[test]
+    fn double_immediate_compare() {
+        let mut vm = Vm::new(VmConfig::default());
+        vm.globals.push(Value::from(2.0_f64));
+        vm.globals.push(Value::from(4.0_f64));
+        vm.bytecode = vec![
+            Op::LoadG { dst: 0, idx: 1 },
+            Op::DGtI {
+                dst: 1,
+                lhs: 0,
+                idx: 0,
+            },
+            Op::DLtI {
+                dst: 2,
+                lhs: 0,
+                idx: 0,
+            },
+            Op::LoadG { dst: 3, idx: 0 },
+            Op::DGtI {
+                dst: 4,
+                lhs: 3,
+                idx: 0,
+            },
+            Op::DLtI {
+                dst: 5,
+                lhs: 3,
+                idx: 1,
+            },
+        ];
+        vm.run(&[]).expect("double immediate comparison");
+
+        assert!(vm.r(1).as_bool());
+        assert!(!vm.r(2).as_bool());
+        assert!(!vm.r(4).as_bool());
+        assert!(vm.r(5).as_bool());
+    }
+
+    #[test]
+    fn double_immediate_ops_match_their_register_forms() {
+        let cases: [(fn(u8, u8, u32) -> Op, fn(u8, u8, u8) -> Op); 6] = [
+            (
+                |dst, lhs, idx| Op::DAddI { dst, lhs, idx },
+                |dst, lhs, rhs| Op::DAdd { dst, lhs, rhs },
+            ),
+            (
+                |dst, lhs, idx| Op::DSubI { dst, lhs, idx },
+                |dst, lhs, rhs| Op::DSub { dst, lhs, rhs },
+            ),
+            (
+                |dst, lhs, idx| Op::DMulI { dst, lhs, idx },
+                |dst, lhs, rhs| Op::DMul { dst, lhs, rhs },
+            ),
+            (
+                |dst, lhs, idx| Op::DDivI { dst, lhs, idx },
+                |dst, lhs, rhs| Op::DDiv { dst, lhs, rhs },
+            ),
+            (
+                |dst, lhs, idx| Op::DGtI { dst, lhs, idx },
+                |dst, lhs, rhs| Op::DGt { dst, lhs, rhs },
+            ),
+            (
+                |dst, lhs, idx| Op::DLtI { dst, lhs, idx },
+                |dst, lhs, rhs| Op::DLt { dst, lhs, rhs },
+            ),
+        ];
+
+        for (imm_form, reg_form) in cases {
+            for (lhs, rhs) in [(7.5_f64, 2.5_f64), (-3.0, 8.0), (0.5, 0.5)] {
+                let mut imm_vm = Vm::new(VmConfig::default());
+                imm_vm.globals.push(Value::from(lhs));
+                imm_vm.globals.push(Value::from(rhs));
+                imm_vm.bytecode = vec![Op::LoadG { dst: 0, idx: 0 }, imm_form(1, 0, 1)];
+                imm_vm.run(&[]).expect("immediate form runs");
+
+                let mut reg_vm = Vm::new(VmConfig::default());
+                reg_vm.globals.push(Value::from(lhs));
+                reg_vm.globals.push(Value::from(rhs));
+                reg_vm.bytecode = vec![
+                    Op::LoadG { dst: 0, idx: 0 },
+                    Op::LoadG { dst: 2, idx: 1 },
+                    reg_form(1, 0, 2),
+                ];
+                reg_vm.run(&[]).expect("register form runs");
+
+                assert_eq!(
+                    imm_vm.r(1).0,
+                    reg_vm.r(1).0,
+                    "immediate and register form disagree for {lhs} op {rhs}"
+                );
+            }
+        }
     }
 
     #[test]

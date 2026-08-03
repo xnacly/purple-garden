@@ -73,6 +73,16 @@ impl Display for Instr<'_> {
             Instr::BinImm {
                 op, dst, lhs, imm, ..
             } => write!(f, "%v{} = {:?} %v{}, {}", dst, op, lhs.0, imm)?,
+            Instr::BinImmD {
+                op, dst, lhs, bits, ..
+            } => write!(
+                f,
+                "%v{} = {:?} %v{}, {}",
+                dst,
+                op,
+                lhs.0,
+                f64::from_bits(*bits)
+            )?,
             Instr::LoadConst { dst, value, .. } => write!(f, "%v{dst} = {value}")?,
             Instr::Noop => (),
             Instr::Call {

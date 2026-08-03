@@ -105,30 +105,60 @@ pub enum Op {
         lhs: u8,
         rhs: u8,
     },
+    DAddI {
+        dst: u8,
+        lhs: u8,
+        idx: u32,
+    },
     DSub {
         dst: u8,
         lhs: u8,
         rhs: u8,
+    },
+    DSubI {
+        dst: u8,
+        lhs: u8,
+        idx: u32,
     },
     DMul {
         dst: u8,
         lhs: u8,
         rhs: u8,
     },
+    DMulI {
+        dst: u8,
+        lhs: u8,
+        idx: u32,
+    },
     DDiv {
         dst: u8,
         lhs: u8,
         rhs: u8,
+    },
+    DDivI {
+        dst: u8,
+        lhs: u8,
+        idx: u32,
     },
     DLt {
         dst: u8,
         lhs: u8,
         rhs: u8,
     },
+    DLtI {
+        dst: u8,
+        lhs: u8,
+        idx: u32,
+    },
     DGt {
         dst: u8,
         lhs: u8,
         rhs: u8,
+    },
+    DGtI {
+        dst: u8,
+        lhs: u8,
+        idx: u32,
     },
     BEq {
         dst: u8,

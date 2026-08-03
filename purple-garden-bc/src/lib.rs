@@ -1012,6 +1012,31 @@ impl<'cc> Cc<'cc> {
                     ILt  => ILtI,
                 });
             }
+            ir::Instr::BinImmD {
+                op, dst, lhs, bits, ..
+            } => {
+                let dst = self.ensure_register(dst.id);
+                let lhs = self.ensure_register(*lhs);
+                let idx = self.globals.intern(Const::Double(*bits));
+
+                macro_rules! emit_bin_imm_ds {
+                    ($($ir:ident => $op:ident),* $(,)?) => {
+                        match op {
+                            $(ir::BinOp::$ir => Op::$op { dst, lhs, idx },)*
+                            _ => unreachable!("only double immediate binops are represented as BinImmD"),
+                        }
+                    };
+                }
+
+                self.emit(emit_bin_imm_ds! {
+                    DAdd => DAddI,
+                    DSub => DSubI,
+                    DMul => DMulI,
+                    DDiv => DDivI,
+                    DGt  => DGtI,
+                    DLt  => DLtI,
+                });
+            }
         }
     }
 
@@ -1169,6 +1194,99 @@ mod tests {
 
     fn has_op(ops: &[Op], pred: impl Fn(&Op) -> bool) -> bool {
         ops.iter().any(pred)
+    }
+
+    fn compile_one_with_doubles(fun: Func<'static>) -> (Vec<Op>, Vec<Option<u64>>) {
+        let mut cc = Cc::new();
+        let mut config = Config::default();
+        config.no_jit = true;
+        let funcs = [fun];
+        cc.compile(&config, &funcs).unwrap();
+        let doubles = cc
+            .globals
+            .to_vec()
+            .iter()
+            .map(|constant| match constant {
+                Const::Double(bits) => Some(*bits),
+                _ => None,
+            })
+            .collect();
+        (cc.buf.clone(), doubles)
+    }
+
+    fn double_bin_imm_fun(op: BinOp, bits: u64) -> Func<'static> {
+        entry_fun(
+            vec![
+                Instr::LoadConst {
+                    dst: type_id(0, Type::Double),
+                    value: Const::Double(1.5f64.to_bits()),
+                    span: 0,
+                },
+                Instr::BinImmD {
+                    op,
+                    dst: type_id(1, Type::Double),
+                    lhs: Id(0),
+                    bits,
+                    span: 0,
+                },
+            ],
+            Some((Id(1), Type::Double)),
+        )
+    }
+
+    #[test]
+    fn lowers_double_bin_imm_to_immediate_ops() {
+        let cases: [(BinOp, fn(&Op) -> Option<u32>); 6] = [
+            (BinOp::DAdd, |op| match op {
+                Op::DAddI { idx, .. } => Some(*idx),
+                _ => None,
+            }),
+            (BinOp::DSub, |op| match op {
+                Op::DSubI { idx, .. } => Some(*idx),
+                _ => None,
+            }),
+            (BinOp::DMul, |op| match op {
+                Op::DMulI { idx, .. } => Some(*idx),
+                _ => None,
+            }),
+            (BinOp::DDiv, |op| match op {
+                Op::DDivI { idx, .. } => Some(*idx),
+                _ => None,
+            }),
+            (BinOp::DGt, |op| match op {
+                Op::DGtI { idx, .. } => Some(*idx),
+                _ => None,
+            }),
+            (BinOp::DLt, |op| match op {
+                Op::DLtI { idx, .. } => Some(*idx),
+                _ => None,
+            }),
+        ];
+
+        for (op, extract) in cases {
+            let bits = 4.25f64.to_bits();
+            let (ops, doubles) = compile_one_with_doubles(double_bin_imm_fun(op, bits));
+
+            let idx = ops.iter().find_map(extract).unwrap_or_else(|| {
+                panic!("expected BinImmD {op:?} to lower to its immediate op: {ops:?}")
+            });
+
+            assert_eq!(
+                doubles[idx as usize],
+                Some(bits),
+                "{op:?} immediate must index the interned constant"
+            );
+        }
+    }
+
+    #[test]
+    fn double_bin_imm_emits_no_global_load() {
+        let (ops, _) = compile_one_with_doubles(double_bin_imm_fun(BinOp::DMul, 2.0f64.to_bits()));
+
+        assert!(
+            !has_op(&ops, |op| matches!(op, Op::LoadG { dst: 1, .. })),
+            "the folded constant must not also be materialised into a register: {ops:?}"
+        );
     }
 
     #[test]
