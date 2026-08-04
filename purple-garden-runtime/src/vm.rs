@@ -1,14 +1,32 @@
 use crate::{
-    Anomaly, BuiltinFn, REGISTER_COUNT, Value,
+    Anomaly, BuiltinFn, DEFAULT_STACK_SIZE, MIB, REGISTER_COUNT, Value,
     gc::{AllocType, Gc},
     op::Op,
 };
 use std::{alloc::Layout, ffi::c_void};
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct VmConfig {
     pub backtrace: bool,
     pub no_gc: bool,
+    /// Size of the call stack in MiB, see [`frames_in`].
+    pub stack_size: usize,
+}
+
+impl Default for VmConfig {
+    fn default() -> Self {
+        Self {
+            backtrace: false,
+            no_gc: false,
+            stack_size: DEFAULT_STACK_SIZE,
+        }
+    }
+}
+
+/// Call depth `mib` MiB holds; debug frames are twice as wide as release ones.
+#[must_use]
+pub const fn frames_in(mib: usize) -> usize {
+    mib.saturating_mul(MIB) / size_of::<CallFrame>()
 }
 
 /// Return address of the synthetic root call frame pushed in [`Vm::new`].
@@ -20,7 +38,7 @@ const ROOT_RETURN_ADDR: usize = usize::MAX - 1;
 
 type CollectFn = fn(&mut Vm);
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct CallFrame {
     pub return_to: usize,
     /// Snapshot of [`Vm::spilled`].`len()` at call entry. Used by the debug
@@ -63,7 +81,8 @@ pub struct Vm {
     r: [Value; REGISTER_COUNT],
     pub pc: usize,
 
-    frames: Vec<CallFrame>,
+    frames: Box<[CallFrame]>,
+    frame_depth: usize,
     /// a stack to keep values alive across recursive function invocations
     spilled: Vec<Value>,
 
@@ -99,15 +118,16 @@ macro_rules! trap_if {
 impl Vm {
     #[must_use]
     pub fn new(config: VmConfig) -> Self {
-        let mut frames = Vec::with_capacity(64);
+        let mut frames = vec![CallFrame::default(); frames_in(config.stack_size).saturating_add(1)]
+            .into_boxed_slice();
         // Synthetic root frame: the VM enters the entry function directly, so
         // its trailing Op::Ret needs a frame to pop. Popping it ends the run
         // (see ROOT_RETURN_ADDR) and drains any pending trap.
-        frames.push(CallFrame {
+        frames[0] = CallFrame {
             return_to: ROOT_RETURN_ADDR,
             #[cfg(debug_assertions)]
             spilled_depth: 0,
-        });
+        };
         let collect = if config.no_gc {
             Self::collect_noop
         } else {
@@ -117,6 +137,7 @@ impl Vm {
         Self {
             r: [const { Value(0) }; REGISTER_COUNT],
             frames,
+            frame_depth: 1,
             pc: 0,
             bytecode: Vec::new(),
             globals: Vec::new(),
@@ -386,11 +407,20 @@ impl Vm {
                         self.backtrace.push(func as usize);
                     }
 
-                    self.frames.push(CallFrame {
-                        return_to: pc,
-                        #[cfg(debug_assertions)]
-                        spilled_depth: self.spilled.len(),
-                    });
+                    let depth = self.frame_depth;
+                    if std::hint::unlikely(depth == self.frames.len()) {
+                        return Err(Anomaly::StackOverflow { pc });
+                    }
+
+                    unsafe {
+                        *self.frames.get_unchecked_mut(depth) = CallFrame {
+                            return_to: pc,
+                            #[cfg(debug_assertions)]
+                            spilled_depth: self.spilled.len(),
+                        };
+                    }
+                    self.frame_depth = depth + 1;
+
                     pc = func as usize;
                     continue;
                 }
@@ -422,12 +452,10 @@ impl Vm {
                         self.backtrace.pop();
                     }
 
-                    // PERF: fully replacing the pop with just an access and a length truncation?
-
-                    // The synthetic root frame from Vm::new guarantees the
-                    // stack is never empty here, so the pop always yields a
-                    // frame.
-                    let frame = unsafe { self.frames.pop().unwrap_unchecked() };
+                    // The root frame from Vm::new keeps this from underflowing.
+                    let depth = self.frame_depth - 1;
+                    self.frame_depth = depth;
+                    let frame = unsafe { *self.frames.get_unchecked(depth) };
 
                     // See Op::Push: every function must leave the spill
                     // stack at the depth it found it. Catches arg-shuffle

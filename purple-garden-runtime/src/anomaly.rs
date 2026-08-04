@@ -7,6 +7,7 @@ pub enum Anomaly {
     DivisionByZero { pc: usize },
     InvalidSyscall { pc: usize },
     AllocationFailed { pc: usize },
+    StackOverflow { pc: usize },
     Msg { msg: &'static str, pc: usize },
 }
 
@@ -15,8 +16,9 @@ impl Anomaly {
     pub fn as_str(&self) -> &str {
         match self {
             Anomaly::DivisionByZero { .. } => "Division by zero",
-            Anomaly::InvalidSyscall { .. } => "InvalidSyscall",
+            Anomaly::InvalidSyscall { .. } => "Invalid syscall",
             Anomaly::AllocationFailed { .. } => "Allocation failed",
+            Anomaly::StackOverflow { .. } => "Stack space exhausted",
             Anomaly::Msg { msg, .. } => msg,
         }
     }
@@ -27,6 +29,7 @@ impl Anomaly {
     pub fn pc(&self) -> usize {
         match self {
             Anomaly::DivisionByZero { pc }
+            | Anomaly::StackOverflow { pc }
             | Anomaly::InvalidSyscall { pc }
             | Anomaly::AllocationFailed { pc }
             | Anomaly::Msg { pc, .. } => *pc,

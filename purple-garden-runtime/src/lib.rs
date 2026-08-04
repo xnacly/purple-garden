@@ -7,6 +7,7 @@ pub use purple_garden_ir::{
     ptype::{Field, RecordFields, Type},
 };
 pub use purple_garden_shared::BuiltinFn;
+pub use purple_garden_shared::config::{DEFAULT_STACK_SIZE, MIB};
 
 pub mod anomaly;
 pub mod gc;
