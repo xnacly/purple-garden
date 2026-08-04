@@ -1,10 +1,12 @@
+use std::collections::HashMap;
+
 use purple_garden_frontend::diagnostic::Diagnostic;
 use purple_garden_ir::ptype::Type;
 
 #[derive(Debug, Clone)]
-pub(super) struct FunctionType<'t> {
-    pub(super) args: Vec<(&'t str, Type<'t>)>,
-    pub(super) ret: Type<'t>,
+pub struct FunctionType<'t> {
+    pub args: Vec<(&'t str, Type<'t>)>,
+    pub ret: Type<'t>,
 }
 
 #[derive(Debug)]
@@ -15,6 +17,7 @@ pub struct TypecheckOutput<'t> {
     /// errors without pretending the whole file typechecked successfully.
     pub types: Vec<Option<Type<'t>>>,
     pub diagnostics: Vec<Diagnostic>,
+    pub functions: HashMap<&'t str, FunctionType<'t>>,
 }
 
 /// Internal typechecking result for one AST node.

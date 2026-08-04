@@ -82,3 +82,7 @@ unlimited amount of work specialising every possible T for every stdlib
 function would require. Therefore purple garden needs substitution based
 generics, which enable passing a value through something and "specialising" the
 function at compile time for the known input automatically.
+
+For a first implementation supporting the identity function in garden, see
+[#42: Introduce embedding side generic functions via
+monomorphism](https://github.com/xnacly/purple-garden/pull/42).

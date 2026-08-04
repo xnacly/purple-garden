@@ -12,7 +12,7 @@
 use crate::lex::Token;
 use crate::lex::Type;
 use purple_garden_runtime::{Anomaly, DebugInfo};
-use std::fmt::Write;
+use std::fmt::{self, Write};
 
 /// A byte span in a source file.
 ///
@@ -134,6 +134,19 @@ impl From<&Token<'_>> for Diagnostic {
     }
 }
 
+/// Formats only the diagnostic headline.
+///
+/// Use [`Diagnostic::render`] for the canonical source-aware pretty printing.
+/// `Display` cannot render source context because it is not given a file name
+/// or source buffer.
+impl fmt::Display for Diagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Diagnostic {}
+
 impl Diagnostic {
     /// Build a diagnostic with a primary span and no label text.
     #[must_use]
@@ -167,12 +180,10 @@ impl Diagnostic {
 
     /// Render this diagnostic for the command-line interface.
     ///
-    /// This renderer is intentionally small and consumes `self` so callers can
-    /// build diagnostics with owned strings without cloning them for display.
-    /// LSP integration should consume the same fields directly instead of
-    /// parsing this text.
+    /// This renderer is intentionally small. LSP integration should consume the
+    /// same fields directly instead of parsing this text.
     #[must_use]
-    pub fn render(self, file: &str, source: &[u8]) -> String {
+    pub fn render(&self, file: &str, source: &[u8]) -> String {
         let location = locate(source, self.primary.span.start);
 
         let mut buf = String::new();
@@ -184,12 +195,12 @@ impl Diagnostic {
             self.message
         )
         .unwrap();
-        render_primary_label(&mut buf, location, self.primary);
+        render_primary_label(&mut buf, location, &self.primary);
 
-        for note in self.notes {
+        for note in &self.notes {
             writeln!(&mut buf, "note: {note}").unwrap();
         }
-        for help in self.helps {
+        for help in &self.helps {
             writeln!(&mut buf, "help: {}", help.message).unwrap();
         }
         buf
@@ -226,7 +237,7 @@ struct Location<'src> {
     line_text: &'src str,
 }
 
-fn render_primary_label(buf: &mut String, location: Location<'_>, label: Label) {
+fn render_primary_label(buf: &mut String, location: Location<'_>, label: &Label) {
     writeln!(buf, "{}", location.line_text).unwrap();
     write!(
         buf,
@@ -235,7 +246,7 @@ fn render_primary_label(buf: &mut String, location: Location<'_>, label: Label) 
         "~".repeat(label.span.len.max(1))
     )
     .unwrap();
-    if let Some(message) = label.message {
+    if let Some(message) = &label.message {
         write!(buf, " {message}").unwrap();
     }
     writeln!(buf).unwrap();

@@ -75,7 +75,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     let pkg_name = package_name(&module.ident);
     let pkg_doc = doc_string(&module.attrs);
     let package = quote! {
-        pub const PACKAGE: #api::Pkg = #api::Pkg {
+        pub const PACKAGE: #api::embed::Pkg = #api::embed::Pkg {
             name: #pkg_name,
             doc: #pkg_doc,
             pkgs: &[#(#subpackages),*],
@@ -191,7 +191,7 @@ impl PgFunction {
 
         quote! {
             unsafe extern "C" fn #wrapper_name(vm: *mut std::ffi::c_void) {
-                let vm = unsafe { &mut *vm.cast::<#api::Vm>() };
+                let vm = unsafe { &mut *vm.cast::<#api::embed::Vm>() };
                 #body
             }
         }
@@ -213,7 +213,7 @@ impl PgFunction {
             let ty = &arg.ty;
 
             quote! {
-                let #binding = <#ty as #api::FromVm>::from_vm(vm, *vm.r(#idx));
+                let #binding = <#ty as #api::embed::FromVm>::from_vm(vm, *vm.r(#idx));
             }
         })
     }
@@ -262,7 +262,7 @@ impl PgFunction {
 
         quote! {
             let ret = #fn_name(#(#args),*);
-            let ret = <#ret_ty as #api::IntoVm>::into_vm(ret, vm);
+            let ret = <#ret_ty as #api::embed::IntoVm>::into_vm(ret, vm);
             *vm.r_mut(0) = ret;
         }
     }
@@ -273,7 +273,7 @@ impl PgFunction {
 
         quote! {
             if let Err(msg) = #fn_name(#(#args),*) {
-                vm.trap(#api::Anomaly::Msg { msg, pc: vm.pc });
+                vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc });
             }
         }
     }
@@ -286,10 +286,10 @@ impl PgFunction {
         quote! {
             match #fn_name(#(#args),*) {
                 Ok(ret) => {
-                    let ret = <#ret_ty as #api::IntoVm>::into_vm(ret, vm);
+                    let ret = <#ret_ty as #api::embed::IntoVm>::into_vm(ret, vm);
                     *vm.r_mut(0) = ret;
                 }
-                Err(msg) => vm.trap(#api::Anomaly::Msg { msg, pc: vm.pc }),
+                Err(msg) => vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc }),
             }
         }
     }
@@ -310,7 +310,7 @@ impl PgFunction {
 
         quote! {
             let ret = #fn_name(#(#args),*);
-            let ret = <#ret_ty as #api::IntoVm>::into_vm(ret, vm);
+            let ret = <#ret_ty as #api::embed::IntoVm>::into_vm(ret, vm);
             *vm.r_mut(0) = ret;
         }
     }
@@ -321,7 +321,7 @@ impl PgFunction {
 
         quote! {
             if let Err(msg) = #fn_name(#(#args),*) {
-                vm.trap(#api::Anomaly::Msg { msg, pc: vm.pc });
+                vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc });
             }
         }
     }
@@ -334,10 +334,10 @@ impl PgFunction {
         quote! {
             match #fn_name(#(#args),*) {
                 Ok(ret) => {
-                    let ret = <#ret_ty as #api::IntoVm>::into_vm(ret, vm);
+                    let ret = <#ret_ty as #api::embed::IntoVm>::into_vm(ret, vm);
                     *vm.r_mut(0) = ret;
                 }
-                Err(msg) => vm.trap(#api::Anomaly::Msg { msg, pc: vm.pc }),
+                Err(msg) => vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc }),
             }
         }
     }
@@ -415,15 +415,15 @@ impl PgFunction {
         let arg_types = self.args.iter().map(|arg| &arg.ty);
 
         quote! {
-            #api::Fn {
+            #api::embed::Fn {
                 name: #name,
                 doc: #doc,
                 ptr: #wrapper_name,
                 pure: #pure,
                 eval: #eval_name,
                 arg_names: &[#(#arg_names),*],
-                args: &[#(<#arg_types as #api::PgType>::TYPE),*],
-                ret: <#ret_ty as #api::PgType>::TYPE,
+                args: &[#(<#arg_types as #api::embed::PgType>::TYPE),*],
+                ret: <#ret_ty as #api::embed::PgType>::TYPE,
                 specialises: #specialises,
             }
         }

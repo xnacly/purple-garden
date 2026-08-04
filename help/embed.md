@@ -137,7 +137,7 @@ remaining arguments and encodes the return value normally. Use this for runtime
 introspection or low-level functions that need direct VM access.
 
 ```rust
-use purple_garden::Vm;
+use purple_garden::embed::Vm;
 
 #[pg_fn(unsafe)]
 pub fn register_plus(vm: &mut Vm, value: i64) -> i64 {

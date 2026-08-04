@@ -28,6 +28,15 @@ pub use crate::value::{
 };
 pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, syscall_unimplemented};
 
+/// Compatibility namespace used by embedding macros.
+#[doc(hidden)]
+pub mod embed {
+    pub use super::{
+        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Type, Value, Vm, VmConfig,
+        alloc_record, copy_record, decode_record_field, encode_record_field,
+    };
+}
+
 #[derive(Debug)]
 pub struct Pkg {
     pub name: &'static str,

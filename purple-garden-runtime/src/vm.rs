@@ -120,14 +120,8 @@ impl Vm {
     pub fn new(config: VmConfig) -> Self {
         let mut frames = vec![CallFrame::default(); frames_in(config.stack_size).saturating_add(1)]
             .into_boxed_slice();
-        // Synthetic root frame: the VM enters the entry function directly, so
-        // its trailing Op::Ret needs a frame to pop. Popping it ends the run
-        // (see ROOT_RETURN_ADDR) and drains any pending trap.
-        frames[0] = CallFrame {
-            return_to: ROOT_RETURN_ADDR,
-            #[cfg(debug_assertions)]
-            spilled_depth: 0,
-        };
+        frames[0] = Self::root_frame()
+
         let collect = if config.no_gc {
             Self::collect_noop
         } else {
@@ -149,6 +143,34 @@ impl Vm {
             config,
             collect_fn: collect,
         }
+    }
+
+    fn root_frame() -> CallFrame {
+        // The VM enters a top-level function directly, so its trailing Op::Ret
+        // needs a frame to pop. Popping this synthetic frame ends the run (see
+        // ROOT_RETURN_ADDR) and drains any pending trap.
+        CallFrame {
+            return_to: ROOT_RETURN_ADDR,
+            #[cfg(debug_assertions)]
+            spilled_depth: 0,
+        }
+    }
+
+    /// Prepare the VM for a new execution
+    ///
+    /// [`Self::run`] consumes the synthetic root frame when the entered function returns. Call this
+    /// before every independent invocation; it also discards call state left behind by a trapped
+    /// run.
+    pub fn reset(&mut self) {
+        // poison le well in debugging so we know whats going on
+        #[cfg(debug_assertions)]
+        self.r.fill(Value(0xDEAD_AFFE_DEAD_AFFE));
+        self.pc = ROOT_RETURN_ADDR;
+        self.frames.clear();
+        self.frames.push(Self::root_frame());
+        self.spilled.clear();
+        self.backtrace.clear();
+        self.pending_trap = None;
     }
 
     fn collect(&mut self) {
@@ -598,6 +620,47 @@ mod ops {
         vm.bytecode = bytecode;
         vm.run::<false>(&[])
             .expect_err("vm run unexpectedly succeeded")
+    }
+
+    #[test]
+    fn prepare_run_reinstalls_root_frame_after_return() {
+        let mut vm = Vm::new(VmConfig::default());
+        vm.bytecode = vec![Op::LoadI { dst: 0, value: 42 }, Op::Ret];
+
+        vm.reset();
+        vm.pc = 0;
+        vm.run(&[]).expect("first invocation should succeed");
+        assert_eq!(vm.r(0).as_int(), 42);
+
+        vm.reset();
+        vm.pc = 0;
+        vm.run(&[]).expect("second invocation should succeed");
+        assert_eq!(vm.r(0).as_int(), 42);
+    }
+
+    #[test]
+    fn prepare_run_discards_frames_left_by_a_trap() {
+        let mut vm = Vm::new(VmConfig::default());
+        vm.bytecode = vec![
+            Op::LoadI { dst: 0, value: 1 },
+            Op::LoadI { dst: 1, value: 0 },
+            Op::IDiv {
+                dst: 0,
+                lhs: 0,
+                rhs: 1,
+            },
+            Op::Ret,
+        ];
+
+        vm.reset();
+        vm.pc = 0;
+        assert!(matches!(vm.run(&[]), Err(Anomaly::DivisionByZero { .. })));
+
+        vm.bytecode[2] = Op::LoadI { dst: 0, value: 7 };
+        vm.reset();
+        vm.pc = 0;
+        vm.run(&[]).expect("invocation after a trap should succeed");
+        assert_eq!(vm.r(0).as_int(), 7);
     }
 
     #[test]

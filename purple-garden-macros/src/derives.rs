@@ -49,9 +49,9 @@ fn expand_record_into_vm(api: &Path, input: &DeriveInput, fields: &FieldsNamed) 
     let encoders = fields.named.iter().map(|field| record_encoder(api, field));
 
     quote! {
-        impl #impl_generics #api::IntoVm for #ident #ty_generics #where_clause {
-            fn into_vm(self, vm: &mut #api::Vm) -> #api::Value {
-                let record = #api::alloc_record(vm, &<Self as #api::PgType>::TYPE);
+        impl #impl_generics #api::embed::IntoVm for #ident #ty_generics #where_clause {
+            fn into_vm(self, vm: &mut #api::embed::Vm) -> #api::embed::Value {
+                let record = #api::embed::alloc_record(vm, &<Self as #api::embed::PgType>::TYPE);
                 #(#encoders)*
                 record
             }
@@ -63,7 +63,7 @@ fn record_encoder(api: &Path, field: &syn::Field) -> TokenStream2 {
     let field_ident = field.ident.as_ref().unwrap();
     let field_name = field_ident.to_string();
     quote! {
-        #api::encode_record_field(vm, record, &<Self as #api::PgType>::TYPE, #field_name, self.#field_ident);
+        #api::embed::encode_record_field(vm, record, &<Self as #api::embed::PgType>::TYPE, #field_name, self.#field_ident);
     }
 }
 
@@ -73,11 +73,11 @@ fn expand_record_from_vm(api: &Path, input: &DeriveInput, fields: &FieldsNamed) 
     prepend_lifetime(&mut generics, "vm");
     let (impl_generics, _, where_clause) = generics.split_for_impl();
     let (_, ty_generics, _) = input.generics.split_for_impl();
-    let decoders = record_decoders(api, fields, quote!(&<Self as #api::PgType>::TYPE));
+    let decoders = record_decoders(api, fields, quote!(&<Self as #api::embed::PgType>::TYPE));
 
     quote! {
-        impl #impl_generics #api::FromVm<'vm> for #ident #ty_generics #where_clause {
-            fn from_vm(vm: &'vm #api::Vm, base: #api::Value) -> Self {
+        impl #impl_generics #api::embed::FromVm<'vm> for #ident #ty_generics #where_clause {
+            fn from_vm(vm: &'vm #api::embed::Vm, base: #api::embed::Value) -> Self {
                 Self { #(#decoders),* }
             }
         }
@@ -94,7 +94,7 @@ fn record_decoders(api: &Path, fields: &FieldsNamed, record_ty: TokenStream2) ->
             let ty = &field.ty;
             quote! {
                 #field_ident: unsafe {
-                    #api::decode_record_field::<#ty>(vm, base, #record_ty, #field_name)
+                    #api::embed::decode_record_field::<#ty>(vm, base, #record_ty, #field_name)
                 }
             }
         })
@@ -113,24 +113,24 @@ fn expand_garden_opaque(api: &Path, input: &DeriveInput) -> syn::Result<TokenStr
     let (from_impl_generics, _, from_where_clause) = from_generics.split_for_impl();
 
     Ok(quote! {
-        impl #impl_generics #api::PgType for #ident #ty_generics #where_clause {
-            const TYPE: #api::Type<'static> = #api::Type::Foreign(#foreign);
+        impl #impl_generics #api::embed::PgType for #ident #ty_generics #where_clause {
+            const TYPE: #api::embed::Type<'static> = #api::embed::Type::Foreign(#foreign);
         }
 
-        impl #impl_generics #api::IntoVm for #ident #ty_generics #where_clause {
-            fn into_vm(self, _: &mut #api::Vm) -> #api::Value {
-                #api::Value::from_ptr(Box::into_raw(Box::new(self)))
+        impl #impl_generics #api::embed::IntoVm for #ident #ty_generics #where_clause {
+            fn into_vm(self, _: &mut #api::embed::Vm) -> #api::embed::Value {
+                #api::embed::Value::from_ptr(Box::into_raw(Box::new(self)))
             }
         }
 
-        impl #from_impl_generics #api::FromVm<'vm> for &'vm #ident #ty_generics #from_where_clause {
-            fn from_vm(_: &'vm #api::Vm, value: #api::Value) -> Self {
+        impl #from_impl_generics #api::embed::FromVm<'vm> for &'vm #ident #ty_generics #from_where_clause {
+            fn from_vm(_: &'vm #api::embed::Vm, value: #api::embed::Value) -> Self {
                 unsafe { &*value.as_ptr::<#ident #ty_generics>() }
             }
         }
 
-        impl #from_impl_generics #api::FromVm<'vm> for &'vm mut #ident #ty_generics #from_where_clause {
-            fn from_vm(_: &'vm #api::Vm, value: #api::Value) -> Self {
+        impl #from_impl_generics #api::embed::FromVm<'vm> for &'vm mut #ident #ty_generics #from_where_clause {
+            fn from_vm(_: &'vm #api::embed::Vm, value: #api::embed::Value) -> Self {
                 unsafe { &mut *value.as_ptr::<#ident #ty_generics>() }
             }
         }
@@ -144,9 +144,9 @@ fn expand_record_pg_type(api: &Path, input: &DeriveInput, fields: &FieldsNamed) 
     let record_fields = fields.named.iter().map(|field| record_field(api, field));
 
     quote! {
-        impl #impl_generics #api::PgType for #ident #ty_generics #where_clause {
-            const TYPE: #api::Type<'static> = #api::Type::Record(
-                #api::RecordFields::Static(&[#(#record_fields),*])
+        impl #impl_generics #api::embed::PgType for #ident #ty_generics #where_clause {
+            const TYPE: #api::embed::Type<'static> = #api::embed::Type::Record(
+                #api::embed::RecordFields::Static(&[#(#record_fields),*])
             );
         }
     }
@@ -157,7 +157,7 @@ fn record_field(api: &Path, field: &syn::Field) -> TokenStream2 {
     let field_name = field_ident.to_string();
     let ty = &field.ty;
     quote! {
-        #api::Field { name: #field_name, ty: <#ty as #api::PgType>::TYPE }
+        #api::embed::Field { name: #field_name, ty: <#ty as #api::embed::PgType>::TYPE }
     }
 }
 

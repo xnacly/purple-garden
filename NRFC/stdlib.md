@@ -9,8 +9,10 @@
   - [ ] create
 - [ ] unsafe/runtime
   - [ ] cycles
-  - [ ] allocs
+  - [x] allocs
+  - [x] used
 - [ ] unsafe/syscall
+    - [x] uname
 - [ ] string
   - [x] contains
   - [x] idx

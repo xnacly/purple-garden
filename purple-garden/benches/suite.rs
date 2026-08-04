@@ -104,11 +104,7 @@ pub fn suite(c: &mut Criterion) {
                 .config(cfg())
                 .compile(&source)
                 .unwrap();
-            let entry = program.entry;
-            b.iter(|| {
-                program.vm.pc = entry;
-                program.run()
-            });
+            b.iter(|| program.run());
         });
         c.bench_function(&format!("{name}_run_opt"), |b| {
             let mut program = purple_garden::Pg::new()
@@ -117,11 +113,7 @@ pub fn suite(c: &mut Criterion) {
                 .config(cfg_opt())
                 .compile(&source)
                 .unwrap();
-            let entry = program.entry;
-            b.iter(|| {
-                program.vm.pc = entry;
-                program.run()
-            });
+            b.iter(|| program.run());
         });
         c.bench_function(&format!("{name}_run_opt_jit"), |b| {
             let mut program = purple_garden::Pg::new()
@@ -130,11 +122,7 @@ pub fn suite(c: &mut Criterion) {
                 .config(cfg_opt_jit())
                 .compile(&source)
                 .unwrap();
-            let entry = program.entry;
-            b.iter(|| {
-                program.vm.pc = entry;
-                program.run()
-            });
+            b.iter(|| program.run());
         });
     }
 }
