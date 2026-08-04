@@ -1,5 +1,5 @@
 use criterion::{BatchSize, Criterion};
-use purple_garden_runtime::{Vm, VmConfig, op::Op};
+use purple_garden_runtime::{DEFAULT_STACK_SIZE, Vm, VmConfig, op::Op};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 mod common;
@@ -8,6 +8,7 @@ const OP_CODE_SIZE: usize = 10_000_000;
 static CONFIG: VmConfig = VmConfig {
     backtrace: false,
     no_gc: false,
+    stack_size: DEFAULT_STACK_SIZE * 4,
 };
 
 /// benchmark pure virtual machine dispatch / throughput with 10 million Nop's
@@ -23,7 +24,7 @@ pub fn bench_uniform_dispatch(c: &mut Criterion) {
                 vm.bytecode = bc;
                 vm
             },
-            |mut vm| vm.run(&[]),
+            |mut vm| vm.run::<false>(&[]),
             BatchSize::LargeInput,
         );
     });
@@ -115,7 +116,28 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
                 vm.bytecode = bc;
                 vm
             },
-            |mut vm| vm.run(&[]),
+            |mut vm| vm.run::<false>(&[]),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+/// benchmark the call frame stack: 10 million Call/Ret pairs into a leaf fn
+pub fn bench_call_dispatch(c: &mut Criterion) {
+    c.bench_function("bench_call_dispatch", |b| {
+        b.iter_batched(
+            || {
+                let leaf = OP_CODE_SIZE as u32;
+                let mut bc = Vec::with_capacity(OP_CODE_SIZE + 1);
+                for _ in 0..OP_CODE_SIZE {
+                    bc.push(Op::Call { func: leaf });
+                }
+                bc.push(Op::Ret);
+                let mut vm = Vm::new(CONFIG);
+                vm.bytecode = bc;
+                vm
+            },
+            |mut vm| vm.run::<false>(&[]),
             BatchSize::LargeInput,
         );
     });
@@ -125,5 +147,6 @@ fn main() {
     let mut criterion = common::criterion();
     bench_uniform_dispatch(&mut criterion);
     bench_random_dispatch(&mut criterion);
+    bench_call_dispatch(&mut criterion);
     criterion.final_summary();
 }

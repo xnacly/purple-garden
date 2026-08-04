@@ -58,6 +58,8 @@ pub fn suite(c: &mut Criterion) {
         // Validate once at startup so codegen bugs panic loudly here, not
         // silently affect the timing.
         let mut probe = purple_garden::Pg::new()
+            .with_stdlib()
+            .with_unsafe_stdlib()
             .config(cfg_opt_jit())
             .compile(&source)
             .unwrap_or_else(|e| panic!("compile failed for {name}: {e:?}"));
@@ -68,6 +70,8 @@ pub fn suite(c: &mut Criterion) {
         c.bench_function(&format!("{name}_compile"), |b| {
             b.iter(|| {
                 purple_garden::Pg::new()
+                    .with_stdlib()
+                    .with_unsafe_stdlib()
                     .config(cfg())
                     .compile(&source)
                     .unwrap();
@@ -76,6 +80,8 @@ pub fn suite(c: &mut Criterion) {
         c.bench_function(&format!("{name}_compile_opt"), |b| {
             b.iter(|| {
                 purple_garden::Pg::new()
+                    .with_stdlib()
+                    .with_unsafe_stdlib()
                     .config(cfg_opt())
                     .compile(&source)
                     .unwrap();
@@ -84,6 +90,8 @@ pub fn suite(c: &mut Criterion) {
         c.bench_function(&format!("{name}_compile_opt_jit"), |b| {
             b.iter(|| {
                 purple_garden::Pg::new()
+                    .with_stdlib()
+                    .with_unsafe_stdlib()
                     .config(cfg_opt_jit())
                     .compile(&source)
                     .unwrap();
@@ -91,6 +99,8 @@ pub fn suite(c: &mut Criterion) {
         });
         c.bench_function(&format!("{name}_run"), |b| {
             let mut program = purple_garden::Pg::new()
+                .with_stdlib()
+                .with_unsafe_stdlib()
                 .config(cfg())
                 .compile(&source)
                 .unwrap();
@@ -98,6 +108,8 @@ pub fn suite(c: &mut Criterion) {
         });
         c.bench_function(&format!("{name}_run_opt"), |b| {
             let mut program = purple_garden::Pg::new()
+                .with_stdlib()
+                .with_unsafe_stdlib()
                 .config(cfg_opt())
                 .compile(&source)
                 .unwrap();
@@ -105,6 +117,8 @@ pub fn suite(c: &mut Criterion) {
         });
         c.bench_function(&format!("{name}_run_opt_jit"), |b| {
             let mut program = purple_garden::Pg::new()
+                .with_stdlib()
+                .with_unsafe_stdlib()
                 .config(cfg_opt_jit())
                 .compile(&source)
                 .unwrap();

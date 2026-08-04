@@ -32,6 +32,14 @@ pub const BUILD_INFO: &str = concat!(
     env!("BUILD_FEATURES"),
     ";profile=",
     env!("BUILD_PROFILE"),
+    ";opt-level=",
+    env!("BUILD_OPT_LEVEL"),
+    ";target=",
+    env!("BUILD_TARGET"),
+    ";rustc=",
+    env!("BUILD_RUSTC"),
+    ";rustflags=",
+    env!("BUILD_RUSTFLAGS"),
 );
 
 macro_rules! err {
@@ -218,6 +226,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let (mut vm, syscalls, debug, entry_native_idx) = cc.finalize(VmConfig {
         backtrace: conf.backtrace,
         no_gc: conf.no_gc,
+        stack_size: conf.stack_size,
     });
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let entry = vm.pc;

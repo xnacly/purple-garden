@@ -128,6 +128,7 @@ mod tests_x86 {
 
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
+        assert_eq!(jit.code(), [0xc3]);
         assert_eq!(run(jit.code(), [42, 0xdead, 0xaffe]), [42, 0xdead, 0xaffe]);
     }
 
@@ -149,6 +150,15 @@ mod tests_x86 {
 
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
+        assert_eq!(
+            jit.code(),
+            [
+                0x48, 0x8b, 0x47, 0x00, // mov rax,[rdi+0]
+                0x48, 0x8b, 0x47, 0x08, // mov rax,[rdi+8]
+                0x48, 0x89, 0x47, 0x00, // mov [rdi+0],rax
+                0xc3,
+            ]
+        );
         assert_eq!(run(jit.code(), [10, 20, 0])[0], 20);
     }
 
@@ -431,7 +441,7 @@ mod tests_x86 {
         let syscalls = vec![jit_fn.entry()];
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = vec![Op::LoadI { dst: 0, value: 187 }, Op::Sys { idx: 0 }];
-        vm.run(&syscalls).expect("vm run");
+        vm.run::<false>(&syscalls).expect("vm run");
         assert_eq!(vm.r(0).as_int(), 187);
     }
 }

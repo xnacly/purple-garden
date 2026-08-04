@@ -84,6 +84,16 @@ pub fn compile_func(
         skip!(func, "empty function");
     };
 
+    if is_result_slot_identity(func, entry) {
+        // Native calls receive arg0 in vm.r[0] and must return through vm.r[0].
+        // When a function returns that parameter unchanged, the VM register file
+        // already holds the required boundary state; materializing it into a GPR
+        // and storing it back would only re-write the single source of truth.
+        emit(out, Insn::Ret);
+        purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
+        return Some(());
+    }
+
     out.reserve(func.params.len() * 4 + func.blocks.len() * 16 + 64);
 
     let regs = allocator.rebuild(
@@ -113,6 +123,25 @@ pub fn compile_func(
 
     purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
     Some(())
+}
+
+fn is_result_slot_identity(func: &ir::Func<'_>, entry: ir::Id) -> bool {
+    let Some(&result_param) = func.params.first() else {
+        return false;
+    };
+    let Some(block) = func.blocks.get(entry.0 as usize) else {
+        return false;
+    };
+
+    !block.tombstone
+        && block.instructions.is_empty()
+        && matches!(
+            block.term,
+            Some(ir::Terminator::Return {
+                value: Some(value),
+                ..
+            }) if value == result_param
+        )
 }
 
 #[derive(Clone, Copy)]

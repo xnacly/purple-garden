@@ -299,7 +299,11 @@ impl<'p> Program<'p> {
             return Ok(());
         }
         self.vm.pc = self.entry;
-        self.vm.run(&self.syscalls)
+        if self.vm.config.backtrace {
+            self.vm.run::<true>(&self.syscalls)
+        } else {
+            self.vm.run::<false>(&self.syscalls)
+        }
     }
 
     /// Runs the program and decodes the entry return value
@@ -584,6 +588,7 @@ fn compile<'i>(
     let (vm, syscalls, _debug, entry_native_idx) = cc.finalize(VmConfig {
         backtrace: config.backtrace,
         no_gc: config.no_gc,
+        stack_size: config.stack_size,
     });
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let mut program = Program::from_vm(vm, syscalls).with_entry_native(entry_native);
