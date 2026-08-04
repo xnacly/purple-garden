@@ -32,6 +32,14 @@ pub const BUILD_INFO: &str = concat!(
     env!("BUILD_FEATURES"),
     ";profile=",
     env!("BUILD_PROFILE"),
+    ";opt-level=",
+    env!("BUILD_OPT_LEVEL"),
+    ";target=",
+    env!("BUILD_TARGET"),
+    ";rustc=",
+    env!("BUILD_RUSTC"),
+    ";rustflags=",
+    env!("BUILD_RUSTFLAGS"),
 );
 
 macro_rules! err {

@@ -1,3 +1,4 @@
+pub const DEFAULT_STACK_SIZE: usize = 1;
 pub const MIB: usize = 1 << 20;
 
 #[derive(Clone, Debug)]
@@ -50,7 +51,7 @@ pub struct Config {
     pub no_jit: bool,
 
     /// Size of the vm call stack in MiB, exceeding it raises a stack overflow.
-    #[cfg_attr(feature = "cli", arg(long, default_value_t = 1))]
+    #[cfg_attr(feature = "cli", arg(long, default_value_t = DEFAULT_STACK_SIZE))]
     pub stack_size: usize,
 }
 
@@ -64,7 +65,7 @@ impl Config {
             no_gc: false,
             no_jit: false,
             liveness: false,
-            stack_size: 1,
+            stack_size: DEFAULT_STACK_SIZE,
         }
     }
 }
