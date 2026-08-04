@@ -425,7 +425,11 @@ impl<'p> Program<'p> {
         match function.handle {
             CcCallTarget::Bc { pc } => {
                 self.vm.pc = pc;
-                self.vm.run(&self.syscalls)?;
+                if self.vm.config.backtrace {
+                    self.vm.run::<true>(&self.syscalls)?;
+                } else {
+                    self.vm.run::<false>(&self.syscalls)?;
+                }
             }
             CcCallTarget::Native { idx } => {
                 unsafe { self.syscalls[idx as usize]((&mut self.vm as *mut Vm).cast()) };
@@ -630,7 +634,8 @@ mod tests {
 
     #[test]
     fn compile_collects_signatures_for_bytecode_and_native_targets() {
-        for (no_jit, want_native) in [(true, false), (false, true)] {
+        for no_jit in [true, false] {
+            let want_native = !no_jit && cfg!(target_arch = "x86_64");
             let mut config = config::Config::default();
             config.no_jit = no_jit;
             let program = Pg::new()
