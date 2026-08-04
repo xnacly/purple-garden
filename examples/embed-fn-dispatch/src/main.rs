@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Wasnt able to find `identity` function");
 
     assert_eq!(
-        unsafe { pg.call_unchecked(&identity_function, &[256i64.into()])? },
+        unsafe { pg.call_unchecked(&identity_function, &[256i64.into(),])? },
         256i64.into()
     );
 
@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for i in 0..=16 {
         // prints numbers 0..=16 using purple gardens io.println
-        pg.call::<_, ()>(&dispatch_function, i)?;
+        pg.call::<_, ()>(&dispatch_function, (i,))?;
     }
 
     Ok(())

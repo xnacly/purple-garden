@@ -1,9 +1,11 @@
 import "io"
 
+#! [identity] function := lx.x
 fn identity(i: Int) Int {
     i
 }
 
+#! dispatch into [io.println]
 fn dispatch(i: Int) {
     io.println(i)
 }

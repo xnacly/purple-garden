@@ -14,6 +14,7 @@ use purple_garden_frontend::{
 use purple_garden_runtime::{Anomaly, BuiltinFn, Value};
 pub use purple_garden_shared::config;
 use purple_garden_shared::trace;
+use purple_garden_std::PgType;
 use purple_garden_typecheck::{FunctionType, Typechecker};
 mod rust_to_pg;
 pub use rust_to_pg::CallArgs;
@@ -245,11 +246,8 @@ pub struct Program<'p> {
     funcs: HashMap<&'p str, (CcCallTarget, FunctionType<'p>)>,
 }
 
-// TODO: introduce .call_unchecked() for non signature checked pg invokation
-// TODO: update all examples for Program::{function,call}() to new signatures
-#[allow(unused)]
-
-/// A handle to a purple garden function extracted from [`Program`] via [`Program::function`], invokable using [`Program::function`]
+/// A handle to a purple garden function extracted from [`Program`] via [`Program::function`],
+/// invokable using [`Program::call`] or [`Program::call_unchecked`]
 #[derive(Debug)]
 pub struct Function<'f> {
     handle: CcCallTarget,
@@ -329,18 +327,33 @@ impl<'p> Program<'p> {
     /// Looks up a named Garden function for later invocation with
     /// [`Program::call`].
     ///
-    /// The name is the function declaration name, not a package path. Returns
-    /// `None` when the compiled source does not define that function.
+    /// The name is the function declaration name. Returns `None` when the compiled source does not
+    /// define that function.
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```
     /// use purple_garden::Pg;
     ///
     /// let mut program = Pg::new()
     ///     .compile(br#"fn identity(value: Int) Int { value }"#)?;
     /// let identity = program.function("identity").expect("function exists");
-    /// assert_eq!(program.call::<i64, i64>(&identity, 42)?, 42);
+    /// assert_eq!(program.call::<_, i64>(&identity, (42i64,))?, 42);
+    ///
+    /// assert!(program.function("not_declared").is_none());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// A handle stays valid for the lifetime of the program and can be reused across calls:
+    ///
+    /// ```
+    /// use purple_garden::Pg;
+    ///
+    /// let mut program = Pg::new().compile(br#"fn double(value: Int) Int { value * 2 }"#)?;
+    /// let double = program.function("double").expect("function exists");
+    /// for i in 0..4i64 {
+    ///     assert_eq!(program.call::<_, i64>(&double, (i,))?, i * 2);
+    /// }
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn function(&self, name: &str) -> Option<Function<'p>> {
@@ -351,16 +364,49 @@ impl<'p> Program<'p> {
         })
     }
 
-    /// Invokes a function returned by [`Program::function`] with homogeneous arguments and decodes
-    /// its return value into a Rust type. Does NOT check the rust types matching the purple garden
-    /// types
+    /// Invokes a function from a handle returned by [`Program::function`] with already encoded
+    /// arguments and returns its raw return register.
     ///
-    /// Arguments are passed through [`IntoVm`] and the result through
-    /// [`FromVm`]. The function must accept the supplied number and type of
-    /// arguments.
+    /// Does NOT check the rust types matching the purple garden types, use [`Program::call`] for
+    /// the checked variant.
+    ///
+    /// # Safety
+    ///
+    /// - The caller guarantees that `args` holds exactly the number of values the function declares
+    /// - Each already encoded as the matching Garden type,
+    /// - The returned [`Value`] is decoded as the declared return type
+    ///
+    /// Violating this reinterprets raw VM words, so a mismatch on a
+    /// pointer-backed type such as `Str` dereferences an arbitrary address.
     ///
     /// # Examples
     ///
+    /// ```
+    /// use purple_garden::{Pg, embed::Value};
+    ///
+    /// let mut program = Pg::new().compile(br#"fn add(a: Int b: Int) Int { a + b }"#)?;
+    /// let add = program.function("add").expect("function exists");
+    ///
+    /// let args: [Value; 2] = [40i64.into(), 2i64.into()];
+    /// let ret = unsafe { program.call_unchecked(&add, &args)? };
+    /// assert_eq!(ret.as_int(), 42);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// Skipping the type check is only sound while the encoding matches the declaration, decoding
+    /// the same `Int` as a `Double` silently reads the word as an IEEE 754 bit pattern:
+    ///
+    /// ```
+    /// use purple_garden::{Pg, embed::Value};
+    ///
+    /// let mut program = Pg::new().compile(br#"fn identity(value: Int) Int { value }"#)?;
+    /// let identity = program.function("identity").expect("function exists");
+    ///
+    /// let ret = unsafe { program.call_unchecked(&identity, &[42i64.into()])? };
+    /// assert_eq!(ret.as_int(), 42);
+    /// assert_ne!(ret.as_f64(), 42.0);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub unsafe fn call_unchecked<'vm>(
         &'vm mut self,
         function: &Function,
@@ -385,15 +431,56 @@ impl<'p> Program<'p> {
         Ok(*self.vm.r(0))
     }
 
-    /// Invokes a function returned by [`Program::function`] with homogeneous
-    /// arguments and decodes its return value into a Rust type.
+    /// Invokes a function from a handle returned by [`Program::function`] with arguments and
+    /// decodes its return value into a Rust type.
     ///
-    /// Arguments are passed through [`IntoVm`] and the result through
-    /// [`FromVm`]. The function must accept the supplied number and type of
-    /// arguments.
+    /// Arguments are passed through [`IntoVm`] and the result through [`FromVm`]. The function must
+    /// accept the supplied number and type of arguments.
+    ///
+    /// Arguments are a tuple, a single argument is therefore `(T,)`. Argument count, argument
+    /// types and the return type are checked against the declared signature before the call
+    /// happens, a mismatch produces Err([`Anomaly`])
     ///
     /// # Examples
     ///
+    /// ```
+    /// use purple_garden::Pg;
+    ///
+    /// let mut program = Pg::new().compile(br#"fn add(a: Int b: Int) Int { a + b }"#)?;
+    /// let add = program.function("add").expect("function exists");
+    /// assert_eq!(program.call::<_, i64>(&add, (40i64, 2i64))?, 42);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// A function without a return type is called with `()`:
+    ///
+    /// ```
+    /// use purple_garden::Pg;
+    ///
+    /// let mut program = Pg::new()
+    ///     .with_stdlib()
+    ///     .compile(br#"
+    /// import "io"
+    /// fn log(value: Int) { io.println(value) }
+    /// "#)?;
+    /// let log = program.function("log").expect("function exists");
+    /// program.call::<_, ()>(&log, (42i64,))?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// Every part of the signature is checked:
+    ///
+    /// ```
+    /// use purple_garden::Pg;
+    ///
+    /// let mut program = Pg::new().compile(br#"fn add(a: Int b: Int) Int { a + b }"#)?;
+    /// let add = program.function("add").expect("function exists");
+    ///
+    /// assert!(program.call::<_, f64>(&add, (40i64, 2i64)).is_err());
+    /// assert!(program.call::<_, i64>(&add, (40i64,)).is_err());
+    /// assert!(program.call::<_, i64>(&add, (40i64, 2.0f64)).is_err());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn call<'vm, Args, Ret>(
         &'vm mut self,
         function: &Function,
@@ -401,11 +488,43 @@ impl<'p> Program<'p> {
     ) -> Result<Ret, Anomaly>
     where
         Args: CallArgs,
-        Ret: FromVm<'vm>,
+        Ret: PgType + FromVm<'vm>,
     {
-        // TODO: verify signature (args+ret) match somewhere inside here, idk how :)
-        let args = args.inner(&mut self.vm).into_iter().collect::<Vec<_>>();
-        let ret = unsafe { self.call_unchecked(function, &args)? };
+        let signature = &function.signature;
+        let pc_or_fallback = match function.handle {
+            CcCallTarget::Bc { pc } => pc,
+            CcCallTarget::Native { .. } => 0,
+        };
+
+        if Ret::TYPE != signature.ret {
+            return Err(Anomaly::Msg {
+                msg: "Return type provided does not match the purple garden functions return type",
+                pc: pc_or_fallback,
+            });
+        }
+
+        let as_types = Args::TYPES;
+        if as_types.len() != signature.args.len() {
+            return Err(Anomaly::Msg {
+                msg: "Provided argument count does not match the purple garden functions argument count",
+                pc: pc_or_fallback,
+            });
+        }
+
+        for (i, arg) in as_types.iter().enumerate() {
+            let expected_type = &signature.args[i].1;
+            if arg != expected_type {
+                return Err(Anomaly::Msg {
+                    msg: "Provided arguments type does not match the type of the purple garden functions argument",
+                    // TODO: i need to improve the errors here
+                    // msg: &format!("argument {i} is {expected_type}, not {arg}"),
+                    pc: pc_or_fallback,
+                });
+            }
+        }
+
+        let args = args.inner(&mut self.vm);
+        let ret = unsafe { self.call_unchecked(function, args.as_ref())? };
         let result = Ret::from_vm(&self.vm, ret);
         Ok(result)
     }
