@@ -441,7 +441,7 @@ mod tests_x86 {
         let syscalls = vec![jit_fn.entry()];
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = vec![Op::LoadI { dst: 0, value: 187 }, Op::Sys { idx: 0 }];
-        vm.run(&syscalls).expect("vm run");
+        vm.run::<false>(&syscalls).expect("vm run");
         assert_eq!(vm.r(0).as_int(), 187);
     }
 }

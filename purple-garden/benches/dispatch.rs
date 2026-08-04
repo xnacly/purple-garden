@@ -23,7 +23,7 @@ pub fn bench_uniform_dispatch(c: &mut Criterion) {
                 vm.bytecode = bc;
                 vm
             },
-            |mut vm| vm.run(&[]),
+            |mut vm| vm.run::<false>(&[]),
             BatchSize::LargeInput,
         );
     });
@@ -115,7 +115,7 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
                 vm.bytecode = bc;
                 vm
             },
-            |mut vm| vm.run(&[]),
+            |mut vm| vm.run::<false>(&[]),
             BatchSize::LargeInput,
         );
     });

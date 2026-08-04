@@ -6,3 +6,6 @@ target
 
 # local planning notes
 plans/
+
+# local, machine-specific rustflags
+.cargo/

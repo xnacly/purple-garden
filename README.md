@@ -50,13 +50,15 @@ cargo run -- --help
 > These may take a while
 
 ```bash
-cargo bench
+set -x RUSTFLAGS "-C target-cpu=native"
+cargo bench --workspace
 ```
 
 For a fast run with less statistical confidence:
 
 ```bash
-PG_BENCH_QUICK=1 cargo bench
+set -x RUSTFLAGS "-C target-cpu=native"
+PG_BENCH_QUICK=1 cargo bench --workspace
 ```
 
 `PG_BENCH_QUICK=1` uses 10 samples, a 100ms warm-up, and a 300ms measurement

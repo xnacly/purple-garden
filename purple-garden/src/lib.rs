@@ -130,7 +130,11 @@ impl Program {
             }
             return Ok(());
         }
-        self.vm.run(&self.syscalls)
+        if self.vm.config.backtrace {
+            self.vm.run::<true>(&self.syscalls)
+        } else {
+            self.vm.run::<false>(&self.syscalls)
+        }
     }
 
     /// Run the program and decode the entry return value from `r0`.
