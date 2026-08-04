@@ -14,8 +14,23 @@ fn cmd(cmd: &str, args: &[&str]) -> String {
 }
 
 fn main() {
+    // Cargo only rescans this package by default, so an edit in any other crate
+    // would leave the git state below stale, most importantly the dirty marker.
+    for entry in std::fs::read_dir("..").unwrap().flatten() {
+        let src = entry.path().join("src");
+        if src.is_dir() {
+            println!("cargo:rerun-if-changed={}", src.display());
+        }
+    }
+
+    // Untracked files are not part of the build, matching `git describe --dirty`.
+    let dirty = if cmd("git", &["status", "--porcelain", "--untracked-files=no"]).is_empty() {
+        ""
+    } else {
+        "+dirty"
+    };
     println!(
-        "cargo:rustc-env=GIT_HASH={}",
+        "cargo:rustc-env=GIT_HASH={}{dirty}",
         cmd("git", &["rev-parse", "--short", "HEAD"])
     );
 
