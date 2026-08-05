@@ -2,6 +2,8 @@ pub use self::math::PACKAGE;
 
 #[purple_garden_macros::pg_pkg(runtime = purple_garden_runtime)]
 /// Package math implements scalar numeric helpers.
+// This module is the public `math` package namespace; its file name matches it.
+#[allow(clippy::module_inception)]
 pub mod math {
     /// Returns the absolute value of `n`.
     ///

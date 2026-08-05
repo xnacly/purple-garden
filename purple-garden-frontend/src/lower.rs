@@ -1,3 +1,7 @@
+// Diagnostics are returned by value throughout lowering to preserve its
+// allocation-free error path; boxing them would make the internal API noisier.
+#![allow(clippy::result_large_err)]
+
 use std::{alloc::Layout, collections::HashMap, num};
 
 use crate::{

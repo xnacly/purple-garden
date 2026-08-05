@@ -70,6 +70,9 @@ impl DebugInfo {
     }
 }
 
+/// # Safety
+///
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
 pub unsafe extern "C" fn syscall_unimplemented(vm: *mut c_void) {
     let vm = unsafe { &mut *vm.cast::<Vm>() };
     vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });

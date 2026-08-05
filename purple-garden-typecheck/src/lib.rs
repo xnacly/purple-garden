@@ -661,15 +661,13 @@ impl<'a, 't> Typechecker<'a, 't> {
                 self.functions.insert(inner_name, f_type.clone());
 
                 let computed_ret = self.block_type(body);
-                if let Some(computed_ret) = computed_ret.as_known() {
-                    if &ret != computed_ret {
-                        self.report(Diagnostic::at_token(
-                            format!(
-                                "`{inner_name}` should return {ret}, but returns {computed_ret}"
-                            ),
-                            self.ast.type_token(*return_type),
-                        ));
-                    }
+                if let Some(computed_ret) = computed_ret.as_known()
+                    && &ret != computed_ret
+                {
+                    self.report(Diagnostic::at_token(
+                        format!("`{inner_name}` should return {ret}, but returns {computed_ret}"),
+                        self.ast.type_token(*return_type),
+                    ));
                 }
 
                 self.env = prev_env;
@@ -908,15 +906,13 @@ impl<'a, 't> Typechecker<'a, 't> {
                     vec![const { None }; case_count];
 
                 for (i, ((condition_token, condition), body)) in cases.iter().enumerate() {
-                    if let Some(condition_type) = self.node(*condition).known() {
-                        if condition_type != Type::Bool {
-                            self.report(Diagnostic::at_token(
-                                format!(
-                                    "Match conditions must be Bool, got {condition_type} instead"
-                                ),
-                                condition_token,
-                            ));
-                        }
+                    if let Some(condition_type) = self.node(*condition).known()
+                        && condition_type != Type::Bool
+                    {
+                        self.report(Diagnostic::at_token(
+                            format!("Match conditions must be Bool, got {condition_type} instead"),
+                            condition_token,
+                        ));
                     }
 
                     if let Some(branch_return_type) = self.block_type(body).known() {
@@ -938,7 +934,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                             format!(
                                 "Match cases must resolve to the same type, but got {first_type} and {ty}"
                             ),
-                            *tok,
+                            tok,
                         ));
                     }
                 }

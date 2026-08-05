@@ -2,6 +2,8 @@ pub use self::strings::PACKAGE;
 
 #[purple_garden_macros::pg_pkg(runtime = purple_garden_runtime)]
 /// Package strings implements functions for creating, inspecting, and combining strings.
+// This module is the public `strings` package namespace; its file name matches it.
+#[allow(clippy::module_inception)]
 pub mod strings {
     use purple_garden_runtime::{PgType, Type, Value, Vm};
 

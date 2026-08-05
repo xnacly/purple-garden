@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         Ok(pg) => pg,
         Err(err) => {
-            eprintln!("{}", &err.render(filename, &program));
+            eprintln!("{}", err.render(filename, &program));
             return Err(err.into());
         }
     };

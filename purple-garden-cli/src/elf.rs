@@ -58,51 +58,59 @@ pub(crate) fn write(native_code: &[(&str, Vec<u8>)], mut out: impl Write) -> io:
 
     shdr(
         &mut buf[shoff + SHDR..shoff + 2 * SHDR],
-        text_name,
-        1,
-        0x6,
-        text_off,
-        text_size,
-        0,
-        0,
-        16,
-        0,
+        SectionHeader {
+            name: text_name,
+            ty: 1,
+            flags: 0x6,
+            off: text_off,
+            size: text_size,
+            link: 0,
+            info: 0,
+            align: 16,
+            entsize: 0,
+        },
     );
     shdr(
         &mut buf[shoff + 2 * SHDR..shoff + 3 * SHDR],
-        symtab_name,
-        2,
-        0,
-        symtab_off,
-        symtab_size,
-        3,
-        1,
-        8,
-        SYM as u64,
+        SectionHeader {
+            name: symtab_name,
+            ty: 2,
+            flags: 0,
+            off: symtab_off,
+            size: symtab_size,
+            link: 3,
+            info: 1,
+            align: 8,
+            entsize: SYM as u64,
+        },
     );
     shdr(
         &mut buf[shoff + 3 * SHDR..shoff + 4 * SHDR],
-        strtab_name,
-        3,
-        0,
-        strtab_off,
-        strtab.len(),
-        0,
-        0,
-        1,
-        0,
+        SectionHeader {
+            name: strtab_name,
+            ty: 3,
+            flags: 0,
+            off: strtab_off,
+            size: strtab.len(),
+            link: 0,
+            info: 0,
+            align: 1,
+            entsize: 0,
+        },
     );
     shdr(
         &mut buf[shoff + 4 * SHDR..shoff + 5 * SHDR],
-        shstrtab_name,
-        3,
-        0,
-        shstrtab_off,
-        shstrtab.len(),
-        0,
-        0,
-        1,
-        0,
+        SectionHeader {
+            name: shstrtab_name,
+            ty: 3,
+            flags: 0,
+            off: shstrtab_off,
+            size: shstrtab.len(),
+            link: 0,
+            info: 0,
+            align: 1,
+            entsize: 0,
+        },
     );
 
     ehdr(&mut buf[..EHDR], shoff);
@@ -130,8 +138,7 @@ fn ehdr(out: &mut [u8], shoff: usize) {
     put!(out, @at 62, SHSTRTAB, u16);
 }
 
-fn shdr(
-    out: &mut [u8],
+struct SectionHeader {
     name: u32,
     ty: u32,
     flags: u64,
@@ -141,7 +148,20 @@ fn shdr(
     info: u32,
     align: u64,
     entsize: u64,
-) {
+}
+
+fn shdr(out: &mut [u8], header: SectionHeader) {
+    let SectionHeader {
+        name,
+        ty,
+        flags,
+        off,
+        size,
+        link,
+        info,
+        align,
+        entsize,
+    } = header;
     put!(out, @at 0, name, u32);
     put!(out, @at 4, ty, u32);
     put!(out, @at 8, flags, u64);

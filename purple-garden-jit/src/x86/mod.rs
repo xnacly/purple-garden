@@ -1034,9 +1034,13 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 yes: (yes_id, yes_params),
                 no: (no_id, no_params),
                 ..
-            }) => {
-                self.emit_branch_cmp_imm(*op, *lhs, *imm, *yes_id, *yes_params, *no_id, *no_params)?
-            }
+            }) => self.emit_branch_cmp_imm(
+                *op,
+                *lhs,
+                *imm,
+                (*yes_id, *yes_params),
+                (*no_id, *no_params),
+            )?,
             Some(ir::Terminator::Jump { id, params, .. }) => self.emit_jump(*id, *params)?,
             Some(ir::Terminator::Tail {
                 func: tail_func,
@@ -1106,10 +1110,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         op: BinOp,
         lhs: ir::Id,
         imm: i32,
-        yes_id: ir::Id,
-        yes_params: ir::ParamsId,
-        no_id: ir::Id,
-        no_params: ir::ParamsId,
+        (yes_id, yes_params): (ir::Id, ir::ParamsId),
+        (no_id, no_params): (ir::Id, ir::ParamsId),
     ) -> Option<()> {
         let Some(yes_dst) = branch_target_params(self.func, yes_id) else {
             skip!(self.func, "bad branch target b{}", yes_id.0);

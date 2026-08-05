@@ -3,7 +3,7 @@ use purple_garden_ir::{self as ir, BinOp, Id, Instr, TypeId, constant::Const};
 
 /// Fold single-use integer constants into integer binops while the IR
 /// still knows SSA use counts.
-pub fn imm_fold<'fun, 's>(fun: &'fun mut ir::Func<'s>, scratch: &mut super::Scratch<'s>) {
+pub fn imm_fold<'s>(fun: &mut ir::Func<'s>, scratch: &mut super::Scratch<'s>) {
     scratch.reset();
 
     for (bi, block) in fun.blocks.iter().enumerate() {
@@ -87,8 +87,8 @@ fn try_fold<'scratch>(
 
     let (new_op, new_lhs, def) = match op {
         BinOp::IEq | BinOp::IAdd | BinOp::IMul => match (rhs_c, lhs_c) {
-            (Some(d), _) => (op.clone(), *lhs, d),
-            (None, Some(d)) => (op.clone(), *rhs, d),
+            (Some(d), _) => (*op, *lhs, d),
+            (None, Some(d)) => (*op, *rhs, d),
             _ => return None,
         },
         BinOp::IGt => match (rhs_c, lhs_c) {

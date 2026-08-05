@@ -115,7 +115,7 @@ fn parse_attr(attr: TokenStream) -> syn::Result<Path> {
     let parser = Punctuated::<Meta, syn::Token![,]>::parse_terminated;
     let metas = parser.parse(attr)?;
 
-    for meta in metas {
+    if let Some(meta) = metas.into_iter().next() {
         let Meta::NameValue(name_value) = meta else {
             return Err(syn::Error::new(meta.span(), "expected `runtime = path`"));
         };

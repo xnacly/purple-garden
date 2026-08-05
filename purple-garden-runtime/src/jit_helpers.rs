@@ -11,6 +11,10 @@ use crate::{
 /// stable ABI. Callers pass the erased [`Vm`] pointer they received at entry.
 /// The VM's `pc` must already point at the trapping bytecode instruction so the
 /// diagnostic can be mapped back to source.
+///
+/// # Safety
+///
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
 pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) {
     let vm = unsafe { &mut *vm.cast::<Vm>() };
     vm.trap(Anomaly::DivisionByZero { pc: vm.pc });
@@ -24,6 +28,10 @@ pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) {
 /// return null; JIT callers must branch on null and return to the native VM
 /// entry before using the pointer, so the pending trap can be surfaced. Valid
 /// requests use the same collect/no-collect policy as interpreter allocations.
+///
+/// # Safety
+///
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
 pub unsafe extern "C" fn jit_alloc(
     vm: *mut c_void,
     alloc_type: u8,

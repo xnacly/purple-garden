@@ -124,7 +124,7 @@ mod tests {
 
     unsafe extern "C" fn test_syscall(_: *mut c_void) {}
 
-    fn double_int<'args, 'c>(args: &'args [Const<'c>]) -> Option<Const<'c>> {
+    fn double_int<'c>(args: &[Const<'c>]) -> Option<Const<'c>> {
         let Const::Int(value) = args.first()? else {
             return None;
         };
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn dce_removes_dead_const_inputs_after_syscall_fold() {
-        fn strlen_eval<'args, 'c>(args: &'args [Const<'c>]) -> Option<Const<'c>> {
+        fn strlen_eval<'c>(args: &[Const<'c>]) -> Option<Const<'c>> {
             let Const::Str(s) = args.first()? else {
                 return None;
             };
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn folds_cascading_pure_syscalls_in_one_pass() {
-        fn repeat_eval<'args, 'c>(args: &'args [Const<'c>]) -> Option<Const<'c>> {
+        fn repeat_eval<'c>(args: &[Const<'c>]) -> Option<Const<'c>> {
             let [Const::Str(s), Const::Int(n)] = args else {
                 return None;
             };

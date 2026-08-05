@@ -516,14 +516,10 @@ impl<'cc> Cc<'cc> {
                     src: start_src,
                 });
                 let mut cur_freed = start_src;
-                loop {
-                    if let Some(idx) = todo.iter().position(|(_, d)| *d == cur_freed) {
-                        let (src, dst) = todo.swap_remove(idx);
-                        self.emit(Op::Mov { dst, src });
-                        cur_freed = src;
-                    } else {
-                        break;
-                    }
+                while let Some(idx) = todo.iter().position(|(_, d)| *d == cur_freed) {
+                    let (src, dst) = todo.swap_remove(idx);
+                    self.emit(Op::Mov { dst, src });
+                    cur_freed = src;
                 }
                 self.emit(Op::Mov {
                     dst: start_dst,
@@ -809,7 +805,7 @@ impl<'cc> Cc<'cc> {
                 ..
             } => {
                 let dst = self.ensure_register(*id);
-                let Some(kind) = AllocType::from_ty(&ty) else {
+                let Some(kind) = AllocType::from_ty(ty) else {
                     unreachable!("alloc attempts to alloc non heap allocated value?");
                 };
                 let (size, align) = (layout.size() as u32, layout.align() as u8);

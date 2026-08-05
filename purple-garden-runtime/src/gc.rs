@@ -91,6 +91,10 @@ impl Metadata {
     }
 
     #[must_use]
+    /// # Safety
+    ///
+    /// `payload` must point to the payload immediately following a valid,
+    /// initialized [`Metadata`] allocation header.
     pub unsafe fn from_payload(payload: NonNull<u8>) -> Self {
         unsafe { payload.as_ptr().sub(METADATA_SIZE).cast::<Self>().read() }
     }

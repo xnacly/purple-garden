@@ -1,3 +1,7 @@
+// The public API returns diagnostics by value so callers can handle them
+// without an additional allocation at every compiler stage.
+#![allow(clippy::result_large_err)]
+
 #[cfg(not(all(
     any(target_os = "linux", target_os = "macos"),
     any(target_arch = "x86_64", target_arch = "aarch64")
@@ -364,7 +368,7 @@ impl<'p> Program<'p> {
         self.funcs.get(name).cloned().map(|(handle, signature)| {
             let f = Function { handle, signature };
             trace!("extracted `{}` handle: {:?}", name, f);
-            return f;
+            f
         })
     }
 
@@ -411,8 +415,8 @@ impl<'p> Program<'p> {
     /// assert_ne!(ret.as_f64(), 42.0);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub unsafe fn call_unchecked<'vm>(
-        &'vm mut self,
+    pub unsafe fn call_unchecked(
+        &mut self,
         function: &Function,
         args: &[Value],
     ) -> Result<Value, Anomaly> {
