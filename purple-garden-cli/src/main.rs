@@ -257,7 +257,11 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         vm.take_trap().map_or(Ok(()), Err)
     } else {
         vm.pc = entry;
-        vm.run(&syscalls)
+        if conf.backtrace {
+            vm.run::<true>(&syscalls)
+        } else {
+            vm.run::<false>(&syscalls)
+        }
     };
 
     if let Err(e) = run {

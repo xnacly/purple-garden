@@ -120,8 +120,7 @@ impl Vm {
     pub fn new(config: VmConfig) -> Self {
         let mut frames = vec![CallFrame::default(); frames_in(config.stack_size).saturating_add(1)]
             .into_boxed_slice();
-        frames[0] = Self::root_frame()
-
+        frames[0] = Self::root_frame();
         let collect = if config.no_gc {
             Self::collect_noop
         } else {
@@ -166,8 +165,8 @@ impl Vm {
         #[cfg(debug_assertions)]
         self.r.fill(Value(0xDEAD_AFFE_DEAD_AFFE));
         self.pc = ROOT_RETURN_ADDR;
-        self.frames.clear();
-        self.frames.push(Self::root_frame());
+        self.frames[0] = Self::root_frame();
+        self.frame_depth = 1;
         self.spilled.clear();
         self.backtrace.clear();
         self.pending_trap = None;
@@ -629,12 +628,14 @@ mod ops {
 
         vm.reset();
         vm.pc = 0;
-        vm.run(&[]).expect("first invocation should succeed");
+        vm.run::<false>(&[])
+            .expect("first invocation should succeed");
         assert_eq!(vm.r(0).as_int(), 42);
 
         vm.reset();
         vm.pc = 0;
-        vm.run(&[]).expect("second invocation should succeed");
+        vm.run::<false>(&[])
+            .expect("second invocation should succeed");
         assert_eq!(vm.r(0).as_int(), 42);
     }
 
@@ -654,12 +655,16 @@ mod ops {
 
         vm.reset();
         vm.pc = 0;
-        assert!(matches!(vm.run(&[]), Err(Anomaly::DivisionByZero { .. })));
+        assert!(matches!(
+            vm.run::<false>(&[]),
+            Err(Anomaly::DivisionByZero { .. })
+        ));
 
         vm.bytecode[2] = Op::LoadI { dst: 0, value: 7 };
         vm.reset();
         vm.pc = 0;
-        vm.run(&[]).expect("invocation after a trap should succeed");
+        vm.run::<false>(&[])
+            .expect("invocation after a trap should succeed");
         assert_eq!(vm.r(0).as_int(), 7);
     }
 

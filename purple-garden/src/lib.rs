@@ -425,7 +425,11 @@ impl<'p> Program<'p> {
         match function.handle {
             CcCallTarget::Bc { pc } => {
                 self.vm.pc = pc;
-                self.vm.run(&self.syscalls)?;
+                if self.vm.config.backtrace {
+                    self.vm.run::<true>(&self.syscalls)?;
+                } else {
+                    self.vm.run::<false>(&self.syscalls)?;
+                }
             }
             CcCallTarget::Native { idx } => {
                 unsafe { self.syscalls[idx as usize]((&mut self.vm as *mut Vm).cast()) };
