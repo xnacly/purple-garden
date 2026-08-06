@@ -7,16 +7,17 @@
   - [ ] read
   - [ ] write
   - [ ] create
+  - [ ] mkdir
 - [ ] unsafe/runtime
   - [ ] cycles
   - [x] allocs
   - [x] used
 - [ ] unsafe/syscall
     - [x] uname
-- [ ] string
+- [ ] strings
   - [x] contains
-  - [x] idx
-  - [ ] slice
+  - [x] get
+  - [x] slice
   - [ ] lines
   - [ ] find
   - [x] repeat
@@ -24,19 +25,23 @@
   - [ ] lower
   - [ ] upper
   - [ ] trim
-- [ ] arr (blocked by generics)
+  - [ ] from(Array<Byte>)
+  - [x] from(Int)
+  - [x] from(Double)
+- [ ] arr
   - [ ] range
   - [ ] join
   - [ ] sum
   - [ ] flat
-- [ ] opt (blocked by generics)
+  - [ ] get
+- [ ] opt
   - [ ] some
   - [ ] none
   - [ ] is_some
   - [ ] is_none
   - [ ] unwrap
   - [ ] or
-- [ ] opt/cmp (blocked by generics)
+- [ ] opt/cmp
   - [ ] and
   - [ ] or
   - [ ] either
@@ -56,6 +61,6 @@
           pub fn either<T>(cond: bool, t: T, f: T) -> T
       }
     ```
-- [ ] cmd (blocked by generics)
-    - [ ] run
-    - [ ] run_with
+- [ ] cmd
+    - [ ] run(Array<Str>)
+    - [ ] run_with(Record<cmd:Str args:Str env:Record<key:Str val:Str> ...>)
