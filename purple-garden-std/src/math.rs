@@ -144,4 +144,65 @@ pub mod math {
     pub fn round_double(n: f64) -> f64 {
         n.round()
     }
+
+    /// The greatest common divisor of integers a and b, at least one of which is nonzero, is the
+    /// greatest positive integer d such that d is a divisor of both a and b
+    ///
+    /// ## Examples
+    ///
+    /// ```garden
+    /// import "math"
+    ///
+    /// math.gcd(48 18)
+    /// ```
+    ///
+    /// Implemented as [Binary GCD algorithm](https://en.wikipedia.org/wiki/Binary_GCD_algorithm)
+    ///
+    /// Traps for u < 0 || v < 0
+    #[pg_fn(unsafe)]
+    pub fn gcd(vm: &mut purple_garden_runtime::Vm, mut u: i64, mut v: i64) -> i64 {
+        if u < 0 || v < 0 {
+            // TODO: return type should be Option<Int> / Option<i64>, since gcd is not defined for
+            // negative inputs, since we are currently missing optionals due to missing monomorphic
+            // generics in the stdlib, we therefore trap
+            vm.trap(purple_garden_runtime::Anomaly::Msg {
+                msg: "gcd: undefined for u < 0 || v < 0",
+                pc: vm.pc,
+            })
+        }
+
+        // gcd(n, 0) = gcd(0, n) = n
+        if u == 0 {
+            return v;
+        } else if v == 0 {
+            return u;
+        }
+
+        // Using identities 2 and 3:
+        let i = u.trailing_zeros();
+        u >>= i;
+        let j = v.trailing_zeros();
+        v >>= j;
+        let k = i.min(j);
+
+        loop {
+            // Swap if necessary so u <= v
+            if u > v {
+                (u, v) = (v, u);
+            }
+
+            // Identity 4
+            v -= u;
+            // v is now even
+
+            if v == 0 {
+                // Identity 1
+                // The shift by k is necessary to add back the 2 power k
+                return u << k;
+            }
+
+            // Identity 3
+            v >>= v.trailing_zeros();
+        }
+    }
 }
