@@ -52,12 +52,16 @@ const RSP: u8 = 4;
 const RAX: u8 = 0;
 const RCX: u8 = 1;
 const RDX: u8 = 2;
+const RSI: u8 = 6;
+const R8: u8 = 8;
+const R9: u8 = 9;
 /// Registers implicitly clobbered by the current `idiv` lowering.
 const IDIV_CLOBBERS: &[u8] = &[RAX, RCX, RDX];
 
 #[derive(Default)]
 struct SupportPlan {
     entry: Option<ir::Id>,
+    call_sites: Vec<u32>,
     /// Target-specific register hazards discovered before allocation. Each
     /// entry says that a lowering at `pos` overwrites `regs`; the allocator then
     /// avoids assigning live-across values to those registers.
@@ -98,7 +102,7 @@ pub fn compile_func(
 
     let regs = allocator.rebuild(
         liveness,
-        &[],
+        &plan.call_sites,
         &plan.fixed_clobbers,
         crate::regalloc::RegClasses {
             caller: POOL,
@@ -594,11 +598,36 @@ fn emit_bin(out: &mut Vec<u8>, op: BinOp, d: u8, l: u8, r: u8) {
 /// C-ABI `call addr`, rdi already holding `*mut Vm`. Leaves enter at `rsp % 16
 /// == 8`, so realign with `sub`/`add rsp, 8`. Callees clobber caller-saved regs,
 /// fine here: the only use is a trap callback that returns right after.
-fn emit_abi_call(out: &mut Vec<u8>, addr: u64) {
+#[derive(Clone, Copy)]
+enum AbiArg {
+    Reg(u8),
+    Imm(u64),
+}
+
+/// Emit a small SysV ABI call. The VM base in `rdi` is saved because it is
+/// caller-saved, while the generated code continues using it after the call.
+fn emit_abi_call(out: &mut Vec<u8>, addr: u64, args: &[AbiArg], result: Option<u8>) {
     emit(out, Insn::SubImm { dst: RSP, imm: 8 });
+    emit(out, Insn::StoreMem { base: RSP, offset: 0, src: RDI });
+
+    let abi_regs = [RDI, RSI, RDX, RCX, R8, R9];
+    for (i, arg) in args.iter().enumerate() {
+        let Some(&dst) = abi_regs.get(i) else { return };
+        match *arg {
+            AbiArg::Reg(src) if src != dst => emit(out, Insn::Mov { dst, src }),
+            AbiArg::Imm(value) => emit(out, Insn::MovAbs { dst, imm: value }),
+            AbiArg::Reg(_) => {}
+        }
+    }
     emit(out, Insn::MovAbs { dst: 0, imm: addr }); // rax = addr
     emit(out, Insn::CallReg { reg: 0 }); // call rax
+    emit(out, Insn::LoadMem { dst: RDI, base: RSP, offset: 0 });
     emit(out, Insn::AddImm { dst: RSP, imm: 8 });
+    if let Some(dst) = result {
+        if dst != RAX {
+            emit(out, Insn::Mov { dst, src: RAX });
+        }
+    }
 }
 
 /// `d = l <op> imm` for IDiv/IMod, nonzero constant divisor. idiv has no imm
@@ -762,6 +791,9 @@ fn validate_supported(func: &ir::Func<'_>) -> Option<SupportPlan> {
 
         for instr in &block.instructions {
             match instr {
+                ir::Instr::Alloc { .. } => {
+                    plan.call_sites.push(pos);
+                }
                 ir::Instr::Noop => {}
                 ir::Instr::LoadConst { value, .. } if supported_const(value) => {}
                 ir::Instr::BinImm { op, imm, .. } if supported_bin_imm(*op) => {
@@ -876,6 +908,21 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     fn emit_instr(&mut self, instr: &ir::Instr<'_>) -> Option<()> {
         match instr {
             ir::Instr::Noop => {}
+            ir::Instr::Alloc { dst: ir::TypeId { id, ty }, layout, .. } => {
+                let Some(dst_reg) = reg_of(self.regs, *id) else {
+                    skip!(self.func, "unallocated alloc dst %v{}", id.0);
+                };
+                let Some(kind) = purple_garden_runtime::AllocType::from_ty(ty) else {
+                    skip!(self.func, "unsupported allocation type");
+                };
+                emit_abi_call(
+                    self.out,
+                    purple_garden_runtime::jit_alloc as *const () as usize as u64,
+                    &[AbiArg::Reg(RDI), AbiArg::Imm(kind as u64),
+                      AbiArg::Imm(layout.size() as u64), AbiArg::Imm(layout.align() as u64)],
+                    Some(dst_reg),
+                );
+            }
             ir::Instr::LoadConst { dst, value, .. } => self.emit_const(dst, value)?,
             ir::Instr::BinImm {
                 op, dst, lhs, imm, ..
@@ -962,7 +1009,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             BinOp::IDiv | BinOp::IMod if imm == 0 => {
                 let helper: purple_garden_runtime::BuiltinFn =
                     purple_garden_runtime::jit_trap_div_zero;
-                emit_abi_call(self.out, helper as usize as u64);
+                emit_abi_call(self.out, helper as usize as u64, &[AbiArg::Reg(RDI)], None);
                 emit(self.out, Insn::Ret);
             }
             BinOp::IMod if imm == 2 => {
