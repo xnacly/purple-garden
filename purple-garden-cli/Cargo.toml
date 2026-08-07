@@ -34,6 +34,7 @@ purple-garden-ir = { path = "../purple-garden-ir" }
 purple-garden-jit = { path = "../purple-garden-jit" }
 purple-garden-runtime = { path = "../purple-garden-runtime" }
 purple-garden-std = { path = "../purple-garden-std" }
+purple-garden-vendor = { path = "../purple-garden-vendor" }
 purple-garden-opt = { path = "../purple-garden-opt" }
 purple-garden-bc = { path = "../purple-garden-bc" }
 purple-garden-frontend = { path = "../purple-garden-frontend" }

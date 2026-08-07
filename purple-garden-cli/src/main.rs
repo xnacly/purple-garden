@@ -8,7 +8,7 @@ use purple_garden_frontend::{
 use purple_garden_runtime::{Vm, VmConfig};
 use purple_garden_typecheck::Typechecker;
 
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, sync::OnceLock};
 
 mod cli;
 mod doc;
@@ -95,7 +95,8 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         match &cmd {
             Command::Check { target } => {
                 let input = Input::from_file(target)?;
-                check_frontend(target, &input, stdlib_packages(&cli))?;
+                let stdlib = stdlib_packages(&cli);
+                check_frontend(target, &input, &stdlib)?;
                 std::process::exit(0);
             }
             Command::Intro { topic } => {
@@ -154,9 +155,10 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let libs = Vec::new();
+    let stdlib = stdlib_packages(&cli);
     let typecheck = Typechecker::new(&ast)
         .with_libs(libs.clone())
-        .with_stdlib(stdlib_packages(&cli))
+        .with_stdlib(&stdlib)
         .check();
     let has_type_errors = !typecheck.diagnostics.is_empty();
 
@@ -180,9 +182,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
-    let lower = Lower::new()
-        .with_libs(libs)
-        .with_stdlib(stdlib_packages(&cli));
+    let lower = Lower::new().with_libs(libs).with_stdlib(&stdlib);
     let mut ir = match lower.ir_from_types(&ast, typecheck.types) {
         Ok(v) => v,
         Err(e) => {
@@ -297,7 +297,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 fn check_frontend(
     input_source: &str,
     input: &Input,
-    stdlib: &'static [purple_garden_runtime::Pkg],
+    stdlib: &[purple_garden_runtime::Pkg],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source_path = Path::new(input_source);
     let failed = frontend::analyze_path(
@@ -321,16 +321,28 @@ fn check_frontend(
     Ok(())
 }
 
-fn stdlib_packages(cli: &Cli) -> &'static [purple_garden_runtime::Pkg] {
+fn stdlib_packages(cli: &Cli) -> Vec<purple_garden_runtime::Pkg> {
     if cli.no_std {
-        return &[];
+        return Vec::new();
     }
 
-    if cli.no_unsafe {
-        purple_garden_std::SAFE_STD
+    let packages = if cli.no_unsafe {
+        purple_garden_std::SAFE_STD.to_vec()
     } else {
-        purple_garden_std::STD
-    }
+        return all_packages().to_vec();
+    };
+    packages
+}
+
+pub(crate) fn all_packages() -> &'static [purple_garden_runtime::Pkg] {
+    static PACKAGES: OnceLock<Vec<purple_garden_runtime::Pkg>> = OnceLock::new();
+    PACKAGES
+        .get_or_init(|| {
+            let mut packages = purple_garden_std::STD.to_vec();
+            packages.extend_from_slice(purple_garden_vendor::PACKAGES);
+            packages
+        })
+        .as_slice()
 }
 
 fn print_standalone_extern_diagnostic(input_source: &str, source: &[u8]) {

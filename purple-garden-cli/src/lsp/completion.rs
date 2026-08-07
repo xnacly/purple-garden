@@ -205,7 +205,10 @@ fn package_member_items(
     offset: usize,
 ) -> Option<Vec<CompletionItem>> {
     let (pkg_name, prefix) = member_access_at(source, offset)?;
-    if pkg_name.is_empty() || !imported_packages.iter().any(|pkg| pkg == pkg_name) {
+    let imported_path = imported_packages
+        .iter()
+        .find(|pkg| *pkg == pkg_name || pkg.rsplit('/').next() == Some(pkg_name));
+    if pkg_name.is_empty() || imported_path.is_none() {
         return None;
     }
 
@@ -226,7 +229,7 @@ fn package_member_items(
         return Some(sorted_completion_items(items));
     }
 
-    let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
+    let pkg = crate::doc::resolve_pkg(imported_path?)?;
     let items = pkg
         .overload_groups()
         .into_iter()
@@ -329,7 +332,7 @@ fn build_global_completions() -> Vec<CompletionEntry> {
             scope: CompletionScope::Global,
         });
     }
-    for pkg in purple_garden_std::STD {
+    for pkg in crate::all_packages() {
         collect_pkg_completions(pkg, None, &mut completions);
     }
     completions
@@ -339,7 +342,7 @@ fn package_entries() -> &'static [CompletionEntry] {
     static PACKAGES: OnceLock<Vec<CompletionEntry>> = OnceLock::new();
     PACKAGES.get_or_init(|| {
         let mut completions = Vec::new();
-        for pkg in purple_garden_std::STD {
+        for pkg in crate::all_packages() {
             collect_package_entries(pkg, None, &mut completions);
         }
         completions
@@ -519,6 +522,32 @@ mod tests {
             items.into_iter().map(|item| item.label).collect::<Vec<_>>(),
             vec!["age", "name"]
         );
+    }
+
+    #[test]
+    fn completes_vendor_package_paths() {
+        let items = items_at(
+            &[],
+            &HashMap::new(),
+            &HashMap::new(),
+            &[],
+            "import \"vendor/exp/r",
+            "import \"vendor/exp/r".len(),
+        );
+        assert!(items.iter().any(|item| item.label == "vendor/exp/raylib"));
+    }
+
+    #[test]
+    fn completes_vendor_package_functions_through_leaf_import() {
+        let items = items_at(
+            &[],
+            &HashMap::new(),
+            &HashMap::new(),
+            &["vendor/exp/raylib".to_owned()],
+            "raylib.draw_",
+            "raylib.draw_".len(),
+        );
+        assert!(items.iter().any(|item| item.label == "draw_rectangle"));
     }
 
     #[test]

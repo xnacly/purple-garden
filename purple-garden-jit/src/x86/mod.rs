@@ -762,7 +762,7 @@ fn validate_supported(func: &ir::Func<'_>) -> Option<SupportPlan> {
 
         for instr in &block.instructions {
             match instr {
-                ir::Instr::Noop => {}
+                ir::Instr::Noop | ir::Instr::Alloc { .. } => {}
                 ir::Instr::LoadConst { value, .. } if supported_const(value) => {}
                 ir::Instr::BinImm { op, imm, .. } if supported_bin_imm(*op) => {
                     if matches!(op, BinOp::IDiv if *imm != 0)

@@ -1,4 +1,8 @@
-use purple_garden_std::{self as pstd, Pkg};
+use purple_garden_std::Pkg;
+
+pub(crate) fn resolve_pkg(query: &str) -> Option<&'static Pkg> {
+    purple_garden_std::resolve_pkg_in(crate::all_packages(), query)
+}
 
 #[must_use]
 pub(crate) fn command(query: &str) -> String {
@@ -35,7 +39,7 @@ pub(crate) fn render_query(query: Option<&str>) -> Result<String, String> {
         None => (query, None),
     };
 
-    let Some(pkg) = pstd::resolve_pkg(path) else {
+    let Some(pkg) = resolve_pkg(path) else {
         return Err(format!("query {path} couldnt be resolved to anything"));
     };
 
@@ -63,7 +67,7 @@ pub(crate) fn render_function(name: &str, variants: &[&purple_garden_runtime::Fn
 
 fn render_index() -> String {
     let mut out = String::from("Purple Garden documentation\n\nPackages:\n");
-    for pkg in purple_garden_std::STD {
+    for pkg in crate::all_packages() {
         render_pkg_index(pkg, None, &mut out);
     }
 

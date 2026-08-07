@@ -1,0 +1,11 @@
+[package]
+name = "purple-garden-vendor"
+version = "0.1.0"
+edition = "2024"
+description = "Optional dependency-backed packages for Purple Garden"
+build = "build.rs"
+
+[dependencies]
+purple-garden-macros = { path = "../purple-garden-macros" }
+purple-garden-runtime = { path = "../purple-garden-runtime" }
+

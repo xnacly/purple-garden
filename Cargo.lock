@@ -594,6 +594,7 @@ dependencies = [
  "purple-garden-shared",
  "purple-garden-std",
  "purple-garden-typecheck",
+ "purple-garden-vendor",
  "serde",
  "serde_json",
 ]
@@ -676,6 +677,14 @@ dependencies = [
  "purple-garden-runtime",
  "purple-garden-shared",
  "purple-garden-std",
+]
+
+[[package]]
+name = "purple-garden-vendor"
+version = "0.1.0"
+dependencies = [
+ "purple-garden-macros",
+ "purple-garden-runtime",
 ]
 
 [[package]]

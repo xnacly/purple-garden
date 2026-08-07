@@ -218,12 +218,13 @@ fn function_hover(pkg_name: &str, fn_name: &str, analysis: &DocumentAnalysis) ->
         return Some(contents.clone());
     }
 
-    let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
+    let pkg_path = imported_package_path(pkg_name, analysis);
+    let pkg = crate::doc::resolve_pkg(pkg_path)?;
     let (_, variants) = pkg
         .overload_groups()
         .into_iter()
         .find(|(name, _)| *name == fn_name)?;
-    Some(overload_detail(&format!("{pkg_name}.{fn_name}"), &variants))
+    Some(overload_detail(&format!("{pkg_path}.{fn_name}"), &variants))
 }
 
 pub(super) fn import_hover(pkg: &Token<'_>, analysis: &DocumentAnalysis) -> Option<String> {
@@ -250,13 +251,38 @@ fn package_hover(pkg_name: &str, analysis: &DocumentAnalysis) -> Option<String> 
         ));
     }
 
-    let pkg = purple_garden_std::resolve_pkg(pkg_name)?;
-    let header = format!("import \"{pkg_name}\"");
-    let command = crate::doc::command(pkg_name);
+    let pkg_path = imported_package_path(pkg_name, analysis);
+    let pkg = crate::doc::resolve_pkg(pkg_path)?;
+    let header = format!("import \"{pkg_path}\"");
+    let command = crate::doc::command(pkg_path);
     if pkg.doc.is_empty() {
         Some(format!("{header}\n\n{command}"))
     } else {
         Some(format!("{header}\n\n{}\n\n{command}", pkg.doc))
+    }
+}
+
+fn imported_package_path<'a>(pkg_name: &'a str, analysis: &'a DocumentAnalysis) -> &'a str {
+    analysis
+        .imported_packages
+        .iter()
+        .find(|path| path.rsplit('/').next() == Some(pkg_name))
+        .map_or(pkg_name, String::as_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hovers_vendor_functions_through_their_import_alias() {
+        let mut analysis = DocumentAnalysis::default();
+        analysis.add_imported_package("vendor/exp/raylib");
+
+        let hover = function_hover("raylib", "draw_text", &analysis).unwrap();
+
+        assert!(hover.contains("fn draw_text"));
+        assert!(hover.contains("vendor/exp/raylib.draw_text"));
     }
 }
 

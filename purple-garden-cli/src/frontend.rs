@@ -50,7 +50,7 @@ pub(crate) fn analyze_path<R>(
     source_path: &Path,
     source: &[u8],
     libs: Vec<&Pkg>,
-    stdlib: &'static [Pkg],
+    stdlib: &[Pkg],
     f: impl for<'a> FnOnce(FrontendAnalysis<'a, '_>) -> R,
 ) -> R {
     let source = source_with_extern(source_path, source);

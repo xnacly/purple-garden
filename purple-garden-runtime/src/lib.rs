@@ -37,7 +37,7 @@ pub mod embed {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Pkg {
     pub name: &'static str,
     pub doc: &'static str,

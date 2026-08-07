@@ -27,7 +27,7 @@ mod r#unsafe;
 /// `resolve_pkg` searches for a package in the standard library by its name, for instance "io/fs",
 /// "runtime/gc" or "encoding/json"
 #[must_use]
-pub fn resolve_pkg(query: &str) -> Option<&Pkg> {
+pub fn resolve_pkg(query: &str) -> Option<&'static Pkg> {
     std_pkg_index().get(query).copied()
 }
 

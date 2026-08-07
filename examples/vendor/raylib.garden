@@ -1,0 +1,35 @@
+import (
+    "vendor/exp/raylib"
+)
+
+let width = 1024
+let height = 512
+
+#! create a raylib color from a rgb input
+fn color(r:Int g:Int b:Int) Record<r:Int g:Int b:Int a:Int> {
+  {r: r g: g b: b a: 255}
+}
+
+#! render a single frame
+fn frame(width: Int height: Int) Void {
+    raylib.begin_drawing()
+    raylib.clear_background(color(30 30 30))
+    let font_size = 64
+    let text_width = raylib.measure_text("purple-garden" font_size)
+    raylib.draw_text("purple-garden" (width - text_width) / 2 height/2 font_size color(0 188 212))
+    raylib.end_drawing()
+}
+
+fn render(width: Int height: Int) Void {
+  match {
+      raylib.should_close() { raylib.close() }
+      {
+        frame(width height)
+        render(width height)
+      }
+  }
+}
+
+raylib.init(width height "Hello from raylib in purple garden")
+raylib.set_target_fps(240)
+render(width height)
