@@ -117,7 +117,15 @@ pub fn compile_func(
             .iter()
             .any(|loc| matches!(loc, ir::Location::Reg(r) if r == candidate))
     });
-    Lowering::new(func, out, regs, scratch, entry).emit()?;
+    let saved_regs = POOL_CALLEE
+        .iter()
+        .copied()
+        .filter(|&candidate| {
+            regs.iter()
+                .any(|loc| matches!(loc, ir::Location::Reg(r) if *r == candidate))
+        })
+        .collect();
+    Lowering::new(func, out, regs, scratch, entry, saved_regs).emit()?;
 
     // we have produced no machine code, so we just RET, this may be the case for fully optimised
     // (dce) away IR
@@ -273,6 +281,13 @@ pub enum Insn {
     CallReg {
         reg: u8,
     },
+    /// `push r{reg}` / `pop r{reg}` (callee-save frame management).
+    Push {
+        reg: u8,
+    },
+    Pop {
+        reg: u8,
+    },
     /// `cqo`; sign-extend rax into rdx:rax (the idiv dividend).
     Cqo,
     /// `idiv r{divisor}`; rdx:rax / divisor, quotient to rax, remainder to rdx.
@@ -356,6 +371,18 @@ impl Insn {
                     code.push(0x41);
                 }
                 code.extend_from_slice(&[0xff, modrm(2, reg)]);
+            }
+            Insn::Push { reg } => {
+                if reg >= 8 {
+                    code.push(0x41);
+                }
+                code.push(0x50 + (reg & 7));
+            }
+            Insn::Pop { reg } => {
+                if reg >= 8 {
+                    code.push(0x41);
+                }
+                code.push(0x58 + (reg & 7));
             }
             // REX.W 0x99 ; cqo.
             Insn::Cqo => code.extend_from_slice(&[0x48, 0x99]),
@@ -451,6 +478,8 @@ impl fmt::Display for Insn {
             Insn::Sete { dst } => write!(f, "sete {}b", r(dst)),
             Insn::MovAbs { dst, imm } => write!(f, "movabs {}, {imm:#x}", r(dst)),
             Insn::CallReg { reg } => write!(f, "call {}", r(reg)),
+            Insn::Push { reg } => write!(f, "push {}", r(reg)),
+            Insn::Pop { reg } => write!(f, "pop {}", r(reg)),
             Insn::Cqo => write!(f, "cqo"),
             Insn::Idiv { divisor } => write!(f, "idiv {}", r(divisor)),
         }
@@ -606,9 +635,28 @@ enum AbiArg {
 
 /// Emit a small SysV ABI call. The VM base in `rdi` is saved because it is
 /// caller-saved, while the generated code continues using it after the call.
-fn emit_abi_call(out: &mut Vec<u8>, addr: u64, args: &[AbiArg], result: Option<u8>) {
-    emit(out, Insn::SubImm { dst: RSP, imm: 8 });
-    emit(out, Insn::StoreMem { base: RSP, offset: 0, src: RDI });
+fn emit_abi_call(
+    out: &mut Vec<u8>,
+    addr: u64,
+    args: &[AbiArg],
+    result: Option<u8>,
+    stack_bytes: i32,
+) {
+    emit(
+        out,
+        Insn::SubImm {
+            dst: RSP,
+            imm: stack_bytes,
+        },
+    );
+    emit(
+        out,
+        Insn::StoreMem {
+            base: RSP,
+            offset: 0,
+            src: RDI,
+        },
+    );
 
     let abi_regs = [RDI, RSI, RDX, RCX, R8, R9];
     for (i, arg) in args.iter().enumerate() {
@@ -621,8 +669,21 @@ fn emit_abi_call(out: &mut Vec<u8>, addr: u64, args: &[AbiArg], result: Option<u
     }
     emit(out, Insn::MovAbs { dst: 0, imm: addr }); // rax = addr
     emit(out, Insn::CallReg { reg: 0 }); // call rax
-    emit(out, Insn::LoadMem { dst: RDI, base: RSP, offset: 0 });
-    emit(out, Insn::AddImm { dst: RSP, imm: 8 });
+    emit(
+        out,
+        Insn::LoadMem {
+            dst: RDI,
+            base: RSP,
+            offset: 0,
+        },
+    );
+    emit(
+        out,
+        Insn::AddImm {
+            dst: RSP,
+            imm: stack_bytes,
+        },
+    );
     if let Some(dst) = result {
         if dst != RAX {
             emit(out, Insn::Mov { dst, src: RAX });
@@ -841,6 +902,8 @@ struct Lowering<'a, 'ir> {
     out: &'a mut Vec<u8>,
     regs: &'a [ir::Location],
     scratch: Option<u8>,
+    /// Callee-saved GPRs used by this function, saved in the prologue.
+    saved_regs: Vec<u8>,
     entry: ir::Id,
     block_offsets: Vec<usize>,
     patches: Vec<Patch>,
@@ -855,12 +918,14 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         regs: &'a [ir::Location],
         scratch: Option<u8>,
         entry: ir::Id,
+        saved_regs: Vec<u8>,
     ) -> Self {
         Self {
             func,
             out,
             regs,
             scratch,
+            saved_regs,
             entry,
             block_offsets: vec![usize::MAX; func.blocks.len()],
             patches: Vec::new(),
@@ -870,6 +935,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
 
     /// Emit the full function body, then patch deferred branch displacements.
     fn emit(mut self) -> Option<()> {
+        self.emit_prologue();
         self.emit_entry_loads();
 
         for block in &self.func.blocks {
@@ -886,6 +952,29 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         }
 
         self.patch_jumps()
+    }
+
+    fn emit_prologue(&mut self) {
+        for &reg in &self.saved_regs {
+            emit(self.out, Insn::Push { reg });
+        }
+    }
+
+    fn emit_epilogue(&mut self) {
+        for &reg in self.saved_regs.iter().rev() {
+            emit(self.out, Insn::Pop { reg });
+        }
+        emit(self.out, Insn::Ret);
+    }
+
+    /// The call-local area contains the saved VM base. Its size also restores
+    /// the required 16-byte stack alignment before `call`.
+    fn abi_call_stack_bytes(&self) -> i32 {
+        if self.saved_regs.len() % 2 == 0 {
+            8
+        } else {
+            16
+        }
     }
 
     /// Load function parameters from `vm.r` slots into allocated registers.
@@ -908,7 +997,11 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     fn emit_instr(&mut self, instr: &ir::Instr<'_>) -> Option<()> {
         match instr {
             ir::Instr::Noop => {}
-            ir::Instr::Alloc { dst: ir::TypeId { id, ty }, layout, .. } => {
+            ir::Instr::Alloc {
+                dst: ir::TypeId { id, ty },
+                layout,
+                ..
+            } => {
                 let Some(dst_reg) = reg_of(self.regs, *id) else {
                     skip!(self.func, "unallocated alloc dst %v{}", id.0);
                 };
@@ -918,9 +1011,14 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 emit_abi_call(
                     self.out,
                     purple_garden_runtime::jit_alloc as *const () as usize as u64,
-                    &[AbiArg::Reg(RDI), AbiArg::Imm(kind as u64),
-                      AbiArg::Imm(layout.size() as u64), AbiArg::Imm(layout.align() as u64)],
+                    &[
+                        AbiArg::Reg(RDI),
+                        AbiArg::Imm(kind as u64),
+                        AbiArg::Imm(layout.size() as u64),
+                        AbiArg::Imm(layout.align() as u64),
+                    ],
                     Some(dst_reg),
+                    self.abi_call_stack_bytes(),
                 );
             }
             ir::Instr::LoadConst { dst, value, .. } => self.emit_const(dst, value)?,
@@ -1009,8 +1107,14 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             BinOp::IDiv | BinOp::IMod if imm == 0 => {
                 let helper: purple_garden_runtime::BuiltinFn =
                     purple_garden_runtime::jit_trap_div_zero;
-                emit_abi_call(self.out, helper as usize as u64, &[AbiArg::Reg(RDI)], None);
-                emit(self.out, Insn::Ret);
+                emit_abi_call(
+                    self.out,
+                    helper as usize as u64,
+                    &[AbiArg::Reg(RDI)],
+                    None,
+                    self.abi_call_stack_bytes(),
+                );
+                self.emit_epilogue();
             }
             BinOp::IMod if imm == 2 => {
                 if d != l {
@@ -1107,7 +1211,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             };
             emit(self.out, Insn::StoreSlot { src: r, slot: 0 });
         }
-        emit(self.out, Insn::Ret);
+        self.emit_epilogue();
         Some(())
     }
 

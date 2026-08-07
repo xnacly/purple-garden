@@ -190,6 +190,95 @@ mod tests_x86 {
         assert_eq!(run(jit.code(), [0, 0, 0])[0], 42);
     }
 
+    /// Allocation is a helper call: values used after it must survive the
+    /// caller-saved register clobber. This also exercises the VM-pointer ABI
+    /// and writing the returned payload.
+    #[test]
+    fn alloc_preserves_live_values_across_helper_call() {
+        use purple_garden_runtime::{Vm, VmConfig};
+        use std::alloc::Layout;
+
+        let record_ty = Type::record(vec![
+            ("r", Type::Int),
+            ("g", Type::Int),
+            ("b", Type::Int),
+            ("a", Type::Int),
+        ]);
+        let mut func = Func::new(
+            "alloc_live",
+            Id(0),
+            vec![Id(0), Id(1), Id(2)],
+            Some(record_ty.clone()),
+        );
+        let params = func.intern_params(vec![Id(0), Id(1), Id(2)]);
+        let alloc_id = Id(3);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Alloc {
+                    dst: TypeId {
+                        id: alloc_id,
+                        ty: record_ty.clone(),
+                    },
+                    layout: Layout::from_size_align(32, 8).unwrap(),
+                    span: 0,
+                },
+                Instr::Store {
+                    src: Id(0),
+                    base: alloc_id,
+                    offset: 0,
+                    span: 0,
+                },
+                Instr::Store {
+                    src: Id(1),
+                    base: alloc_id,
+                    offset: 8,
+                    span: 0,
+                },
+                Instr::Store {
+                    src: Id(2),
+                    base: alloc_id,
+                    offset: 16,
+                    span: 0,
+                },
+                Instr::LoadConst {
+                    dst: TypeId {
+                        id: Id(4),
+                        ty: Type::Int,
+                    },
+                    value: Const::Int(255),
+                    span: 0,
+                },
+                Instr::Store {
+                    src: Id(4),
+                    base: alloc_id,
+                    offset: 24,
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(alloc_id),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        let mut vm = Vm::new(VmConfig {
+            no_gc: true,
+            ..VmConfig::default()
+        });
+        let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
+        slots[0..3].copy_from_slice(&[1, 2, 3]);
+        let page = ExecPage::new(jit.code()).expect("executable JIT page");
+        let f: unsafe extern "C" fn(*mut u64) = unsafe { std::mem::transmute(page.as_ptr()) };
+        unsafe { f(&mut vm as *mut Vm as *mut u64) };
+        let payload = unsafe { std::slice::from_raw_parts(slots[0] as *const u64, 4) };
+        assert_eq!(payload, &[1, 2, 3, 255]);
+    }
+
     #[test]
     fn compiles_tail_recursive_factorial_loop() {
         let mut func = Func::new("factorial", Id(0), vec![Id(0), Id(1)], Some(Type::Int));

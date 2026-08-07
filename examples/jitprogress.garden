@@ -35,3 +35,14 @@ testing.assert(divs(42 17) == 8)
 testing.assert(absish(0) == 1)
 testing.assert(absish(5) == 2)
 testing.assert(factorial(20 1) == 2432902008176640000)
+
+#! create a color record from rgb
+fn C(r:Int g:Int b:Int) Record<r:Int g:Int b:Int a:Int> {
+  {r: r g: g b: b a: 255}
+}
+
+let c = C(1 2 3)
+testing.assert(c.r == 1)
+testing.assert(c.g == 2)
+testing.assert(c.b == 3)
+testing.assert(c.a == 255)
