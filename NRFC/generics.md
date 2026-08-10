@@ -1,5 +1,12 @@
 # Generics
 
+All generics, be it specialisation or monomorphisation are not
+user exposed in the sense of creating them, they can however be
+consumed by users. Embedders can mark functions as either
+specialising (choosing an implementation based on the type) or
+generic, which accepts a list of generic types used in said
+function.
+
 ## Specialisation based
 
 Things like 
@@ -71,7 +78,7 @@ globals:
   0002:    ret
 ```
 
-## Substitution based
+## Monomorphism
 
 However, this only works for known types requiring different implementations.
 It does not work for something like `cmp.or(bool,T) Option<T>`, which decided
@@ -82,3 +89,45 @@ unlimited amount of work specialising every possible T for every stdlib
 function would require. Therefore purple garden needs substitution based
 generics, which enable passing a value through something and "specialising" the
 function at compile time for the known input automatically.
+
+Given the identity function:
+
+
+<!-- TODO: figure out how to actually instruct purple garden to
+see and support generics -->
+
+```rust
+#[pg_pkg]
+mod tt {
+    fn identity<T>(x: T) -> T { x }
+}
+```
+
+For the below example usage from pgs side there should be a generated function for each of the different usages (in both IR, pgvm and x86)
+
+```garden
+import "tt"
+tt.identity(3.1415)         # Double
+tt.identity(3)              # Int
+tt.identity("hello")        # Str
+tt.identity(true)           # Bool
+tt.identity({ n:9 m:10 })   # Record<n:Int m:Int>
+tt.identity(["ab" "bc"])    # Array<Str>
+```
+
+<!-- TODO: add IR and typechecker output here -->
+
+To do so the generic type def in the function signature instructs
+the typechecker to infer types passed to the function and thus
+build the actual function signature at type check time.
+
+A more complex example:
+
+```rust
+#[pg_pkg]
+mod opt {
+}
+```
+
+
+<!-- TODO: add IR and typechecker output here -->
