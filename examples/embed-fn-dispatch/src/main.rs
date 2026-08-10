@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let identity_function = pg
-        .function("identity")
+        .function::<i64, i64>("identity")
         .expect("Wasnt able to find `identity` function");
 
     assert_eq!(
@@ -25,12 +25,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let dispatch_function = pg
-        .function("dispatch")
+        .function::<(i64,), ()>("dispatch")
         .expect("Wasnt able to find `dispatch` function");
 
     for i in 0..=16 {
         // prints numbers 0..=16 using purple gardens io.println
-        pg.call::<_, ()>(&dispatch_function, (i,))?;
+        pg.call(&dispatch_function, (i,))?;
     }
 
     Ok(())
