@@ -8,7 +8,7 @@
 )))]
 compile_error!("purple-garden currently supports only Linux or macOS on x86_64 or aarch64");
 
-use std::collections::HashMap;
+use std::{collections::HashMap, marker::PhantomData};
 
 use purple_garden_bc::{self as bc, CcCallTarget};
 use purple_garden_frontend::{
@@ -250,12 +250,108 @@ pub struct Program<'p> {
     funcs: HashMap<&'p str, (CcCallTarget, FunctionType<'p>)>,
 }
 
-/// A handle to a purple garden function extracted from [`Program`] via [`Program::function`],
-/// invokable using [`Program::call`] or [`Program::call_unchecked`]
+/// A typed handle to a purple garden function extracted from [`Program`] via
+/// [`Program::function`].
+///
+/// `Args` and `Ret` are the Rust types expected when invoking this function.
+/// [`Program::call`] verifies that they match the Garden declaration before
+/// executing it.
 #[derive(Debug)]
-pub struct Function<'f> {
+pub struct Function<'f, Args, Ret> {
     handle: CcCallTarget,
     signature: FunctionType<'f>,
+    types: PhantomData<fn(Args) -> Ret>,
+}
+
+/// Error returned by [`Program::call`].
+///
+/// Signature variants describe a mismatch between the Rust types selected on
+/// [`Program::function`] and the Garden function declaration. [`CallError::Runtime`]
+/// contains a trap raised while the function was executing.
+#[derive(Debug)]
+pub enum CallError {
+    /// The requested Rust return type does not match the Garden return type.
+    ReturnType { expected: String, actual: String },
+    /// The requested Rust argument count does not match the Garden declaration.
+    ArgumentCount { expected: usize, actual: usize },
+    /// One requested Rust argument type does not match the Garden declaration.
+    ArgumentType {
+        index: usize,
+        expected: String,
+        actual: String,
+    },
+    /// Execution trapped in the Garden VM.
+    Runtime(Anomaly),
+}
+
+impl std::fmt::Display for CallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ReturnType { expected, actual } => {
+                write!(f, "return type mismatch: expected {expected}, got {actual}")
+            }
+            Self::ArgumentCount { expected, actual } => {
+                write!(
+                    f,
+                    "argument count mismatch: expected {expected}, got {actual}"
+                )
+            }
+            Self::ArgumentType {
+                index,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "argument type mismatch at index {index}: expected {expected}, got {actual}"
+            ),
+            Self::Runtime(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for CallError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Runtime(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl<Args, Ret> Function<'_, Args, Ret>
+where
+    Args: CallArgs,
+    Ret: PgType,
+{
+    fn verify_signature(&self) -> Result<(), CallError> {
+        if Ret::TYPE != self.signature.ret {
+            return Err(CallError::ReturnType {
+                expected: self.signature.ret.to_string(),
+                actual: Ret::TYPE.to_string(),
+            });
+        }
+
+        let as_types = Args::TYPES;
+        if as_types.len() != self.signature.args.len() {
+            return Err(CallError::ArgumentCount {
+                expected: self.signature.args.len(),
+                actual: as_types.len(),
+            });
+        }
+
+        for (i, arg) in as_types.iter().enumerate() {
+            let expected_type = &self.signature.args[i].1;
+            if arg != expected_type {
+                return Err(CallError::ArgumentType {
+                    index: i,
+                    expected: expected_type.to_string(),
+                    actual: arg.to_string(),
+                });
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl<'p> Program<'p> {
@@ -345,10 +441,10 @@ impl<'p> Program<'p> {
     ///
     /// let mut program = Pg::new()
     ///     .compile(br#"fn identity(value: Int) Int { value }"#)?;
-    /// let identity = program.function("identity").expect("function exists");
-    /// assert_eq!(program.call::<_, i64>(&identity, (42i64,))?, 42);
+    /// let identity = program.function::<_, i64>("identity").expect("function exists");
+    /// assert_eq!(program.call(&identity, (42i64,))?, 42);
     ///
-    /// assert!(program.function("not_declared").is_none());
+    /// assert!(program.function::<(i64,), i64>("not_declared").is_none());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
@@ -358,16 +454,20 @@ impl<'p> Program<'p> {
     /// use purple_garden::Pg;
     ///
     /// let mut program = Pg::new().compile(br#"fn double(value: Int) Int { value * 2 }"#)?;
-    /// let double = program.function("double").expect("function exists");
+    /// let double = program.function::<_, i64>("double").expect("function exists");
     /// for i in 0..4i64 {
-    ///     assert_eq!(program.call::<_, i64>(&double, (i,))?, i * 2);
+    ///     assert_eq!(program.call(&double, (i,))?, i * 2);
     /// }
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn function(&self, name: &str) -> Option<Function<'p>> {
+    pub fn function<Args, Ret>(&self, name: &str) -> Option<Function<'p, Args, Ret>> {
         self.funcs.get(name).cloned().map(|(handle, signature)| {
-            let f = Function { handle, signature };
-            trace!("extracted `{}` handle: {:?}", name, f);
+            let f = Function {
+                handle,
+                signature,
+                types: PhantomData,
+            };
+            trace!("extracted `{}` handle: {:?}", name, &f.handle);
             f
         })
     }
@@ -393,7 +493,9 @@ impl<'p> Program<'p> {
     /// use purple_garden::{Pg, embed::Value};
     ///
     /// let mut program = Pg::new().compile(br#"fn add(a: Int b: Int) Int { a + b }"#)?;
-    /// let add = program.function("add").expect("function exists");
+    /// let add = program
+    ///     .function::<(i64, i64), i64>("add")
+    ///     .expect("function exists");
     ///
     /// let args: [Value; 2] = [40i64.into(), 2i64.into()];
     /// let ret = unsafe { program.call_unchecked(&add, &args)? };
@@ -408,16 +510,18 @@ impl<'p> Program<'p> {
     /// use purple_garden::{Pg, embed::Value};
     ///
     /// let mut program = Pg::new().compile(br#"fn identity(value: Int) Int { value }"#)?;
-    /// let identity = program.function("identity").expect("function exists");
+    /// let identity = program
+    ///     .function::<(i64,), i64>("identity")
+    ///     .expect("function exists");
     ///
     /// let ret = unsafe { program.call_unchecked(&identity, &[42i64.into()])? };
     /// assert_eq!(ret.as_int(), 42);
     /// assert_ne!(ret.as_f64(), 42.0);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub unsafe fn call_unchecked(
+    pub unsafe fn call_unchecked<Args, Ret>(
         &mut self,
-        function: &Function,
+        function: &Function<'_, Args, Ret>,
         args: &[Value],
     ) -> Result<Value, Anomaly> {
         self.vm.reset();
@@ -451,7 +555,9 @@ impl<'p> Program<'p> {
     ///
     /// Arguments are a tuple, a single argument is therefore `(T,)`. Argument count, argument
     /// types and the return type are checked against the declared signature before the call
-    /// happens, a mismatch produces Err([`Anomaly`])
+    /// happens, a mismatch produces Err([`CallError`]). The Rust signature is
+    /// selected when retrieving the function with [`Program::function`], so it
+    /// is inferred here.
     ///
     /// # Examples
     ///
@@ -459,8 +565,8 @@ impl<'p> Program<'p> {
     /// use purple_garden::Pg;
     ///
     /// let mut program = Pg::new().compile(br#"fn add(a: Int b: Int) Int { a + b }"#)?;
-    /// let add = program.function("add").expect("function exists");
-    /// assert_eq!(program.call::<_, i64>(&add, (40i64, 2i64))?, 42);
+    /// let add = program.function::<_, i64>("add").expect("function exists");
+    /// assert_eq!(program.call(&add, (40i64, 2i64))?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
@@ -475,8 +581,8 @@ impl<'p> Program<'p> {
     /// import "io"
     /// fn log(value: Int) { io.println(value) }
     /// "#)?;
-    /// let log = program.function("log").expect("function exists");
-    /// program.call::<_, ()>(&log, (42i64,))?;
+    /// let log = program.function::<_, ()>("log").expect("function exists");
+    /// program.call(&log, (42i64,))?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
@@ -486,57 +592,31 @@ impl<'p> Program<'p> {
     /// use purple_garden::Pg;
     ///
     /// let mut program = Pg::new().compile(br#"fn add(a: Int b: Int) Int { a + b }"#)?;
-    /// let add = program.function("add").expect("function exists");
+    /// let wrong_return = program.function::<_, f64>("add").expect("function exists");
+    /// let wrong_arity = program.function::<(i64,), i64>("add").expect("function exists");
+    /// let wrong_argument = program
+    ///     .function::<(i64, f64), i64>("add")
+    ///     .expect("function exists");
     ///
-    /// assert!(program.call::<_, f64>(&add, (40i64, 2i64)).is_err());
-    /// assert!(program.call::<_, i64>(&add, (40i64,)).is_err());
-    /// assert!(program.call::<_, i64>(&add, (40i64, 2.0f64)).is_err());
+    /// assert!(program.call(&wrong_return, (40i64, 2i64)).is_err());
+    /// assert!(program.call(&wrong_arity, (40i64,)).is_err());
+    /// assert!(program.call(&wrong_argument, (40i64, 2.0f64)).is_err());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn call<'vm, Args, Ret>(
         &'vm mut self,
-        function: &Function,
+        function: &Function<'_, Args, Ret>,
         args: Args,
-    ) -> Result<Ret, Anomaly>
+    ) -> Result<Ret, CallError>
     where
         Args: CallArgs,
         Ret: PgType + FromVm<'vm>,
     {
-        let signature = &function.signature;
-        let pc_or_fallback = match function.handle {
-            CcCallTarget::Bc { pc } => pc,
-            CcCallTarget::Native { .. } => 0,
-        };
-
-        if Ret::TYPE != signature.ret {
-            return Err(Anomaly::Msg {
-                msg: "Return type provided does not match the purple garden functions return type",
-                pc: pc_or_fallback,
-            });
-        }
-
-        let as_types = Args::TYPES;
-        if as_types.len() != signature.args.len() {
-            return Err(Anomaly::Msg {
-                msg: "Provided argument count does not match the purple garden functions argument count",
-                pc: pc_or_fallback,
-            });
-        }
-
-        for (i, arg) in as_types.iter().enumerate() {
-            let expected_type = &signature.args[i].1;
-            if arg != expected_type {
-                return Err(Anomaly::Msg {
-                    msg: "Provided arguments type does not match the type of the purple garden functions argument",
-                    // TODO: i need to improve the errors here
-                    // msg: &format!("argument {i} is {expected_type}, not {arg}"),
-                    pc: pc_or_fallback,
-                });
-            }
-        }
+        function.verify_signature()?;
 
         let args = args.inner(&mut self.vm);
-        let ret = unsafe { self.call_unchecked(function, args.as_ref())? };
+        let ret =
+            unsafe { self.call_unchecked(function, args.as_ref()) }.map_err(CallError::Runtime)?;
         let result = Ret::from_vm(&self.vm, ret);
         Ok(result)
     }
@@ -657,5 +737,55 @@ mod tests {
             assert!(program.funcs.contains_key("unused"));
             assert!(!program.funcs.contains_key("entry"));
         }
+    }
+
+    #[test]
+    fn call_error_reports_signature_mismatches_and_runtime_traps() {
+        let mut config = config::Config::default();
+        config.no_jit = true;
+        let mut program = Pg::new()
+            .config(config)
+            .compile(b"fn divide(a: Int b: Int) Int { a / b }")
+            .expect("program should compile");
+
+        let wrong_return = program
+            .function::<(i64, i64), f64>("divide")
+            .expect("function exists");
+        assert!(matches!(
+            program.call(&wrong_return, (1i64, 1i64)),
+            Err(CallError::ReturnType { expected, actual })
+                if expected == "Int" && actual == "Double"
+        ));
+
+        let wrong_arity = program
+            .function::<(i64,), i64>("divide")
+            .expect("function exists");
+        assert!(matches!(
+            program.call(&wrong_arity, (1i64,)),
+            Err(CallError::ArgumentCount {
+                expected: 2,
+                actual: 1
+            })
+        ));
+
+        let wrong_argument = program
+            .function::<(i64, f64), i64>("divide")
+            .expect("function exists");
+        assert!(matches!(
+            program.call(&wrong_argument, (1i64, 1.0f64)),
+            Err(CallError::ArgumentType {
+                index: 1,
+                expected,
+                actual
+            }) if expected == "Int" && actual == "Double"
+        ));
+
+        let divide = program
+            .function::<_, i64>("divide")
+            .expect("function exists");
+        assert!(matches!(
+            program.call(&divide, (1i64, 0i64)),
+            Err(CallError::Runtime(Anomaly::DivisionByZero { .. }))
+        ));
     }
 }
