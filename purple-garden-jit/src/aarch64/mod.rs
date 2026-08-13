@@ -1,3 +1,5 @@
+//! see https://support.arm.com/documentation/ddi0487/mc/-Part-C-The-AArch64-Instruction-Set?lang=en
+
 use purple_garden_ir as ir;
 
 pub fn compile_func(
