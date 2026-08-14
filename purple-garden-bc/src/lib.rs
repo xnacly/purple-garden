@@ -840,18 +840,22 @@ impl<'cc> Cc<'cc> {
             }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let dst = self.ensure_register(dst.id);
-                // PERF: add a fastpath for booleans, since rn they touch the globals file, which is
-                // unnecessary
-                if let Const::Int(i) = value
-                    && *i < i32::MAX as i64
-                {
-                    self.emit(Op::LoadI {
-                        dst,
-                        value: *i as i32,
-                    });
-                } else {
-                    let idx = self.intern(value);
-                    self.emit(Op::LoadG { dst, idx });
+                match value {
+                    Const::Int(i) if *i > i32::MIN as i64 && *i < i32::MAX as i64 => {
+                        self.emit(Op::LoadI {
+                            dst,
+                            value: *i as i32,
+                        });
+                    }
+                    Const::True | Const::False => {
+                        // fast path for booleans
+                        let value = matches!(value, Const::True) as i32;
+                        self.emit(Op::LoadI { dst, value });
+                    }
+                    _ => {
+                        let idx = self.intern(value);
+                        self.emit(Op::LoadG { dst, idx });
+                    }
                 }
             }
             ir::Instr::Call {
