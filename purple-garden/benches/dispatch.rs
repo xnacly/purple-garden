@@ -143,10 +143,43 @@ pub fn bench_call_dispatch(c: &mut Criterion) {
     });
 }
 
+pub fn bench_packed_spill_dispatch(c: &mut Criterion) {
+    for (name, push, pop) in [
+        (
+            "bench_push2_pop2_dispatch",
+            Op::Push2 { a: 0, b: 1 },
+            Op::Pop2 { a: 2, b: 3 },
+        ),
+        (
+            "bench_push3_pop3_dispatch",
+            Op::Push3 { a: 0, b: 1, c: 2 },
+            Op::Pop3 { a: 3, b: 4, c: 5 },
+        ),
+    ] {
+        c.bench_function(name, |b| {
+            b.iter_batched(
+                || {
+                    let mut bc = Vec::with_capacity(OP_CODE_SIZE);
+                    for _ in 0..OP_CODE_SIZE / 2 {
+                        bc.push(push);
+                        bc.push(pop);
+                    }
+                    let mut vm = Vm::new(CONFIG);
+                    vm.bytecode = bc;
+                    vm
+                },
+                |mut vm| vm.run::<false>(&[]),
+                BatchSize::LargeInput,
+            );
+        });
+    }
+}
+
 fn main() {
     let mut criterion = common::criterion();
     bench_uniform_dispatch(&mut criterion);
     bench_random_dispatch(&mut criterion);
     bench_call_dispatch(&mut criterion);
+    bench_packed_spill_dispatch(&mut criterion);
     criterion.final_summary();
 }

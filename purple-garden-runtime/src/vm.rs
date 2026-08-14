@@ -499,29 +499,71 @@ impl Vm {
                     }
                     pc = frame.return_to;
                 }
-                Op::Push { src } => unsafe {
-                    self.spilled.push(*r!(src));
-                },
-                Op::Push2 { a, b } => unsafe {
-                    self.spilled.push(*r!(a));
-                    self.spilled.push(*r!(b));
-                },
-                Op::Push3 { a, b, c } => unsafe {
-                    self.spilled.push(*r!(a));
-                    self.spilled.push(*r!(b));
-                    self.spilled.push(*r!(c));
-                },
+                Op::Push { src } => {
+                    let len = self.spilled.len();
+
+                    if std::hint::unlikely(len + 1 > self.spilled.capacity()) {
+                        self.spilled.reserve(1);
+                    }
+
+                    unsafe {
+                        let dst = self.spilled.as_mut_ptr().add(len);
+                        dst.write(*r!(src));
+                        self.spilled.set_len(len + 1);
+                    }
+                }
+                Op::Push2 { a, b } => {
+                    let len = self.spilled.len();
+
+                    if std::hint::unlikely(len + 2 > self.spilled.capacity()) {
+                        self.spilled.reserve(2);
+                    }
+
+                    unsafe {
+                        let dst = self.spilled.as_mut_ptr().add(len);
+                        dst.write(*r!(a));
+                        dst.add(1).write(*r!(b));
+                        self.spilled.set_len(len + 2);
+                    }
+                }
+                Op::Push3 { a, b, c } => {
+                    let len = self.spilled.len();
+
+                    if std::hint::unlikely(len + 3 > self.spilled.capacity()) {
+                        self.spilled.reserve(3);
+                    }
+
+                    unsafe {
+                        let dst = self.spilled.as_mut_ptr().add(len);
+                        dst.write(*r!(a));
+                        dst.add(1).write(*r!(b));
+                        dst.add(2).write(*r!(c));
+                        self.spilled.set_len(len + 3);
+                    }
+                }
                 Op::Pop { dst } => unsafe {
-                    r_mut!(dst) = self.spilled.pop().unwrap();
+                    let len = self.spilled.len();
+                    let ptr = self.spilled.as_ptr();
+                    debug_assert!(len >= 1);
+                    r_mut!(dst) = ptr.add(len - 1).read();
+                    self.spilled.set_len(len - 1);
                 },
                 Op::Pop2 { a, b } => unsafe {
-                    r_mut!(a) = self.spilled.pop().unwrap();
-                    r_mut!(b) = self.spilled.pop().unwrap();
+                    let len = self.spilled.len();
+                    let ptr = self.spilled.as_ptr();
+                    debug_assert!(len >= 2);
+                    r_mut!(a) = ptr.add(len - 1).read();
+                    r_mut!(b) = ptr.add(len - 2).read();
+                    self.spilled.set_len(len - 2);
                 },
                 Op::Pop3 { a, b, c } => unsafe {
-                    r_mut!(a) = self.spilled.pop().unwrap();
-                    r_mut!(b) = self.spilled.pop().unwrap();
-                    r_mut!(c) = self.spilled.pop().unwrap();
+                    let len = self.spilled.len();
+                    let ptr = self.spilled.as_ptr();
+                    debug_assert!(len >= 3);
+                    r_mut!(a) = ptr.add(len - 1).read();
+                    r_mut!(b) = ptr.add(len - 2).read();
+                    r_mut!(c) = ptr.add(len - 3).read();
+                    self.spilled.set_len(len - 3);
                 },
                 Op::CastToDouble { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_f64();
