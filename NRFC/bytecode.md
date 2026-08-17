@@ -168,76 +168,61 @@ The opcode selects the instruction class used to decode its remaining bits;
 there is no separate class tag. Bit ranges below are `[high:low]`, and `op`
 always means `[5:0]`.
 
-#### Instruction classes
-
-```text
-NULL:  [5:0] op | [31:6] reserved
-R:     [5:0] op | [10:6] r | [31:11] reserved
-RR:    [5:0] op | [10:6] rd | [15:11] rn | [31:16] reserved
-RRR:   [5:0] op | [10:6] rd | [15:11] rn | [20:16] rm | [31:21] reserved
-RI16:  [5:0] op | [10:6] rd | [15:11] rn | [31:16] signed imm16
-RI21:  [5:0] op | [10:6] rd | [31:11] signed imm21
-MEM:   [5:0] op | [10:6] value | [15:11] base | [31:16] unsigned offset16
-BR:    [5:0] op | [10:6] cond | [31:11] absolute target21
-JMP:   [5:0] op | [31:6] absolute target26
-SYS:   [5:0] op | [21:6] syscall16 | [31:22] reserved
-ALLOC: [5:0] op | [10:6] rd | [13:11] kind | [18:14] align_log2 | [31:19] size13
-BRI5:  [5:0] op | [10:6] lhs | [15:11] signed imm5 | [31:16] absolute target16
-```
-
-Sys 10bits reserved to enable inlining a0, a1 into the instruction itself (registers).
+Fields pack left-to-right from bit 6 in the order listed; a bare register
+operand takes 5 bits, nameN takes N. Postfix i = signed (arithmetic shift), u =
+unsigned (logical shift).
 
 ### Opcode assignment
 
-|        Opcode | Instruction    | Class | Operands / notes                              |
-| ------------: | -------------- | ----- | --------------------------------------------- |
-|        `0x00` | `Nop`          | NULL  |                                               |
-|        `0x01` | `Ret`          | NULL  |                                               |
-|        `0x02` | `Mov`          | RR    | `rd, src`                                     |
-|        `0x03` | `IAdd`         | RRR   | `rd, lhs, rhs`                                |
-|        `0x04` | `ISub`         | RRR   | `rd, lhs, rhs`                                |
-|        `0x05` | `IMul`         | RRR   | `rd, lhs, rhs`                                |
-|        `0x06` | `IDiv`         | RRR   | `rd, lhs, rhs`                                |
-|        `0x07` | `IMod`         | RRR   | `rd, lhs, rhs`                                |
-|        `0x08` | `ILt`          | RRR   | `rd, lhs, rhs`                                |
-|        `0x09` | `IGt`          | RRR   | `rd, lhs, rhs`                                |
-|        `0x0a` | `IEq`          | RRR   | `rd, lhs, rhs`                                |
-|        `0x0b` | `DAdd`         | RRR   | `rd, lhs, rhs`                                |
-|        `0x0c` | `DSub`         | RRR   | `rd, lhs, rhs`                                |
-|        `0x0d` | `DMul`         | RRR   | `rd, lhs, rhs`                                |
-|        `0x0e` | `DDiv`         | RRR   | `rd, lhs, rhs`                                |
-|        `0x0f` | `DLt`          | RRR   | `rd, lhs, rhs`                                |
-|        `0x10` | `DGt`          | RRR   | `rd, lhs, rhs`                                |
-|        `0x11` | `BEq`          | RRR   | `rd, lhs, rhs`                                |
-|        `0x12` | `IAddI`        | RI16  | `rd, lhs, imm16`                              |
-|        `0x13` | `ISubI`        | RI16  | `rd, lhs, imm16`                              |
-|        `0x14` | `IMulI`        | RI16  | `rd, lhs, imm16`                              |
-|        `0x15` | `IDivI`        | RI16  | `rd, lhs, imm16`                              |
-|        `0x16` | `IModI`        | RI16  | `rd, lhs, imm16`                              |
-|        `0x17` | `IEqI`         | RI16  | `rd, lhs, imm16`                              |
-|        `0x18` | `IGtI`         | RI16  | `rd, lhs, imm16`                              |
-|        `0x19` | `ILtI`         | RI16  | `rd, lhs, imm16`                              |
-|        `0x1a` | `LoadI`        | RI21  | `rd, imm21`                                   |
-|        `0x1b` | `LoadG`        | RI21  | `rd, global_index16`; bits `[31:27]` reserved |
-|        `0x1c` | `Jmp`          | JMP   | `target26`                                    |
-|        `0x1d` | `JmpT`         | BR    | `cond, target21`                              |
-|        `0x1e` | `JmpF`         | BR    | `cond, target21`                              |
-|        `0x1f` | `JmpEqI`       | BRI5  | `lhs, imm5, target16`                         |
-|        `0x20` | `JmpNeI`       | BRI5  | `lhs, imm5, target16`                         |
-|        `0x21` | `Tail`         | JMP   | `func26`                                      |
-|        `0x22` | `Call`         | JMP   | `func26`                                      |
-|        `0x23` | `Sys`          | SYS   | `syscall16`                                   |
-|        `0x24` | `Push`         | R     | `src`                                         |
-|        `0x25` | `Push2`        | RR    | `a, b`                                        |
-|        `0x26` | `Push3`        | RRR   | `a, b, c`                                     |
-|        `0x27` | `Pop`          | R     | `dst`                                         |
-|        `0x28` | `Pop2`         | RR    | `a, b`                                        |
-|        `0x29` | `Pop3`         | RRR   | `a, b, c`                                     |
-|        `0x2a` | `CastToInt`    | RR    | `dst, src`                                    |
-|        `0x2b` | `CastToDouble` | RR    | `dst, src`                                    |
-|        `0x2c` | `CastToBool`   | RR    | `dst, src`                                    |
-|        `0x2d` | `Alloc`        | ALLOC | `rd, kind3, align_log2, size13`               |
-|        `0x2e` | `Store`        | MEM   | `src, base, offset16`                         |
-|        `0x2f` | `Load`         | MEM   | `dst, base, offset16`                         |
-|        `0x30` | `AddrOf`       | MEM   | `dst, base, offset16`                         |
-| `0x31`-`0x3f` | -              | -     | reserved                                      |
+|        Opcode | Instruction    | Operands / notes                                                                                                                |
+| ------------: | -------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+|        `0x00` | `Nop`          |                                                                                                                                 |
+|        `0x01` | `Ret`          |                                                                                                                                 |
+|        `0x02` | `Mov`          | `rd, src`                                                                                                                       |
+|        `0x03` | `IAdd`         | `rd, lhs, rhs`                                                                                                                  |
+|        `0x04` | `ISub`         | `rd, lhs, rhs`                                                                                                                  |
+|        `0x05` | `IMul`         | `rd, lhs, rhs`                                                                                                                  |
+|        `0x06` | `IDiv`         | `rd, lhs, rhs`                                                                                                                  |
+|        `0x07` | `IMod`         | `rd, lhs, rhs`                                                                                                                  |
+|        `0x08` | `ILt`          | `rd, lhs, rhs`                                                                                                                  |
+|        `0x09` | `IGt`          | `rd, lhs, rhs`                                                                                                                  |
+|        `0x0a` | `IEq`          | `rd, lhs, rhs`                                                                                                                  |
+|        `0x0b` | `DAdd`         | `rd, lhs, rhs`                                                                                                                  |
+|        `0x0c` | `DSub`         | `rd, lhs, rhs`                                                                                                                  |
+|        `0x0d` | `DMul`         | `rd, lhs, rhs`                                                                                                                  |
+|        `0x0e` | `DDiv`         | `rd, lhs, rhs`                                                                                                                  |
+|        `0x0f` | `DLt`          | `rd, lhs, rhs`                                                                                                                  |
+|        `0x10` | `DGt`          | `rd, lhs, rhs`                                                                                                                  |
+|        `0x11` | `BEq`          | `rd, lhs, rhs`                                                                                                                  |
+|        `0x12` | `IAddI`        | `rd, lhs, imm16i`                                                                                                               |
+|        `0x13` | `ISubI`        | `rd, lhs, imm16i`                                                                                                               |
+|        `0x14` | `IMulI`        | `rd, lhs, imm16i`                                                                                                               |
+|        `0x15` | `IDivI`        | `rd, lhs, imm16i`                                                                                                               |
+|        `0x16` | `IModI`        | `rd, lhs, imm16i`                                                                                                               |
+|        `0x17` | `IEqI`         | `rd, lhs, imm16i`                                                                                                               |
+|        `0x18` | `IGtI`         | `rd, lhs, imm16i`                                                                                                               |
+|        `0x19` | `ILtI`         | `rd, lhs, imm16i`                                                                                                               |
+|        `0x1a` | `LoadI`        | `rd, imm21i`, previous imm32i, now imm21i                                                                                       |
+|        `0x1b` | `LoadG`        | `rd, global_index21u`                                                                                                           |
+|        `0x1c` | `Jmp`          | `target26u`                                                                                                                     |
+|        `0x1d` | `JmpT`         | `cond, target21u`                                                                                                               |
+|        `0x1e` | `JmpF`         | `cond, target21u`                                                                                                               |
+|        `0x1f` | `JmpEqI`       | `lhs, rhs, target16u`, both require a change to the vm impl, rhs is now r, not imm, also requires a change to `opt::branch_cmp` |
+|        `0x20` | `JmpNeI`       | `lhs, rhs, target16u`, see above and `opt::branch_cmp` pass is skipped when the target exceeds `target16u`                      |
+|        `0x21` | `Tail`         | `func26u`                                                                                                                       |
+|        `0x22` | `Call`         | `func26u`                                                                                                                       |
+|        `0x23` | `Sys`          | `syscall16u` 10bits reserved to enable inlining a0, a1 into the instr                                                           |
+|        `0x24` | `Push`         | `src`                                                                                                                           |
+|        `0x25` | `Push2`        | `a, b`                                                                                                                          |
+|        `0x26` | `Push3`        | `a, b, c`                                                                                                                       |
+|        `0x27` | `Pop`          | `dst`                                                                                                                           |
+|        `0x28` | `Pop2`         | `a, b`                                                                                                                          |
+|        `0x29` | `Pop3`         | `a, b, c`                                                                                                                       |
+|        `0x2a` | `CastToInt`    | `dst, src`                                                                                                                      |
+|        `0x2b` | `CastToDouble` | `dst, src`                                                                                                                      |
+|        `0x2c` | `CastToBool`   | `dst, src`                                                                                                                      |
+|        `0x2d` | `Alloc`        | `rd, kind3u, size18u`                                                                                                           |
+|        `0x2e` | `Store`        | `src, base, offset16u`                                                                                                          |
+|        `0x2f` | `Load`         | `dst, base, offset16u`                                                                                                          |
+|        `0x30` | `AddrOf`       | `dst, base, offset16u`                                                                                                          |
+| `0x31`-`0x3f` | -              | reserved                                                                                                                        |
