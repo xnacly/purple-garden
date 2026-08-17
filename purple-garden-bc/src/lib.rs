@@ -1194,6 +1194,29 @@ mod tests {
     }
 
     #[test]
+    fn lowers_boolean_load_consts_to_immediates() {
+        for (constant, expected) in [(Const::True, 1), (Const::False, 0)] {
+            let ops = compile_one(entry_fun(
+                vec![Instr::LoadConst {
+                    dst: type_id(0, Type::Bool),
+                    value: constant,
+                    span: 0,
+                }],
+                Some((Id(0), Type::Bool)),
+            ));
+
+            assert!(
+                has_op(&ops, |op| matches!(op, Op::LoadI { dst: 0, value } if *value == expected)),
+                "expected boolean constant to lower to LoadI({expected}): {ops:?}",
+            );
+            assert!(
+                !has_op(&ops, |op| matches!(op, Op::LoadG { .. })),
+                "boolean constant should not lower to LoadG: {ops:?}",
+            );
+        }
+    }
+
+    #[test]
     fn lowers_non_immediate_load_const_to_load_global() {
         let ops = compile_one(entry_fun(
             vec![Instr::LoadConst {
