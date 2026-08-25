@@ -74,6 +74,7 @@ pub fn compile_func(
     out: &mut Vec<u8>,
     liveness: &[(u32, u32)],
     allocator: &mut crate::regalloc::Allocator,
+    buffers: &mut Scratch,
 ) -> Option<()> {
     if func.params.len() > 32 {
         skip!(
@@ -112,20 +113,12 @@ pub fn compile_func(
     // Parallel edge moves only need a scratch register for cycles. If the
     // allocator consumed every caller register, cyclic edge moves are rejected
     // and the function falls back to bytecode.
-    let scratch = POOL.iter().copied().find(|candidate| {
+    let reg_scratch = POOL.iter().copied().find(|candidate| {
         !regs
             .iter()
             .any(|loc| matches!(loc, ir::Location::Reg(r) if r == candidate))
     });
-    let saved_regs = POOL_CALLEE
-        .iter()
-        .copied()
-        .filter(|&candidate| {
-            regs.iter()
-                .any(|loc| matches!(loc, ir::Location::Reg(r) if *r == candidate))
-        })
-        .collect();
-    Lowering::new(func, out, regs, scratch, entry, saved_regs).emit()?;
+    Lowering::new(func, out, regs, reg_scratch, buffers, entry).emit()?;
 
     // we have produced no machine code, so we just RET, this may be the case for fully optimised
     // (dce) away IR
@@ -156,12 +149,21 @@ fn is_result_slot_identity(func: &ir::Func<'_>, entry: ir::Id) -> bool {
         )
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct Patch {
     /// Offset of the 4-byte relative displacement inside `out`.
     rel: usize,
     /// IR block id that owns the final machine-code target offset.
     target: ir::Id,
+}
+
+/// Reusable lowering allocation storage
+#[derive(Debug, Default, Clone)]
+pub struct Scratch {
+    block_offsets: Vec<usize>,
+    patches: Vec<Patch>,
+    move_pairs: Vec<(u8, u8)>,
+    saved_regs: Vec<u8>,
 }
 
 /// A single x86-64 instruction. `encode` appends its machine-code bytes;
@@ -903,11 +905,11 @@ struct Lowering<'a, 'ir> {
     regs: &'a [ir::Location],
     scratch: Option<u8>,
     /// Callee-saved GPRs used by this function, saved in the prologue.
-    saved_regs: Vec<u8>,
+    saved_regs: &'a Vec<u8>,
     entry: ir::Id,
-    block_offsets: Vec<usize>,
-    patches: Vec<Patch>,
-    move_pairs: Vec<(u8, u8)>,
+    block_offsets: &'a mut Vec<usize>,
+    patches: &'a mut Vec<Patch>,
+    move_pairs: &'a mut Vec<(u8, u8)>,
 }
 
 impl<'a, 'ir> Lowering<'a, 'ir> {
@@ -917,9 +919,24 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         out: &'a mut Vec<u8>,
         regs: &'a [ir::Location],
         scratch: Option<u8>,
+        buffers: &'a mut Scratch,
         entry: ir::Id,
-        saved_regs: Vec<u8>,
     ) -> Self {
+        let Scratch {
+            block_offsets,
+            patches,
+            move_pairs,
+            saved_regs,
+        } = buffers;
+        block_offsets.clear();
+        block_offsets.resize(func.blocks.len(), usize::MAX);
+        patches.clear();
+        move_pairs.clear();
+        saved_regs.clear();
+        saved_regs.extend(POOL_CALLEE.iter().copied().filter(|&candidate| {
+            regs.iter()
+                .any(|loc| matches!(loc, ir::Location::Reg(r) if *r == candidate))
+        }));
         Self {
             func,
             out,
@@ -927,9 +944,9 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             scratch,
             saved_regs,
             entry,
-            block_offsets: vec![usize::MAX; func.blocks.len()],
-            patches: Vec::new(),
-            move_pairs: Vec::new(),
+            block_offsets,
+            patches,
+            move_pairs,
         }
     }
 
@@ -955,7 +972,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     }
 
     fn emit_prologue(&mut self) {
-        for &reg in &self.saved_regs {
+        for &reg in self.saved_regs {
             emit(self.out, Insn::Push { reg });
         }
     }
@@ -1355,8 +1372,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     }
 
     /// Patch every deferred branch once block offsets are known.
-    fn patch_jumps(self) -> Option<()> {
-        for Patch { rel, target } in self.patches {
+    fn patch_jumps(&mut self) -> Option<()> {
+        for Patch { rel, target } in self.patches.drain(..) {
             let Some(target) = self
                 .block_offsets
                 .get(target.0 as usize)

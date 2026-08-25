@@ -50,6 +50,7 @@ pub struct Jit {
     code: Vec<u8>,
     liveness: Vec<(u32, u32)>,
     regalloc: regalloc::Allocator,
+    scratch: arch::Scratch,
 }
 
 impl Jit {
@@ -75,7 +76,13 @@ impl Jit {
         liveness: &[(u32, u32)],
     ) -> Option<()> {
         self.code.clear();
-        let result = arch::compile_func(func, &mut self.code, liveness, &mut self.regalloc);
+        let result = arch::compile_func(
+            func,
+            &mut self.code,
+            liveness,
+            &mut self.regalloc,
+            &mut self.scratch,
+        );
         if result.is_none() {
             self.code.clear();
         }

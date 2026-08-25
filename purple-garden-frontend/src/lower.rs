@@ -829,6 +829,10 @@ impl<'lower> Lower<'lower> {
         types: Vec<Option<ptype::Type<'lower>>>,
     ) -> Result<Vec<Func<'lower>>, Diagnostic> {
         self.types = types;
+        // Most roots are declarations or expressions becoming functions later;
+        // thus reserving this avoids repeated growth
+        self.functions.reserve(ast.roots.len() + 1);
+        self.func_name_to_id.reserve(ast.roots.len() + 1);
 
         self.ctx.func =
             Func::new("entry", Id(0), Vec::new(), None).with_span(ast.entry_span().unwrap_or(0));

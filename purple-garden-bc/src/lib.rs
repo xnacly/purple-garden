@@ -276,8 +276,9 @@ impl<'cc> Cc<'cc> {
         ir: &'cc [Func<'cc>],
     ) -> Result<Vec<purple_garden_jit::JitFn>, String> {
         let mut native_pages: Option<Vec<purple_garden_jit::JitFn>> =
-            (!config.no_jit).then(Vec::new);
-        self.native_code = (config.disassemble > 0).then(Vec::new);
+            (!config.no_jit).then(|| Vec::with_capacity(ir.len()));
+        self.native_code = (config.disassemble > 0).then(|| Vec::with_capacity(ir.len()));
+        self.functions.reserve(ir.len());
 
         for func in ir {
             if config.liveness {
@@ -1206,7 +1207,10 @@ mod tests {
             ));
 
             assert!(
-                has_op(&ops, |op| matches!(op, Op::LoadI { dst: 0, value } if *value == expected)),
+                has_op(
+                    &ops,
+                    |op| matches!(op, Op::LoadI { dst: 0, value } if *value == expected)
+                ),
                 "expected boolean constant to lower to LoadI({expected}): {ops:?}",
             );
             assert!(
