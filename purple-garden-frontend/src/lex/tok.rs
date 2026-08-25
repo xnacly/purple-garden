@@ -164,9 +164,9 @@ define_keywords! {
                 "```garden\n",
                 "import \"testing\"\n",
                 "\n",
-                "import (\"testing\" \"strings\")\n",
-                "let label = strings.concat(\"steps: \" strings.from(42))\n",
-                "testing.assert(strings.contains(label \"steps\"))\n",
+                "import (\"testing\" \"str\")\n",
+                "let label = str.concat(\"steps: \" str.from(42))\n",
+                "testing.assert(str.contains(label \"steps\"))\n",
                 "```"
             )
         },
@@ -297,10 +297,10 @@ define_keywords! {
                 "```garden\n",
                 "let name = \"garden\"\n",
                 "\n",
-                "import \"strings\"\n",
+                "import \"str\"\n",
                 "\n",
                 "let name = \"garden\"\n",
-                "let greeting = strings.concat(\"hello \" name)\n",
+                "let greeting = str.concat(\"hello \" name)\n",
                 "```"
             )
         },

@@ -12,9 +12,10 @@
   - [ ] cycles
   - [x] allocs
   - [x] used
+  - [ ] type(T)->Str
 - [ ] unsafe/syscall
     - [x] uname
-- [ ] strings
+- [ ] str
   - [x] contains
   - [x] get
   - [x] slice

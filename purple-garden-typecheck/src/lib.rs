@@ -808,7 +808,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                                     &candidates,
                                 );
                                 self.report(err);
-                                // `strings.from(Str)` is invalid, but every
+                                // `str.from(Str)` is invalid, but every
                                 // variant returns `Str`, so callers can still
                                 // typecheck against that result.
                                 if let Some(ret) = Self::common_return(&candidates) {

@@ -116,7 +116,7 @@ impl<'pg> Pg<'pg> {
 
     /// Enables the safe standard-library packages for this compilation.
     ///
-    /// This makes packages such as `math`, `strings`, `io`, and `testing`
+    /// This makes packages such as `math`, `str`, `io`, and `testing`
     /// available to `import` statements in the source.
     ///
     /// # Examples

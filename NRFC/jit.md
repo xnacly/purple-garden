@@ -3,6 +3,32 @@
 For current full scope of compilable purple garden script contents, see:
 [examples/jitprogress.garden](../examples/jitprogress.garden):
 
+## Future work:
+
+Use something like plan9 asm with slots to abstract away from machines and
+build a stencil like JIT, for instance in
+`purple-garden-jit/defs/bin.iadd.pgasm`:
+
+```armasm
+add %0, %0, %1
+```
+
+Gets codegened for all architectures into:
+
+```x86
+add    %rax,%rcx
+mov    %rcx,%rdi
+```
+
+And
+
+```armasm
+add x2, x1, x0
+```
+
+This is the goal since the current x86 jit implementation is a collection of
+spaghetti
+
 ## Progress
 
 | IR node        | variant             | x86 | aarch64 |

@@ -1,10 +1,10 @@
-pub use self::strings::PACKAGE;
+pub use self::str::PACKAGE;
 
 #[purple_garden_macros::pg_pkg(runtime = purple_garden_runtime)]
-/// Package strings implements functions for creating, inspecting, and combining strings.
-// This module is the public `strings` package namespace; its file name matches it.
+/// Package str implements functions for creating, inspecting, and combining strings.
+// This module is the public `str` package namespace; its file name matches it.
 #[allow(clippy::module_inception)]
-pub mod strings {
+pub mod str {
     use purple_garden_runtime::{PgType, Type, Value, Vm};
 
     pub struct RawString(Value);
@@ -30,9 +30,9 @@ pub mod strings {
     /// ## Examples
     ///
     /// ```garden
-    /// import "strings"
+    /// import "str"
     ///
-    /// strings.contains("purple garden" "garden")
+    /// str.contains("purple garden" "garden")
     /// ```
     #[purple_garden_macros::pg_fn(pure)]
     pub fn contains(hay: &str, needle: &str) -> bool {
@@ -44,9 +44,9 @@ pub mod strings {
     /// ## Examples
     ///
     /// ```garden
-    /// import "strings"
+    /// import "str"
     ///
-    /// strings.repeat("ha" 3)
+    /// str.repeat("ha" 3)
     /// ```
     #[purple_garden_macros::pg_fn(pure)]
     pub fn repeat(s: &str, n: i64) -> String {
@@ -58,9 +58,9 @@ pub mod strings {
     /// ## Examples
     ///
     /// ```garden
-    /// import "strings"
+    /// import "str"
     ///
-    /// let greeting = strings.concat("hello " "garden")
+    /// let greeting = str.concat("hello " "garden")
     /// ```
     #[purple_garden_macros::pg_fn(pure)]
     pub fn concat(a: &str, b: &str) -> String {
@@ -75,9 +75,9 @@ pub mod strings {
     /// ## Examples
     ///
     /// ```garden
-    /// import "strings"
+    /// import "str"
     ///
-    /// strings.len("garden")
+    /// str.len("garden")
     /// ```
     #[purple_garden_macros::pg_fn(pure)]
     pub fn len(s: &str) -> i64 {
@@ -89,16 +89,16 @@ pub mod strings {
     /// ## Examples
     ///
     /// ```garden
-    /// import "strings"
+    /// import "str"
     ///
-    /// strings.get("garden" 0)
+    /// str.get("garden" 0)
     /// ```
     pub fn get(s: &str, index: i64) -> Result<i64, &'static str> {
-        let index = usize::try_from(index).map_err(|_| "strings.get: negative index")?;
+        let index = usize::try_from(index).map_err(|_| "str.get: negative index")?;
         s.as_bytes()
             .get(index)
             .map(|&byte| i64::from(byte))
-            .ok_or("strings.get: index out of bounds")
+            .ok_or("str.get: index out of bounds")
     }
 
     /// Returns the substring from byte offset `start` up to but not including `end`.
@@ -106,9 +106,9 @@ pub mod strings {
     /// ## Examples
     ///
     /// ```garden
-    /// import "strings"
+    /// import "str"
     ///
-    /// strings.slice("garden" 0 3)
+    /// str.slice("garden" 0 3)
     /// ```
     #[purple_garden_macros::pg_fn(unsafe)]
     pub fn slice(
@@ -118,13 +118,13 @@ pub mod strings {
         end: i64,
     ) -> Result<RawString, &'static str> {
         let s = s.0.as_str();
-        let start = usize::try_from(start).map_err(|_| "strings.slice: negative start")?;
-        let end = usize::try_from(end).map_err(|_| "strings.slice: negative end")?;
+        let start = usize::try_from(start).map_err(|_| "str.slice: negative start")?;
+        let end = usize::try_from(end).map_err(|_| "str.slice: negative end")?;
         if start > end || end > s.len() {
-            return Err("strings.slice: range out of bounds");
+            return Err("str.slice: range out of bounds");
         }
         if !s.is_char_boundary(start) || !s.is_char_boundary(end) {
-            return Err("strings.slice: range is not on utf-8 boundaries");
+            return Err("str.slice: range is not on utf-8 boundaries");
         }
 
         Ok(RawString(vm.new_string_from_str(&s[start..end])))
@@ -135,9 +135,9 @@ pub mod strings {
     /// ## Examples
     ///
     /// ```garden
-    /// import "strings"
+    /// import "str"
     ///
-    /// strings.from(42)
+    /// str.from(42)
     /// ```
     #[pg_fn(pure, specialises = "from")]
     pub fn from_i64(i: i64) -> String {
@@ -149,9 +149,9 @@ pub mod strings {
     /// ## Examples
     ///
     /// ```garden
-    /// import "strings"
+    /// import "str"
     ///
-    /// strings.from(3.1415)
+    /// str.from(3.1415)
     /// ```
     #[pg_fn(pure, specialises = "from")]
     pub fn from_double(d: f64) -> String {

@@ -41,7 +41,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     let Some((_, items)) = module.content.as_mut() else {
         return syn::Error::new(
             module.span(),
-            "pg_pkg only supports inline modules, e.g. `mod strings { ... }`",
+            "pg_pkg only supports inline modules, e.g. `mod str { ... }`",
         )
         .to_compile_error()
         .into();

@@ -85,8 +85,8 @@ pub struct Replacement {
 
 /// Actionable guidance attached to a diagnostic.
 ///
-/// Use notes for context and helps for actions. For example, "package `strings`
-/// exists but is not imported" is a note; "add `import \"strings\"`" is help.
+/// Use notes for context and helps for actions. For example, "package `str`
+/// exists but is not imported" is a note; "add `import \"str\"`" is help.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Help {
     pub message: String,

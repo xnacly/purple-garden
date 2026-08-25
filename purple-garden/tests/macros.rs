@@ -24,7 +24,7 @@ struct Account {
 }
 
 #[pg_pkg]
-mod strings {
+mod str {
     /// Returns the length of s in bytes.
     #[purple_garden::pg_fn(pure)]
     pub fn len(s: &str) -> i64 {
@@ -104,13 +104,13 @@ mod tools {
 
 #[test]
 fn pg_pkg_generates_package_metadata() {
-    assert_eq!(strings::PACKAGE.name, "strings");
-    assert_eq!(strings::PACKAGE.fns.len(), 3);
-    assert_eq!(strings::PACKAGE.fns[0].name, "len");
-    assert!(strings::PACKAGE.fns[0].pure);
-    assert_eq!(strings::PACKAGE.fns[0].arg_names, &["s"]);
-    assert!(!strings::PACKAGE.fns[1].pure);
-    assert_eq!(strings::PACKAGE.fns[1].arg_names, &["s", "n"]);
+    assert_eq!(str::PACKAGE.name, "str");
+    assert_eq!(str::PACKAGE.fns.len(), 3);
+    assert_eq!(str::PACKAGE.fns[0].name, "len");
+    assert!(str::PACKAGE.fns[0].pure);
+    assert_eq!(str::PACKAGE.fns[0].arg_names, &["s"]);
+    assert!(!str::PACKAGE.fns[1].pure);
+    assert_eq!(str::PACKAGE.fns[1].arg_names, &["s", "n"]);
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn pg_pkg_wrapper_decodes_args_and_encodes_return() {
     let s = vm.new_string("hello".to_owned());
     *vm.r_mut(0) = s;
 
-    unsafe { (strings::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
+    unsafe { (str::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
 
     assert_eq!(vm.r(0).as_int(), 5);
 }
@@ -141,7 +141,7 @@ fn pg_pkg_wrapper_allocates_return_strings() {
     *vm.r_mut(0) = s;
     *vm.r_mut(1) = Value::from(3_i64);
 
-    unsafe { (strings::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
+    unsafe { (str::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
     assert_eq!(vm.r(0).as_str(), "hahaha");
 }
