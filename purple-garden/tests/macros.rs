@@ -167,6 +167,16 @@ fn pg_pkg_supports_garden_opaque_types() {
 }
 
 #[test]
+fn garden_opaque_encodes_borrowed_handles() {
+    let counter = Counter { value: 9 };
+    let mut vm = Vm::new(VmConfig::default());
+    let value = (&counter).into_vm(&mut vm);
+
+    let decoded: &Counter = FromVm::from_vm(&vm, value);
+    assert_eq!(decoded.value, 9);
+}
+
+#[test]
 fn pg_fn_unsafe_passes_vm_and_exposes_remaining_signature() {
     let fun = &counters::PACKAGE.fns[2];
     assert_eq!(fun.name, "add_register_zero");

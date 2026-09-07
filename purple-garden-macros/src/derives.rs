@@ -108,6 +108,9 @@ fn expand_garden_opaque(api: &Path, input: &DeriveInput) -> syn::Result<TokenStr
     let foreign = ident.to_string();
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+    let mut borrow_generics = input.generics.clone();
+    prepend_lifetime(&mut borrow_generics, "borrow");
+    let (borrow_impl_generics, _, borrow_where_clause) = borrow_generics.split_for_impl();
     let mut from_generics = input.generics.clone();
     prepend_lifetime(&mut from_generics, "vm");
     let (from_impl_generics, _, from_where_clause) = from_generics.split_for_impl();
@@ -120,6 +123,14 @@ fn expand_garden_opaque(api: &Path, input: &DeriveInput) -> syn::Result<TokenStr
         impl #impl_generics #api::embed::IntoVm for #ident #ty_generics #where_clause {
             fn into_vm(self, _: &mut #api::embed::Vm) -> #api::embed::Value {
                 #api::embed::Value::from_ptr(Box::into_raw(Box::new(self)))
+            }
+        }
+
+        // Borrowed opaque handles are valid for the duration of the embedding
+        // call. The VM representation is the same pointer used by `FromVm`.
+        impl #borrow_impl_generics #api::embed::IntoVm for &'borrow #ident #ty_generics #borrow_where_clause {
+            fn into_vm(self, _: &mut #api::embed::Vm) -> #api::embed::Value {
+                #api::embed::Value::from_ptr((self as *const #ident #ty_generics).cast_mut())
             }
         }
 
