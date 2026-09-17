@@ -16,10 +16,11 @@ pub fn bench_uniform_dispatch(c: &mut Criterion) {
     c.bench_function("bench_uniform_dispatch", |b| {
         b.iter_batched(
             || {
-                let mut bc = Vec::with_capacity(OP_CODE_SIZE);
+                let mut bc = Vec::with_capacity(OP_CODE_SIZE + 1);
                 for _ in 0..OP_CODE_SIZE {
                     bc.push(Op::Nop);
                 }
+                bc.push(Op::Halt);
                 let mut vm = Vm::new(CONFIG);
                 vm.bytecode = bc;
                 vm
@@ -104,7 +105,7 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
     c.bench_function("bench_random_dispatch", |b| {
         b.iter_batched(
             || {
-                let mut bc = Vec::with_capacity(OP_CODE_SIZE);
+                let mut bc = Vec::with_capacity(OP_CODE_SIZE + 1);
                 bc.push(Op::LoadI { dst: 0, value: 1 });
                 bc.push(Op::LoadI { dst: 1, value: 2 });
                 let mut rng = StdRng::seed_from_u64(0);
@@ -112,6 +113,7 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
                     let idx = rng.random_range(0..RANDOM_OPS.len());
                     bc.push(RANDOM_OPS[idx]);
                 }
+                bc.push(Op::Halt);
                 let mut vm = Vm::new(CONFIG);
                 vm.bytecode = bc;
                 vm
@@ -128,11 +130,12 @@ pub fn bench_call_dispatch(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let leaf = OP_CODE_SIZE as u32;
-                let mut bc = Vec::with_capacity(OP_CODE_SIZE + 1);
+                let mut bc = Vec::with_capacity(OP_CODE_SIZE + 2);
                 for _ in 0..OP_CODE_SIZE {
                     bc.push(Op::Call { func: leaf });
                 }
                 bc.push(Op::Ret);
+                bc.push(Op::Halt);
                 let mut vm = Vm::new(CONFIG);
                 vm.bytecode = bc;
                 vm
@@ -159,11 +162,12 @@ pub fn bench_packed_spill_dispatch(c: &mut Criterion) {
         c.bench_function(name, |b| {
             b.iter_batched(
                 || {
-                    let mut bc = Vec::with_capacity(OP_CODE_SIZE);
+                    let mut bc = Vec::with_capacity(OP_CODE_SIZE + 1);
                     for _ in 0..OP_CODE_SIZE / 2 {
                         bc.push(push);
                         bc.push(pop);
                     }
+                    bc.push(Op::Halt);
                     let mut vm = Vm::new(CONFIG);
                     vm.bytecode = bc;
                     vm

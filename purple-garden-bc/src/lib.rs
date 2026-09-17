@@ -1083,14 +1083,18 @@ impl<'cc> Cc<'cc> {
     /// jitted
     pub fn finalize(self, config: VmConfig) -> (Vm, Vec<BuiltinFn>, DebugInfo, Option<u16>) {
         let Cc {
-            buf,
+            mut buf,
             globals,
             std_fns,
             functions,
             entry_native_idx,
-            pc_to_span,
+            mut pc_to_span,
             ..
         } = self;
+
+        // entry is lowered last, we halt after its Ret. Enables omitting bounds check in dispatch loop
+        buf.push(Op::Halt);
+        pc_to_span.push(0);
 
         let mut vm = Vm::new(config);
         // A native entry runs directly from its native page; a bytecode entry

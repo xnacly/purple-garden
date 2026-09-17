@@ -29,13 +29,6 @@ pub const fn frames_in(mib: usize) -> usize {
     mib.saturating_mul(MIB) / size_of::<CallFrame>()
 }
 
-/// Return address of the synthetic root call frame pushed in [`Vm::new`].
-/// Chosen so that after the dispatcher's unconditional `pc += 1` the program
-/// counter lands at `usize::MAX`; never less than the bytecode length, so the
-/// run loop exits. `MAX - 1` (not `MAX`) keeps that `+ 1` from overflowing in
-/// debug builds.
-const ROOT_RETURN_ADDR: usize = usize::MAX - 1;
-
 type CollectFn = fn(&mut Vm);
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -149,10 +142,11 @@ impl Vm {
 
     fn root_frame() -> CallFrame {
         // The VM enters a top-level function directly, so its trailing Op::Ret
-        // needs a frame to pop. Popping this synthetic frame ends the run (see
-        // ROOT_RETURN_ADDR) and drains any pending trap.
+        // needs a frame to pop. Popping this synthetic frame lands on the
+        // trailing Op::Halt and drains any pending trap. `return_to` is a
+        // placeholder; `run` patches it once the bytecode length is known.
         CallFrame {
-            return_to: ROOT_RETURN_ADDR,
+            return_to: usize::MAX,
             #[cfg(debug_assertions)]
             spilled_depth: 0,
         }
@@ -167,7 +161,7 @@ impl Vm {
         // poison le well in debugging so we know whats going on
         #[cfg(debug_assertions)]
         self.r.fill(Value(0xDEAD_AFFE_DEAD_AFFE));
-        self.pc = ROOT_RETURN_ADDR;
+        self.pc = usize::MAX;
         self.frames[0] = Self::root_frame();
         self.frame_depth = 1;
         self.spilled.clear();
@@ -246,9 +240,24 @@ impl Vm {
     }
 
     pub fn run<const BACKTRACE: bool>(&mut self, syscalls: &[BuiltinFn]) -> Result<(), Anomaly> {
+        let Some(last) = self.bytecode.last() else {
+            return Ok(());
+        };
+        debug_assert!(
+            matches!(last, Op::Halt),
+            "bytecode must end in Op::Halt (bc::Cc::finalize emits it)"
+        );
+        let halt = self.bytecode.len() - 1;
+        // wrapping_sub covers bytecode that is only a Halt.
+        self.frames[0].return_to = halt.wrapping_sub(1);
+
+        let mut pc = self.pc;
+        if pc > halt {
+            return Ok(());
+        }
+
         let regs = self.r.as_mut_ptr();
         let instructions = self.bytecode.as_mut_ptr();
-        let instructions_len = self.bytecode.len();
         let globals = self.globals.as_mut_ptr();
         let syscalls = syscalls.as_ptr();
 
@@ -264,9 +273,7 @@ impl Vm {
             };
         }
 
-        let mut pc = self.pc;
-
-        while pc < instructions_len {
+        loop {
             let op = unsafe { *instructions.add(pc) };
 
             match op {
@@ -597,10 +604,11 @@ impl Vm {
                 Op::AddrOf { dst, base, offset } => unsafe {
                     r_mut!(dst) = Value::from_ptr(r!(base).as_ptr::<u8>().add(offset as usize));
                 },
+                Op::Halt => break,
                 Op::Nop => {}
             }
 
-            pc += 1;
+            pc = pc.wrapping_add(1);
         }
 
         self.pc = pc;
@@ -652,14 +660,16 @@ mod ops {
         SIDE_EFFECTS.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn run(bytecode: Vec<Op>) -> Vm {
+    fn run(mut bytecode: Vec<Op>) -> Vm {
+        bytecode.push(Op::Halt);
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;
         vm.run::<false>(&[]).expect("vm run failed");
         vm
     }
 
-    fn run_err(bytecode: Vec<Op>) -> Anomaly {
+    fn run_err(mut bytecode: Vec<Op>) -> Anomaly {
+        bytecode.push(Op::Halt);
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;
         vm.run::<false>(&[])
@@ -669,7 +679,7 @@ mod ops {
     #[test]
     fn prepare_run_reinstalls_root_frame_after_return() {
         let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = vec![Op::LoadI { dst: 0, value: 42 }, Op::Ret];
+        vm.bytecode = vec![Op::LoadI { dst: 0, value: 42 }, Op::Ret, Op::Halt];
 
         vm.reset();
         vm.pc = 0;
@@ -696,6 +706,7 @@ mod ops {
                 rhs: 1,
             },
             Op::Ret,
+            Op::Halt,
         ];
 
         vm.reset();
@@ -718,7 +729,7 @@ mod ops {
         SIDE_EFFECTS.store(0, Ordering::SeqCst);
 
         let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = vec![Op::Sys { idx: 0 }, Op::Sys { idx: 1 }];
+        vm.bytecode = vec![Op::Sys { idx: 0 }, Op::Sys { idx: 1 }, Op::Halt];
         let err = vm
             .run::<false>(&[trap_syscall, side_effect_syscall])
             .expect_err("trapping syscall should stop execution");
@@ -857,6 +868,7 @@ mod ops {
                 lhs: 0,
                 rhs: 1,
             },
+            Op::Halt,
         ];
         let err = vm.run::<false>(&[]).expect_err("ddiv by zero should trap");
         assert!(matches!(err, Anomaly::DivisionByZero { .. }));
@@ -935,6 +947,7 @@ mod ops {
                 lhs: 1,
                 rhs: 0,
             },
+            Op::Halt,
         ];
         vm.run::<false>(&[]).unwrap();
         assert_eq!(vm.r(2).as_f64(), 4.0);
@@ -1119,6 +1132,7 @@ mod ops {
             Op::CastToBool { dst: 4, src: 0 },
             Op::LoadI { dst: 5, value: 0 },
             Op::CastToBool { dst: 6, src: 5 },
+            Op::Halt,
         ];
         vm.run::<false>(&[]).unwrap();
         assert_eq!(vm.r(1).as_f64(), 5.0);

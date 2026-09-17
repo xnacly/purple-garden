@@ -278,6 +278,8 @@ pub enum Op {
         offset: u32,
     },
     Ret,
+    /// Stop the dispatch loop
+    Halt,
     Nop,
 }
 
