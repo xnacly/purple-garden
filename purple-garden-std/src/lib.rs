@@ -83,8 +83,8 @@ pub mod t {
             pure: false,
             eval: None,
             arg_names: &["x"],
-            args: &[purple_garden_runtime::Type::Generic('T')],
-            ret: purple_garden_runtime::Type::Generic('T'),
+            args: &[purple_garden_runtime::Type::Substitution('T')],
+            ret: purple_garden_runtime::Type::Substitution('T'),
             specialises: None,
         }],
     };
