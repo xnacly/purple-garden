@@ -24,6 +24,7 @@ pub enum Type<'t> {
     // Foreign<player> in the typesystem, meaning functions defined on the former can not be
     // called on the latter, resulting in a type error
     Foreign(&'t str),
+    Generic(char),
 }
 
 #[derive(Debug, Clone)]
@@ -121,6 +122,7 @@ impl<'t> Type<'t> {
     pub fn size(&self) -> usize {
         match self {
             Type::Void => 0,
+            Type::Generic(_) => unreachable!("generics size asked, this is not supposed to happen"),
             Type::Record(fields) => record_size(fields.as_slice()),
             Type::Bool
             | Type::Int
@@ -181,6 +183,7 @@ fn align_up(value: usize, align: usize) -> usize {
 impl Display for Type<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Type::Generic(c) => write!(f, "{c}"),
             Type::Void => write!(f, "Void"),
             Type::Bool => write!(f, "Bool"),
             Type::Int => write!(f, "Int"),
