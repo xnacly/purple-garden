@@ -1,26 +1,37 @@
 use crate::{
-    Anomaly, BuiltinFn, REGISTER_COUNT, Value,
+    Anomaly, BuiltinFn, DEFAULT_STACK_SIZE, MIB, REGISTER_COUNT, Value,
     gc::{AllocType, Gc},
     op::Op,
 };
 use std::{alloc::Layout, ffi::c_void};
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct VmConfig {
     pub backtrace: bool,
     pub no_gc: bool,
+    /// Size of the call stack in MiB, see [`frames_in`].
+    pub stack_size: usize,
 }
 
-/// Return address of the synthetic root call frame pushed in [`Vm::new`].
-/// Chosen so that after the dispatcher's unconditional `pc += 1` the program
-/// counter lands at `usize::MAX`; never less than the bytecode length, so the
-/// run loop exits. `MAX - 1` (not `MAX`) keeps that `+ 1` from overflowing in
-/// debug builds.
-const ROOT_RETURN_ADDR: usize = usize::MAX - 1;
+impl Default for VmConfig {
+    fn default() -> Self {
+        Self {
+            backtrace: false,
+            no_gc: false,
+            stack_size: DEFAULT_STACK_SIZE,
+        }
+    }
+}
+
+/// Call depth `mib` MiB holds; debug frames are twice as wide as release ones.
+#[must_use]
+pub const fn frames_in(mib: usize) -> usize {
+    mib.saturating_mul(MIB) / size_of::<CallFrame>()
+}
 
 type CollectFn = fn(&mut Vm);
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct CallFrame {
     pub return_to: usize,
     /// Snapshot of [`Vm::spilled`].`len()` at call entry. Used by the debug
@@ -52,6 +63,9 @@ impl DebugInfo {
     }
 }
 
+/// # Safety
+///
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
 pub unsafe extern "C" fn syscall_unimplemented(vm: *mut c_void) {
     let vm = unsafe { &mut *vm.cast::<Vm>() };
     vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
@@ -63,7 +77,8 @@ pub struct Vm {
     r: [Value; REGISTER_COUNT],
     pub pc: usize,
 
-    frames: Vec<CallFrame>,
+    frames: Box<[CallFrame]>,
+    frame_depth: usize,
     /// a stack to keep values alive across recursive function invocations
     spilled: Vec<Value>,
 
@@ -81,7 +96,7 @@ pub struct Vm {
     /// so the `Op::Sys` hot path stays branch-free.
     pub pending_trap: Option<Anomaly>,
 
-    config: VmConfig,
+    pub config: VmConfig,
     /// Called when allocation wants to run a collection pass.
     collect_fn: CollectFn,
 }
@@ -99,15 +114,9 @@ macro_rules! trap_if {
 impl Vm {
     #[must_use]
     pub fn new(config: VmConfig) -> Self {
-        let mut frames = Vec::with_capacity(64);
-        // Synthetic root frame: the VM enters the entry function directly, so
-        // its trailing Op::Ret needs a frame to pop. Popping it ends the run
-        // (see ROOT_RETURN_ADDR) and drains any pending trap.
-        frames.push(CallFrame {
-            return_to: ROOT_RETURN_ADDR,
-            #[cfg(debug_assertions)]
-            spilled_depth: 0,
-        });
+        let mut frames = vec![CallFrame::default(); frames_in(config.stack_size).saturating_add(1)]
+            .into_boxed_slice();
+        frames[0] = Self::root_frame();
         let collect = if config.no_gc {
             Self::collect_noop
         } else {
@@ -117,6 +126,7 @@ impl Vm {
         Self {
             r: [const { Value(0) }; REGISTER_COUNT],
             frames,
+            frame_depth: 1,
             pc: 0,
             bytecode: Vec::new(),
             globals: Vec::new(),
@@ -128,6 +138,35 @@ impl Vm {
             config,
             collect_fn: collect,
         }
+    }
+
+    fn root_frame() -> CallFrame {
+        // The VM enters a top-level function directly, so its trailing Op::Ret
+        // needs a frame to pop. Popping this synthetic frame lands on the
+        // trailing Op::Halt and drains any pending trap. `return_to` is a
+        // placeholder; `run` patches it once the bytecode length is known.
+        CallFrame {
+            return_to: usize::MAX,
+            #[cfg(debug_assertions)]
+            spilled_depth: 0,
+        }
+    }
+
+    /// Prepare the VM for a new execution
+    ///
+    /// [`Self::run`] consumes the synthetic root frame when the entered function returns. Call this
+    /// before every independent invocation; it also discards call state left behind by a trapped
+    /// run.
+    pub fn reset(&mut self) {
+        // poison le well in debugging so we know whats going on
+        #[cfg(debug_assertions)]
+        self.r.fill(Value(0xDEAD_AFFE_DEAD_AFFE));
+        self.pc = usize::MAX;
+        self.frames[0] = Self::root_frame();
+        self.frame_depth = 1;
+        self.spilled.clear();
+        self.backtrace.clear();
+        self.pending_trap = None;
     }
 
     fn collect(&mut self) {
@@ -200,10 +239,25 @@ impl Vm {
         value
     }
 
-    pub fn run(&mut self, syscalls: &[BuiltinFn]) -> Result<(), Anomaly> {
+    pub fn run<const BACKTRACE: bool>(&mut self, syscalls: &[BuiltinFn]) -> Result<(), Anomaly> {
+        let Some(last) = self.bytecode.last() else {
+            return Ok(());
+        };
+        debug_assert!(
+            matches!(last, Op::Halt),
+            "bytecode must end in Op::Halt (bc::Cc::finalize emits it)"
+        );
+        let halt = self.bytecode.len() - 1;
+        // wrapping_sub covers bytecode that is only a Halt.
+        self.frames[0].return_to = halt.wrapping_sub(1);
+
+        let mut pc = self.pc;
+        if pc > halt {
+            return Ok(());
+        }
+
         let regs = self.r.as_mut_ptr();
         let instructions = self.bytecode.as_mut_ptr();
-        let instructions_len = self.bytecode.len();
         let globals = self.globals.as_mut_ptr();
         let syscalls = syscalls.as_ptr();
 
@@ -219,9 +273,7 @@ impl Vm {
             };
         }
 
-        let mut pc = self.pc;
-
-        while pc < instructions_len {
+        loop {
             let op = unsafe { *instructions.add(pc) };
 
             match op {
@@ -351,7 +403,7 @@ impl Vm {
                     continue;
                 }
                 Op::Tail { func } => {
-                    if std::hint::unlikely(self.config.backtrace) {
+                    if BACKTRACE {
                         self.backtrace.push(func as usize);
                     }
                     pc = func as usize;
@@ -382,15 +434,24 @@ impl Vm {
                     }
                 },
                 Op::Call { func } => {
-                    if std::hint::unlikely(self.config.backtrace) {
+                    if BACKTRACE {
                         self.backtrace.push(func as usize);
                     }
 
-                    self.frames.push(CallFrame {
-                        return_to: pc,
-                        #[cfg(debug_assertions)]
-                        spilled_depth: self.spilled.len(),
-                    });
+                    let depth = self.frame_depth;
+                    if std::hint::unlikely(depth == self.frames.len()) {
+                        return Err(Anomaly::StackOverflow { pc });
+                    }
+
+                    unsafe {
+                        *self.frames.get_unchecked_mut(depth) = CallFrame {
+                            return_to: pc,
+                            #[cfg(debug_assertions)]
+                            spilled_depth: self.spilled.len(),
+                        };
+                    }
+                    self.frame_depth = depth + 1;
+
                     pc = func as usize;
                     continue;
                 }
@@ -418,16 +479,14 @@ impl Vm {
                     }
                 },
                 Op::Ret => {
-                    if std::hint::unlikely(self.config.backtrace) {
+                    if BACKTRACE {
                         self.backtrace.pop();
                     }
 
-                    // PERF: fully replacing the pop with just an access and a length truncation?
-
-                    // The synthetic root frame from Vm::new guarantees the
-                    // stack is never empty here, so the pop always yields a
-                    // frame.
-                    let frame = unsafe { self.frames.pop().unwrap_unchecked() };
+                    // The root frame from Vm::new keeps this from underflowing.
+                    let depth = self.frame_depth - 1;
+                    self.frame_depth = depth;
+                    let frame = unsafe { *self.frames.get_unchecked(depth) };
 
                     // See Op::Push: every function must leave the spill
                     // stack at the depth it found it. Catches arg-shuffle
@@ -447,29 +506,71 @@ impl Vm {
                     }
                     pc = frame.return_to;
                 }
-                Op::Push { src } => unsafe {
-                    self.spilled.push(*r!(src));
-                },
-                Op::Push2 { a, b } => unsafe {
-                    self.spilled.push(*r!(a));
-                    self.spilled.push(*r!(b));
-                },
-                Op::Push3 { a, b, c } => unsafe {
-                    self.spilled.push(*r!(a));
-                    self.spilled.push(*r!(b));
-                    self.spilled.push(*r!(c));
-                },
+                Op::Push { src } => {
+                    let len = self.spilled.len();
+
+                    if std::hint::unlikely(len + 1 > self.spilled.capacity()) {
+                        self.spilled.reserve(1);
+                    }
+
+                    unsafe {
+                        let dst = self.spilled.as_mut_ptr().add(len);
+                        dst.write(*r!(src));
+                        self.spilled.set_len(len + 1);
+                    }
+                }
+                Op::Push2 { a, b } => {
+                    let len = self.spilled.len();
+
+                    if std::hint::unlikely(len + 2 > self.spilled.capacity()) {
+                        self.spilled.reserve(2);
+                    }
+
+                    unsafe {
+                        let dst = self.spilled.as_mut_ptr().add(len);
+                        dst.write(*r!(a));
+                        dst.add(1).write(*r!(b));
+                        self.spilled.set_len(len + 2);
+                    }
+                }
+                Op::Push3 { a, b, c } => {
+                    let len = self.spilled.len();
+
+                    if std::hint::unlikely(len + 3 > self.spilled.capacity()) {
+                        self.spilled.reserve(3);
+                    }
+
+                    unsafe {
+                        let dst = self.spilled.as_mut_ptr().add(len);
+                        dst.write(*r!(a));
+                        dst.add(1).write(*r!(b));
+                        dst.add(2).write(*r!(c));
+                        self.spilled.set_len(len + 3);
+                    }
+                }
                 Op::Pop { dst } => unsafe {
-                    r_mut!(dst) = self.spilled.pop().unwrap();
+                    let len = self.spilled.len();
+                    let ptr = self.spilled.as_ptr();
+                    debug_assert!(len >= 1);
+                    r_mut!(dst) = ptr.add(len - 1).read();
+                    self.spilled.set_len(len - 1);
                 },
                 Op::Pop2 { a, b } => unsafe {
-                    r_mut!(a) = self.spilled.pop().unwrap();
-                    r_mut!(b) = self.spilled.pop().unwrap();
+                    let len = self.spilled.len();
+                    let ptr = self.spilled.as_ptr();
+                    debug_assert!(len >= 2);
+                    r_mut!(a) = ptr.add(len - 1).read();
+                    r_mut!(b) = ptr.add(len - 2).read();
+                    self.spilled.set_len(len - 2);
                 },
                 Op::Pop3 { a, b, c } => unsafe {
-                    r_mut!(a) = self.spilled.pop().unwrap();
-                    r_mut!(b) = self.spilled.pop().unwrap();
-                    r_mut!(c) = self.spilled.pop().unwrap();
+                    let len = self.spilled.len();
+                    let ptr = self.spilled.as_ptr();
+                    debug_assert!(len >= 3);
+                    r_mut!(a) = ptr.add(len - 1).read();
+                    r_mut!(b) = ptr.add(len - 2).read();
+                    r_mut!(c) = ptr.add(len - 3).read();
+                    self.spilled.set_len(len - 3);
                 },
                 Op::CastToDouble { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_f64();
@@ -503,10 +604,11 @@ impl Vm {
                 Op::AddrOf { dst, base, offset } => unsafe {
                     r_mut!(dst) = Value::from_ptr(r!(base).as_ptr::<u8>().add(offset as usize));
                 },
+                Op::Halt => break,
                 Op::Nop => {}
             }
 
-            pc += 1;
+            pc = pc.wrapping_add(1);
         }
 
         self.pc = pc;
@@ -558,17 +660,68 @@ mod ops {
         SIDE_EFFECTS.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn run(bytecode: Vec<Op>) -> Vm {
+    fn run(mut bytecode: Vec<Op>) -> Vm {
+        bytecode.push(Op::Halt);
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;
-        vm.run(&[]).expect("vm run failed");
+        vm.run::<false>(&[]).expect("vm run failed");
         vm
     }
 
-    fn run_err(bytecode: Vec<Op>) -> Anomaly {
+    fn run_err(mut bytecode: Vec<Op>) -> Anomaly {
+        bytecode.push(Op::Halt);
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;
-        vm.run(&[]).expect_err("vm run unexpectedly succeeded")
+        vm.run::<false>(&[])
+            .expect_err("vm run unexpectedly succeeded")
+    }
+
+    #[test]
+    fn prepare_run_reinstalls_root_frame_after_return() {
+        let mut vm = Vm::new(VmConfig::default());
+        vm.bytecode = vec![Op::LoadI { dst: 0, value: 42 }, Op::Ret, Op::Halt];
+
+        vm.reset();
+        vm.pc = 0;
+        vm.run::<false>(&[])
+            .expect("first invocation should succeed");
+        assert_eq!(vm.r(0).as_int(), 42);
+
+        vm.reset();
+        vm.pc = 0;
+        vm.run::<false>(&[])
+            .expect("second invocation should succeed");
+        assert_eq!(vm.r(0).as_int(), 42);
+    }
+
+    #[test]
+    fn prepare_run_discards_frames_left_by_a_trap() {
+        let mut vm = Vm::new(VmConfig::default());
+        vm.bytecode = vec![
+            Op::LoadI { dst: 0, value: 1 },
+            Op::LoadI { dst: 1, value: 0 },
+            Op::IDiv {
+                dst: 0,
+                lhs: 0,
+                rhs: 1,
+            },
+            Op::Ret,
+            Op::Halt,
+        ];
+
+        vm.reset();
+        vm.pc = 0;
+        assert!(matches!(
+            vm.run::<false>(&[]),
+            Err(Anomaly::DivisionByZero { .. })
+        ));
+
+        vm.bytecode[2] = Op::LoadI { dst: 0, value: 7 };
+        vm.reset();
+        vm.pc = 0;
+        vm.run::<false>(&[])
+            .expect("invocation after a trap should succeed");
+        assert_eq!(vm.r(0).as_int(), 7);
     }
 
     #[test]
@@ -576,9 +729,9 @@ mod ops {
         SIDE_EFFECTS.store(0, Ordering::SeqCst);
 
         let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = vec![Op::Sys { idx: 0 }, Op::Sys { idx: 1 }];
+        vm.bytecode = vec![Op::Sys { idx: 0 }, Op::Sys { idx: 1 }, Op::Halt];
         let err = vm
-            .run(&[trap_syscall, side_effect_syscall])
+            .run::<false>(&[trap_syscall, side_effect_syscall])
             .expect_err("trapping syscall should stop execution");
 
         assert!(matches!(
@@ -715,8 +868,9 @@ mod ops {
                 lhs: 0,
                 rhs: 1,
             },
+            Op::Halt,
         ];
-        let err = vm.run(&[]).expect_err("ddiv by zero should trap");
+        let err = vm.run::<false>(&[]).expect_err("ddiv by zero should trap");
         assert!(matches!(err, Anomaly::DivisionByZero { .. }));
     }
 
@@ -793,8 +947,9 @@ mod ops {
                 lhs: 1,
                 rhs: 0,
             },
+            Op::Halt,
         ];
-        vm.run(&[]).unwrap();
+        vm.run::<false>(&[]).unwrap();
         assert_eq!(vm.r(2).as_f64(), 4.0);
         assert_eq!(vm.r(3).as_f64(), 1.0);
         assert_eq!(vm.r(4).as_f64(), 3.75);
@@ -977,8 +1132,9 @@ mod ops {
             Op::CastToBool { dst: 4, src: 0 },
             Op::LoadI { dst: 5, value: 0 },
             Op::CastToBool { dst: 6, src: 5 },
+            Op::Halt,
         ];
-        vm.run(&[]).unwrap();
+        vm.run::<false>(&[]).unwrap();
         assert_eq!(vm.r(1).as_f64(), 5.0);
         assert_eq!(vm.r(3).as_int(), 3);
         assert!(vm.r(4).as_bool());

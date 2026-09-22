@@ -1,4 +1,5 @@
-use purple_garden::{FromVm, GardenOpaque, GardenValue, IntoVm, Value, Vm, VmConfig, pg_pkg};
+use purple_garden::embed::{FromVm, IntoVm, Value, Vm, VmConfig};
+use purple_garden::{GardenOpaque, GardenValue, pg_pkg};
 
 #[derive(GardenOpaque)]
 struct Counter {
@@ -23,7 +24,7 @@ struct Account {
 }
 
 #[pg_pkg]
-mod strings {
+mod str {
     /// Returns the length of s in bytes.
     #[purple_garden::pg_fn(pure)]
     pub fn len(s: &str) -> i64 {
@@ -41,7 +42,7 @@ mod strings {
 
 #[pg_pkg]
 mod counters {
-    use purple_garden::Vm;
+    use purple_garden::embed::Vm;
 
     use super::Counter;
 
@@ -103,13 +104,13 @@ mod tools {
 
 #[test]
 fn pg_pkg_generates_package_metadata() {
-    assert_eq!(strings::PACKAGE.name, "strings");
-    assert_eq!(strings::PACKAGE.fns.len(), 3);
-    assert_eq!(strings::PACKAGE.fns[0].name, "len");
-    assert!(strings::PACKAGE.fns[0].pure);
-    assert_eq!(strings::PACKAGE.fns[0].arg_names, &["s"]);
-    assert!(!strings::PACKAGE.fns[1].pure);
-    assert_eq!(strings::PACKAGE.fns[1].arg_names, &["s", "n"]);
+    assert_eq!(str::PACKAGE.name, "str");
+    assert_eq!(str::PACKAGE.fns.len(), 3);
+    assert_eq!(str::PACKAGE.fns[0].name, "len");
+    assert!(str::PACKAGE.fns[0].pure);
+    assert_eq!(str::PACKAGE.fns[0].arg_names, &["s"]);
+    assert!(!str::PACKAGE.fns[1].pure);
+    assert_eq!(str::PACKAGE.fns[1].arg_names, &["s", "n"]);
 }
 
 #[test]
@@ -128,7 +129,7 @@ fn pg_pkg_wrapper_decodes_args_and_encodes_return() {
     let s = vm.new_string("hello".to_owned());
     *vm.r_mut(0) = s;
 
-    unsafe { (strings::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
+    unsafe { (str::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
 
     assert_eq!(vm.r(0).as_int(), 5);
 }
@@ -140,7 +141,7 @@ fn pg_pkg_wrapper_allocates_return_strings() {
     *vm.r_mut(0) = s;
     *vm.r_mut(1) = Value::from(3_i64);
 
-    unsafe { (strings::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
+    unsafe { (str::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
     assert_eq!(vm.r(0).as_str(), "hahaha");
 }
@@ -149,11 +150,11 @@ fn pg_pkg_wrapper_allocates_return_strings() {
 fn pg_pkg_supports_garden_opaque_types() {
     assert_eq!(
         counters::PACKAGE.fns[0].ret,
-        purple_garden::Type::Foreign("Counter")
+        purple_garden::embed::Type::Foreign("Counter")
     );
     assert_eq!(
         counters::PACKAGE.fns[1].args,
-        &[purple_garden::Type::Foreign("Counter")]
+        &[purple_garden::embed::Type::Foreign("Counter")]
     );
 
     let mut vm = Vm::new(VmConfig::default());
@@ -166,12 +167,22 @@ fn pg_pkg_supports_garden_opaque_types() {
 }
 
 #[test]
+fn garden_opaque_encodes_borrowed_handles() {
+    let counter = Counter { value: 9 };
+    let mut vm = Vm::new(VmConfig::default());
+    let value = (&counter).into_vm(&mut vm);
+
+    let decoded: &Counter = FromVm::from_vm(&vm, value);
+    assert_eq!(decoded.value, 9);
+}
+
+#[test]
 fn pg_fn_unsafe_passes_vm_and_exposes_remaining_signature() {
     let fun = &counters::PACKAGE.fns[2];
     assert_eq!(fun.name, "add_register_zero");
     assert_eq!(fun.arg_names, &["value"]);
-    assert_eq!(fun.args, &[purple_garden::Type::Int]);
-    assert_eq!(fun.ret, purple_garden::Type::Int);
+    assert_eq!(fun.args, &[purple_garden::embed::Type::Int]);
+    assert_eq!(fun.ret, purple_garden::embed::Type::Int);
 
     let mut vm = Vm::new(VmConfig::default());
     *vm.r_mut(0) = Value::from(40_i64);
@@ -185,15 +196,15 @@ fn pg_fn_unsafe_passes_vm_and_exposes_remaining_signature() {
 fn pg_pkg_exposes_record_metadata() {
     assert_eq!(
         users::PACKAGE.fns[0].args,
-        &[purple_garden::Type::Record(
-            purple_garden::RecordFields::Static(&[
-                purple_garden::Field {
+        &[purple_garden::embed::Type::Record(
+            purple_garden::embed::RecordFields::Static(&[
+                purple_garden::embed::Field {
                     name: "name",
-                    ty: purple_garden::Type::Str,
+                    ty: purple_garden::embed::Type::Str,
                 },
-                purple_garden::Field {
+                purple_garden::embed::Field {
                     name: "age",
-                    ty: purple_garden::Type::Int,
+                    ty: purple_garden::embed::Type::Int,
                 },
             ])
         )]

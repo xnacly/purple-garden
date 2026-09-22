@@ -7,6 +7,7 @@ pub use purple_garden_ir::{
     ptype::{Field, RecordFields, Type},
 };
 pub use purple_garden_shared::BuiltinFn;
+pub use purple_garden_shared::config::{DEFAULT_STACK_SIZE, MIB};
 
 pub mod anomaly;
 pub mod gc;
@@ -26,6 +27,15 @@ pub use crate::value::{
     encode_record_field,
 };
 pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, syscall_unimplemented};
+
+/// Compatibility namespace used by embedding macros.
+#[doc(hidden)]
+pub mod embed {
+    pub use super::{
+        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Type, Value, Vm, VmConfig,
+        alloc_record, copy_record, decode_record_field, encode_record_field,
+    };
+}
 
 #[derive(Debug)]
 pub struct Pkg {

@@ -3,13 +3,22 @@ use std::{collections::HashMap, sync::OnceLock};
 extern crate self as purple_garden;
 
 pub use purple_garden_runtime::{
-    Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Type, Value, Vm, alloc_record,
+    Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Type, Value, Vm, alloc_record,
     copy_record, decode_record_field, encode_record_field,
 };
 
+/// Compatibility namespace used by embedding macros.
+#[doc(hidden)]
+pub mod embed {
+    pub use super::{
+        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Type, Value, Vm,
+        alloc_record, copy_record, decode_record_field, encode_record_field,
+    };
+}
+
 mod io;
 mod math;
-mod strings;
+mod str;
 #[macro_use]
 mod syscall_macros;
 mod testing;
@@ -62,14 +71,14 @@ fn insert_pkg(index: &mut HashMap<String, &'static Pkg>, parent: String, pkg: &'
 pub static SAFE_STD: &[Pkg] = &[
     io::PACKAGE,
     math::PACKAGE,
-    strings::PACKAGE,
+    str::PACKAGE,
     testing::PACKAGE,
 ];
 
 pub static STD: &[Pkg] = &[
     io::PACKAGE,
     math::PACKAGE,
-    strings::PACKAGE,
+    str::PACKAGE,
     testing::PACKAGE,
     r#unsafe::PACKAGE,
 ];
@@ -82,7 +91,7 @@ mod tests {
     fn resolves_root_packages() {
         assert_eq!(resolve_pkg("io").unwrap().name, "io");
         assert_eq!(resolve_pkg("math").unwrap().name, "math");
-        assert_eq!(resolve_pkg("strings").unwrap().name, "strings");
+        assert_eq!(resolve_pkg("str").unwrap().name, "str");
         assert_eq!(resolve_pkg("testing").unwrap().name, "testing");
         assert_eq!(resolve_pkg("unsafe").unwrap().name, "unsafe");
     }
@@ -102,6 +111,7 @@ mod tests {
     fn rejects_unknown_or_malformed_paths() {
         assert!(resolve_pkg("").is_none());
         assert!(resolve_pkg("missing").is_none());
+        assert!(resolve_pkg("strings").is_none());
         assert!(resolve_pkg("io/").is_none());
         assert!(resolve_pkg("io/missing").is_none());
         assert!(resolve_pkg("unsafe/").is_none());

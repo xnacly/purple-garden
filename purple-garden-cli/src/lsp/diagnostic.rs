@@ -23,7 +23,7 @@ pub(super) fn diagnostic_for_lsp(
 fn diagnostic_message(diagnostic: &FrontendDiagnostic) -> String {
     let mut message = diagnostic.message.clone();
     if let Some(label) = &diagnostic.primary.message {
-        message.push_str("\n");
+        message.push('\n');
         message.push_str(label);
     }
     for note in &diagnostic.notes {

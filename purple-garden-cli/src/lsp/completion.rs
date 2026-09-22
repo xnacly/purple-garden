@@ -457,8 +457,7 @@ fn completion_prefix(source: &str, offset: usize) -> String {
 
 fn line_prefix(source: &str, offset: usize) -> &str {
     let clamped = offset.min(source.len());
-    let start = source[..clamped]
-        .as_bytes()
+    let start = source.as_bytes()[..clamped]
         .iter()
         .rposition(|&b| b == b'\n')
         .map_or(0, |idx| idx + 1);

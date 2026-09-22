@@ -52,12 +52,16 @@ const RSP: u8 = 4;
 const RAX: u8 = 0;
 const RCX: u8 = 1;
 const RDX: u8 = 2;
+const RSI: u8 = 6;
+const R8: u8 = 8;
+const R9: u8 = 9;
 /// Registers implicitly clobbered by the current `idiv` lowering.
 const IDIV_CLOBBERS: &[u8] = &[RAX, RCX, RDX];
 
 #[derive(Default)]
 struct SupportPlan {
     entry: Option<ir::Id>,
+    call_sites: Vec<u32>,
     /// Target-specific register hazards discovered before allocation. Each
     /// entry says that a lowering at `pos` overwrites `regs`; the allocator then
     /// avoids assigning live-across values to those registers.
@@ -70,6 +74,7 @@ pub fn compile_func(
     out: &mut Vec<u8>,
     liveness: &[(u32, u32)],
     allocator: &mut crate::regalloc::Allocator,
+    buffers: &mut Scratch,
 ) -> Option<()> {
     if func.params.len() > 32 {
         skip!(
@@ -84,11 +89,21 @@ pub fn compile_func(
         skip!(func, "empty function");
     };
 
+    if is_result_slot_identity(func, entry) {
+        // Native calls receive arg0 in vm.r[0] and must return through vm.r[0].
+        // When a function returns that parameter unchanged, the VM register file
+        // already holds the required boundary state; materializing it into a GPR
+        // and storing it back would only re-write the single source of truth.
+        emit(out, Insn::Ret);
+        purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
+        return Some(());
+    }
+
     out.reserve(func.params.len() * 4 + func.blocks.len() * 16 + 64);
 
     let regs = allocator.rebuild(
         liveness,
-        &[],
+        &plan.call_sites,
         &plan.fixed_clobbers,
         crate::regalloc::RegClasses {
             caller: POOL,
@@ -98,12 +113,12 @@ pub fn compile_func(
     // Parallel edge moves only need a scratch register for cycles. If the
     // allocator consumed every caller register, cyclic edge moves are rejected
     // and the function falls back to bytecode.
-    let scratch = POOL.iter().copied().find(|candidate| {
+    let reg_scratch = POOL.iter().copied().find(|candidate| {
         !regs
             .iter()
             .any(|loc| matches!(loc, ir::Location::Reg(r) if r == candidate))
     });
-    Lowering::new(func, out, regs, scratch, entry).emit()?;
+    Lowering::new(func, out, regs, reg_scratch, buffers, entry).emit()?;
 
     // we have produced no machine code, so we just RET, this may be the case for fully optimised
     // (dce) away IR
@@ -115,12 +130,40 @@ pub fn compile_func(
     Some(())
 }
 
-#[derive(Clone, Copy)]
+fn is_result_slot_identity(func: &ir::Func<'_>, entry: ir::Id) -> bool {
+    let Some(&result_param) = func.params.first() else {
+        return false;
+    };
+    let Some(block) = func.blocks.get(entry.0 as usize) else {
+        return false;
+    };
+
+    !block.tombstone
+        && block.instructions.is_empty()
+        && matches!(
+            block.term,
+            Some(ir::Terminator::Return {
+                value: Some(value),
+                ..
+            }) if value == result_param
+        )
+}
+
+#[derive(Debug, Clone, Copy)]
 struct Patch {
     /// Offset of the 4-byte relative displacement inside `out`.
     rel: usize,
     /// IR block id that owns the final machine-code target offset.
     target: ir::Id,
+}
+
+/// Reusable lowering allocation storage
+#[derive(Debug, Default, Clone)]
+pub struct Scratch {
+    block_offsets: Vec<usize>,
+    patches: Vec<Patch>,
+    move_pairs: Vec<(u8, u8)>,
+    saved_regs: Vec<u8>,
 }
 
 /// A single x86-64 instruction. `encode` appends its machine-code bytes;
@@ -240,6 +283,13 @@ pub enum Insn {
     CallReg {
         reg: u8,
     },
+    /// `push r{reg}` / `pop r{reg}` (callee-save frame management).
+    Push {
+        reg: u8,
+    },
+    Pop {
+        reg: u8,
+    },
     /// `cqo`; sign-extend rax into rdx:rax (the idiv dividend).
     Cqo,
     /// `idiv r{divisor}`; rdx:rax / divisor, quotient to rax, remainder to rdx.
@@ -323,6 +373,18 @@ impl Insn {
                     code.push(0x41);
                 }
                 code.extend_from_slice(&[0xff, modrm(2, reg)]);
+            }
+            Insn::Push { reg } => {
+                if reg >= 8 {
+                    code.push(0x41);
+                }
+                code.push(0x50 + (reg & 7));
+            }
+            Insn::Pop { reg } => {
+                if reg >= 8 {
+                    code.push(0x41);
+                }
+                code.push(0x58 + (reg & 7));
             }
             // REX.W 0x99 ; cqo.
             Insn::Cqo => code.extend_from_slice(&[0x48, 0x99]),
@@ -418,6 +480,8 @@ impl fmt::Display for Insn {
             Insn::Sete { dst } => write!(f, "sete {}b", r(dst)),
             Insn::MovAbs { dst, imm } => write!(f, "movabs {}, {imm:#x}", r(dst)),
             Insn::CallReg { reg } => write!(f, "call {}", r(reg)),
+            Insn::Push { reg } => write!(f, "push {}", r(reg)),
+            Insn::Pop { reg } => write!(f, "pop {}", r(reg)),
             Insn::Cqo => write!(f, "cqo"),
             Insn::Idiv { divisor } => write!(f, "idiv {}", r(divisor)),
         }
@@ -565,11 +629,68 @@ fn emit_bin(out: &mut Vec<u8>, op: BinOp, d: u8, l: u8, r: u8) {
 /// C-ABI `call addr`, rdi already holding `*mut Vm`. Leaves enter at `rsp % 16
 /// == 8`, so realign with `sub`/`add rsp, 8`. Callees clobber caller-saved regs,
 /// fine here: the only use is a trap callback that returns right after.
-fn emit_abi_call(out: &mut Vec<u8>, addr: u64) {
-    emit(out, Insn::SubImm { dst: RSP, imm: 8 });
+#[derive(Clone, Copy)]
+enum AbiArg {
+    Reg(u8),
+    Imm(u64),
+}
+
+/// Emit a small SysV ABI call. The VM base in `rdi` is saved because it is
+/// caller-saved, while the generated code continues using it after the call.
+fn emit_abi_call(
+    out: &mut Vec<u8>,
+    addr: u64,
+    args: &[AbiArg],
+    result: Option<u8>,
+    stack_bytes: i32,
+) {
+    emit(
+        out,
+        Insn::SubImm {
+            dst: RSP,
+            imm: stack_bytes,
+        },
+    );
+    emit(
+        out,
+        Insn::StoreMem {
+            base: RSP,
+            offset: 0,
+            src: RDI,
+        },
+    );
+
+    let abi_regs = [RDI, RSI, RDX, RCX, R8, R9];
+    for (i, arg) in args.iter().enumerate() {
+        let Some(&dst) = abi_regs.get(i) else { return };
+        match *arg {
+            AbiArg::Reg(src) if src != dst => emit(out, Insn::Mov { dst, src }),
+            AbiArg::Imm(value) => emit(out, Insn::MovAbs { dst, imm: value }),
+            AbiArg::Reg(_) => {}
+        }
+    }
     emit(out, Insn::MovAbs { dst: 0, imm: addr }); // rax = addr
     emit(out, Insn::CallReg { reg: 0 }); // call rax
-    emit(out, Insn::AddImm { dst: RSP, imm: 8 });
+    emit(
+        out,
+        Insn::LoadMem {
+            dst: RDI,
+            base: RSP,
+            offset: 0,
+        },
+    );
+    emit(
+        out,
+        Insn::AddImm {
+            dst: RSP,
+            imm: stack_bytes,
+        },
+    );
+    if let Some(dst) = result {
+        if dst != RAX {
+            emit(out, Insn::Mov { dst, src: RAX });
+        }
+    }
 }
 
 /// `d = l <op> imm` for IDiv/IMod, nonzero constant divisor. idiv has no imm
@@ -733,6 +854,9 @@ fn validate_supported(func: &ir::Func<'_>) -> Option<SupportPlan> {
 
         for instr in &block.instructions {
             match instr {
+                ir::Instr::Alloc { .. } => {
+                    plan.call_sites.push(pos);
+                }
                 ir::Instr::Noop => {}
                 ir::Instr::LoadConst { value, .. } if supported_const(value) => {}
                 ir::Instr::BinImm { op, imm, .. } if supported_bin_imm(*op) => {
@@ -780,10 +904,12 @@ struct Lowering<'a, 'ir> {
     out: &'a mut Vec<u8>,
     regs: &'a [ir::Location],
     scratch: Option<u8>,
+    /// Callee-saved GPRs used by this function, saved in the prologue.
+    saved_regs: &'a Vec<u8>,
     entry: ir::Id,
-    block_offsets: Vec<usize>,
-    patches: Vec<Patch>,
-    move_pairs: Vec<(u8, u8)>,
+    block_offsets: &'a mut Vec<usize>,
+    patches: &'a mut Vec<Patch>,
+    move_pairs: &'a mut Vec<(u8, u8)>,
 }
 
 impl<'a, 'ir> Lowering<'a, 'ir> {
@@ -793,22 +919,40 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         out: &'a mut Vec<u8>,
         regs: &'a [ir::Location],
         scratch: Option<u8>,
+        buffers: &'a mut Scratch,
         entry: ir::Id,
     ) -> Self {
+        let Scratch {
+            block_offsets,
+            patches,
+            move_pairs,
+            saved_regs,
+        } = buffers;
+        block_offsets.clear();
+        block_offsets.resize(func.blocks.len(), usize::MAX);
+        patches.clear();
+        move_pairs.clear();
+        saved_regs.clear();
+        saved_regs.extend(POOL_CALLEE.iter().copied().filter(|&candidate| {
+            regs.iter()
+                .any(|loc| matches!(loc, ir::Location::Reg(r) if *r == candidate))
+        }));
         Self {
             func,
             out,
             regs,
             scratch,
+            saved_regs,
             entry,
-            block_offsets: vec![usize::MAX; func.blocks.len()],
-            patches: Vec::new(),
-            move_pairs: Vec::new(),
+            block_offsets,
+            patches,
+            move_pairs,
         }
     }
 
     /// Emit the full function body, then patch deferred branch displacements.
     fn emit(mut self) -> Option<()> {
+        self.emit_prologue();
         self.emit_entry_loads();
 
         for block in &self.func.blocks {
@@ -825,6 +969,29 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         }
 
         self.patch_jumps()
+    }
+
+    fn emit_prologue(&mut self) {
+        for &reg in self.saved_regs {
+            emit(self.out, Insn::Push { reg });
+        }
+    }
+
+    fn emit_epilogue(&mut self) {
+        for &reg in self.saved_regs.iter().rev() {
+            emit(self.out, Insn::Pop { reg });
+        }
+        emit(self.out, Insn::Ret);
+    }
+
+    /// The call-local area contains the saved VM base. Its size also restores
+    /// the required 16-byte stack alignment before `call`.
+    fn abi_call_stack_bytes(&self) -> i32 {
+        if self.saved_regs.len() % 2 == 0 {
+            8
+        } else {
+            16
+        }
     }
 
     /// Load function parameters from `vm.r` slots into allocated registers.
@@ -847,6 +1014,30 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     fn emit_instr(&mut self, instr: &ir::Instr<'_>) -> Option<()> {
         match instr {
             ir::Instr::Noop => {}
+            ir::Instr::Alloc {
+                dst: ir::TypeId { id, ty },
+                layout,
+                ..
+            } => {
+                let Some(dst_reg) = reg_of(self.regs, *id) else {
+                    skip!(self.func, "unallocated alloc dst %v{}", id.0);
+                };
+                let Some(kind) = purple_garden_runtime::AllocType::from_ty(ty) else {
+                    skip!(self.func, "unsupported allocation type");
+                };
+                emit_abi_call(
+                    self.out,
+                    purple_garden_runtime::jit_alloc as *const () as usize as u64,
+                    &[
+                        AbiArg::Reg(RDI),
+                        AbiArg::Imm(kind as u64),
+                        AbiArg::Imm(layout.size() as u64),
+                        AbiArg::Imm(layout.align() as u64),
+                    ],
+                    Some(dst_reg),
+                    self.abi_call_stack_bytes(),
+                );
+            }
             ir::Instr::LoadConst { dst, value, .. } => self.emit_const(dst, value)?,
             ir::Instr::BinImm {
                 op, dst, lhs, imm, ..
@@ -933,8 +1124,14 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             BinOp::IDiv | BinOp::IMod if imm == 0 => {
                 let helper: purple_garden_runtime::BuiltinFn =
                     purple_garden_runtime::jit_trap_div_zero;
-                emit_abi_call(self.out, helper as usize as u64);
-                emit(self.out, Insn::Ret);
+                emit_abi_call(
+                    self.out,
+                    helper as usize as u64,
+                    &[AbiArg::Reg(RDI)],
+                    None,
+                    self.abi_call_stack_bytes(),
+                );
+                self.emit_epilogue();
             }
             BinOp::IMod if imm == 2 => {
                 if d != l {
@@ -1005,9 +1202,13 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 yes: (yes_id, yes_params),
                 no: (no_id, no_params),
                 ..
-            }) => {
-                self.emit_branch_cmp_imm(*op, *lhs, *imm, *yes_id, *yes_params, *no_id, *no_params)?
-            }
+            }) => self.emit_branch_cmp_imm(
+                *op,
+                *lhs,
+                *imm,
+                (*yes_id, *yes_params),
+                (*no_id, *no_params),
+            )?,
             Some(ir::Terminator::Jump { id, params, .. }) => self.emit_jump(*id, *params)?,
             Some(ir::Terminator::Tail {
                 func: tail_func,
@@ -1027,7 +1228,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             };
             emit(self.out, Insn::StoreSlot { src: r, slot: 0 });
         }
-        emit(self.out, Insn::Ret);
+        self.emit_epilogue();
         Some(())
     }
 
@@ -1077,10 +1278,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         op: BinOp,
         lhs: ir::Id,
         imm: i32,
-        yes_id: ir::Id,
-        yes_params: ir::ParamsId,
-        no_id: ir::Id,
-        no_params: ir::ParamsId,
+        (yes_id, yes_params): (ir::Id, ir::ParamsId),
+        (no_id, no_params): (ir::Id, ir::ParamsId),
     ) -> Option<()> {
         let Some(yes_dst) = branch_target_params(self.func, yes_id) else {
             skip!(self.func, "bad branch target b{}", yes_id.0);
@@ -1173,8 +1372,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     }
 
     /// Patch every deferred branch once block offsets are known.
-    fn patch_jumps(self) -> Option<()> {
-        for Patch { rel, target } in self.patches {
+    fn patch_jumps(&mut self) -> Option<()> {
+        for Patch { rel, target } in self.patches.drain(..) {
             let Some(target) = self
                 .block_offsets
                 .get(target.0 as usize)

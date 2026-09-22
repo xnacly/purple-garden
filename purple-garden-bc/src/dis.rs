@@ -314,6 +314,7 @@ impl<'dis> Disassembler<'dis> {
                     format!("addrof r{dst}, r{base}, #{offset}")
                 }
                 Op::Ret => "ret".into(),
+                Op::Halt => "halt".into(),
                 Op::CastToBool { dst, src } => {
                     format!("cast_to_bool r{dst}, r{src}")
                 }

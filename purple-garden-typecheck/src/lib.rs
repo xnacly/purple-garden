@@ -12,12 +12,13 @@ use purple_garden_ir::ptype::Type;
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
 
+pub use typedefs::FunctionType;
+use typedefs::TcType;
 pub use typedefs::TypecheckOutput;
-use typedefs::{FunctionType, TcType};
 
 #[derive(Debug)]
-pub struct Typechecker<'t> {
-    ast: &'t Ast<'t>,
+pub struct Typechecker<'a, 't> {
+    ast: &'a Ast<'t>,
     /// Node id -> Type. Indexed by id; Node ids are dense from the parser.
     map: Vec<Option<Type<'t>>>,
     /// scope stack; innermost frame last; lookups walk from top to bottom
@@ -33,9 +34,9 @@ pub struct Typechecker<'t> {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl<'t> Typechecker<'t> {
+impl<'a, 't> Typechecker<'a, 't> {
     #[must_use]
-    pub fn new(ast: &'t Ast<'t>) -> Self {
+    pub fn new(ast: &'a Ast<'t>) -> Self {
         let mut s = Self {
             ast,
             map: Vec::new(),
@@ -165,6 +166,7 @@ impl<'t> Typechecker<'t> {
 
         TypecheckOutput {
             types: self.map,
+            functions: self.functions,
             diagnostics: self.diagnostics,
         }
     }
@@ -663,15 +665,13 @@ impl<'t> Typechecker<'t> {
                 self.functions.insert(inner_name, f_type.clone());
 
                 let computed_ret = self.block_type(body);
-                if let Some(computed_ret) = computed_ret.as_known() {
-                    if &ret != computed_ret {
-                        self.report(Diagnostic::at_token(
-                            format!(
-                                "`{inner_name}` should return {ret}, but returns {computed_ret}"
-                            ),
-                            self.ast.type_token(*return_type),
-                        ));
-                    }
+                if let Some(computed_ret) = computed_ret.as_known()
+                    && &ret != computed_ret
+                {
+                    self.report(Diagnostic::at_token(
+                        format!("`{inner_name}` should return {ret}, but returns {computed_ret}"),
+                        self.ast.type_token(*return_type),
+                    ));
                 }
 
                 self.env = prev_env;
@@ -815,7 +815,7 @@ impl<'t> Typechecker<'t> {
                                     &candidates,
                                 );
                                 self.report(err);
-                                // `strings.from(Str)` is invalid, but every
+                                // `str.from(Str)` is invalid, but every
                                 // variant returns `Str`, so callers can still
                                 // typecheck against that result.
                                 if let Some(ret) = Self::common_return(&candidates) {
@@ -913,15 +913,13 @@ impl<'t> Typechecker<'t> {
                     vec![const { None }; case_count];
 
                 for (i, ((condition_token, condition), body)) in cases.iter().enumerate() {
-                    if let Some(condition_type) = self.node(*condition).known() {
-                        if condition_type != Type::Bool {
-                            self.report(Diagnostic::at_token(
-                                format!(
-                                    "Match conditions must be Bool, got {condition_type} instead"
-                                ),
-                                condition_token,
-                            ));
-                        }
+                    if let Some(condition_type) = self.node(*condition).known()
+                        && condition_type != Type::Bool
+                    {
+                        self.report(Diagnostic::at_token(
+                            format!("Match conditions must be Bool, got {condition_type} instead"),
+                            condition_token,
+                        ));
                     }
 
                     if let Some(branch_return_type) = self.block_type(body).known() {
@@ -943,7 +941,7 @@ impl<'t> Typechecker<'t> {
                             format!(
                                 "Match cases must resolve to the same type, but got {first_type} and {ty}"
                             ),
-                            *tok,
+                            tok,
                         ));
                     }
                 }
@@ -1005,6 +1003,20 @@ mod tests {
             .and_then(|id| out.types.get(id))
             .cloned()
             .flatten()
+    }
+
+    #[test]
+    fn output_outlives_the_ast_it_was_checked_against() {
+        fn check(source: &[u8]) -> TypecheckOutput<'_> {
+            let ast = parse(source);
+            Typechecker::new(&ast).check()
+        }
+
+        let out = check(br#"fn wrap(value:Int) Record<value: Int> { { value: value } }"#);
+        let wrap = out.functions.get("wrap").expect("fn is registered");
+
+        assert_eq!(wrap.args, vec![("value", Type::Int)]);
+        assert_eq!(wrap.ret, Type::record(vec![("value", Type::Int)]));
     }
 
     #[test]

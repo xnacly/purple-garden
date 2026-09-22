@@ -55,7 +55,11 @@ pub struct JitFn {
 impl JitFn {
     pub fn new(code: &[u8]) -> Result<Self, String> {
         let page = ExecPage::new(code)?;
-        let entry = unsafe { std::mem::transmute(page.as_ptr()) };
+        let entry = unsafe {
+            std::mem::transmute::<*const u8, unsafe extern "C" fn(*mut std::ffi::c_void)>(
+                page.as_ptr(),
+            )
+        };
         Ok(Self { _page: page, entry })
     }
 

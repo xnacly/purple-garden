@@ -39,8 +39,8 @@ impl<'fun> CcFunc<'fun> {
     }
 }
 
-#[derive(Clone, Copy)]
-enum CcCallTarget {
+#[derive(Clone, Copy, Debug)]
+pub enum CcCallTarget {
     Bc { pc: usize },
     Native { idx: u16 },
 }
@@ -276,8 +276,9 @@ impl<'cc> Cc<'cc> {
         ir: &'cc [Func<'cc>],
     ) -> Result<Vec<purple_garden_jit::JitFn>, String> {
         let mut native_pages: Option<Vec<purple_garden_jit::JitFn>> =
-            (!config.no_jit).then(Vec::new);
-        self.native_code = (config.disassemble > 0).then(Vec::new);
+            (!config.no_jit).then(|| Vec::with_capacity(ir.len()));
+        self.native_code = (config.disassemble > 0).then(|| Vec::with_capacity(ir.len()));
+        self.functions.reserve(ir.len());
 
         for func in ir {
             if config.liveness {
@@ -516,14 +517,10 @@ impl<'cc> Cc<'cc> {
                     src: start_src,
                 });
                 let mut cur_freed = start_src;
-                loop {
-                    if let Some(idx) = todo.iter().position(|(_, d)| *d == cur_freed) {
-                        let (src, dst) = todo.swap_remove(idx);
-                        self.emit(Op::Mov { dst, src });
-                        cur_freed = src;
-                    } else {
-                        break;
-                    }
+                while let Some(idx) = todo.iter().position(|(_, d)| *d == cur_freed) {
+                    let (src, dst) = todo.swap_remove(idx);
+                    self.emit(Op::Mov { dst, src });
+                    cur_freed = src;
                 }
                 self.emit(Op::Mov {
                     dst: start_dst,
@@ -809,7 +806,7 @@ impl<'cc> Cc<'cc> {
                 ..
             } => {
                 let dst = self.ensure_register(*id);
-                let Some(kind) = AllocType::from_ty(&ty) else {
+                let Some(kind) = AllocType::from_ty(ty) else {
                     unreachable!("alloc attempts to alloc non heap allocated value?");
                 };
                 let (size, align) = (layout.size() as u32, layout.align() as u8);
@@ -844,18 +841,22 @@ impl<'cc> Cc<'cc> {
             }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let dst = self.ensure_register(dst.id);
-                // PERF: add a fastpath for booleans, since rn they touch the globals file, which is
-                // unnecessary
-                if let Const::Int(i) = value
-                    && *i < i32::MAX as i64
-                {
-                    self.emit(Op::LoadI {
-                        dst,
-                        value: *i as i32,
-                    });
-                } else {
-                    let idx = self.intern(value);
-                    self.emit(Op::LoadG { dst, idx });
+                match value {
+                    Const::Int(i) if *i > i32::MIN as i64 && *i < i32::MAX as i64 => {
+                        self.emit(Op::LoadI {
+                            dst,
+                            value: *i as i32,
+                        });
+                    }
+                    Const::True | Const::False => {
+                        // fast path for booleans
+                        let value = matches!(value, Const::True) as i32;
+                        self.emit(Op::LoadI { dst, value });
+                    }
+                    _ => {
+                        let idx = self.intern(value);
+                        self.emit(Op::LoadG { dst, idx });
+                    }
                 }
             }
             ir::Instr::Call {
@@ -1025,6 +1026,8 @@ impl<'cc> Cc<'cc> {
             return;
         }
 
+        // PERF: do classification of possible targets with simd
+
         // Skip the whole pass when peephole produced nothing to compact.
         // Avoids the remap allocation and second walk in the common no-op case.
         if !bc.iter().any(|op| matches!(op, Op::Nop)) {
@@ -1076,16 +1079,22 @@ impl<'cc> Cc<'cc> {
         }
     }
 
+    /// Returns the vm, a list of syscalls, debug info, and the entry point to the native page, if
+    /// jitted
     pub fn finalize(self, config: VmConfig) -> (Vm, Vec<BuiltinFn>, DebugInfo, Option<u16>) {
         let Cc {
-            buf,
+            mut buf,
             globals,
             std_fns,
             functions,
             entry_native_idx,
-            pc_to_span,
+            mut pc_to_span,
             ..
         } = self;
+
+        // entry is lowered last, we halt after its Ret. Enables omitting bounds check in dispatch loop
+        buf.push(Op::Halt);
+        pc_to_span.push(0);
 
         let mut vm = Vm::new(config);
         // A native entry runs directly from its native page; a bytecode entry
@@ -1187,6 +1196,32 @@ mod tests {
             "expected int constant to lower to LoadI: {:?}",
             ops
         );
+    }
+
+    #[test]
+    fn lowers_boolean_load_consts_to_immediates() {
+        for (constant, expected) in [(Const::True, 1), (Const::False, 0)] {
+            let ops = compile_one(entry_fun(
+                vec![Instr::LoadConst {
+                    dst: type_id(0, Type::Bool),
+                    value: constant,
+                    span: 0,
+                }],
+                Some((Id(0), Type::Bool)),
+            ));
+
+            assert!(
+                has_op(
+                    &ops,
+                    |op| matches!(op, Op::LoadI { dst: 0, value } if *value == expected)
+                ),
+                "expected boolean constant to lower to LoadI({expected}): {ops:?}",
+            );
+            assert!(
+                !has_op(&ops, |op| matches!(op, Op::LoadG { .. })),
+                "boolean constant should not lower to LoadG: {ops:?}",
+            );
+        }
     }
 
     #[test]

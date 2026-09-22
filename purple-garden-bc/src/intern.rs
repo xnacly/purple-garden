@@ -12,7 +12,7 @@ impl<'a> Interner<Cow<'a, str>> {
     /// Builds a flat string arena from the interner. All interned strings are concatenated
     /// into one `String`; the returned spans vec maps each interned index to its `(offset, len)`
     /// in that buffer. One allocation instead of N `Box<str>` allocations.
-    pub fn into_arena(&self) -> (String, Vec<(u32, u32)>) {
+    pub fn to_arena(&self) -> (String, Vec<(u32, u32)>) {
         let len = self.next_id as usize;
         let total: usize = self.map.keys().map(|s| s.len()).sum();
         let mut data = String::with_capacity(total);

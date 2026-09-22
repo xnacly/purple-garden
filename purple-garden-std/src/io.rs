@@ -5,6 +5,8 @@ use purple_garden_macros::pg_pkg;
 #[pg_pkg(runtime = purple_garden_runtime)]
 /// Package io provides rudimentary I/O primitives,
 /// like writing and reading from file descriptors.
+// This module is the public `io` package namespace; its file name matches it.
+#[allow(clippy::module_inception)]
 pub mod io {
 
     /// Writes a `Str` to stdout, with a newline appended.

@@ -1,6 +1,8 @@
 pub use self::r#unsafe::PACKAGE;
 
 /// Package unsafe provides inherently unsafe operations.
+// This module is the public `unsafe` package namespace; its file name matches it.
+#[allow(clippy::module_inception)]
 pub mod r#unsafe {
     use purple_garden_runtime::{Fn, Pkg};
 
