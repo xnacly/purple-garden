@@ -885,14 +885,23 @@ impl<'a, 't> Typechecker<'a, 't> {
                     let Some(provided_type) = provided_type.as_known() else {
                         continue;
                     };
-                    let expected_type = &fun.args[i].1;
+                    let (expected_arg_name, expected_arg_type) = &fun.args[i];
 
-                    if expected_type != provided_type {
+                    if expected_arg_type != provided_type {
+                        // BUG: this diagnostic points to id in t.id, not to arg:
+                        //
+                        // test.garden:2:3: `t.id` expected x:T, got x:Int instead:
+                        // t.id(5)
+                        //   ~~
+                        //
+                        // It should point to the argument:
+                        //
+                        // t.id(5)
+                        //      ~
                         self.report(Diagnostic::at_token(
                             format!(
-                                "`{inner_name}` arg{i} expected {expected_type}, got {provided_type} instead",
+                                "`{inner_name}` expected {expected_arg_name}:{expected_arg_type}, got {expected_arg_name}:{provided_type} instead",
                             ),
-                            // TODO: extract this token from provided_node
                             tok,
                         ));
                     }
