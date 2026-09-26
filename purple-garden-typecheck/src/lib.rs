@@ -117,7 +117,6 @@ impl<'a, 't> Typechecker<'a, 't> {
         let Node::Extern { name, fns, .. } = self.ast.node(node) else {
             return;
         };
-
         let lex::Type::S(pkg_name) = name.t else {
             unreachable!();
         };
@@ -158,10 +157,6 @@ impl<'a, 't> Typechecker<'a, 't> {
 
     #[must_use]
     pub fn check(mut self) -> TypecheckOutput<'t> {
-        for &node in &self.ast.roots {
-            self.register_extern(node);
-        }
-
         for &node in &self.ast.roots {
             self.node(node);
         }
@@ -908,7 +903,10 @@ impl<'a, 't> Typechecker<'a, 't> {
 
                 TcType::Known(Type::Void)
             }
-            Node::Extern { .. } => TcType::Known(Type::Void),
+            Node::Extern { .. } => {
+                self.register_extern(node_id);
+                TcType::Known(Type::Void)
+            }
         }
     }
 }
