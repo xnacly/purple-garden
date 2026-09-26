@@ -68,17 +68,37 @@ fn insert_pkg(index: &mut HashMap<String, &'static Pkg>, parent: String, pkg: &'
     }
 }
 
-pub static SAFE_STD: &[Pkg] = &[
-    io::PACKAGE,
-    math::PACKAGE,
-    str::PACKAGE,
-    testing::PACKAGE,
-];
+/// TODO: remove after generics are implemented
+pub mod t {
+    unsafe extern "C" fn id(_vm: *mut std::ffi::c_void) {
+        // nothing necessary since vm.r0 already holds the argument
+    }
+
+    pub const PACKAGE: purple_garden_runtime::embed::Pkg = purple_garden_runtime::embed::Pkg {
+        name: "t",
+        doc: "package for testing new compiler, runtime and jit features",
+        pkgs: &[],
+        fns: &[purple_garden_runtime::embed::Fn {
+            name: "id",
+            doc: "identity function",
+            ptr: id,
+            pure: false,
+            eval: None,
+            arg_names: &["x"],
+            args: &[purple_garden_runtime::Type::Substitution('T')],
+            ret: purple_garden_runtime::Type::Substitution('T'),
+            specialises: None,
+        }],
+    };
+}
+
+pub static SAFE_STD: &[Pkg] = &[io::PACKAGE, math::PACKAGE, str::PACKAGE, testing::PACKAGE];
 
 pub static STD: &[Pkg] = &[
     io::PACKAGE,
     math::PACKAGE,
     str::PACKAGE,
+    t::PACKAGE,
     testing::PACKAGE,
     r#unsafe::PACKAGE,
 ];

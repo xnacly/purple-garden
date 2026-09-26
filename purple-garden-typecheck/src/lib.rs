@@ -1,11 +1,12 @@
 mod display;
+mod err;
 mod typedefs;
 
 use std::collections::HashMap;
 
 use purple_garden_frontend::{
     ast::{Ast, Node, NodeId},
-    diagnostic::{Diagnostic, Help, Span},
+    diagnostic::{Diagnostic, Span},
     lex::{self, Token},
 };
 use purple_garden_ir::ptype::Type;
@@ -157,10 +158,6 @@ impl<'a, 't> Typechecker<'a, 't> {
     #[must_use]
     pub fn check(mut self) -> TypecheckOutput<'t> {
         for &node in &self.ast.roots {
-            self.register_extern(node);
-        }
-
-        for &node in &self.ast.roots {
             self.node(node);
         }
 
@@ -169,10 +166,6 @@ impl<'a, 't> Typechecker<'a, 't> {
             functions: self.functions,
             diagnostics: self.diagnostics,
         }
-    }
-
-    fn report(&mut self, diagnostic: Diagnostic) {
-        self.diagnostics.push(diagnostic);
     }
 
     fn set_type(&mut self, id: usize, t: Type<'t>) {
@@ -215,89 +208,6 @@ impl<'a, 't> Typechecker<'a, 't> {
             } => Some(*name),
             _ => None,
         }
-    }
-
-    fn redundant_conversion_note(
-        &self,
-        args: &[NodeId],
-        candidates: &[FunctionType<'t>],
-    ) -> Option<String> {
-        if args.len() != 1 {
-            return None;
-        }
-
-        let provided_ty = self.resolved_arg_ty(args[0]);
-        if !candidates
-            .iter()
-            .all(|c| c.args.len() == 1 && &c.ret == provided_ty)
-        {
-            return None;
-        }
-
-        let arg = self.node_label(args[0]).unwrap_or("the argument");
-        Some(format!("`{arg}` is already {provided_ty}"))
-    }
-
-    fn redundant_cast_error(at: &lex::Token, ty: &Type<'t>) -> Diagnostic {
-        Diagnostic::at_token(format!("Can not cast {ty} to {ty}"), at)
-            .with_primary_message("unnecessary cast")
-            .with_note(format!("the expression is already {ty}"))
-            .with_help(Help::new("remove the cast"))
-    }
-
-    fn missing_package_error(&mut self, pkg_name: &'t str, pkg_tok: &lex::Token) -> Diagnostic {
-        let mut err = Diagnostic::at_token(format!("Can't find package `{pkg_name}`"), pkg_tok)
-            .with_primary_message("package used here");
-        if self.resolve_pkg(pkg_name).is_some() {
-            err = err
-                .with_note(format!("package `{pkg_name}` exists but is not imported"))
-                .with_help(
-                    Help::new(format!("add `import \"{pkg_name}\"`"))
-                        .with_replacement(Span::new(0, 0), format!("import \"{pkg_name}\"\n")),
-                );
-        }
-        err
-    }
-
-    fn specialisation_miss_error(
-        &self,
-        pkg_name: &str,
-        inner_name: &str,
-        name: &lex::Token,
-        args: &[NodeId],
-        candidates: &[FunctionType<'t>],
-    ) -> Diagnostic {
-        fn sig<'a, 'b: 'a>(types: impl Iterator<Item = &'a Type<'b>>) -> String {
-            types
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        }
-
-        let provided = || args.iter().map(|&a| self.resolved_arg_ty(a));
-        let avail = candidates
-            .iter()
-            .map(|c| sig(c.args.iter().map(|(_, t)| t)))
-            .collect::<Vec<_>>()
-            .join(" | ");
-        let mut err = Diagnostic::at_token(
-            format!(
-                "no specialisation of `{pkg_name}.{inner_name}` accepts ({}); available: {avail}",
-                sig(provided())
-            ),
-            name,
-        );
-        if let Some(note) = self.redundant_conversion_note(args, candidates) {
-            err = err
-                .with_note(note)
-                .with_help(Help::new(format!("remove `{pkg_name}.{inner_name}`")));
-        }
-        err
-    }
-
-    fn common_return(candidates: &[FunctionType<'t>]) -> Option<Type<'t>> {
-        let first = candidates.first()?.ret.clone();
-        candidates.iter().all(|c| c.ret == first).then_some(first)
     }
 
     fn fuse(&mut self, op: &lex::Token, lhs: &Type<'t>, rhs: &Type<'t>) -> TcType<'t> {
@@ -471,6 +381,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                 let (first_type, mut poisoned) = match self.node(*first_member) {
                     TcType::Known(ty) => (ty, false),
                     TcType::Poison => (Type::Void, true),
+                    _ => unreachable!(),
                 };
 
                 for member in members.iter().skip(1) {
@@ -500,6 +411,8 @@ impl<'a, 't> Typechecker<'a, 't> {
                         TcType::Poison => {
                             poisoned = true;
                         }
+
+                        _ => unreachable!(),
                     }
                 }
 
@@ -528,6 +441,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                         TcType::Poison => {
                             poisoned = true;
                         }
+                        _ => unreachable!(),
                     }
                 }
 
@@ -722,6 +636,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                         ));
                         TcType::Poison
                     }
+                    TcType::Variable(_) => unreachable!(),
                     _ => TcType::Poison,
                 }
             }
@@ -750,6 +665,8 @@ impl<'a, 't> Typechecker<'a, 't> {
                         else {
                             unreachable!();
                         };
+
+                        // TODO: add type variable as valid argument type here
 
                         // Type args up front: overload selection reads them back
                         // by reference, and `node` memoises so the single-candidate
@@ -878,14 +795,23 @@ impl<'a, 't> Typechecker<'a, 't> {
                     let Some(provided_type) = provided_type.as_known() else {
                         continue;
                     };
-                    let expected_type = &fun.args[i].1;
+                    let (expected_arg_name, expected_arg_type) = &fun.args[i];
 
-                    if expected_type != provided_type {
+                    if expected_arg_type != provided_type {
+                        // BUG: this diagnostic points to id in t.id, not to arg:
+                        //
+                        // test.garden:2:3: `t.id` expected x:T, got x:Int instead:
+                        // t.id(5)
+                        //   ~~
+                        //
+                        // It should point to the argument:
+                        //
+                        // t.id(5)
+                        //      ~
                         self.report(Diagnostic::at_token(
                             format!(
-                                "`{inner_name}` arg{i} expected {expected_type}, got {provided_type} instead",
+                                "`{inner_name}` expected {expected_arg_name}:{expected_arg_type}, got {expected_arg_name}:{provided_type} instead",
                             ),
-                            // TODO: extract this token from provided_node
                             tok,
                         ));
                     }
@@ -977,7 +903,10 @@ impl<'a, 't> Typechecker<'a, 't> {
 
                 TcType::Known(Type::Void)
             }
-            Node::Extern { .. } => TcType::Known(Type::Void),
+            Node::Extern { .. } => {
+                self.register_extern(node_id);
+                TcType::Known(Type::Void)
+            }
         }
     }
 }
@@ -1255,6 +1184,104 @@ mod tests {
                 (Id(0), 24),
                 (Id(0), 32)
             ]
+        );
+    }
+
+    #[test]
+    fn binary_int_arithmetic_produces_int() {
+        let ast = parse(b"1 + 2");
+        let out = Typechecker::new(&ast).check();
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Int));
+    }
+
+    #[test]
+    fn binary_comparison_produces_bool() {
+        let ast = parse(b"1 < 2");
+        let out = Typechecker::new(&ast).check();
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Bool));
+    }
+
+    #[test]
+    fn binary_mismatched_operands_report_error() {
+        let ast = parse(br#"1 + "s""#);
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "Incompatible types Int and Str for \"+\""
+        );
+    }
+
+    #[test]
+    fn fn_return_type_mismatch_reports_error() {
+        let ast = parse(b"fn one() Str { 1 }");
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "`one` should return Str, but returns Int"
+        );
+    }
+
+    #[test]
+    fn fn_redeclaration_reports_error() {
+        let ast = parse(b"fn dup() Int { 1 } fn dup() Int { 2 }");
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(out.diagnostics[0].message, "`dup` is already defined");
+    }
+
+    #[test]
+    fn match_non_bool_condition_reports_error() {
+        let ast = parse(b"match { 1 { 2 } { 3 } }");
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "Match conditions must be Bool, got Int instead"
+        );
+    }
+
+    #[test]
+    fn match_branches_type_mismatch_reports_error() {
+        let ast = parse(br#"match { 1 == 1 { "yes" } { 0 } }"#);
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "Match cases must resolve to the same type, but got Int and Str"
+        );
+    }
+
+    #[test]
+    fn cast_illegal_reports_error() {
+        let ast = parse(br#""foo" as Int"#);
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(out.diagnostics[0].message, "Can not cast Str to Int");
+    }
+
+    #[test]
+    fn call_wrong_arity_reports_error() {
+        let ast = parse(b"fn add(a:Int b:Int) Int { a + b } add(1)");
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "`add` requires 2 arguments, got 1"
+        );
+    }
+
+    #[test]
+    fn call_wrong_arg_type_reports_error() {
+        let ast = parse(br#"fn add(a:Int b:Int) Int { a + b } add(1 "s")"#);
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "`add` expected b:Int, got b:Str instead"
         );
     }
 }

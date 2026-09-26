@@ -18,12 +18,15 @@ pub enum Type<'t> {
     Option(Box<Type<'t>>),
     Array(Box<Type<'t>>),
     Record(RecordFields<'t>),
-    // Foreign type for handling opaque rust data feed into the vm runtime
-    //
-    // which is useful for something like Foreign<counter> vs
-    // Foreign<player> in the typesystem, meaning functions defined on the former can not be
-    // called on the latter, resulting in a type error
+    /// Foreign type for handling opaque rust data feed into the vm runtime
+    ///
+    /// which is useful for something like Foreign<counter> vs
+    /// Foreign<player> in the typesystem, meaning functions defined on the former can not be
+    /// called on the latter, resulting in a type error
     Foreign(&'t str),
+    /// Substitution is part of the generic implementation for purple garden, at type checking time
+    /// this is just a character denoting the variable to be replaced
+    Substitution(char),
 }
 
 #[derive(Debug, Clone)]
@@ -121,6 +124,9 @@ impl<'t> Type<'t> {
     pub fn size(&self) -> usize {
         match self {
             Type::Void => 0,
+            Type::Substitution(_) => {
+                unreachable!("generics size asked, this is not supposed to happen")
+            }
             Type::Record(fields) => record_size(fields.as_slice()),
             Type::Bool
             | Type::Int
@@ -181,6 +187,7 @@ fn align_up(value: usize, align: usize) -> usize {
 impl Display for Type<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Type::Substitution(c) => write!(f, "{c}"),
             Type::Void => write!(f, "Void"),
             Type::Bool => write!(f, "Bool"),
             Type::Int => write!(f, "Int"),
