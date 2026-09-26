@@ -1186,4 +1186,102 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn binary_int_arithmetic_produces_int() {
+        let ast = parse(b"1 + 2");
+        let out = Typechecker::new(&ast).check();
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Int));
+    }
+
+    #[test]
+    fn binary_comparison_produces_bool() {
+        let ast = parse(b"1 < 2");
+        let out = Typechecker::new(&ast).check();
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Bool));
+    }
+
+    #[test]
+    fn binary_mismatched_operands_report_error() {
+        let ast = parse(br#"1 + "s""#);
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "Incompatible types Int and Str for \"+\""
+        );
+    }
+
+    #[test]
+    fn fn_return_type_mismatch_reports_error() {
+        let ast = parse(b"fn one() Str { 1 }");
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "`one` should return Str, but returns Int"
+        );
+    }
+
+    #[test]
+    fn fn_redeclaration_reports_error() {
+        let ast = parse(b"fn dup() Int { 1 } fn dup() Int { 2 }");
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(out.diagnostics[0].message, "`dup` is already defined");
+    }
+
+    #[test]
+    fn match_non_bool_condition_reports_error() {
+        let ast = parse(b"match { 1 { 2 } { 3 } }");
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "Match conditions must be Bool, got Int instead"
+        );
+    }
+
+    #[test]
+    fn match_branches_type_mismatch_reports_error() {
+        let ast = parse(br#"match { 1 == 1 { "yes" } { 0 } }"#);
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "Match cases must resolve to the same type, but got Int and Str"
+        );
+    }
+
+    #[test]
+    fn cast_illegal_reports_error() {
+        let ast = parse(br#""foo" as Int"#);
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(out.diagnostics[0].message, "Can not cast Str to Int");
+    }
+
+    #[test]
+    fn call_wrong_arity_reports_error() {
+        let ast = parse(b"fn add(a:Int b:Int) Int { a + b } add(1)");
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "`add` requires 2 arguments, got 1"
+        );
+    }
+
+    #[test]
+    fn call_wrong_arg_type_reports_error() {
+        let ast = parse(br#"fn add(a:Int b:Int) Int { a + b } add(1 "s")"#);
+        let out = Typechecker::new(&ast).check();
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(
+            out.diagnostics[0].message,
+            "`add` expected b:Int, got b:Str instead"
+        );
+    }
 }
