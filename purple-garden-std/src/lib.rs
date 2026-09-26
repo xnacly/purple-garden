@@ -70,7 +70,9 @@ fn insert_pkg(index: &mut HashMap<String, &'static Pkg>, parent: String, pkg: &'
 
 /// TODO: remove after generics are implemented
 pub mod t {
-    unsafe extern "C" fn id(_vm: *mut std::ffi::c_void) {}
+    unsafe extern "C" fn id(_vm: *mut std::ffi::c_void) {
+        // nothing necessary since vm.r0 already holds the argument
+    }
 
     pub const PACKAGE: purple_garden_runtime::embed::Pkg = purple_garden_runtime::embed::Pkg {
         name: "t",
