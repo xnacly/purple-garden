@@ -15,8 +15,8 @@ pub enum Type<'t> {
     Int,
     Double,
     Str,
-    Option(Box<Type<'t>>),
-    Array(Box<Type<'t>>),
+    Option(BoxedType<'t>),
+    Array(BoxedType<'t>),
     Record(RecordFields<'t>),
     /// Foreign type for handling opaque rust data feed into the vm runtime
     ///
@@ -24,9 +24,60 @@ pub enum Type<'t> {
     /// Foreign<player> in the typesystem, meaning functions defined on the former can not be
     /// called on the latter, resulting in a type error
     Foreign(&'t str),
-    /// Substitution is part of the generic implementation for purple garden, at type checking time
-    /// this is just a character denoting the variable to be replaced
-    Substitution(char),
+    /// Slot is part of the generic implementation for purple garden, at type checking time this is
+    /// just an identifier denoting the slot to be replaced with a concrete type
+    Slot(&'t str),
+}
+
+/// Cow-style wrapper around the inner type of `Type::Option` / `Type::Array`.
+///
+/// `Static` lets these variants be constructed in `const` contexts (where
+/// `Box::new` is not available), while `Owned` remains available for runtime
+/// construction where the inner type is computed dynamically.
+#[derive(Debug, Clone)]
+pub enum BoxedType<'t> {
+    Static(&'t Type<'t>),
+    Owned(Box<Type<'t>>),
+}
+
+impl<'t> BoxedType<'t> {
+    #[must_use]
+    pub const fn static_type(ty: &'t Type<'t>) -> Self {
+        Self::Static(ty)
+    }
+
+    #[must_use]
+    pub fn owned(ty: Type<'t>) -> Self {
+        Self::Owned(Box::new(ty))
+    }
+
+    #[must_use]
+    pub fn as_ref(&self) -> &Type<'t> {
+        match self {
+            Self::Static(ty) => ty,
+            Self::Owned(ty) => ty,
+        }
+    }
+}
+
+impl PartialEq for BoxedType<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref() == other.as_ref()
+    }
+}
+
+impl Eq for BoxedType<'_> {}
+
+impl Hash for BoxedType<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_ref().hash(state);
+    }
+}
+
+impl<'t> From<Box<Type<'t>>> for BoxedType<'t> {
+    fn from(value: Box<Type<'t>>) -> Self {
+        Self::Owned(value)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -124,8 +175,8 @@ impl<'t> Type<'t> {
     pub fn size(&self) -> usize {
         match self {
             Type::Void => 0,
-            Type::Substitution(_) => {
-                unreachable!("generics size asked, this is not supposed to happen")
+            Type::Slot(_) => {
+                unreachable!("slots size asked, this is not supposed to happen")
             }
             Type::Record(fields) => record_size(fields.as_slice()),
             Type::Bool
@@ -187,15 +238,15 @@ fn align_up(value: usize, align: usize) -> usize {
 impl Display for Type<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Substitution(c) => write!(f, "{c}"),
+            Type::Slot(slot_name) => write!(f, "{slot_name}"),
             Type::Void => write!(f, "Void"),
             Type::Bool => write!(f, "Bool"),
             Type::Int => write!(f, "Int"),
             Type::Double => write!(f, "Double"),
             Type::Str => write!(f, "Str"),
             Type::Foreign(id) => write!(f, "Foreign<{id}>"),
-            Type::Option(inner) => write!(f, "Option<{inner}>"),
-            Type::Array(inner) => write!(f, "Array<{inner}>"),
+            Type::Option(inner) => write!(f, "Option<{}>", inner.as_ref()),
+            Type::Array(inner) => write!(f, "Array<{}>", inner.as_ref()),
             Type::Record(fields) => {
                 write!(f, "Record<")?;
                 for (i, field) in fields.as_slice().iter().enumerate() {
@@ -224,7 +275,7 @@ impl<'a> From<Const<'a>> for Type<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Field, RecordFields, Type};
+    use super::{BoxedType, Field, RecordFields, Type};
 
     #[test]
     fn scalars_are_one_vm_word() {
@@ -262,7 +313,7 @@ mod tests {
 
     #[test]
     fn array_values_are_pointers_to_payloads() {
-        let ty = Type::Array(Box::new(Type::Int));
+        let ty = Type::Array(BoxedType::owned(Type::Int));
 
         assert_eq!(ty.size(), 8);
         assert_eq!(ty.align(), 8);

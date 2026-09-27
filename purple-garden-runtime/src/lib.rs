@@ -4,7 +4,7 @@ use std::fmt::{self, Write as _};
 
 pub use purple_garden_ir::{
     Fn,
-    ptype::{Field, RecordFields, Type},
+    ptype::{BoxedType, Field, RecordFields, Type},
 };
 pub use purple_garden_shared::BuiltinFn;
 pub use purple_garden_shared::config::{DEFAULT_STACK_SIZE, MIB};
@@ -32,8 +32,8 @@ pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, syscall_unimplemented};
 #[doc(hidden)]
 pub mod embed {
     pub use super::{
-        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Type, Value, Vm, VmConfig,
-        alloc_record, copy_record, decode_record_field, encode_record_field,
+        Anomaly, BoxedType, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Type, Value, Vm,
+        VmConfig, alloc_record, copy_record, decode_record_field, encode_record_field,
     };
 }
 

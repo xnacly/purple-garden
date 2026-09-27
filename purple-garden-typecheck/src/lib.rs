@@ -9,7 +9,7 @@ use purple_garden_frontend::{
     diagnostic::{Diagnostic, Span},
     lex::{self, Token},
 };
-use purple_garden_ir::ptype::Type;
+use purple_garden_ir::ptype::{BoxedType, Type};
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
 
@@ -359,6 +359,184 @@ impl<'a, 't> Typechecker<'a, 't> {
         last_type
     }
 
+    fn resolve_pkg_call(
+        &mut self,
+        call_id: usize,
+        field_target: NodeId,
+        name: &lex::Token,
+        args: &[NodeId],
+    ) -> TcType<'t> {
+        let Node::Ident { name: pkg_tok, .. } = self.ast.node(field_target) else {
+            self.report(Diagnostic::at_token(
+                "only package functions can be called through field syntax",
+                name,
+            ));
+            return TcType::Poison;
+        };
+        let lex::Token {
+            t: lex::Type::Ident(pkg_name),
+            ..
+        } = pkg_tok
+        else {
+            unreachable!();
+        };
+        let lex::Token {
+            t: lex::Type::Ident(inner_name),
+            ..
+        } = name
+        else {
+            unreachable!();
+        };
+
+        let mut args_poisoned = false;
+        for &arg in args {
+            if self.node(arg).as_known().is_none() {
+                args_poisoned = true;
+            }
+        }
+
+        let Some(pkg) = self.packages.get(pkg_name) else {
+            let err = self.missing_package_error(pkg_name, pkg_tok);
+            self.report(err);
+            return TcType::Poison;
+        };
+
+        let Some(candidates) = pkg.get(inner_name).cloned() else {
+            self.report(Diagnostic::at_token(
+                format!("Call to undefined function `{pkg_name}.{inner_name}`"),
+                name,
+            ));
+            return TcType::Poison;
+        };
+
+        // function call specialisation via monomorphic dispatch
+        if candidates.len() > 1 {
+            // If argument expressions were poisoned, exact overload
+            // selection is impossible. A shared return type is still
+            // useful enough to recover with.
+            if args_poisoned {
+                if let Some(ret) = Self::common_return(&candidates) {
+                    return self.set_known(call_id, ret);
+                }
+                return TcType::Poison;
+            }
+
+            let provided = || args.iter().map(|&a| self.resolved_arg_ty(a));
+
+            let Some(idx) = candidates.iter().position(|c| {
+                purple_garden_frontend::overload_matches(c.args.iter().map(|(_, t)| t), provided())
+            }) else {
+                let err =
+                    self.specialisation_miss_error(pkg_name, inner_name, name, args, &candidates);
+                self.report(err);
+                // `str.from(Str)` is invalid, but every variant returns
+                // `Str`, so callers can still typecheck against that
+                // result.
+                if let Some(ret) = Self::common_return(&candidates) {
+                    return self.set_known(call_id, ret);
+                }
+                return TcType::Poison;
+            };
+
+            let ret = candidates[idx].ret.clone();
+            purple_garden_shared::trace!(
+                "[ir::typecheck::Typechecker::node] resolved `{}.{}` to specialisation {}/{} ({}) -> {}",
+                pkg_name,
+                inner_name,
+                idx + 1,
+                candidates.len(),
+                provided()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                ret
+            );
+            return self.set_known(call_id, ret);
+        }
+
+        let mut display_name = String::from(*pkg_name);
+        display_name.push('.');
+        display_name.push_str(inner_name);
+        self.check_call_args(call_id, name, &display_name, candidates[0].clone(), args)
+    }
+
+    fn resolve_call(&mut self, call_id: usize, name: &lex::Token, args: &[NodeId]) -> TcType<'t> {
+        let lex::Token {
+            t: lex::Type::Ident(inner_name),
+            ..
+        } = name
+        else {
+            unreachable!();
+        };
+        let Some(fun) = self.functions.get(inner_name).cloned() else {
+            self.report(Diagnostic::at_token(
+                format!("Call to undefined function `{inner_name}`"),
+                name,
+            ));
+            return TcType::Poison;
+        };
+        self.check_call_args(call_id, name, inner_name, fun, args)
+    }
+
+    fn check_call_args(
+        &mut self,
+        call_id: usize,
+        tok: &lex::Token,
+        display_name: &str,
+        fun: FunctionType<'t>,
+        args: &[NodeId],
+    ) -> TcType<'t> {
+        if args.len() != fun.args.len() {
+            self.report(Diagnostic::at_token(
+                format!(
+                    "`{}` requires {} arguments, got {}",
+                    display_name,
+                    fun.args.len(),
+                    args.len()
+                ),
+                tok,
+            ));
+            return self.set_known(call_id, fun.ret);
+        }
+
+        for (i, provided_node) in args.iter().enumerate() {
+            let provided_maybe_type = self.node(*provided_node);
+            let Some(provided_type) = provided_maybe_type.as_known() else {
+                continue;
+            };
+
+            let (expected_arg_name, expected_arg_type) = &fun.args[i];
+
+            // TODO: walk expected_arg_type and provided_type, if the former has a slot, register
+            // both in temporary slot to type mapping then used to infer the return type, based on
+            // its slot
+
+            if expected_arg_type != provided_type {
+                // BUG: this diagnostic points to id in t.id, not to arg:
+                //
+                // test.garden:2:3: `t.id` expected x:T, got x:Int instead:
+                // t.id(5)
+                //   ~~
+                //
+                // It should point to the argument:
+                //
+                // t.id(5)
+                //      ~
+                self.report(Diagnostic::at_token(
+                    format!(
+                        "`{display_name}` expected {expected_arg_name}:{expected_arg_type}, got {expected_arg_name}:{provided_type} instead",
+                    ),
+                    tok,
+                ));
+            }
+        }
+
+        let ret = fun.ret;
+
+        self.set_type(call_id, ret.clone());
+        TcType::Known(ret)
+    }
+
     fn node(&mut self, node_id: NodeId) -> TcType<'t> {
         let node = self.ast.node(node_id);
         if let Some(t) = self.already_checked(node_id) {
@@ -381,7 +559,6 @@ impl<'a, 't> Typechecker<'a, 't> {
                 let (first_type, mut poisoned) = match self.node(*first_member) {
                     TcType::Known(ty) => (ty, false),
                     TcType::Poison => (Type::Void, true),
-                    _ => unreachable!(),
                 };
 
                 for member in members.iter().skip(1) {
@@ -411,8 +588,6 @@ impl<'a, 't> Typechecker<'a, 't> {
                         TcType::Poison => {
                             poisoned = true;
                         }
-
-                        _ => unreachable!(),
                     }
                 }
 
@@ -420,7 +595,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                     return TcType::Poison;
                 }
 
-                self.set_known(*id, Type::Array(Box::new(first_type)))
+                self.set_known(*id, Type::Array(BoxedType::owned(first_type)))
             }
             Node::Record { id, fields, .. } => {
                 let mut typed_fields = Vec::with_capacity(fields.len());
@@ -441,7 +616,6 @@ impl<'a, 't> Typechecker<'a, 't> {
                         TcType::Poison => {
                             poisoned = true;
                         }
-                        _ => unreachable!(),
                     }
                 }
 
@@ -636,189 +810,14 @@ impl<'a, 't> Typechecker<'a, 't> {
                         ));
                         TcType::Poison
                     }
-                    TcType::Variable(_) => unreachable!(),
                     _ => TcType::Poison,
                 }
             }
-            Node::Call { id, target, args } => {
-                let (tok, inner_name, fun) = match self.ast.node(*target) {
-                    Node::Field { target, name, .. } => {
-                        let Node::Ident { name: pkg_tok, .. } = self.ast.node(*target) else {
-                            self.report(Diagnostic::at_token(
-                                "only package functions can be called through field syntax",
-                                name,
-                            ));
-                            return TcType::Poison;
-                        };
-                        let lex::Token {
-                            t: lex::Type::Ident(pkg_name),
-                            ..
-                        } = pkg_tok
-                        else {
-                            unreachable!();
-                        };
-
-                        let lex::Token {
-                            t: lex::Type::Ident(inner_name),
-                            ..
-                        } = name
-                        else {
-                            unreachable!();
-                        };
-
-                        // TODO: add type variable as valid argument type here
-
-                        // Type args up front: overload selection reads them back
-                        // by reference, and `node` memoises so the single-candidate
-                        // fall-through arity check below reuses the results. Doing
-                        // this before borrowing `candidates` lets us hold that
-                        // borrow instead of cloning the whole group.
-                        let mut args_poisoned = false;
-                        for &arg in args {
-                            if self.node(arg).as_known().is_none() {
-                                args_poisoned = true;
-                            }
-                        }
-
-                        let Some(pkg) = self.packages.get(pkg_name) else {
-                            let err = self.missing_package_error(pkg_name, pkg_tok);
-                            self.report(err);
-                            return TcType::Poison;
-                        };
-
-                        let Some(candidates) = pkg.get(inner_name).cloned() else {
-                            self.report(Diagnostic::at_token(
-                                format!("Call to undefined function `{pkg_name}.{inner_name}`"),
-                                name,
-                            ));
-                            return TcType::Poison;
-                        };
-
-                        // A `specialises` group (>1 candidate) dispatches on the
-                        // provided arg types. A single-candidate name falls
-                        // through to the shared arity/per-arg checks below, which
-                        // produce precise per-argument diagnostics.
-                        if candidates.len() > 1 {
-                            // If argument expressions were poisoned, exact
-                            // overload selection is impossible. A shared return
-                            // type is still useful enough to recover with.
-                            if args_poisoned {
-                                if let Some(ret) = Self::common_return(&candidates) {
-                                    return self.set_known(*id, ret);
-                                }
-                                return TcType::Poison;
-                            }
-
-                            let provided = || args.iter().map(|&a| self.resolved_arg_ty(a));
-
-                            let Some(idx) = candidates.iter().position(|c| {
-                                purple_garden_frontend::overload_matches(
-                                    c.args.iter().map(|(_, t)| t),
-                                    provided(),
-                                )
-                            }) else {
-                                let err = self.specialisation_miss_error(
-                                    pkg_name,
-                                    inner_name,
-                                    name,
-                                    args,
-                                    &candidates,
-                                );
-                                self.report(err);
-                                // `str.from(Str)` is invalid, but every
-                                // variant returns `Str`, so callers can still
-                                // typecheck against that result.
-                                if let Some(ret) = Self::common_return(&candidates) {
-                                    return self.set_known(*id, ret);
-                                }
-                                return TcType::Poison;
-                            };
-
-                            let ret = candidates[idx].ret.clone();
-                            purple_garden_shared::trace!(
-                                "[ir::typecheck::Typechecker::node] resolved `{}.{}` to specialisation {}/{} ({}) -> {}",
-                                pkg_name,
-                                inner_name,
-                                idx + 1,
-                                candidates.len(),
-                                provided()
-                                    .map(ToString::to_string)
-                                    .collect::<Vec<_>>()
-                                    .join(", "),
-                                ret
-                            );
-                            return self.set_known(*id, ret);
-                        }
-
-                        let mut s = String::from(*pkg_name);
-                        s.push('.');
-                        s.push_str(inner_name);
-                        (name, s, candidates[0].clone())
-                    }
-                    Node::Ident { name, .. } => {
-                        let lex::Token {
-                            t: lex::Type::Ident(inner_name),
-                            ..
-                        } = name
-                        else {
-                            unreachable!();
-                        };
-                        let Some(fun) = self.functions.get(inner_name).cloned() else {
-                            self.report(Diagnostic::at_token(
-                                format!("Call to undefined function `{inner_name}`"),
-                                name,
-                            ));
-                            return TcType::Poison;
-                        };
-                        (name, inner_name.to_string(), fun)
-                    }
-                    _ => unreachable!(),
-                };
-
-                if args.len() != fun.args.len() {
-                    self.report(Diagnostic::at_token(
-                        format!(
-                            "`{}` requires {} arguments, got {}",
-                            inner_name,
-                            fun.args.len(),
-                            args.len()
-                        ),
-                        tok,
-                    ));
-                    return self.set_known(*id, fun.ret);
-                }
-
-                self.set_type(*id, fun.ret.clone());
-
-                for (i, provided_node) in args.iter().enumerate() {
-                    let provided_type = self.node(*provided_node);
-                    let Some(provided_type) = provided_type.as_known() else {
-                        continue;
-                    };
-                    let (expected_arg_name, expected_arg_type) = &fun.args[i];
-
-                    if expected_arg_type != provided_type {
-                        // BUG: this diagnostic points to id in t.id, not to arg:
-                        //
-                        // test.garden:2:3: `t.id` expected x:T, got x:Int instead:
-                        // t.id(5)
-                        //   ~~
-                        //
-                        // It should point to the argument:
-                        //
-                        // t.id(5)
-                        //      ~
-                        self.report(Diagnostic::at_token(
-                            format!(
-                                "`{inner_name}` expected {expected_arg_name}:{expected_arg_type}, got {expected_arg_name}:{provided_type} instead",
-                            ),
-                            tok,
-                        ));
-                    }
-                }
-
-                TcType::Known(fun.ret)
-            }
+            Node::Call { id, target, args } => match self.ast.node(*target) {
+                Node::Field { target, name, .. } => self.resolve_pkg_call(*id, *target, name, args),
+                Node::Ident { name, .. } => self.resolve_call(*id, name, args),
+                _ => unreachable!(),
+            },
             Node::Match { id, cases, default } => {
                 // short circuit for empty matches
                 if cases.is_empty() {
@@ -991,7 +990,7 @@ mod tests {
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
         assert_eq!(
             type_of(&ast, &out, ast.roots[0]),
-            Some(Type::Array(Box::new(Type::Int)))
+            Some(Type::Array(BoxedType::owned(Type::Int)))
         );
     }
 
@@ -1117,7 +1116,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(alloc.0, Id(0));
-        assert_eq!(alloc.1, Type::Array(Box::new(Type::Int)));
+        assert_eq!(alloc.1, Type::Array(BoxedType::owned(Type::Int)));
         assert_eq!(alloc.2.size(), 24);
         assert_eq!(alloc.2.align(), 8);
         assert_eq!(
@@ -1168,7 +1167,7 @@ mod tests {
         assert_eq!(allocs[0].0, Id(0));
         assert_eq!(
             allocs[0].1,
-            Type::Array(Box::new(Type::record(vec![
+            Type::Array(BoxedType::owned(Type::record(vec![
                 ("x", Type::Int),
                 ("y", Type::Int),
             ])))
