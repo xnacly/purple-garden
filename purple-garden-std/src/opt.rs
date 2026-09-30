@@ -17,6 +17,7 @@ pub const PACKAGE: purple_garden_runtime::embed::Pkg = purple_garden_runtime::em
         pure: false,
         eval: None,
         arg_names: &["inner"],
+        with_slots: true,
         args: &[Type::Slot("T")],
         ret: Type::Option(BoxedType::static_type(&Type::Slot("T"))),
         specialises: None,

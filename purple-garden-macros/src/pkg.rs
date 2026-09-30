@@ -19,6 +19,7 @@ struct PgFunction {
     doc: String,
     pure: bool,
     specialises: Option<String>,
+    with_slots: bool,
     args: Vec<FunctionArg>,
     ret: Type,
     result: bool,
@@ -174,6 +175,7 @@ impl PgFunction {
             pure: attrs.pure,
             specialises: attrs.specialises,
             args,
+            with_slots: attrs.with_slots,
             ret,
             result,
             raw: attrs.raw,
@@ -407,6 +409,7 @@ impl PgFunction {
             Some(group) => quote!(Some(#group)),
             None => quote!(None),
         };
+        let with_slots = self.with_slots;
         let ret_ty = &self.ret;
         let arg_names = self
             .args
@@ -425,6 +428,7 @@ impl PgFunction {
                 args: &[#(<#arg_types as #api::embed::PgType>::TYPE),*],
                 ret: <#ret_ty as #api::embed::PgType>::TYPE,
                 specialises: #specialises,
+                with_slots: #with_slots,
             }
         }
     }
@@ -532,6 +536,9 @@ struct PgFnAttrs {
     /// `#[pg_fn(specialises = "group")]`: one variant of an overload group; the
     /// fn is reachable only via `group`, never its own name.
     specialises: Option<String>,
+    /// `#[pg_fn(with_slots)]`: allows usage of embed::Slot(Generic) to allow slot based generic
+    /// functions
+    with_slots: bool,
 }
 
 impl PgFnAttrs {

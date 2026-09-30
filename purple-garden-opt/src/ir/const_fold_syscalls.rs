@@ -141,6 +141,7 @@ mod tests {
         args: &[Type::Int],
         ret: Type::Int,
         specialises: None,
+        with_slots: false,
     };
 
     static IMPURE_FN: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
@@ -153,6 +154,7 @@ mod tests {
         args: &[Type::Int],
         ret: Type::Int,
         specialises: None,
+        with_slots: false,
     };
 
     #[test]
@@ -324,6 +326,7 @@ mod tests {
             args: &[Type::Str],
             ret: Type::Int,
             specialises: None,
+            with_slots: false,
         };
 
         let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Int));
@@ -397,6 +400,7 @@ mod tests {
             args: &[Type::Str, Type::Int],
             ret: Type::Str,
             specialises: None,
+            with_slots: false,
         };
 
         let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Str));
