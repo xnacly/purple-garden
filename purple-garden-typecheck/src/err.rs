@@ -3,7 +3,7 @@ use purple_garden_frontend::{
     diagnostic::{Diagnostic, Help, Span},
     lex,
 };
-use purple_garden_ir::ptype::Type;
+use purple_garden_ir::ptype::{BindError, Type};
 
 use crate::{FunctionType, Typechecker};
 
@@ -106,6 +106,26 @@ impl<'a, 't> Typechecker<'a, 't> {
             at,
         )
         .with_primary_message(format!("this argument is of type {provided}"))
+    }
+
+    pub(crate) fn slot_bind_error(display_name: &str, err: BindError<'t>, at: Span) -> Diagnostic {
+        match err {
+            BindError::Conflict {
+                slot,
+                existing,
+                new,
+            } => Diagnostic::new(
+                format!("`{display_name}` can not bind {slot} to {new}, it is already bound to {existing}"),
+                at,
+            )
+            .with_primary_message(format!("this argument binds {slot} to {new}"))
+            .with_note(format!("{slot} was bound to {existing} by an earlier argument")),
+            BindError::Void { slot } => Diagnostic::new(
+                format!("`{display_name}` can not bind {slot} to Void"),
+                at,
+            )
+            .with_primary_message("this argument is of type Void"),
+        }
     }
 
     pub(crate) fn common_return(candidates: &[FunctionType<'t>]) -> Option<Type<'t>> {

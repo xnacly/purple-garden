@@ -7,6 +7,8 @@ use purple_garden_ir::ptype::Type;
 pub struct FunctionType<'t> {
     pub args: Vec<(&'t str, Type<'t>)>,
     pub ret: Type<'t>,
+    /// Signature contains `Type::Slot`s, gates the generic binding path in call checking
+    pub with_slots: bool,
 }
 
 #[derive(Debug)]

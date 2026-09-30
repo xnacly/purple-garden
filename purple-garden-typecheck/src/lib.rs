@@ -106,6 +106,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                     .zip(f.args.iter().cloned())
                     .collect(),
                 ret: f.ret.clone(),
+                with_slots: f.with_slots,
             };
             registered.entry(f.group_name()).or_default().push(f_type);
         }
@@ -142,6 +143,7 @@ impl<'a, 't> Typechecker<'a, 't> {
             let f_type = FunctionType {
                 args,
                 ret: purple_garden_frontend::type_from_type_expr(self.ast, fun.return_type),
+                with_slots: false,
             };
             purple_garden_shared::trace!(
                 "[ir::typecheck::Typechecker::extern][{}.{}]: {}",
@@ -499,6 +501,9 @@ impl<'a, 't> Typechecker<'a, 't> {
             return self.set_known(call_id, fun.ret);
         }
 
+        // PERF: replace with scratch storage
+        let mut slot_to_type_bindings: HashMap<&str, Type<'_>> = HashMap::new();
+
         for (i, provided_node) in args.iter().enumerate() {
             let provided_maybe_type = self.node(*provided_node);
             let Some(provided_type) = provided_maybe_type.as_known() else {
@@ -507,27 +512,50 @@ impl<'a, 't> Typechecker<'a, 't> {
 
             let (expected_arg_name, expected_arg_type) = &fun.args[i];
 
-            // TODO: walk expected_arg_type and provided_type, if the former has a slot, register
-            // both in temporary slot to type mapping then used to infer the return type, based on
-            // its slot
-
             let span = self
                 .ast
                 .span(*provided_node)
                 .unwrap_or_else(|| Span::from_token(tok));
 
-            if expected_arg_type != provided_type {
+            if !fun.with_slots {
+                if expected_arg_type != provided_type {
+                    self.report(Self::arg_mismatch(
+                        display_name,
+                        expected_arg_name,
+                        expected_arg_type,
+                        provided_type,
+                        span,
+                    ));
+                }
+                continue;
+            }
+
+            if let Err(err) =
+                expected_arg_type.bind_slots(provided_type, &mut slot_to_type_bindings)
+            {
+                self.report(Self::slot_bind_error(display_name, err, span));
+                continue;
+            }
+
+            let expected_arg_type = expected_arg_type.apply_slot_binding(&slot_to_type_bindings);
+            if *expected_arg_type != *provided_type {
                 self.report(Self::arg_mismatch(
                     display_name,
                     expected_arg_name,
-                    expected_arg_type,
+                    &expected_arg_type,
                     provided_type,
                     span,
                 ));
             }
         }
 
-        let ret = fun.ret;
+        let ret = if fun.with_slots {
+            fun.ret
+                .apply_slot_binding(&slot_to_type_bindings)
+                .into_owned()
+        } else {
+            fun.ret
+        };
 
         self.set_type(call_id, ret.clone());
         TcType::Known(ret)
@@ -741,6 +769,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                 let f_type = FunctionType {
                     args: typed_arguments,
                     ret: ret.clone(),
+                    with_slots: false,
                 };
                 self.functions.insert(inner_name, f_type.clone());
 
