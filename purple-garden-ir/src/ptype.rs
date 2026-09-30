@@ -1,5 +1,5 @@
 //! Purple garden type system
-use std::{alloc::Layout, fmt::Display, hash::Hash};
+use std::{alloc::Layout, collections::HashMap, fmt::Display, hash::Hash};
 
 use crate::Const;
 
@@ -130,6 +130,19 @@ pub struct Field<'t> {
     pub ty: Type<'t>,
 }
 
+/// Why [`Type::bind_slots`] refused to bind a slot to an argument type
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum BindError<'t> {
+    /// The slot was already bound to a different type by an earlier argument
+    Conflict {
+        slot: &'t str,
+        existing: Type<'t>,
+        new: Type<'t>,
+    },
+    /// Generics can not be instantiated with `Void`
+    Void { slot: &'t str },
+}
+
 impl<'t> RecordFields<'t> {
     #[must_use]
     pub const fn static_fields(fields: &'t [Field<'t>]) -> Self {
@@ -179,6 +192,60 @@ impl<'t> Type<'t> {
                 .map(|(name, ty)| Field { name, ty })
                 .collect(),
         ))
+    }
+
+    /// Recursively binds parameter slots to the matching argument type
+    ///
+    /// For example:
+    ///
+    /// ```text
+    /// T           | Int                   => T := Int
+    /// Option(T)   | Option(Int)           => T := Int
+    /// Array(T)    | Array(Bool)           => T := Bool
+    /// Option(T)   | Option(Option(Bool))  => T := Option(Bool)
+    /// Record(t T) | Record(t Str)         => T := Str
+    /// ```
+    ///
+    /// Shape mismatches (`Option(T) | Int`) bind nothing and are left to the caller to diagnose
+    /// once slots are substituted.
+    ///
+    /// # Panics
+    ///
+    /// If `possible_filler` contains a slot: argument types are always concrete, a slot on that
+    /// side means a generic return type escaped without substitution.
+    pub fn bind_slots(
+        &self,
+        possible_filler: &Self,
+        bindings: &mut HashMap<&'t str, Self>,
+    ) -> Result<(), BindError<'t>> {
+        match (self, possible_filler) {
+            (_, Self::Slot(_)) => {
+                unreachable!("argument type {possible_filler} contains an unsubstituted slot")
+            }
+            (Self::Option(lhs), Self::Option(rhs)) | (Self::Array(lhs), Self::Array(rhs)) => {
+                lhs.as_ref().bind_slots(rhs.as_ref(), bindings)
+            }
+            (Self::Record(lhs), Self::Record(rhs)) => lhs
+                .as_slice()
+                .iter()
+                .zip(rhs.as_slice())
+                .try_for_each(|(l, r)| l.ty.bind_slots(&r.ty, bindings)),
+            (Self::Slot(slot), Self::Void) => Err(BindError::Void { slot }),
+            // T | a => T := a
+            (Self::Slot(slot), a) => match bindings.get(slot) {
+                None => {
+                    bindings.insert(slot, a.clone());
+                    Ok(())
+                }
+                Some(existing) if existing == a => Ok(()),
+                Some(existing) => Err(BindError::Conflict {
+                    slot,
+                    existing: existing.clone(),
+                    new: a.clone(),
+                }),
+            },
+            _ => Ok(()),
+        }
     }
 
     /// Runtime payload layout for a value of this type, see [Type] for heap layouts
@@ -289,7 +356,9 @@ impl<'a> From<Const<'a>> for Type<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BoxedType, Field, RecordFields, Type};
+    use std::collections::HashMap;
+
+    use super::{BindError, BoxedType, Field, RecordFields, Type};
 
     #[test]
     fn scalars_are_one_vm_word() {
@@ -350,5 +419,180 @@ mod tests {
         let owned_record = Type::Record(RecordFields::owned(FIELDS.to_vec()));
 
         assert_eq!(static_record, owned_record);
+    }
+
+    fn opt(ty: Type<'static>) -> Type<'static> {
+        Type::Option(BoxedType::owned(ty))
+    }
+
+    fn arr(ty: Type<'static>) -> Type<'static> {
+        Type::Array(BoxedType::owned(ty))
+    }
+
+    fn bind(param: &Type<'static>, arg: &Type<'static>) -> HashMap<&'static str, Type<'static>> {
+        let mut bindings = HashMap::new();
+        param.bind_slots(arg, &mut bindings).unwrap();
+        bindings
+    }
+
+    #[test]
+    fn bind_slots_binds_bare_slot() {
+        let b = bind(&Type::Slot("T"), &Type::Int);
+        assert_eq!(b, HashMap::from([("T", Type::Int)]));
+    }
+
+    #[test]
+    fn bind_slots_looks_through_option_and_array() {
+        assert_eq!(
+            bind(&opt(Type::Slot("T")), &opt(Type::Int)),
+            HashMap::from([("T", Type::Int)])
+        );
+        assert_eq!(
+            bind(&arr(Type::Slot("T")), &arr(Type::Bool)),
+            HashMap::from([("T", Type::Bool)])
+        );
+    }
+
+    #[test]
+    fn bind_slots_binds_nested_type() {
+        assert_eq!(
+            bind(&opt(Type::Slot("T")), &opt(opt(Type::Bool))),
+            HashMap::from([("T", opt(Type::Bool))])
+        );
+        assert_eq!(
+            bind(&arr(opt(Type::Slot("T"))), &arr(opt(Type::Str))),
+            HashMap::from([("T", Type::Str)])
+        );
+    }
+
+    #[test]
+    fn bind_slots_binds_record_fields() {
+        let param = Type::record(vec![("t", Type::Slot("T"))]);
+        let arg = Type::record(vec![("t", Type::Str)]);
+        assert_eq!(bind(&param, &arg), HashMap::from([("T", Type::Str)]));
+
+        let param = Type::record(vec![
+            ("a", Type::Slot("T")),
+            ("b", Type::Int),
+            ("c", opt(Type::Slot("U"))),
+        ]);
+        let arg = Type::record(vec![
+            ("a", Type::Double),
+            ("b", Type::Int),
+            ("c", opt(Type::Bool)),
+        ]);
+        assert_eq!(
+            bind(&param, &arg),
+            HashMap::from([("T", Type::Double), ("U", Type::Bool)])
+        );
+    }
+
+    #[test]
+    fn bind_slots_binds_static_record_fields() {
+        static PARAM: &[Field<'static>] = &[Field {
+            name: "t",
+            ty: Type::Slot("T"),
+        }];
+        let param = Type::Record(RecordFields::static_fields(PARAM));
+        let arg = Type::record(vec![("t", Type::Int)]);
+        assert_eq!(bind(&param, &arg), HashMap::from([("T", Type::Int)]));
+    }
+
+    #[test]
+    fn bind_slots_ignores_concrete_types() {
+        assert!(bind(&Type::Int, &Type::Int).is_empty());
+        assert!(bind(&opt(Type::Int), &opt(Type::Str)).is_empty());
+        assert!(
+            bind(
+                &Type::record(vec![("a", Type::Int)]),
+                &Type::record(vec![("a", Type::Int)])
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "argument type T contains an unsubstituted slot")]
+    fn bind_slots_panics_on_argument_side_slot() {
+        bind(&Type::Int, &Type::Slot("T"));
+    }
+
+    #[test]
+    #[should_panic(expected = "argument type Option<T> contains an unsubstituted slot")]
+    fn bind_slots_panics_on_nested_argument_side_slot() {
+        bind(&Type::Slot("T"), &opt(Type::Slot("T")));
+    }
+
+    #[test]
+    fn bind_slots_rejects_void() {
+        let mut bindings = HashMap::new();
+        assert_eq!(
+            Type::Slot("T").bind_slots(&Type::Void, &mut bindings),
+            Err(BindError::Void { slot: "T" })
+        );
+        assert_eq!(
+            opt(Type::Slot("T")).bind_slots(&opt(Type::Void), &mut bindings),
+            Err(BindError::Void { slot: "T" })
+        );
+        assert!(bindings.is_empty());
+    }
+
+    #[test]
+    fn bind_slots_accepts_same_type_twice() {
+        let param = Type::record(vec![("a", Type::Slot("T")), ("b", Type::Slot("T"))]);
+        let arg = Type::record(vec![("a", Type::Int), ("b", Type::Int)]);
+        assert_eq!(bind(&param, &arg), HashMap::from([("T", Type::Int)]));
+    }
+
+    #[test]
+    fn bind_slots_rejects_conflicting_binding() {
+        let param = Type::record(vec![("a", Type::Slot("T")), ("b", opt(Type::Slot("T")))]);
+        let arg = Type::record(vec![("a", Type::Int), ("b", opt(Type::Str))]);
+        let mut bindings = HashMap::new();
+        assert_eq!(
+            param.bind_slots(&arg, &mut bindings),
+            Err(BindError::Conflict {
+                slot: "T",
+                existing: Type::Int,
+                new: Type::Str,
+            })
+        );
+
+        // conflicts across separate arguments
+        let mut bindings = HashMap::new();
+        Type::Slot("T")
+            .bind_slots(&Type::Int, &mut bindings)
+            .unwrap();
+        assert_eq!(
+            arr(Type::Slot("T")).bind_slots(&arr(Type::Bool), &mut bindings),
+            Err(BindError::Conflict {
+                slot: "T",
+                existing: Type::Int,
+                new: Type::Bool,
+            })
+        );
+        assert_eq!(bindings, HashMap::from([("T", Type::Int)]));
+    }
+
+    #[test]
+    fn bind_slots_ignores_shape_mismatch() {
+        assert!(bind(&opt(Type::Slot("T")), &arr(Type::Int)).is_empty());
+        assert!(bind(&opt(Type::Slot("T")), &Type::Int).is_empty());
+        assert!(bind(&arr(Type::Slot("T")), &Type::Void).is_empty());
+    }
+
+    #[test]
+    fn bind_slots_accumulates_across_calls() {
+        let mut bindings = HashMap::new();
+        Type::Slot("T")
+            .bind_slots(&Type::Int, &mut bindings)
+            .unwrap();
+        opt(Type::Slot("U"))
+            .bind_slots(&opt(Type::Str), &mut bindings)
+            .unwrap();
+        assert_eq!(
+            bindings,
+            HashMap::from([("T", Type::Int), ("U", Type::Str)])
+        );
     }
 }
