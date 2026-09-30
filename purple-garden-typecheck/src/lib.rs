@@ -511,22 +511,18 @@ impl<'a, 't> Typechecker<'a, 't> {
             // both in temporary slot to type mapping then used to infer the return type, based on
             // its slot
 
+            let span = self
+                .ast
+                .span(*provided_node)
+                .unwrap_or_else(|| Span::from_token(tok));
+
             if expected_arg_type != provided_type {
-                // BUG: this diagnostic points to id in t.id, not to arg:
-                //
-                // test.garden:2:3: `t.id` expected x:T, got x:Int instead:
-                // t.id(5)
-                //   ~~
-                //
-                // It should point to the argument:
-                //
-                // t.id(5)
-                //      ~
-                self.report(Diagnostic::at_token(
-                    format!(
-                        "`{display_name}` expected {expected_arg_name}:{expected_arg_type}, got {expected_arg_name}:{provided_type} instead",
-                    ),
-                    tok,
+                self.report(Self::arg_mismatch(
+                    display_name,
+                    expected_arg_name,
+                    expected_arg_type,
+                    provided_type,
+                    span,
                 ));
             }
         }

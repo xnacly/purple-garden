@@ -94,6 +94,20 @@ impl<'a, 't> Typechecker<'a, 't> {
         err
     }
 
+    pub(crate) fn arg_mismatch(
+        display_name: &str,
+        arg_name: &str,
+        expected: &Type<'t>,
+        provided: &Type<'t>,
+        at: Span,
+    ) -> Diagnostic {
+        Diagnostic::new(
+            format!("`{display_name}` expected {arg_name}:{expected}, got {arg_name}:{provided} instead"),
+            at,
+        )
+        .with_primary_message(format!("this argument is of type {provided}"))
+    }
+
     pub(crate) fn common_return(candidates: &[FunctionType<'t>]) -> Option<Type<'t>> {
         let first = candidates.first()?.ret.clone();
         candidates.iter().all(|c| c.ret == first).then_some(first)
