@@ -178,6 +178,7 @@ impl<'a, 't> Typechecker<'a, 't> {
         Self::store_known(&mut self.map, id, t)
     }
 
+    #[inline]
     fn store(map: &mut Vec<Option<Type<'t>>>, id: usize, t: Type<'t>) {
         if id >= map.len() {
             map.resize(id + 1, None);
@@ -185,6 +186,7 @@ impl<'a, 't> Typechecker<'a, 't> {
         map[id] = Some(t);
     }
 
+    #[inline]
     fn store_known(map: &mut Vec<Option<Type<'t>>>, id: usize, t: Type<'t>) -> TcType<'t> {
         Self::store(map, id, t.clone());
         TcType::Known(t)
