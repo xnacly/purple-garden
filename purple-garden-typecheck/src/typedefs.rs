@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
-use purple_garden_frontend::diagnostic::Diagnostic;
+use purple_garden_frontend::{ast::Ast, diagnostic::Diagnostic};
 use purple_garden_ir::ptype::Type;
 
 #[derive(Debug, Clone)]
@@ -48,5 +48,29 @@ impl<'t> TcType<'t> {
             Self::Known(ty) => Some(ty),
             Self::Poison => None,
         }
+    }
+}
+
+/// Everything a call check writes to. A signature is borrowed straight out of the function tables
+/// while the call is checked, which rules out `&mut Typechecker`, so the written fields are split
+/// off instead of cloning the signature.
+pub(super) struct CallSink<'s, 'a, 't> {
+    pub(super) ast: &'a Ast<'t>,
+    pub(super) map: &'s mut Vec<Option<Type<'t>>>,
+    pub(super) diagnostics: &'s mut Vec<Diagnostic>,
+}
+
+/// `pkg.name` or `name`, only formatted when a diagnostic needs it
+pub(super) struct CallName<'n> {
+    pub(super) pkg: Option<&'n str>,
+    pub(super) name: &'n str,
+}
+
+impl Display for CallName<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(pkg) = self.pkg {
+            write!(f, "{pkg}.")?;
+        }
+        f.write_str(self.name)
     }
 }

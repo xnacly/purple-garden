@@ -14,8 +14,8 @@ use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
 
 pub use typedefs::FunctionType;
-use typedefs::TcType;
 pub use typedefs::TypecheckOutput;
+use typedefs::{CallName, CallSink, TcType};
 
 #[derive(Debug)]
 pub struct Typechecker<'a, 't> {
@@ -171,14 +171,22 @@ impl<'a, 't> Typechecker<'a, 't> {
     }
 
     fn set_type(&mut self, id: usize, t: Type<'t>) {
-        if id >= self.map.len() {
-            self.map.resize(id + 1, None);
-        }
-        self.map[id] = Some(t);
+        Self::store(&mut self.map, id, t);
     }
 
     fn set_known(&mut self, id: usize, t: Type<'t>) -> TcType<'t> {
-        self.set_type(id, t.clone());
+        Self::store_known(&mut self.map, id, t)
+    }
+
+    fn store(map: &mut Vec<Option<Type<'t>>>, id: usize, t: Type<'t>) {
+        if id >= map.len() {
+            map.resize(id + 1, None);
+        }
+        map[id] = Some(t);
+    }
+
+    fn store_known(map: &mut Vec<Option<Type<'t>>>, id: usize, t: Type<'t>) -> TcType<'t> {
+        Self::store(map, id, t.clone());
         TcType::Known(t)
     }
 
@@ -403,7 +411,7 @@ impl<'a, 't> Typechecker<'a, 't> {
             return TcType::Poison;
         };
 
-        let Some(candidates) = pkg.get(inner_name).cloned() else {
+        let Some(candidates) = pkg.get(inner_name) else {
             self.report(Diagnostic::at_token(
                 format!("Call to undefined function `{pkg_name}.{inner_name}`"),
                 name,
@@ -417,8 +425,8 @@ impl<'a, 't> Typechecker<'a, 't> {
             // selection is impossible. A shared return type is still
             // useful enough to recover with.
             if args_poisoned {
-                if let Some(ret) = Self::common_return(&candidates) {
-                    return self.set_known(call_id, ret);
+                if let Some(ret) = Self::common_return(candidates) {
+                    return Self::store_known(&mut self.map, call_id, ret);
                 }
                 return TcType::Poison;
             }
@@ -429,13 +437,13 @@ impl<'a, 't> Typechecker<'a, 't> {
                 purple_garden_frontend::overload_matches(c.args.iter().map(|(_, t)| t), provided())
             }) else {
                 let err =
-                    self.specialisation_miss_error(pkg_name, inner_name, name, args, &candidates);
-                self.report(err);
+                    self.specialisation_miss_error(pkg_name, inner_name, name, args, candidates);
+                self.diagnostics.push(err);
                 // `str.from(Str)` is invalid, but every variant returns
                 // `Str`, so callers can still typecheck against that
                 // result.
-                if let Some(ret) = Self::common_return(&candidates) {
-                    return self.set_known(call_id, ret);
+                if let Some(ret) = Self::common_return(candidates) {
+                    return Self::store_known(&mut self.map, call_id, ret);
                 }
                 return TcType::Poison;
             };
@@ -453,13 +461,24 @@ impl<'a, 't> Typechecker<'a, 't> {
                     .join(", "),
                 ret
             );
-            return self.set_known(call_id, ret);
+            return Self::store_known(&mut self.map, call_id, ret);
         }
 
-        let mut display_name = String::from(*pkg_name);
-        display_name.push('.');
-        display_name.push_str(inner_name);
-        self.check_call_args(call_id, name, &display_name, candidates[0].clone(), args)
+        Self::check_call_args(
+            CallSink {
+                ast: self.ast,
+                map: &mut self.map,
+                diagnostics: &mut self.diagnostics,
+            },
+            call_id,
+            name,
+            &CallName {
+                pkg: Some(pkg_name),
+                name: inner_name,
+            },
+            &candidates[0],
+            args,
+        )
     }
 
     fn resolve_call(&mut self, call_id: usize, name: &lex::Token, args: &[NodeId]) -> TcType<'t> {
@@ -470,26 +489,53 @@ impl<'a, 't> Typechecker<'a, 't> {
         else {
             unreachable!();
         };
-        let Some(fun) = self.functions.get(inner_name).cloned() else {
+
+        for &arg in args {
+            self.node(arg);
+        }
+
+        let Some(fun) = self.functions.get(inner_name) else {
             self.report(Diagnostic::at_token(
                 format!("Call to undefined function `{inner_name}`"),
                 name,
             ));
             return TcType::Poison;
         };
-        self.check_call_args(call_id, name, inner_name, fun, args)
+
+        Self::check_call_args(
+            CallSink {
+                ast: self.ast,
+                map: &mut self.map,
+                diagnostics: &mut self.diagnostics,
+            },
+            call_id,
+            name,
+            &CallName {
+                pkg: None,
+                name: inner_name,
+            },
+            fun,
+            args,
+        )
     }
 
+    /// Arguments must already be typed, see [`CallSink`] for why `fun` is borrowed
     fn check_call_args(
-        &mut self,
+        sink: CallSink<'_, 'a, 't>,
         call_id: usize,
         tok: &lex::Token,
-        display_name: &str,
-        fun: FunctionType<'t>,
+        display_name: &CallName<'_>,
+        fun: &FunctionType<'t>,
         args: &[NodeId],
     ) -> TcType<'t> {
+        let CallSink {
+            ast,
+            map,
+            diagnostics,
+        } = sink;
+
         if args.len() != fun.args.len() {
-            self.report(Diagnostic::at_token(
+            diagnostics.push(Diagnostic::at_token(
                 format!(
                     "`{}` requires {} arguments, got {}",
                     display_name,
@@ -498,28 +544,27 @@ impl<'a, 't> Typechecker<'a, 't> {
                 ),
                 tok,
             ));
-            return self.set_known(call_id, fun.ret);
+            return Self::store_known(map, call_id, fun.ret.clone());
         }
 
         // PERF: replace with scratch storage
         let mut slot_to_type_bindings: HashMap<&str, Type<'_>> = HashMap::new();
 
-        for (i, provided_node) in args.iter().enumerate() {
-            let provided_maybe_type = self.node(*provided_node);
-            let Some(provided_type) = provided_maybe_type.as_known() else {
+        for (i, &provided_node) in args.iter().enumerate() {
+            let Some(provided_type) = ast.value_id(provided_node).and_then(|id| map[id].as_ref())
+            else {
                 continue;
             };
 
             let (expected_arg_name, expected_arg_type) = &fun.args[i];
 
-            let span = self
-                .ast
-                .span(*provided_node)
+            let span = ast
+                .span(provided_node)
                 .unwrap_or_else(|| Span::from_token(tok));
 
             if !fun.with_slots {
                 if expected_arg_type != provided_type {
-                    self.report(Self::arg_mismatch(
+                    diagnostics.push(Self::arg_mismatch(
                         display_name,
                         expected_arg_name,
                         expected_arg_type,
@@ -533,13 +578,13 @@ impl<'a, 't> Typechecker<'a, 't> {
             if let Err(err) =
                 expected_arg_type.bind_slots(provided_type, &mut slot_to_type_bindings)
             {
-                self.report(Self::slot_bind_error(display_name, err, span));
+                diagnostics.push(Self::slot_bind_error(display_name, err, span));
                 continue;
             }
 
             let expected_arg_type = expected_arg_type.apply_slot_binding(&slot_to_type_bindings);
             if *expected_arg_type != *provided_type {
-                self.report(Self::arg_mismatch(
+                diagnostics.push(Self::arg_mismatch(
                     display_name,
                     expected_arg_name,
                     &expected_arg_type,
@@ -554,11 +599,10 @@ impl<'a, 't> Typechecker<'a, 't> {
                 .apply_slot_binding(&slot_to_type_bindings)
                 .into_owned()
         } else {
-            fun.ret
+            fun.ret.clone()
         };
 
-        self.set_type(call_id, ret.clone());
-        TcType::Known(ret)
+        Self::store_known(map, call_id, ret)
     }
 
     fn node(&mut self, node_id: NodeId) -> TcType<'t> {

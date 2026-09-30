@@ -5,7 +5,7 @@ use purple_garden_frontend::{
 };
 use purple_garden_ir::ptype::{BindError, Type};
 
-use crate::{FunctionType, Typechecker};
+use crate::{FunctionType, Typechecker, typedefs::CallName};
 
 impl<'a, 't> Typechecker<'a, 't> {
     pub(crate) fn report(&mut self, diagnostic: Diagnostic) {
@@ -95,20 +95,26 @@ impl<'a, 't> Typechecker<'a, 't> {
     }
 
     pub(crate) fn arg_mismatch(
-        display_name: &str,
+        display_name: &CallName<'_>,
         arg_name: &str,
         expected: &Type<'t>,
         provided: &Type<'t>,
         at: Span,
     ) -> Diagnostic {
         Diagnostic::new(
-            format!("`{display_name}` expected {arg_name}:{expected}, got {arg_name}:{provided} instead"),
+            format!(
+                "`{display_name}` expected {arg_name}:{expected}, got {arg_name}:{provided} instead"
+            ),
             at,
         )
         .with_primary_message(format!("this argument is of type {provided}"))
     }
 
-    pub(crate) fn slot_bind_error(display_name: &str, err: BindError<'t>, at: Span) -> Diagnostic {
+    pub(crate) fn slot_bind_error(
+        display_name: &CallName<'_>,
+        err: BindError<'t>,
+        at: Span,
+    ) -> Diagnostic {
         match err {
             BindError::Conflict {
                 slot,
