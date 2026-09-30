@@ -193,11 +193,11 @@ impl<'t> Type<'t> {
                 unreachable!("slots size asked, this is not supposed to happen")
             }
             Type::Record(fields) => record_size(fields.as_slice()),
+            Type::Option(inner) => WORD_SIZE + inner.as_ref().size(),
             Type::Bool
             | Type::Int
             | Type::Double
             | Type::Str
-            | Type::Option(_)
             | Type::Array(_)
             | Type::Foreign(_) => WORD_SIZE,
         }
