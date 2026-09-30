@@ -234,6 +234,10 @@ impl<'t> Type<'t> {
             // T | a => T := a
             (Self::Slot(slot), a) => match bindings.get(slot) {
                 None => {
+                    debug_assert!(
+                        !a.contains_slot(),
+                        "argument type {a} contains an unsubstituted slot"
+                    );
                     bindings.insert(slot, a.clone());
                     Ok(())
                 }
@@ -245,6 +249,15 @@ impl<'t> Type<'t> {
                 }),
             },
             _ => Ok(()),
+        }
+    }
+
+    fn contains_slot(&self) -> bool {
+        match self {
+            Self::Slot(_) => true,
+            Self::Option(inner) | Self::Array(inner) => inner.as_ref().contains_slot(),
+            Self::Record(fields) => fields.as_slice().iter().any(|f| f.ty.contains_slot()),
+            _ => false,
         }
     }
 
@@ -652,9 +665,17 @@ mod tests {
             arr(opt(opt(Type::Str)))
         );
         assert_eq!(
-            *Type::record(vec![("a", Type::Slot("T")), ("b", Type::Bool), ("c", Type::Slot("U"))])
-                .apply_slot_binding(&b),
-            Type::record(vec![("a", Type::Int), ("b", Type::Bool), ("c", opt(Type::Str))])
+            *Type::record(vec![
+                ("a", Type::Slot("T")),
+                ("b", Type::Bool),
+                ("c", Type::Slot("U"))
+            ])
+            .apply_slot_binding(&b),
+            Type::record(vec![
+                ("a", Type::Int),
+                ("b", Type::Bool),
+                ("c", opt(Type::Str))
+            ])
         );
     }
 
