@@ -461,7 +461,7 @@ impl<'lower> Lower<'lower> {
                 self.ctx = old_ctx;
                 None
             }
-            Node::Call { target, args, .. } => {
+            Node::Call { target, args, id } => {
                 let mut a = vec![];
                 for &arg in args {
                     let Some(id) = self.lower_node(ast, arg)? else {
@@ -522,7 +522,11 @@ impl<'lower> Lower<'lower> {
                                 .unwrap()
                         };
 
-                        dst.ty = fun.ret.clone();
+                        // the declared ret may contain generic slots, the typechecker resolved
+                        // them per call site
+                        dst.ty = self.types[*id]
+                            .clone()
+                            .expect("typechecker should have typed the call");
                         self.emit(Instr::Sys {
                             dst,
                             path: pkg_name,
