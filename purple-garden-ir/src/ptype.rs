@@ -15,8 +15,45 @@ pub enum Type<'t> {
     Int,
     Double,
     Str,
+    /// Option layout is:
+    ///
+    /// ```text
+    /// byte  0        8        16
+    ///       +--------+--------+
+    ///       | tag    | ptr    |
+    ///       +--------+--------+
+    /// ```
+    ///
+    /// Where tag is either 0 for None or 1 for Some
+    ///
+    /// PERF: Niche optimisation to avoid heap allocs via `Type::option_repr -> OptionRepr { NullPtr
+    /// | NaNSentinal | BoolSentinal | Tagged }`
+    /// - optimise to use nullptr for None and ptr for some, thus just being 8 byte
+    /// - optimise to use NaN values for Option(Double)
+    /// - optimise to use non 0..1 values for Option(Bool)
     Option(BoxedType<'t>),
+    /// Arrays are pointer-sized values. The heap payload behind an `Array<T>`
+    /// is contiguous and starts with a length word:
+    ///
+    /// ```text
+    /// Array<Record<x: Int y: Bool>> with len = 2
+    ///
+    /// byte  0        8        16       24       32       40
+    ///       +--------+--------+--------+--------+--------+
+    ///       | len    | [0].x  | [0].y  | [1].x  | [1].y  |
+    ///       +--------+--------+--------+--------+--------+
+    /// ```
     Array(BoxedType<'t>),
+    /// Records are stored inline:
+    ///
+    /// ```text
+    /// Record<a: Int b: Record<c: Bool d: Str> e: Double>
+    ///
+    /// byte  0        8        16       24       32
+    ///       +--------+--------+--------+--------+
+    ///       | a      | b.c    | b.d    | e      |
+    ///       +--------+--------+--------+--------+
+    /// ```
     Record(RecordFields<'t>),
     /// Foreign type for handling opaque rust data feed into the vm runtime
     ///
@@ -25,7 +62,8 @@ pub enum Type<'t> {
     /// called on the latter, resulting in a type error
     Foreign(&'t str),
     /// Slot is part of the generic implementation for purple garden, at type checking time this is
-    /// just an identifier denoting the slot to be replaced with a concrete type
+    /// just an identifier denoting the slot to be replaced with a concrete type, for instance an
+    /// optional over a generic is represented as Option(Slot("T"))
     Slot(&'t str),
 }
 
@@ -143,31 +181,7 @@ impl<'t> Type<'t> {
         ))
     }
 
-    /// Runtime payload layout for a value of this type.
-    ///
-    /// Records are inline: nested record fields contribute their full payload
-    /// size, not one pointer-sized slot. For example:
-    ///
-    /// ```text
-    /// Record<a: Int b: Record<c: Bool d: Str> e: Double>
-    ///
-    /// byte  0        8        16       24       32
-    ///       +--------+--------+--------+--------+
-    ///       | a      | b.c    | b.d    | e      |
-    ///       +--------+--------+--------+--------+
-    /// ```
-    ///
-    /// Arrays are pointer-sized values. The heap payload behind an `Array<T>`
-    /// is contiguous and starts with a length word:
-    ///
-    /// ```text
-    /// Array<Record<x: Int y: Bool>> with len = 2
-    ///
-    /// byte  0        8        16       24       32       40
-    ///       +--------+--------+--------+--------+--------+
-    ///       | len    | [0].x  | [0].y  | [1].x  | [1].y  |
-    ///       +--------+--------+--------+--------+--------+
-    /// ```
+    /// Runtime payload layout for a value of this type, see [Type] for heap layouts
     pub fn layout(&self) -> Layout {
         Layout::from_size_align(self.size(), self.align()).expect("type layout")
     }
