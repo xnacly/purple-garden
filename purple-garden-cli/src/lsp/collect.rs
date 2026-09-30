@@ -88,7 +88,12 @@ fn collect_node(
     analysis: &mut DocumentAnalysis,
 ) {
     let node = ast.node(node_id);
-    if let (Some(span), Some(ty)) = (
+    // declarations are typed for the checker's own bookkeeping, hovering them shows their
+    // signature instead
+    if !matches!(
+        node,
+        Node::Fn { .. } | Node::Import { .. } | Node::Extern { .. }
+    ) && let (Some(span), Some(ty)) = (
         node_span(ast, node_id),
         type_for_node(ast, typecheck, node_id),
     ) {
@@ -102,6 +107,7 @@ fn collect_node(
             args,
             return_type,
             body,
+            ..
         } => {
             let detail = fn_detail(ast, name, args, *return_type);
             add_decl_hover(analysis, token_span(name), detail.clone(), docs);
@@ -227,8 +233,9 @@ fn ty_for_node<'a>(
     typecheck: &'a TypecheckOutput<'a>,
     node_id: NodeId,
 ) -> Option<&'a Type<'a>> {
-    ast.value_id(node_id)
-        .and_then(|id| typecheck.types.get(id))
+    typecheck
+        .types
+        .get(ast.value_id(node_id))
         .and_then(Option::as_ref)
 }
 

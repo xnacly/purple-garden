@@ -24,28 +24,22 @@ pub struct TypecheckOutput<'t> {
 
 /// Internal typechecking result for one AST node.
 ///
-/// We keep this separate from `purple_garden_ir::Type`
-/// so the IR/runtime type vocabulary does not need an error sentinel.
-#[derive(Debug, Clone)]
-pub(super) enum TcType<'t> {
-    /// means later nodes can safely use the type.
-    Known(Type<'t>),
+/// Types live in the typechecker's map only, a result just names the slot, so consumers read the
+/// type back by reference instead of cloning it out per node. We keep this separate from
+/// `purple_garden_ir::Type` so the IR/runtime type vocabulary does not need an error sentinel.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum TcType {
+    /// value id whose map slot holds the type, later nodes can safely use it
+    Known(usize),
     /// means the node already produced, or depends on, an error and should not cause cascading
     /// follow-up diagnostics.
     Poison,
 }
 
-impl<'t> TcType<'t> {
-    pub(super) fn known(self) -> Option<Type<'t>> {
+impl TcType {
+    pub(super) fn known(self) -> Option<usize> {
         match self {
-            Self::Known(ty) => Some(ty),
-            Self::Poison => None,
-        }
-    }
-
-    pub(super) fn as_known(&self) -> Option<&Type<'t>> {
-        match self {
-            Self::Known(ty) => Some(ty),
+            Self::Known(id) => Some(id),
             Self::Poison => None,
         }
     }

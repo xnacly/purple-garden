@@ -103,6 +103,7 @@ impl<'p> Parser<'p> {
     /// program = prefix*
     pub fn parse(mut self) -> Result<Ast<'p>, Diagnostic> {
         self.parse_roots()?;
+        self.ast.values = self.id;
         Ok(self.ast)
     }
 
@@ -155,6 +156,7 @@ impl<'p> Parser<'p> {
     pub fn parse_collect(mut self) -> ParseOutput<'p> {
         self.parse_roots_collect();
         self.diagnostics.extend(self.lex.into_diagnostics());
+        self.ast.values = self.id;
         ParseOutput {
             ast: Some(self.ast),
             diagnostics: self.diagnostics,
@@ -271,7 +273,9 @@ impl<'p> Parser<'p> {
         }
         self.expect(Type::CurlyRight)?;
 
+        let id = self.next_id();
         Ok(self.push_node(Node::Fn {
+            id,
             docs,
             name,
             args,
@@ -346,7 +350,9 @@ impl<'p> Parser<'p> {
         }
         self.expect(Type::CurlyRight)?;
 
+        let id = self.next_id();
         Ok(self.push_node(Node::Extern {
+            id,
             src,
             docs,
             name,

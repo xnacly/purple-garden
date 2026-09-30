@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 mod display;
 mod err;
 mod typedefs;
@@ -20,8 +22,10 @@ use typedefs::{CallName, CallSink, TcType};
 #[derive(Debug)]
 pub struct Typechecker<'a, 't> {
     ast: &'a Ast<'t>,
-    /// Node id -> Type. Indexed by id; Node ids are dense from the parser.
+    /// Node id -> Type. Indexed by id; Node ids are dense from the parser, the slot past the last
+    /// id holds `Void` for results without a node of their own, see [`Self::void`]
     map: Vec<Option<Type<'t>>>,
+    void: usize,
     /// scope stack; innermost frame last; lookups walk from top to bottom
     env: Vec<HashMap<&'t str, Type<'t>>>,
     /// map a function name to its type(s)
@@ -40,7 +44,8 @@ impl<'a, 't> Typechecker<'a, 't> {
     pub fn new(ast: &'a Ast<'t>) -> Self {
         let mut s = Self {
             ast,
-            map: Vec::new(),
+            map: vec![None; ast.values + 1],
+            void: ast.values,
             env: Vec::new(),
             functions: HashMap::new(),
             packages: HashMap::new(),
@@ -49,6 +54,7 @@ impl<'a, 't> Typechecker<'a, 't> {
             stdlib: pstd::STD,
             diagnostics: Vec::new(),
         };
+        s.map[s.void] = Some(Type::Void);
         s.env.push(HashMap::new());
         s
     }
@@ -170,40 +176,36 @@ impl<'a, 't> Typechecker<'a, 't> {
         }
     }
 
-    fn set_type(&mut self, id: usize, t: Type<'t>) {
-        Self::store(&mut self.map, id, t);
-    }
-
-    fn set_known(&mut self, id: usize, t: Type<'t>) -> TcType<'t> {
+    fn set_known(&mut self, id: usize, t: Type<'t>) -> TcType {
         Self::store_known(&mut self.map, id, t)
     }
 
     #[inline]
-    fn store(map: &mut Vec<Option<Type<'t>>>, id: usize, t: Type<'t>) {
-        if id >= map.len() {
-            map.resize(id + 1, None);
-        }
+    fn store(map: &mut [Option<Type<'t>>], id: usize, t: Type<'t>) {
         map[id] = Some(t);
     }
 
     #[inline]
-    fn store_known(map: &mut Vec<Option<Type<'t>>>, id: usize, t: Type<'t>) -> TcType<'t> {
-        Self::store(map, id, t.clone());
-        TcType::Known(t)
+    fn store_known(map: &mut [Option<Type<'t>>], id: usize, t: Type<'t>) -> TcType {
+        Self::store(map, id, t);
+        TcType::Known(id)
     }
 
-    fn already_checked(&self, node: NodeId) -> Option<Type<'t>> {
-        self.map
-            .get(self.ast.value_id(node)?)
-            .and_then(|o| o.as_ref())
-            .cloned()
+    /// Type behind a [`TcType::Known`] id
+    fn ty(&self, id: usize) -> &Type<'t> {
+        self.map[id].as_ref().expect("known ids always have a type")
+    }
+
+    fn already_checked(&self, node: NodeId) -> Option<TcType> {
+        let id = self.ast.value_id(node);
+        self.map[id].is_some().then_some(TcType::Known(id))
     }
 
     /// Type already assigned to `node`, by reference. Callers must have typed
     /// `node` first (via [`Self::node`]); used to read arg types for overload
     /// selection without cloning them out of the map.
     fn resolved_arg_ty(&self, node: NodeId) -> &Type<'t> {
-        self.map[self.ast.value_id(node).expect("arg has a value id")]
+        self.map[self.ast.value_id(node)]
             .as_ref()
             .expect("arg typed before overload selection")
     }
@@ -222,7 +224,7 @@ impl<'a, 't> Typechecker<'a, 't> {
         }
     }
 
-    fn fuse(&mut self, op: &lex::Token, lhs: &Type<'t>, rhs: &Type<'t>) -> TcType<'t> {
+    fn fuse(op: &lex::Token, lhs: &Type<'t>, rhs: &Type<'t>) -> Result<Type<'t>, Diagnostic> {
         let ty = match op.t {
             // arithmetics
             lex::Type::Plus | lex::Type::Minus | lex::Type::Asteriks | lex::Type::Slash => {
@@ -230,7 +232,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                     (Type::Int, Type::Int) => Type::Int,
                     (Type::Double, Type::Double) => Type::Double,
                     (_, _) if lhs == rhs => {
-                        self.report(Diagnostic::at_token(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Unsupported type {} for {:?}, want Int or Double",
                                 lhs,
@@ -238,10 +240,9 @@ impl<'a, 't> Typechecker<'a, 't> {
                             ),
                             op,
                         ));
-                        return TcType::Poison;
                     }
                     (_, _) => {
-                        self.report(Diagnostic::at_token(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Incompatible types {} and {} for {:?}",
                                 lhs,
@@ -250,21 +251,19 @@ impl<'a, 't> Typechecker<'a, 't> {
                             ),
                             op,
                         ));
-                        return TcType::Poison;
                     }
                 }
             }
             lex::Type::Percent => match (lhs, rhs) {
                 (Type::Int, Type::Int) => Type::Int,
                 (_, _) if lhs == rhs => {
-                    self.report(Diagnostic::at_token(
+                    return Err(Diagnostic::at_token(
                         format!("Unsupported type {} for {:?}, want Int", lhs, op.t.as_str()),
                         op,
                     ));
-                    return TcType::Poison;
                 }
                 (_, _) => {
-                    self.report(Diagnostic::at_token(
+                    return Err(Diagnostic::at_token(
                         format!(
                             "Incompatible types {} and {} for {:?}, want both sides Int",
                             lhs,
@@ -273,14 +272,13 @@ impl<'a, 't> Typechecker<'a, 't> {
                         ),
                         op,
                     ));
-                    return TcType::Poison;
                 }
             },
             lex::Type::DoubleEqual | lex::Type::NotEqual => {
                 match (lhs, rhs) {
                     (Type::Int, Type::Int) | (Type::Bool, Type::Bool) => {}
                     (_, _) if lhs == rhs => {
-                        self.report(Diagnostic::at_token(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Unsupported type {} for {:?}, want Int or Bool",
                                 lhs,
@@ -288,10 +286,9 @@ impl<'a, 't> Typechecker<'a, 't> {
                             ),
                             op,
                         ));
-                        return TcType::Poison;
                     }
                     (_, _) => {
-                        self.report(Diagnostic::at_token(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Incompatible types {} and {} for {:?}, want both sides Int or both sides Bool",
                                 lhs,
@@ -300,7 +297,6 @@ impl<'a, 't> Typechecker<'a, 't> {
                             ),
                             op,
                         ));
-                        return TcType::Poison;
                     }
                 }
                 Type::Bool
@@ -309,7 +305,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                 match (lhs, rhs) {
                     (Type::Double, Type::Double) | (Type::Int, Type::Int) => {}
                     (_, _) if lhs == rhs => {
-                        self.report(Diagnostic::at_token(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Unsupported type {} for {:?}, want Int or Double for both sides",
                                 lhs,
@@ -317,10 +313,9 @@ impl<'a, 't> Typechecker<'a, 't> {
                             ),
                             op,
                         ));
-                        return TcType::Poison;
                     }
                     (_, _) => {
-                        self.report(Diagnostic::at_token(
+                        return Err(Diagnostic::at_token(
                             format!(
                                 "Incompatible types {} and {} for {:?}",
                                 lhs,
@@ -329,7 +324,6 @@ impl<'a, 't> Typechecker<'a, 't> {
                             ),
                             op,
                         ));
-                        return TcType::Poison;
                     }
                 }
                 Type::Bool
@@ -339,31 +333,34 @@ impl<'a, 't> Typechecker<'a, 't> {
             // lex::Type::Question => todo!(),
             _ => unreachable!(),
         };
-        TcType::Known(ty)
+        Ok(ty)
     }
 
-    fn cast(&mut self, at: &lex::Token, i: &Type<'t>, o: &Type<'t>) -> TcType<'t> {
-        match (i, o) {
-            (Type::Int, Type::Double) => TcType::Known(Type::Double),
-            (Type::Double | Type::Bool, Type::Int) => TcType::Known(Type::Int),
-            (Type::Int, Type::Bool) => TcType::Known(Type::Bool),
-            (_, _) if i == o => {
+    fn cast(&mut self, at: &lex::Token, lhs: usize, o: Type<'t>) -> Option<Type<'t>> {
+        let i = self.ty(lhs);
+        match (i, &o) {
+            (Type::Int, Type::Double) => Some(Type::Double),
+            (Type::Double | Type::Bool, Type::Int) => Some(Type::Int),
+            (Type::Int, Type::Bool) => Some(Type::Bool),
+            (_, _) if i == &o => {
                 // This is still an error in PG, but the expression's type is
                 // unambiguous. Keeping it known prevents downstream false
                 // positives and makes `--types` more useful.
-                self.report(Self::redundant_cast_error(at, i));
-                TcType::Known(o.clone())
+                let err = Self::redundant_cast_error(at, i);
+                self.report(err);
+                Some(o)
             }
             (_, _) => {
-                self.report(Diagnostic::at_token(format!("Can not cast {i} to {o}"), at));
-                TcType::Poison
+                let err = Diagnostic::at_token(format!("Can not cast {i} to {o}"), at);
+                self.report(err);
+                None
             }
         }
     }
 
-    fn block_type(&mut self, nodes: &[NodeId]) -> TcType<'t> {
+    fn block_type(&mut self, nodes: &[NodeId]) -> TcType {
         self.env.push(HashMap::new());
-        let mut last_type = TcType::Known(Type::Void);
+        let mut last_type = TcType::Known(self.void);
         for &node in nodes {
             last_type = self.node(node);
         }
@@ -377,7 +374,7 @@ impl<'a, 't> Typechecker<'a, 't> {
         field_target: NodeId,
         name: &lex::Token,
         args: &[NodeId],
-    ) -> TcType<'t> {
+    ) -> TcType {
         let Node::Ident { name: pkg_tok, .. } = self.ast.node(field_target) else {
             self.report(Diagnostic::at_token(
                 "only package functions can be called through field syntax",
@@ -402,7 +399,7 @@ impl<'a, 't> Typechecker<'a, 't> {
 
         let mut args_poisoned = false;
         for &arg in args {
-            if self.node(arg).as_known().is_none() {
+            if self.node(arg).known().is_none() {
                 args_poisoned = true;
             }
         }
@@ -483,7 +480,7 @@ impl<'a, 't> Typechecker<'a, 't> {
         )
     }
 
-    fn resolve_call(&mut self, call_id: usize, name: &lex::Token, args: &[NodeId]) -> TcType<'t> {
+    fn resolve_call(&mut self, call_id: usize, name: &lex::Token, args: &[NodeId]) -> TcType {
         let lex::Token {
             t: lex::Type::Ident(inner_name),
             ..
@@ -529,7 +526,7 @@ impl<'a, 't> Typechecker<'a, 't> {
         display_name: &CallName<'_>,
         fun: &FunctionType<'t>,
         args: &[NodeId],
-    ) -> TcType<'t> {
+    ) -> TcType {
         let CallSink {
             ast,
             map,
@@ -553,8 +550,7 @@ impl<'a, 't> Typechecker<'a, 't> {
         let mut slot_to_type_bindings: HashMap<&str, Type<'_>> = HashMap::new();
 
         for (i, &provided_node) in args.iter().enumerate() {
-            let Some(provided_type) = ast.value_id(provided_node).and_then(|id| map[id].as_ref())
-            else {
+            let Some(provided_type) = map[ast.value_id(provided_node)].as_ref() else {
                 continue;
             };
 
@@ -607,10 +603,10 @@ impl<'a, 't> Typechecker<'a, 't> {
         Self::store_known(map, call_id, ret)
     }
 
-    fn node(&mut self, node_id: NodeId) -> TcType<'t> {
+    fn node(&mut self, node_id: NodeId) -> TcType {
         let node = self.ast.node(node_id);
-        if let Some(t) = self.already_checked(node_id) {
-            return TcType::Known(t);
+        if let Some(known) = self.already_checked(node_id) {
+            return known;
         }
 
         match node {
@@ -626,38 +622,37 @@ impl<'a, 't> Typechecker<'a, 't> {
                     return TcType::Poison;
                 };
 
-                let (first_type, mut poisoned) = match self.node(*first_member) {
-                    TcType::Known(ty) => (ty, false),
-                    TcType::Poison => (Type::Void, true),
+                let Some(first) = self.node(*first_member).known() else {
+                    for member in members.iter().skip(1) {
+                        self.node(*member);
+                    }
+                    return TcType::Poison;
                 };
 
+                let mut poisoned = false;
                 for member in members.iter().skip(1) {
-                    match self.node(*member) {
-                        TcType::Known(ty) => {
-                            if ty != first_type {
-                                let span = self
-                                    .ast
-                                    .span(*member)
-                                    .unwrap_or_else(|| Span::from_token(src));
-                                self.report(
-                                    Diagnostic::new(
-                                        format!(
-                                            "Array members must all have the same type, expected {first_type} but got {ty}"
-                                        ),
-                                        span,
-                                    )
-                                    .with_primary_message(format!("this member is of type {ty}"))
-                                    .with_note(format!(
-                                        "the array element type was inferred as {first_type} from the first member"
-                                    )),
-                                );
-
-                                return TcType::Poison;
-                            }
-                        }
-                        TcType::Poison => {
-                            poisoned = true;
-                        }
+                    let Some(ty) = self.node(*member).known() else {
+                        poisoned = true;
+                        continue;
+                    };
+                    if self.ty(ty) != self.ty(first) {
+                        let span = self
+                            .ast
+                            .span(*member)
+                            .unwrap_or_else(|| Span::from_token(src));
+                        let (first_type, ty) = (self.ty(first), self.ty(ty));
+                        let err = Diagnostic::new(
+                            format!(
+                                "Array members must all have the same type, expected {first_type} but got {ty}"
+                            ),
+                            span,
+                        )
+                        .with_primary_message(format!("this member is of type {ty}"))
+                        .with_note(format!(
+                            "the array element type was inferred as {first_type} from the first member"
+                        ));
+                        self.report(err);
+                        return TcType::Poison;
                     }
                 }
 
@@ -665,7 +660,8 @@ impl<'a, 't> Typechecker<'a, 't> {
                     return TcType::Poison;
                 }
 
-                self.set_known(*id, Type::Array(BoxedType::owned(first_type)))
+                let elem = self.ty(first).clone();
+                self.set_known(*id, Type::Array(BoxedType::owned(elem)))
             }
             Node::Record { id, fields, .. } => {
                 let mut typed_fields = Vec::with_capacity(fields.len());
@@ -676,16 +672,12 @@ impl<'a, 't> Typechecker<'a, 't> {
                         unreachable!()
                     };
 
-                    match self.node(*value) {
-                        TcType::Known(ty) => {
-                            typed_fields.push(purple_garden_ir::ptype::Field {
-                                name: inner_name,
-                                ty,
-                            });
-                        }
-                        TcType::Poison => {
-                            poisoned = true;
-                        }
+                    match self.node(*value).known() {
+                        Some(ty) => typed_fields.push(purple_garden_ir::ptype::Field {
+                            name: inner_name,
+                            ty: self.ty(ty).clone(),
+                        }),
+                        None => poisoned = true,
                     }
                 }
 
@@ -721,32 +713,34 @@ impl<'a, 't> Typechecker<'a, 't> {
             Node::Bin { id, op, lhs, rhs } => {
                 let lhs = self.node(*lhs);
                 let rhs = self.node(*rhs);
-                let (Some(lhs), Some(rhs)) = (lhs.as_known(), rhs.as_known()) else {
+                let (Some(lhs), Some(rhs)) = (lhs.known(), rhs.known()) else {
                     return TcType::Poison;
                 };
-                let res = self.fuse(op, lhs, rhs);
-                if let Some(ty) = res.clone().known() {
-                    self.set_type(*id, ty);
+                match Self::fuse(op, self.ty(lhs), self.ty(rhs)) {
+                    Ok(t) => self.set_known(*id, t),
+                    Err(err) => {
+                        self.report(err);
+                        TcType::Poison
+                    }
                 }
-                res
             }
             Node::Unary { id, op, rhs } => {
-                let inner = self.node(*rhs);
-                let Some(inner) = inner.as_known() else {
+                let Some(inner) = self.node(*rhs).known() else {
                     return TcType::Poison;
                 };
-                let t = match (&op.t, inner) {
+                let t = match (&op.t, self.ty(inner)) {
                     (lex::Type::Plus | lex::Type::Minus, Type::Int) => Type::Int,
                     (lex::Type::Plus | lex::Type::Minus, Type::Double) => Type::Double,
-                    _ => {
-                        self.report(Diagnostic::at_token(
+                    (_, inner) => {
+                        let err = Diagnostic::at_token(
                             format!(
                                 "Unary {:?} requires Int or Double, got {}",
                                 op.t.as_str(),
                                 inner
                             ),
                             op,
-                        ));
+                        );
+                        self.report(err);
                         return TcType::Poison;
                     }
                 };
@@ -761,15 +755,15 @@ impl<'a, 't> Typechecker<'a, 't> {
                     unreachable!()
                 };
 
-                let inner = self.node(*rhs);
-                let Some(inner) = inner.known() else {
+                let Some(inner) = self.node(*rhs).known() else {
                     return TcType::Poison;
                 };
-                self.set_type(*id, inner.clone());
-                self.env_insert(inner_name, inner.clone());
-                TcType::Known(inner)
+                let t = self.ty(inner).clone();
+                self.env_insert(inner_name, t.clone());
+                self.set_known(*id, t)
             }
             Node::Fn {
+                id,
                 name,
                 args,
                 return_type,
@@ -817,72 +811,75 @@ impl<'a, 't> Typechecker<'a, 't> {
                     ret: ret.clone(),
                     with_slots: false,
                 };
-                self.functions.insert(inner_name, f_type.clone());
-
-                let computed_ret = self.block_type(body);
-                if let Some(computed_ret) = computed_ret.as_known()
-                    && &ret != computed_ret
-                {
-                    self.report(Diagnostic::at_token(
-                        format!("`{inner_name}` should return {ret}, but returns {computed_ret}"),
-                        self.ast.type_token(*return_type),
-                    ));
-                }
-
-                self.env = prev_env;
                 purple_garden_shared::trace!(
                     "[ir::typecheck::Typechecker::node][{}]: {}",
                     inner_name,
                     f_type
                 );
-                TcType::Known(ret)
+                self.functions.insert(inner_name, f_type);
+
+                if let Some(computed_ret) = self.block_type(body).known()
+                    && self.ty(computed_ret) != &ret
+                {
+                    let err = Diagnostic::at_token(
+                        format!(
+                            "`{inner_name}` should return {ret}, but returns {}",
+                            self.ty(computed_ret)
+                        ),
+                        self.ast.type_token(*return_type),
+                    );
+                    self.report(err);
+                }
+
+                self.env = prev_env;
+                self.set_known(*id, ret)
             }
             Node::Cast { id, lhs, rhs, src } => {
                 let rhs = purple_garden_frontend::type_from_type_expr(self.ast, *rhs);
-                let lhs = self.node(*lhs);
-                let Some(lhs) = lhs.as_known() else {
+                let Some(lhs) = self.node(*lhs).known() else {
                     return TcType::Poison;
                 };
-                let cast = self.cast(src, lhs, &rhs);
-                if let Some(ty) = cast.clone().known() {
-                    self.set_type(*id, ty);
+                match self.cast(src, lhs, rhs) {
+                    Some(t) => self.set_known(*id, t),
+                    None => TcType::Poison,
                 }
-                cast
             }
             Node::Field { id, target, name } => {
-                let target_type = self.node(*target);
+                let Some(target) = self.node(*target).known() else {
+                    return TcType::Poison;
+                };
+                let lex::Type::Ident(idx_path_end) = name.t else {
+                    unreachable!();
+                };
 
-                match target_type {
-                    TcType::Known(ref target @ Type::Record(ref fields)) => {
-                        let lex::Type::Ident(idx_path_end) = name.t else {
-                            unreachable!();
-                        };
+                let Type::Record(fields) = self.ty(target) else {
+                    let err = Diagnostic::at_token(
+                        format!("{} can not be indexed in this way", self.ty(target)),
+                        name,
+                    );
+                    self.report(err);
+                    return TcType::Poison;
+                };
 
-                        // PERF: this record path lookup should mabye be a map
-                        let Some(field) = fields
-                            .as_slice()
-                            .iter()
-                            .find(|field| field.name == idx_path_end)
-                        else {
-                            self.report(Diagnostic::at_token(
-                                format!("{target} does not have a field called {idx_path_end}"),
-                                name,
-                            ));
-                            return TcType::Poison;
-                        };
+                // PERF: this record path lookup should mabye be a map
+                let Some(field) = fields
+                    .as_slice()
+                    .iter()
+                    .find(|field| field.name == idx_path_end)
+                else {
+                    let err = Diagnostic::at_token(
+                        format!(
+                            "{} does not have a field called {idx_path_end}",
+                            self.ty(target)
+                        ),
+                        name,
+                    );
+                    self.report(err);
+                    return TcType::Poison;
+                };
 
-                        self.set_type(*id, field.ty.clone());
-                        TcType::Known(field.ty.clone())
-                    }
-                    TcType::Known(t) => {
-                        self.report(Diagnostic::at_token(
-                            format!("{t} can not be indexed in this way"),
-                            name,
-                        ));
-                        TcType::Poison
-                    }
-                    _ => TcType::Poison,
-                }
+                let t = field.ty.clone();
+                self.set_known(*id, t)
             }
             Node::Call { id, target, args } => match self.ast.node(*target) {
                 Node::Field { target, name, .. } => self.resolve_pkg_call(*id, *target, name, args),
@@ -892,23 +889,24 @@ impl<'a, 't> Typechecker<'a, 't> {
             Node::Match { id, cases, default } => {
                 // short circuit for empty matches
                 if cases.is_empty() {
-                    return TcType::Known(Type::Void);
+                    return self.set_known(*id, Type::Void);
                 }
 
-                let case_count = cases.len();
-
                 // all branches MUST resolve to the same type :)
-                let mut branch_types: Vec<Option<(&Token, Type<'t>)>> =
-                    vec![const { None }; case_count];
+                let mut branch_types: Vec<Option<(&Token, usize)>> = vec![None; cases.len()];
 
                 for (i, ((condition_token, condition), body)) in cases.iter().enumerate() {
                     if let Some(condition_type) = self.node(*condition).known()
-                        && condition_type != Type::Bool
+                        && self.ty(condition_type) != &Type::Bool
                     {
-                        self.report(Diagnostic::at_token(
-                            format!("Match conditions must be Bool, got {condition_type} instead"),
+                        let err = Diagnostic::at_token(
+                            format!(
+                                "Match conditions must be Bool, got {} instead",
+                                self.ty(condition_type)
+                            ),
                             condition_token,
-                        ));
+                        );
+                        self.report(err);
                     }
 
                     if let Some(branch_return_type) = self.block_type(body).known() {
@@ -925,25 +923,29 @@ impl<'a, 't> Typechecker<'a, 't> {
                 for cur in &branch_types {
                     let Some((tok, ty)) = cur else { continue };
 
-                    if ty != &first_type {
-                        self.report(Diagnostic::at_token(
+                    if self.ty(*ty) != self.ty(first_type) {
+                        let err = Diagnostic::at_token(
                             format!(
-                                "Match cases must resolve to the same type, but got {first_type} and {ty}"
+                                "Match cases must resolve to the same type, but got {} and {}",
+                                self.ty(first_type),
+                                self.ty(*ty)
                             ),
                             tok,
-                        ));
+                        );
+                        self.report(err);
                     }
                 }
 
-                self.set_known(*id, first_type)
+                let t = self.ty(first_type).clone();
+                self.set_known(*id, t)
             }
-            Node::Import { pkgs, src, .. } => {
+            Node::Import { id, pkgs, src } => {
                 if pkgs.is_empty() {
                     self.report(Diagnostic::at_token(
                         "Import without any paths to import is considered invalid",
                         src,
                     ));
-                    return TcType::Known(Type::Void);
+                    return self.set_known(*id, Type::Void);
                 }
 
                 for pkg_tok in pkgs {
@@ -971,11 +973,11 @@ impl<'a, 't> Typechecker<'a, 't> {
                     self.register_pkg(pkg);
                 }
 
-                TcType::Known(Type::Void)
+                self.set_known(*id, Type::Void)
             }
-            Node::Extern { .. } => {
+            Node::Extern { id, .. } => {
                 self.register_extern(node_id);
-                TcType::Known(Type::Void)
+                self.set_known(*id, Type::Void)
             }
         }
     }
@@ -991,10 +993,7 @@ mod tests {
     }
 
     fn type_of<'t>(ast: &Ast<'t>, out: &TypecheckOutput<'t>, node: NodeId) -> Option<Type<'t>> {
-        ast.value_id(node)
-            .and_then(|id| out.types.get(id))
-            .cloned()
-            .flatten()
+        out.types.get(ast.value_id(node)).cloned().flatten()
     }
 
     #[test]

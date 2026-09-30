@@ -168,7 +168,7 @@ impl<'lower> Lower<'lower> {
                 };
                 let field_offset =
                     offset + ty.field_offset(name).expect("record field was typechecked") as u32;
-                let field_ty = self.types[ast.value_id(*value).unwrap()].clone().unwrap();
+                let field_ty = self.types[ast.value_id(*value)].clone().unwrap();
                 self.lower_node_into(ast, *value, &field_ty, base, field_offset, tok.start as u32)?;
             }
 
@@ -241,7 +241,7 @@ impl<'lower> Lower<'lower> {
             }
             Node::Field { id, target, name } => {
                 let base = self.lower_node(ast, *target)?.unwrap();
-                let target_value_id = ast.value_id(*target).unwrap();
+                let target_value_id = ast.value_id(*target);
                 let target_type = self.types[target_value_id].clone().unwrap();
                 let ty = self.types[*id].clone().unwrap();
 
@@ -285,7 +285,7 @@ impl<'lower> Lower<'lower> {
                     BEq, DAdd, DDiv, DGt, DLt, DMul, DSub, IAdd, IDiv, IEq, IGt, ILt, IMod, IMul,
                     ISub,
                 };
-                let src_type = self.types[ast.value_id(*lhs).unwrap()].clone().unwrap();
+                let src_type = self.types[ast.value_id(*lhs)].clone().unwrap();
                 let span = op.start as u32;
 
                 let Some(lhs) = self.lower_node(ast, *lhs)? else {
@@ -340,7 +340,7 @@ impl<'lower> Lower<'lower> {
                 Some(dst_id)
             }
             Node::Unary { op, rhs, .. } => {
-                let inner_ty = self.types[ast.value_id(*rhs).unwrap()].clone().unwrap();
+                let inner_ty = self.types[ast.value_id(*rhs)].clone().unwrap();
                 let span = op.start as u32;
                 let Some(rhs_id) = self.lower_node(ast, *rhs)? else {
                     unreachable!()
@@ -512,9 +512,8 @@ impl<'lower> Lower<'lower> {
                             // arg types stream by reference from the type map; the
                             // typechecker already proved exactly one variant matches.
                             let provided = || {
-                                args.iter().map(|&n| {
-                                    self.types[ast.value_id(n).unwrap()].as_ref().unwrap()
-                                })
+                                args.iter()
+                                    .map(|&n| self.types[ast.value_id(n)].as_ref().unwrap())
                             };
                             *candidates
                                 .iter()
@@ -596,9 +595,8 @@ impl<'lower> Lower<'lower> {
             }
             Node::Extern { .. } => None,
             Node::Cast { lhs, rhs, src, .. } => {
-                let src_ty = ast
-                    .value_id(*lhs)
-                    .and_then(|aid| self.types.get(aid).cloned().flatten())
+                let src_ty = self.types[ast.value_id(*lhs)]
+                    .clone()
                     .expect("typechecker should have typed the cast's lhs");
 
                 let Some(from_id) = self.lower_node(ast, *lhs)? else {
@@ -815,7 +813,7 @@ impl<'lower> Lower<'lower> {
                         .field_offset(name)
                         .expect("record field was typechecked")
                         as u32;
-                    let field_ty = self.types[ast.value_id(*value).unwrap()].clone().unwrap();
+                    let field_ty = self.types[ast.value_id(*value)].clone().unwrap();
                     self.lower_node_into(ast, *value, &field_ty, base, offset, tok.start as u32)?;
                 }
 
