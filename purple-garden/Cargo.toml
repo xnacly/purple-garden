@@ -41,3 +41,7 @@ harness = false
 [[bench]]
 name = "suite"
 harness = false
+
+[[bench]]
+name = "typecheck"
+harness = false
