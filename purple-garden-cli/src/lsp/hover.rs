@@ -272,6 +272,5 @@ pub(super) fn type_for_node(
     typecheck
         .types
         .get(ast.value_id(node_id))
-        .and_then(Option::as_ref)
         .map(ToString::to_string)
 }

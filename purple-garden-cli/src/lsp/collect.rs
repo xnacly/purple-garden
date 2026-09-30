@@ -233,10 +233,7 @@ fn ty_for_node<'a>(
     typecheck: &'a TypecheckOutput<'a>,
     node_id: NodeId,
 ) -> Option<&'a Type<'a>> {
-    typecheck
-        .types
-        .get(ast.value_id(node_id))
-        .and_then(Option::as_ref)
+    typecheck.types.get(ast.value_id(node_id))
 }
 
 fn collect_nodes(

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use purple_garden_frontend::{ast::Ast, diagnostic::Diagnostic};
+use purple_garden_frontend::{ast::Ast, diagnostic::Diagnostic, typemap::TypeMap};
 use purple_garden_ir::ptype::Type;
 
 #[derive(Debug, Clone)]
@@ -13,11 +13,11 @@ pub struct FunctionType<'t> {
 
 #[derive(Debug)]
 pub struct TypecheckOutput<'t> {
-    /// Node value id -> inferred type. Poisoned nodes stay `None`.
+    /// Node value id -> inferred type. Poisoned nodes have no type.
     ///
     /// This lets analysis clients use all types that were still knowable after
     /// errors without pretending the whole file typechecked successfully.
-    pub types: Vec<Option<Type<'t>>>,
+    pub types: TypeMap<'t>,
     pub diagnostics: Vec<Diagnostic>,
     pub functions: HashMap<&'t str, FunctionType<'t>>,
 }
@@ -50,7 +50,7 @@ impl TcType {
 /// off instead of cloning the signature.
 pub(super) struct CallSink<'s, 'a, 't> {
     pub(super) ast: &'a Ast<'t>,
-    pub(super) map: &'s mut Vec<Option<Type<'t>>>,
+    pub(super) map: &'s mut TypeMap<'t>,
     pub(super) diagnostics: &'s mut Vec<Diagnostic>,
 }
 

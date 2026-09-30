@@ -6,6 +6,7 @@ mod typedefs;
 
 use std::collections::HashMap;
 
+use purple_garden_frontend::typemap::{TypeMap, TypeRef};
 use purple_garden_frontend::{
     ast::{Ast, Node, NodeId},
     diagnostic::{Diagnostic, Span},
@@ -24,10 +25,11 @@ pub struct Typechecker<'a, 't> {
     ast: &'a Ast<'t>,
     /// Node id -> Type. Indexed by id; Node ids are dense from the parser, the slot past the last
     /// id holds `Void` for results without a node of their own, see [`Self::void`]
-    map: Vec<Option<Type<'t>>>,
+    map: TypeMap<'t>,
     void: usize,
-    /// scope stack; innermost frame last; lookups walk from top to bottom
-    env: Vec<HashMap<&'t str, Type<'t>>>,
+    /// scope stack; innermost frame last; lookups walk from top to bottom. Bindings point at
+    /// the arena entry of the expression that produced them
+    env: Vec<HashMap<&'t str, TypeRef>>,
     /// map a function name to its type(s)
     functions: HashMap<&'t str, FunctionType<'t>>,
     /// map a pkg name to a map of its public method names to overload groups
@@ -44,7 +46,7 @@ impl<'a, 't> Typechecker<'a, 't> {
     pub fn new(ast: &'a Ast<'t>) -> Self {
         let mut s = Self {
             ast,
-            map: vec![None; ast.values + 1],
+            map: TypeMap::with_slots(ast.values + 1),
             void: ast.values,
             env: Vec::new(),
             functions: HashMap::new(),
@@ -54,7 +56,7 @@ impl<'a, 't> Typechecker<'a, 't> {
             stdlib: pstd::STD,
             diagnostics: Vec::new(),
         };
-        s.map[s.void] = Some(Type::Void);
+        s.map.insert(s.void, Type::Void);
         s.env.push(HashMap::new());
         s
     }
@@ -77,11 +79,15 @@ impl<'a, 't> Typechecker<'a, 't> {
         self
     }
 
-    fn env_get(&self, k: &str) -> Option<&Type<'t>> {
-        self.env.iter().rev().find_map(|frame| frame.get(k))
+    fn env_get(&self, k: &str) -> Option<TypeRef> {
+        self.env
+            .iter()
+            .rev()
+            .find_map(|frame| frame.get(k))
+            .copied()
     }
 
-    fn env_insert(&mut self, k: &'t str, v: Type<'t>) {
+    fn env_insert(&mut self, k: &'t str, v: TypeRef) {
         self.env.last_mut().unwrap().insert(k, v);
     }
 
@@ -181,32 +187,34 @@ impl<'a, 't> Typechecker<'a, 't> {
     }
 
     #[inline]
-    fn store(map: &mut [Option<Type<'t>>], id: usize, t: Type<'t>) {
-        map[id] = Some(t);
+    fn store_known(map: &mut TypeMap<'t>, id: usize, t: Type<'t>) -> TcType {
+        map.insert(id, t);
+        TcType::Known(id)
     }
 
-    #[inline]
-    fn store_known(map: &mut [Option<Type<'t>>], id: usize, t: Type<'t>) -> TcType {
-        Self::store(map, id, t);
+    /// `id` shares the type already stored for `of`
+    fn alias(&mut self, id: usize, of: usize) -> TcType {
+        let r = self.map.ref_of(of).expect("known ids always have a type");
+        self.map.bind(id, r);
         TcType::Known(id)
     }
 
     /// Type behind a [`TcType::Known`] id
     fn ty(&self, id: usize) -> &Type<'t> {
-        self.map[id].as_ref().expect("known ids always have a type")
+        self.map.get(id).expect("known ids always have a type")
     }
 
     fn already_checked(&self, node: NodeId) -> Option<TcType> {
         let id = self.ast.value_id(node);
-        self.map[id].is_some().then_some(TcType::Known(id))
+        self.map.get(id).is_some().then_some(TcType::Known(id))
     }
 
     /// Type already assigned to `node`, by reference. Callers must have typed
     /// `node` first (via [`Self::node`]); used to read arg types for overload
     /// selection without cloning them out of the map.
     fn resolved_arg_ty(&self, node: NodeId) -> &Type<'t> {
-        self.map[self.ast.value_id(node)]
-            .as_ref()
+        self.map
+            .get(self.ast.value_id(node))
             .expect("arg typed before overload selection")
     }
 
@@ -550,7 +558,7 @@ impl<'a, 't> Typechecker<'a, 't> {
         let mut slot_to_type_bindings: HashMap<&str, Type<'_>> = HashMap::new();
 
         for (i, &provided_node) in args.iter().enumerate() {
-            let Some(provided_type) = map[ast.value_id(provided_node)].as_ref() else {
+            let Some(provided_type) = map.get(ast.value_id(provided_node)) else {
                 continue;
             };
 
@@ -700,7 +708,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                     unreachable!()
                 };
 
-                let Some(t) = self.env_get(inner_name).cloned() else {
+                let Some(binding) = self.env_get(inner_name) else {
                     self.report(Diagnostic::at_token(
                         format!("binding `{inner_name}` not found"),
                         name,
@@ -708,7 +716,8 @@ impl<'a, 't> Typechecker<'a, 't> {
                     return TcType::Poison;
                 };
 
-                self.set_known(*id, t)
+                self.map.bind(*id, binding);
+                TcType::Known(*id)
             }
             Node::Bin { id, op, lhs, rhs } => {
                 let lhs = self.node(*lhs);
@@ -758,9 +767,13 @@ impl<'a, 't> Typechecker<'a, 't> {
                 let Some(inner) = self.node(*rhs).known() else {
                     return TcType::Poison;
                 };
-                let t = self.ty(inner).clone();
-                self.env_insert(inner_name, t.clone());
-                self.set_known(*id, t)
+                let binding = self
+                    .map
+                    .ref_of(inner)
+                    .expect("known ids always have a type");
+                self.env_insert(inner_name, binding);
+                self.map.bind(*id, binding);
+                TcType::Known(*id)
             }
             Node::Fn {
                 id,
@@ -800,7 +813,8 @@ impl<'a, 't> Typechecker<'a, 't> {
                     let inner_name = *inner_name;
 
                     let t = purple_garden_frontend::type_from_type_expr(self.ast, *arg_type);
-                    self.env_insert(inner_name, t.clone());
+                    let binding = self.map.alloc(t.clone());
+                    self.env_insert(inner_name, binding);
                     typed_arguments.push((inner_name, t));
                 }
 
@@ -931,8 +945,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                     }
                 }
 
-                let t = self.ty(first_type).clone();
-                self.set_known(*id, t)
+                self.alias(*id, first_type)
             }
             Node::Import { id, pkgs, src } => {
                 if pkgs.is_empty() {
@@ -940,7 +953,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                         "Import without any paths to import is considered invalid",
                         src,
                     ));
-                    return self.set_known(*id, Type::Void);
+                    return self.alias(*id, self.void);
                 }
 
                 for pkg_tok in pkgs {
@@ -968,11 +981,11 @@ impl<'a, 't> Typechecker<'a, 't> {
                     self.register_pkg(pkg);
                 }
 
-                self.set_known(*id, Type::Void)
+                self.alias(*id, self.void)
             }
             Node::Extern { id, .. } => {
                 self.register_extern(node_id);
-                self.set_known(*id, Type::Void)
+                self.alias(*id, self.void)
             }
         }
     }
@@ -988,7 +1001,7 @@ mod tests {
     }
 
     fn type_of<'t>(ast: &Ast<'t>, out: &TypecheckOutput<'t>, node: NodeId) -> Option<Type<'t>> {
-        out.types.get(ast.value_id(node)).cloned().flatten()
+        out.types.get(ast.value_id(node)).cloned()
     }
 
     #[test]
@@ -1381,8 +1394,8 @@ mod tests {
     fn type_map_covers_every_value_id_and_ends_with_the_void_slot() {
         let (ast, out) = check(b"let x = { a: [1 2] b: -1 }\nx.a\nfn f() Int { 1 }\nf()");
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
-        assert_eq!(out.types.len(), ast.values + 1);
-        assert_eq!(out.types[ast.values], Some(Type::Void));
+        assert_eq!(out.types.slots(), ast.values + 1);
+        assert_eq!(out.types.get(ast.values), Some(&Type::Void));
         for root in 0..ast.roots.len() {
             assert!(
                 root_type(&ast, &out, root).is_some(),
