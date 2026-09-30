@@ -84,6 +84,18 @@ impl<'l> Lexer<'l> {
         self.input.get(self.pos + 1).copied()
     }
 
+    /// A sign detached from what precedes it but glued to what follows (`1 -1`) starts a new
+    /// expression, `1 - 1` and `1-1` stay infix
+    #[must_use]
+    pub fn is_prefix_sign(&self, at: usize) -> bool {
+        let spaced_before = at == 0 || class_of(self.input[at - 1]) & WS != 0;
+        let glued_after = self
+            .input
+            .get(at + 1)
+            .is_some_and(|b| class_of(*b) & WS == 0);
+        spaced_before && glued_after
+    }
+
     /// skip whitespace and comments
     fn skip_whitespace(&mut self) {
         let bytes = self.input;
@@ -210,19 +222,37 @@ impl<'l> Lexer<'l> {
                 }
                 c if class_of(c) & DIGIT != 0 => {
                     let bytes = self.input;
-                    let p = start + 1 + skip_num_cont(&self.input[start + 1..]);
-                    self.pos = p;
+                    let mut p = start + 1 + skip_num_cont(&self.input[start + 1..]);
 
-                    let is_double = if let Some(dot) = find_byte(b'.', &bytes[start + 1..p]) {
-                        if find_byte(b'.', &bytes[start + 1 + dot + 1..p]).is_some() {
-                            self.diagnostics
-                                .push(self.make_err("Invalid numeric literal", start));
-                            continue;
-                        }
-                        true
-                    } else {
-                        false
+                    // `1.x` and `1.5.x` are field accesses on a number, that dot is the parser's
+                    let ends_number = |dot: usize| {
+                        bytes
+                            .get(dot + 1)
+                            .is_some_and(|b| class_of(*b) & IDENT_START != 0)
                     };
+                    let is_double = match find_byte(b'.', &bytes[start + 1..p]) {
+                        None => false,
+                        Some(rel) => {
+                            let dot = start + 1 + rel;
+                            if ends_number(dot) {
+                                p = dot;
+                                false
+                            } else if let Some(rel) = find_byte(b'.', &bytes[dot + 1..p]) {
+                                let dot = dot + 1 + rel;
+                                if !ends_number(dot) {
+                                    self.pos = p;
+                                    self.diagnostics
+                                        .push(self.make_err("Invalid numeric literal", start));
+                                    continue;
+                                }
+                                p = dot;
+                                true
+                            } else {
+                                true
+                            }
+                        }
+                    };
+                    self.pos = p;
 
                     // SAFETY: only ASCII digits and '.' are accepted, valid UTF-8.
                     let inner = unsafe { str::from_utf8_unchecked(&bytes[start..p]) };
@@ -452,6 +482,23 @@ mod tests {
     fn leading_dot_numbers() {
         let toks = lex("0.5 1.");
         assert_eq!(toks, vec![Type::D("0.5"), Type::D("1.")]);
+    }
+
+    #[test]
+    fn dot_before_identifier_ends_the_number() {
+        let toks = lex("1.x 1.5.x 2.");
+        assert_eq!(
+            toks,
+            vec![
+                Type::I("1"),
+                Type::Dot,
+                Type::Ident("x"),
+                Type::D("1.5"),
+                Type::Dot,
+                Type::Ident("x"),
+                Type::D("2."),
+            ]
+        );
     }
 
     #[test]
