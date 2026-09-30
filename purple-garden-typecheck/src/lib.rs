@@ -1353,4 +1353,263 @@ mod tests {
             "`add` expected b:Int, got b:Str instead"
         );
     }
+
+    fn check<'s>(source: &'s [u8]) -> (Ast<'s>, TypecheckOutput<'s>) {
+        let ast = parse(source);
+        let out = Typechecker::new(&ast).check();
+        (ast, out)
+    }
+
+    fn root_type<'t>(ast: &Ast<'t>, out: &TypecheckOutput<'t>, root: usize) -> Option<Type<'t>> {
+        type_of(ast, out, ast.roots[root])
+    }
+
+    fn messages<'o>(out: &'o TypecheckOutput<'_>) -> Vec<&'o str> {
+        out.diagnostics.iter().map(|d| d.message.as_str()).collect()
+    }
+
+    fn opt(ty: Type<'static>) -> Type<'static> {
+        Type::Option(BoxedType::owned(ty))
+    }
+
+    #[test]
+    fn declarations_are_typed_void_or_their_return_type() {
+        let (ast, out) =
+            check(b"import \"math\"\nfn f(a:Int) Int { a }\nextern \"ffi\" { fn g(a:Int) Bool }");
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(root_type(&ast, &out, 0), Some(Type::Void));
+        assert_eq!(root_type(&ast, &out, 1), Some(Type::Int));
+        assert_eq!(root_type(&ast, &out, 2), Some(Type::Void));
+    }
+
+    #[test]
+    fn type_map_covers_every_value_id_and_ends_with_the_void_slot() {
+        let (ast, out) = check(b"let x = { a: [1 2] b: -1 }\nx.a\nfn f() Int { 1 }\nf()");
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(out.types.len(), ast.values + 1);
+        assert_eq!(out.types[ast.values], Some(Type::Void));
+        for root in 0..ast.roots.len() {
+            assert!(
+                root_type(&ast, &out, root).is_some(),
+                "root {root} is typed"
+            );
+        }
+    }
+
+    #[test]
+    fn let_types_the_binding_and_later_reads() {
+        let (ast, out) = check(b"let x = 1.5\nx");
+        assert!(out.diagnostics.is_empty());
+        assert_eq!(root_type(&ast, &out, 0), Some(Type::Double));
+        assert_eq!(root_type(&ast, &out, 1), Some(Type::Double));
+    }
+
+    #[test]
+    fn unknown_binding_reports_error_and_poisons() {
+        let (ast, out) = check(b"y");
+        assert_eq!(messages(&out), vec!["binding `y` not found"]);
+        assert_eq!(root_type(&ast, &out, 0), None);
+    }
+
+    #[test]
+    fn unary_minus_types_int_and_double() {
+        let (ast, out) = check(b"-1\n-1.5");
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(root_type(&ast, &out, 0), Some(Type::Int));
+        assert_eq!(root_type(&ast, &out, 1), Some(Type::Double));
+    }
+
+    #[test]
+    fn unary_on_str_reports_error() {
+        let (ast, out) = check(br#"-"s""#);
+        assert_eq!(
+            messages(&out),
+            vec![r#"Unary "-" requires Int or Double, got Str"#]
+        );
+        assert_eq!(root_type(&ast, &out, 0), None);
+    }
+
+    #[test]
+    fn cast_int_to_double_types_double() {
+        let (ast, out) = check(b"1 as Double");
+        assert!(out.diagnostics.is_empty());
+        assert_eq!(root_type(&ast, &out, 0), Some(Type::Double));
+    }
+
+    #[test]
+    fn redundant_cast_reports_but_keeps_the_type() {
+        let (ast, out) = check(b"1 as Int");
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(root_type(&ast, &out, 0), Some(Type::Int));
+    }
+
+    #[test]
+    fn match_takes_the_default_branch_type() {
+        let (ast, out) = check(b"match { 1 == 1 { 2 } { 3 } }");
+        assert!(out.diagnostics.is_empty());
+        assert_eq!(root_type(&ast, &out, 0), Some(Type::Int));
+    }
+
+    #[test]
+    fn fn_parameters_are_scoped_to_the_body() {
+        let (ast, out) = check(b"fn f(a:Int) Int { a }\na");
+        assert_eq!(messages(&out), vec!["binding `a` not found"]);
+        assert_eq!(root_type(&ast, &out, 0), Some(Type::Int));
+    }
+
+    #[test]
+    fn fn_body_let_chain_typechecks_against_declared_return() {
+        let (ast, out) = check(b"fn f(n:Int) Int { let a = n + 1\nlet b = a * 2\nb }\nf(1)");
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(root_type(&ast, &out, 1), Some(Type::Int));
+    }
+
+    #[test]
+    fn fn_body_returning_void_reports_mismatch() {
+        let (_, out) = check(b"fn f() Int { }");
+        assert_eq!(
+            messages(&out),
+            vec!["`f` should return Int, but returns Void"]
+        );
+    }
+
+    #[test]
+    fn array_with_poisoned_first_member_reports_once() {
+        let (ast, out) = check(b"[nope 1]");
+        assert_eq!(messages(&out), vec!["binding `nope` not found"]);
+        assert_eq!(root_type(&ast, &out, 0), None);
+    }
+
+    #[test]
+    fn array_with_poisoned_later_member_reports_once() {
+        let (ast, out) = check(b"[1 nope]");
+        assert_eq!(messages(&out), vec!["binding `nope` not found"]);
+        assert_eq!(root_type(&ast, &out, 0), None);
+    }
+
+    #[test]
+    fn record_with_poisoned_field_reports_once() {
+        let (ast, out) = check(b"{ a: nope b: 1 }");
+        assert_eq!(messages(&out), vec!["binding `nope` not found"]);
+        assert_eq!(root_type(&ast, &out, 0), None);
+    }
+
+    #[test]
+    fn field_access_on_non_record_reports_error() {
+        let (ast, out) = check(b"1.x");
+        assert_eq!(messages(&out), vec!["Int can not be indexed in this way"]);
+        assert_eq!(root_type(&ast, &out, 0), None);
+    }
+
+    #[test]
+    fn package_call_resolves_overload_return_type() {
+        let (ast, out) = check(b"import \"math\"\nmath.abs(1)\nmath.abs(1.5)");
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(root_type(&ast, &out, 1), Some(Type::Int));
+        assert_eq!(root_type(&ast, &out, 2), Some(Type::Double));
+    }
+
+    #[test]
+    fn package_call_overload_miss_reports_error() {
+        let (ast, out) = check(b"import \"math\"\nmath.abs(\"s\")");
+        assert_eq!(out.diagnostics.len(), 1);
+        assert!(
+            out.diagnostics[0]
+                .message
+                .starts_with("no specialisation of `math.abs` accepts (Str)"),
+            "{}",
+            out.diagnostics[0].message
+        );
+        assert_eq!(root_type(&ast, &out, 1), None);
+    }
+
+    #[test]
+    fn undefined_package_function_reports_error() {
+        let (_, out) = check(b"import \"math\"\nmath.nope(1)");
+        assert_eq!(
+            messages(&out),
+            vec!["Call to undefined function `math.nope`"]
+        );
+    }
+
+    #[test]
+    fn calling_an_unimported_package_reports_error() {
+        let (_, out) = check(b"math.abs(1)");
+        assert_eq!(messages(&out), vec!["Can't find package `math`"]);
+    }
+
+    #[test]
+    fn import_of_unknown_package_reports_error() {
+        let (_, out) = check(b"import \"nope\"");
+        assert_eq!(
+            messages(&out),
+            vec!["Wasnt able to find a package named `nope`"]
+        );
+    }
+
+    #[test]
+    fn undefined_function_still_types_its_arguments() {
+        let (_, out) = check(b"nope(x)");
+        assert_eq!(
+            messages(&out),
+            vec!["binding `x` not found", "Call to undefined function `nope`"]
+        );
+    }
+
+    #[test]
+    fn poisoned_call_argument_is_not_diagnosed_twice() {
+        let (_, out) = check(b"import \"math\"\nmath.abs(x)");
+        assert_eq!(messages(&out), vec!["binding `x` not found"]);
+
+        let (_, out) = check(b"fn f(a:Int) Int { a }\nf(x)");
+        assert_eq!(messages(&out), vec!["binding `x` not found"]);
+    }
+
+    #[test]
+    fn call_arg_mismatch_points_at_the_argument() {
+        let (_, out) = check(b"fn f(a:Int) Int { a }\nf(\"s\")");
+        assert_eq!(
+            messages(&out),
+            vec!["`f` expected a:Int, got a:Str instead"]
+        );
+        assert_eq!(out.diagnostics[0].primary.span, Span::new(25, 1));
+        assert_eq!(
+            out.diagnostics[0].primary.message.as_deref(),
+            Some("this argument is of type Str")
+        );
+    }
+
+    #[test]
+    fn generic_call_substitutes_the_return_type() {
+        let (ast, out) =
+            check(b"import \"opt\"\nopt.some(1)\nopt.some(opt.some(\"s\"))\nopt.some([1 2])");
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(root_type(&ast, &out, 1), Some(opt(Type::Int)));
+        assert_eq!(root_type(&ast, &out, 2), Some(opt(opt(Type::Str))));
+        assert_eq!(
+            root_type(&ast, &out, 3),
+            Some(opt(Type::Array(BoxedType::owned(Type::Int))))
+        );
+    }
+
+    #[test]
+    fn generic_result_flows_into_concrete_parameters() {
+        let (_, out) = check(
+            b"import \"opt\"\nfn f(a: Option<Int>) Int { 1 }\nf(opt.some(1))\nf(opt.some(\"s\"))",
+        );
+        assert_eq!(
+            messages(&out),
+            vec!["`f` expected a:Option<Int>, got a:Option<Str> instead"]
+        );
+    }
+
+    #[test]
+    fn record_arguments_compare_structurally() {
+        let (ast, out) = check(b"fn first(r: Record<a: Int b: Str>) Int { r.a }\nfirst({ a: 1 b: \"s\" })\nfirst({ a: 1 b: 2 })");
+        assert_eq!(
+            messages(&out),
+            vec!["`first` expected r:Record<a: Int b: Str>, got r:Record<a: Int b: Int> instead"]
+        );
+        assert_eq!(root_type(&ast, &out, 1), Some(Type::Int));
+    }
 }
