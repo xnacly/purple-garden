@@ -1,5 +1,5 @@
 //! Purple garden type system
-use std::{alloc::Layout, collections::HashMap, fmt::Display, hash::Hash};
+use std::{alloc::Layout, borrow::Cow, collections::HashMap, fmt::Display, hash::Hash};
 
 use crate::Const;
 
@@ -248,6 +248,52 @@ impl<'t> Type<'t> {
         }
     }
 
+    /// Recursively replaces every slot with its binding from `bindings`, the inverse of
+    /// [`Type::bind_slots`]. Slots without a binding are left in place.
+    ///
+    /// Returns `Cow::Borrowed` when nothing was substituted so concrete types are never cloned.
+    #[must_use]
+    pub fn apply_slot_binding<'s>(&'s self, bindings: &HashMap<&'t str, Self>) -> Cow<'s, Self> {
+        match self {
+            Self::Slot(slot) => bindings
+                .get(slot)
+                .map_or(Cow::Borrowed(self), |ty| Cow::Owned(ty.clone())),
+            Self::Option(inner) | Self::Array(inner) => {
+                match inner.as_ref().apply_slot_binding(bindings) {
+                    Cow::Borrowed(_) => Cow::Borrowed(self),
+                    Cow::Owned(inner) => {
+                        let inner = BoxedType::owned(inner);
+                        Cow::Owned(match self {
+                            Self::Option(_) => Self::Option(inner),
+                            _ => Self::Array(inner),
+                        })
+                    }
+                }
+            }
+            Self::Record(fields) => {
+                let fields = fields.as_slice();
+                let substituted: Vec<_> = fields
+                    .iter()
+                    .map(|field| field.ty.apply_slot_binding(bindings))
+                    .collect();
+                if substituted.iter().all(|ty| matches!(ty, Cow::Borrowed(_))) {
+                    return Cow::Borrowed(self);
+                }
+                Cow::Owned(Self::Record(RecordFields::owned(
+                    fields
+                        .iter()
+                        .zip(substituted)
+                        .map(|(field, ty)| Field {
+                            name: field.name,
+                            ty: ty.into_owned(),
+                        })
+                        .collect(),
+                )))
+            }
+            _ => Cow::Borrowed(self),
+        }
+    }
+
     /// Runtime payload layout for a value of this type, see [Type] for heap layouts
     pub fn layout(&self) -> Layout {
         Layout::from_size_align(self.size(), self.align()).expect("type layout")
@@ -356,7 +402,7 @@ impl<'a> From<Const<'a>> for Type<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{borrow::Cow, collections::HashMap};
 
     use super::{BindError, BoxedType, Field, RecordFields, Type};
 
@@ -594,5 +640,54 @@ mod tests {
             bindings,
             HashMap::from([("T", Type::Int), ("U", Type::Str)])
         );
+    }
+
+    #[test]
+    fn apply_slot_binding_substitutes_bare_and_nested_slots() {
+        let b = HashMap::from([("T", Type::Int), ("U", opt(Type::Str))]);
+        assert_eq!(*Type::Slot("T").apply_slot_binding(&b), Type::Int);
+        assert_eq!(*opt(Type::Slot("T")).apply_slot_binding(&b), opt(Type::Int));
+        assert_eq!(
+            *arr(opt(Type::Slot("U"))).apply_slot_binding(&b),
+            arr(opt(opt(Type::Str)))
+        );
+        assert_eq!(
+            *Type::record(vec![("a", Type::Slot("T")), ("b", Type::Bool), ("c", Type::Slot("U"))])
+                .apply_slot_binding(&b),
+            Type::record(vec![("a", Type::Int), ("b", Type::Bool), ("c", opt(Type::Str))])
+        );
+    }
+
+    #[test]
+    fn apply_slot_binding_substitutes_static_record_fields() {
+        static FIELDS: &[Field<'static>] = &[Field {
+            name: "t",
+            ty: Type::Slot("T"),
+        }];
+        let b = HashMap::from([("T", Type::Int)]);
+        assert_eq!(
+            *Type::Record(RecordFields::static_fields(FIELDS)).apply_slot_binding(&b),
+            Type::record(vec![("t", Type::Int)])
+        );
+    }
+
+    #[test]
+    fn apply_slot_binding_leaves_unbound_slots_and_borrows_when_unchanged() {
+        let b = HashMap::from([("T", Type::Int)]);
+        for ty in [
+            Type::Int,
+            opt(Type::Str),
+            Type::Slot("U"),
+            arr(Type::Slot("U")),
+            Type::record(vec![("a", Type::Bool), ("u", Type::Slot("U"))]),
+        ] {
+            let out = ty.apply_slot_binding(&b);
+            assert!(matches!(out, Cow::Borrowed(_)), "{ty} should not be cloned");
+            assert_eq!(*out, ty);
+        }
+        assert!(matches!(
+            Type::Slot("T").apply_slot_binding(&HashMap::new()),
+            Cow::Borrowed(Type::Slot("T"))
+        ));
     }
 }
