@@ -1,11 +1,11 @@
 # Generics
 
-All generics, be it specialisation or monomorphisation are not
-user exposed in the sense of creating them, they can however be
-consumed by users. Embedders can mark functions as either
-specialising (choosing an implementation based on the type) or
-generic, which accepts a list of generic types used in said
-function.
+All generics, be it specialisation or slots are not exposed to the user in the
+sense of creating them, they can however be consumed by users. 
+
+Embedders can mark functions as either specialising (choosing an implementation
+based on the type) or generic, which accepts a list of generic types used in
+said function.
 
 ## Specialisation based
 
@@ -87,47 +87,129 @@ needs to do so for all possible inputs, and we cant write a specialisation for
 types we may now know, something like `Record<Age:Int Name:Str>` shows the
 unlimited amount of work specialising every possible T for every stdlib
 function would require. Therefore purple garden needs substitution based
-generics, which enable passing a value through something and "specialising" the
-function at compile time for the known input automatically.
+generics (called slots), which enable passing a value through something and
+"specialising" the function at compile time for the known input automatically.
 
 Given the identity function:
 
+```rust
+#[pg_pkg(runtime = purple_garden_runtime)]
+pub mod t {
+    /// lx.x
+    #[pg_fn(with_slots)]
+    pub fn id(x: embed::Slot("T")) -> embed::Slot("T") {
+        x
+    }
+}
+```
 
-<!-- TODO: figure out how to actually instruct purple garden to
-see and support generics -->
+Producing the following after macro expansion:
 
 ```rust
-#[pg_pkg]
-mod tt {
-    fn identity<T>(x: T) -> T { x }
+unsafe extern "C" fn id(vm: *mut std::ffi::c_void) {
+    // This could be an empty body, but the macro codegen does not optimise,
+    // thus the id function is taken verbatim
+    let vm = unsafe { &mut *vm.cast::<Vm>() };
+    let inner = vm.r(0);
+    *vm.r_mut(0) = *inner;
 }
+
+pub const PACKAGE: purple_garden_runtime::embed::Pkg = purple_garden_runtime::embed::Pkg {
+    name: "t",
+    doc: "t",
+    pkgs: &[],
+    fns: &[purple_garden_runtime::embed::Fn {
+        name: "id",
+        doc: "lx.x",
+        ptr: id,
+        pure: false,
+        eval: None,
+        with_slots: true,
+        arg_names: &["x"],
+        args: &[Type::Slot("T")],
+        ret: Type::Slot("T"),
+        specialises: None,
+    }],
+};
 ```
 
 For the below example usage from pgs side there should be a generated function for each of the different usages (in both IR, pgvm and x86)
 
 ```garden
-import "tt"
-tt.identity(3.1415)         # Double
-tt.identity(3)              # Int
-tt.identity("hello")        # Str
-tt.identity(true)           # Bool
-tt.identity({ n:9 m:10 })   # Record<n:Int m:Int>
-tt.identity(["ab" "bc"])    # Array<Str>
+import "t"
+
+t.id(3.1415)         # Double
+t.id(3)              # Int
+t.id("hello")        # Str
+t.id(true)           # Bool
+t.id({ n:9 m:10 })   # Record<n:Int m:Int>
+t.id(["ab" "bc"])    # Array<Str>
 ```
 
-<!-- TODO: add IR and typechecker output here -->
+```text
+$ cargo run --features trace -- -ITT test.garden
+call: Double
+  callee t.id
+  3.1415: Double
+...
+call: Record<n: Int m: Int>
+  callee t.id
+  record: Record<n: Int m: Int>
+    field n
+      9: Int
+    field m
+      10: Int
+call: Array<Str>
+  callee t.id
+  array: Array<Str>
+    ab: Str
+    bc: Str
+```
 
-To do so the generic type def in the function signature instructs
-the typechecker to infer types passed to the function and thus
-build the actual function signature at type check time.
-
-A more complex example:
-
-```rust
-#[pg_pkg]
-mod opt {
+```llvmir
+// entry
+fn f0() -> Void {
+b0():
+        %v0:Double = 3.1415
+        %v1:Double = Sys t.id(%v0)
+        ...
+        %v8 = Alloc Record<n: Int m: Int>(size=16,align=8)
+        %v9:Int = 9
+        Store %v8+0, %v9
+        %v10:Int = 10
+        Store %v8+8, %v10
+        %v11:Record<n: Int m: Int> = Sys t.id(%v8)
+        %v12 = Alloc Array<Str>(size=24,align=8)
+        %v13:Int = 2
+        Store %v12+0, %v13
+        %v14:Str = `ab`
+        Store %v12+8, %v14
+        %v15:Str = `bc`
+        Store %v12+16, %v15
+        %v16:Array<Str> = Sys t.id(%v12)
+        ret %v16
 }
 ```
 
-
-<!-- TODO: add IR and typechecker output here -->
+```asm
+00000000 <entry>:
+  0000:    load_global r0, 0         ; 2: t.id(3.1415)         # Double
+  0001:    sys 0 <t.id>
+  .....
+  0008:    alloc r0, Record, #16, #8 ; 6: t.id({ n:9 m:10 })   # Record<n:Int m:Int>
+  0009:    load_imm r1, #9
+  000a:    store r0, #0, r1
+  000b:    load_imm r1, #10
+  000c:    store r0, #8, r1
+  000d:    sys 0 <t.id>
+  000e:    alloc r0, Array, #24, #8  ; 7: t.id(["ab" "bc"])    # Array<Str>
+  000f:    load_imm r1, #2
+  0010:    store r0, #0, r1
+  0011:    load_global r1, 2
+  0012:    store r0, #8, r1
+  0013:    load_global r1, 3
+  0014:    store r0, #16, r1
+  0015:    sys 0 <t.id>
+  0016:    ret
+  0017:    halt
+```
