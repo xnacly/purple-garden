@@ -887,11 +887,6 @@ impl<'a, 't> Typechecker<'a, 't> {
                 _ => unreachable!(),
             },
             Node::Match { id, cases, default } => {
-                // short circuit for empty matches
-                if cases.is_empty() {
-                    return self.set_known(*id, Type::Void);
-                }
-
                 // all branches MUST resolve to the same type :)
                 let mut branch_types: Vec<Option<(&Token, usize)>> = vec![None; cases.len()];
 
@@ -1448,6 +1443,14 @@ mod tests {
         let (ast, out) = check(b"match { 1 == 1 { 2 } { 3 } }");
         assert!(out.diagnostics.is_empty());
         assert_eq!(root_type(&ast, &out, 0), Some(Type::Int));
+    }
+
+    #[test]
+    fn default_only_match_takes_the_default_branch_type() {
+        let (ast, out) = check(b"let x = match { { 3 } }\nx + 1");
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(root_type(&ast, &out, 0), Some(Type::Int));
+        assert_eq!(root_type(&ast, &out, 1), Some(Type::Int));
     }
 
     #[test]
