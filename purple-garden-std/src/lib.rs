@@ -21,7 +21,6 @@ mod math;
 mod str;
 #[macro_use]
 mod syscall_macros;
-mod opt;
 mod testing;
 mod r#unsafe;
 
