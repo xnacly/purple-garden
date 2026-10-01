@@ -110,6 +110,13 @@ impl<'a, 't> Typechecker<'a, 't> {
     fn register_pkg(&mut self, pkg: &'t Pkg) {
         let mut registered: HashMap<&str, Vec<FunctionType>> = HashMap::new();
         for f in pkg.fns {
+            debug_assert!(
+                !(f.with_slots && f.specialises.is_some()),
+                "{}.{} is generic and specialises `{}`, overload selection can not match slots",
+                pkg.name,
+                f.name,
+                f.specialises.unwrap_or_default()
+            );
             let f_type = FunctionType {
                 args: f
                     .arg_names

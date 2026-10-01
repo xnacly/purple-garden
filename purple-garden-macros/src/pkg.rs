@@ -162,6 +162,13 @@ impl PgFunction {
             ));
         }
 
+        if attrs.with_slots && attrs.specialises.is_some() {
+            return Err(syn::Error::new(
+                ident.span(),
+                "pg_fn(with_slots) functions cannot specialise an overload group, slots are bound per call instead",
+            ));
+        }
+
         let args = if attrs.raw {
             parse_unsafe_args(&fun.sig.inputs)?
         } else {
