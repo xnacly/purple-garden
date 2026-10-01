@@ -1,10 +1,13 @@
 #![feature(likely_unlikely)]
+#![feature(adt_const_params, unsized_const_params)]
+// `&'static str` const params for `Slot<"T">`
+#![allow(incomplete_features)]
 
 use std::fmt::{self, Write as _};
 
 pub use purple_garden_ir::{
     Fn,
-    ptype::{Field, RecordFields, Type},
+    ptype::{BoxedType, Field, RecordFields, Type},
 };
 pub use purple_garden_shared::BuiltinFn;
 pub use purple_garden_shared::config::{DEFAULT_STACK_SIZE, MIB};
@@ -23,7 +26,7 @@ pub use crate::anomaly::Anomaly;
 pub use crate::gc::{AllocType, Gc, Metadata};
 pub use crate::jit_helpers::{jit_alloc, jit_trap_div_zero};
 pub use crate::value::{
-    FromVm, IntoVm, PgType, Value, alloc_record, copy_record, decode_record_field,
+    FromVm, IntoVm, PgType, Slot, Value, alloc_record, copy_record, decode_record_field,
     encode_record_field,
 };
 pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, syscall_unimplemented};
@@ -32,8 +35,8 @@ pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, syscall_unimplemented};
 #[doc(hidden)]
 pub mod embed {
     pub use super::{
-        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Type, Value, Vm, VmConfig,
-        alloc_record, copy_record, decode_record_field, encode_record_field,
+        Anomaly, BoxedType, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Slot, Type,
+        Value, Vm, VmConfig, alloc_record, copy_record, decode_record_field, encode_record_field,
     };
 }
 

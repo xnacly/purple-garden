@@ -16,6 +16,8 @@ pub struct Ast<'ast> {
     pub roots: Vec<NodeId>,
     pub nodes: Vec<Node<'ast>>,
     pub types: Vec<TypeExpr<'ast>>,
+    /// Number of value ids the parser handed out, every `Node` id is below it
+    pub values: usize,
 }
 
 impl<'ast> Ast<'ast> {
@@ -47,7 +49,7 @@ impl<'ast> Ast<'ast> {
     }
 
     #[must_use]
-    pub fn value_id(&self, id: NodeId) -> Option<usize> {
+    pub fn value_id(&self, id: NodeId) -> usize {
         self.node(id).value_id()
     }
 
@@ -254,6 +256,7 @@ pub enum Node<'node> {
     ///     <body>
     /// }
     Fn {
+        id: usize,
         docs: Vec<Token<'node>>,
         name: Token<'node>,
         /// (<identifier>, <type>)
@@ -306,6 +309,7 @@ pub enum Node<'node> {
 
     /// extern "<pkg name>" { fn <name>(<arg0:type0>) <return_type> }
     Extern {
+        id: usize,
         src: Token<'node>,
         docs: Vec<Token<'node>>,
         name: Token<'node>,
@@ -337,21 +341,23 @@ pub struct ExternFn<'node> {
 
 impl Node<'_> {
     #[must_use]
-    fn value_id(&self) -> Option<usize> {
-        Some(match self {
+    fn value_id(&self) -> usize {
+        match self {
             Node::Atom { id, .. }
             | Node::Ident { id, .. }
             | Node::Bin { id, .. }
             | Node::Unary { id, .. }
             | Node::Array { id, .. }
             | Node::Let { id, .. }
+            | Node::Fn { id, .. }
             | Node::Match { id, .. }
             | Node::Call { id, .. }
             | Node::Cast { id, .. }
+            | Node::Import { id, .. }
+            | Node::Extern { id, .. }
             | Node::Record { id, .. }
             | Node::Field { id, .. } => *id,
-            Node::Fn { .. } | Node::Import { .. } | Node::Extern { .. } => return None,
-        })
+        }
     }
 }
 

@@ -269,8 +269,8 @@ pub(super) fn type_for_node(
     typecheck: &TypecheckOutput<'_>,
     node_id: NodeId,
 ) -> Option<String> {
-    ast.value_id(node_id)
-        .and_then(|id| typecheck.types.get(id))
-        .and_then(Option::as_ref)
+    typecheck
+        .types
+        .get(ast.value_id(node_id))
         .map(ToString::to_string)
 }

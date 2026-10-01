@@ -4,6 +4,7 @@
 
 use std::{alloc::Layout, collections::HashMap, num};
 
+use crate::typemap::TypeMap;
 use crate::{
     ast::{Ast, Node, NodeId, TypeExpr},
     diagnostic::Diagnostic,
@@ -49,7 +50,7 @@ pub struct Lower<'lower> {
     ctx: LowerCtx<'lower>,
     functions: Vec<Func<'lower>>,
     func_name_to_id: HashMap<&'lower str, (Id, Option<ptype::Type<'lower>>)>,
-    types: Vec<Option<ptype::Type<'lower>>>,
+    types: TypeMap<'lower>,
     packages: HashMap<
         &'lower str,
         (
@@ -68,7 +69,7 @@ impl Default for Lower<'_> {
             ctx: LowerCtx::default(),
             functions: Vec::new(),
             func_name_to_id: HashMap::new(),
-            types: Vec::new(),
+            types: TypeMap::default(),
             packages: HashMap::new(),
             pkg_cache: HashMap::new(),
             libs: Vec::new(),
@@ -168,7 +169,7 @@ impl<'lower> Lower<'lower> {
                 };
                 let field_offset =
                     offset + ty.field_offset(name).expect("record field was typechecked") as u32;
-                let field_ty = self.types[ast.value_id(*value).unwrap()].clone().unwrap();
+                let field_ty = self.types.get(ast.value_id(*value)).cloned().unwrap();
                 self.lower_node_into(ast, *value, &field_ty, base, field_offset, tok.start as u32)?;
             }
 
@@ -241,9 +242,9 @@ impl<'lower> Lower<'lower> {
             }
             Node::Field { id, target, name } => {
                 let base = self.lower_node(ast, *target)?.unwrap();
-                let target_value_id = ast.value_id(*target).unwrap();
-                let target_type = self.types[target_value_id].clone().unwrap();
-                let ty = self.types[*id].clone().unwrap();
+                let target_value_id = ast.value_id(*target);
+                let target_type = self.types.get(target_value_id).cloned().unwrap();
+                let ty = self.types.get(*id).cloned().unwrap();
 
                 let ptype::Type::Record(_) = target_type else {
                     unreachable!();
@@ -285,7 +286,7 @@ impl<'lower> Lower<'lower> {
                     BEq, DAdd, DDiv, DGt, DLt, DMul, DSub, IAdd, IDiv, IEq, IGt, ILt, IMod, IMul,
                     ISub,
                 };
-                let src_type = self.types[ast.value_id(*lhs).unwrap()].clone().unwrap();
+                let src_type = self.types.get(ast.value_id(*lhs)).cloned().unwrap();
                 let span = op.start as u32;
 
                 let Some(lhs) = self.lower_node(ast, *lhs)? else {
@@ -298,7 +299,7 @@ impl<'lower> Lower<'lower> {
                 let dst_id = self.ctx.id_store.new_value();
                 let dst = TypeId {
                     id: dst_id,
-                    ty: self.types[*id].clone().unwrap(),
+                    ty: self.types.get(*id).cloned().unwrap(),
                 };
 
                 let op = match src_type {
@@ -340,7 +341,7 @@ impl<'lower> Lower<'lower> {
                 Some(dst_id)
             }
             Node::Unary { op, rhs, .. } => {
-                let inner_ty = self.types[ast.value_id(*rhs).unwrap()].clone().unwrap();
+                let inner_ty = self.types.get(ast.value_id(*rhs)).cloned().unwrap();
                 let span = op.start as u32;
                 let Some(rhs_id) = self.lower_node(ast, *rhs)? else {
                     unreachable!()
@@ -461,7 +462,7 @@ impl<'lower> Lower<'lower> {
                 self.ctx = old_ctx;
                 None
             }
-            Node::Call { target, args, .. } => {
+            Node::Call { target, args, id } => {
                 let mut a = vec![];
                 for &arg in args {
                     let Some(id) = self.lower_node(ast, arg)? else {
@@ -512,9 +513,8 @@ impl<'lower> Lower<'lower> {
                             // arg types stream by reference from the type map; the
                             // typechecker already proved exactly one variant matches.
                             let provided = || {
-                                args.iter().map(|&n| {
-                                    self.types[ast.value_id(n).unwrap()].as_ref().unwrap()
-                                })
+                                args.iter()
+                                    .map(|&n| self.types.get(ast.value_id(n)).unwrap())
                             };
                             *candidates
                                 .iter()
@@ -522,7 +522,13 @@ impl<'lower> Lower<'lower> {
                                 .unwrap()
                         };
 
-                        dst.ty = fun.ret.clone();
+                        // the declared ret may contain generic slots, the typechecker resolved
+                        // them per call site
+                        dst.ty = self
+                            .types
+                            .get(*id)
+                            .cloned()
+                            .expect("typechecker should have typed the call");
                         self.emit(Instr::Sys {
                             dst,
                             path: pkg_name,
@@ -592,9 +598,10 @@ impl<'lower> Lower<'lower> {
             }
             Node::Extern { .. } => None,
             Node::Cast { lhs, rhs, src, .. } => {
-                let src_ty = ast
-                    .value_id(*lhs)
-                    .and_then(|aid| self.types.get(aid).cloned().flatten())
+                let src_ty = self
+                    .types
+                    .get(ast.value_id(*lhs))
+                    .cloned()
                     .expect("typechecker should have typed the cast's lhs");
 
                 let Some(from_id) = self.lower_node(ast, *lhs)? else {
@@ -728,7 +735,7 @@ impl<'lower> Lower<'lower> {
                 Some(last)
             }
             Node::Array { id, src, members } => {
-                let Some(ty) = self.types[*id].clone() else {
+                let Some(ty) = self.types.get(*id).cloned() else {
                     unreachable!();
                 };
 
@@ -788,7 +795,7 @@ impl<'lower> Lower<'lower> {
                 Some(array_id)
             }
             Node::Record { id, src, fields } => {
-                let Some(record_ty) = self.types[*id].clone() else {
+                let Some(record_ty) = self.types.get(*id).cloned() else {
                     unreachable!();
                 };
                 let layout = record_ty.layout();
@@ -811,7 +818,7 @@ impl<'lower> Lower<'lower> {
                         .field_offset(name)
                         .expect("record field was typechecked")
                         as u32;
-                    let field_ty = self.types[ast.value_id(*value).unwrap()].clone().unwrap();
+                    let field_ty = self.types.get(ast.value_id(*value)).cloned().unwrap();
                     self.lower_node_into(ast, *value, &field_ty, base, offset, tok.start as u32)?;
                 }
 
@@ -826,7 +833,7 @@ impl<'lower> Lower<'lower> {
     pub fn ir_from_types(
         mut self,
         ast: &'lower Ast<'lower>,
-        types: Vec<Option<ptype::Type<'lower>>>,
+        types: TypeMap<'lower>,
     ) -> Result<Vec<Func<'lower>>, Diagnostic> {
         self.types = types;
         // Most roots are declarations or expressions becoming functions later;

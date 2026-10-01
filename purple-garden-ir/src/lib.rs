@@ -42,8 +42,9 @@ pub struct Fn<'f> {
     pub args: &'f [Type<'f>],
     pub ret: Type<'f>,
     /// Overload group this fn specialises, e.g. `println_int` specialises
-    /// `println`. `Some` ⇒ callable only via the group name, never its own.
+    /// `println`. `Some` => callable only via the group name
     pub specialises: Option<&'f str>,
+    pub with_slots: bool,
 }
 
 impl<'f> Fn<'f> {

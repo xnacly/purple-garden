@@ -19,6 +19,7 @@ struct PgFunction {
     doc: String,
     pure: bool,
     specialises: Option<String>,
+    with_slots: bool,
     args: Vec<FunctionArg>,
     ret: Type,
     result: bool,
@@ -161,6 +162,13 @@ impl PgFunction {
             ));
         }
 
+        if attrs.with_slots && attrs.specialises.is_some() {
+            return Err(syn::Error::new(
+                ident.span(),
+                "pg_fn(with_slots) functions cannot specialise an overload group, slots are bound per call instead",
+            ));
+        }
+
         let args = if attrs.raw {
             parse_unsafe_args(&fun.sig.inputs)?
         } else {
@@ -174,6 +182,7 @@ impl PgFunction {
             pure: attrs.pure,
             specialises: attrs.specialises,
             args,
+            with_slots: attrs.with_slots,
             ret,
             result,
             raw: attrs.raw,
@@ -407,6 +416,7 @@ impl PgFunction {
             Some(group) => quote!(Some(#group)),
             None => quote!(None),
         };
+        let with_slots = self.with_slots;
         let ret_ty = &self.ret;
         let arg_names = self
             .args
@@ -425,6 +435,7 @@ impl PgFunction {
                 args: &[#(<#arg_types as #api::embed::PgType>::TYPE),*],
                 ret: <#ret_ty as #api::embed::PgType>::TYPE,
                 specialises: #specialises,
+                with_slots: #with_slots,
             }
         }
     }
@@ -532,6 +543,9 @@ struct PgFnAttrs {
     /// `#[pg_fn(specialises = "group")]`: one variant of an overload group; the
     /// fn is reachable only via `group`, never its own name.
     specialises: Option<String>,
+    /// `#[pg_fn(with_slots)]`: the signature uses `embed::Slot<"T">` generics, bound per call
+    /// by the typechecker
+    with_slots: bool,
 }
 
 impl PgFnAttrs {
@@ -550,6 +564,7 @@ impl PgFnAttrs {
         self.pure |= other.pure;
         self.raw |= other.raw;
         self.specialises = other.specialises.or_else(|| self.specialises.take());
+        self.with_slots |= other.with_slots;
     }
 
     fn parse_option(&mut self, meta: Meta) -> syn::Result<()> {
@@ -568,13 +583,18 @@ impl PgFnAttrs {
             return Ok(());
         }
 
+        if meta.path().is_ident("with_slots") {
+            self.with_slots = true;
+            return Ok(());
+        }
+
         Err(syn::Error::new(meta.span(), "unknown pg_fn option"))
     }
 }
 
 /// Strip and parse the `#[pg_fn(..)]` marker off a stdlib fn, leaving its other
-/// attributes intact. Accepts `pure`, `unsafe`, and `specialises = "group"` in
-/// any order.
+/// attributes intact. Accepts `pure`, `unsafe`, `with_slots` and
+/// `specialises = "group"` in any order.
 fn take_pg_fn_attrs(attrs: &mut Vec<Attribute>) -> syn::Result<PgFnAttrs> {
     let mut pg_fn_attrs = PgFnAttrs::default();
     let mut out = Vec::with_capacity(attrs.len());

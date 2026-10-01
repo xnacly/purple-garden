@@ -5,6 +5,7 @@ pub mod diagnostic;
 pub mod lex;
 pub mod lower;
 pub mod parser;
+pub mod typemap;
 
 use ast::{Ast, TypeExpr, TypeExprId};
 use purple_garden_ir::ptype;
@@ -48,12 +49,12 @@ pub fn type_from_type_expr<'a>(ast: &Ast<'a>, id: TypeExprId) -> ptype::Type<'a>
     match ast.ty(id) {
         TypeExpr::Atom(token) => type_from_lex_type(token.t),
         TypeExpr::Foreign(token) => ptype::Type::Foreign(token.t.as_str()),
-        TypeExpr::Option(type_expr) => {
-            ptype::Type::Option(Box::new(type_from_type_expr(ast, *type_expr)))
-        }
-        TypeExpr::Array(type_expr) => {
-            ptype::Type::Array(Box::new(type_from_type_expr(ast, *type_expr)))
-        }
+        TypeExpr::Option(type_expr) => ptype::Type::Option(ptype::BoxedType::owned(
+            type_from_type_expr(ast, *type_expr),
+        )),
+        TypeExpr::Array(type_expr) => ptype::Type::Array(ptype::BoxedType::owned(
+            type_from_type_expr(ast, *type_expr),
+        )),
         TypeExpr::Record { fields, .. } => ptype::Type::record(
             fields
                 .iter()

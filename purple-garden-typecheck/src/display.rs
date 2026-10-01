@@ -57,7 +57,6 @@ impl<'t> TypecheckOutput<'t> {
     fn type_at(&self, id: usize) -> String {
         self.types
             .get(id)
-            .and_then(Option::as_ref)
             .map_or_else(|| "<unknown>".to_owned(), ToString::to_string)
     }
 

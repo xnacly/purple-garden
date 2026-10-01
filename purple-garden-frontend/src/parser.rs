@@ -103,6 +103,7 @@ impl<'p> Parser<'p> {
     /// program = prefix*
     pub fn parse(mut self) -> Result<Ast<'p>, Diagnostic> {
         self.parse_roots()?;
+        self.ast.values = self.id;
         Ok(self.ast)
     }
 
@@ -155,6 +156,7 @@ impl<'p> Parser<'p> {
     pub fn parse_collect(mut self) -> ParseOutput<'p> {
         self.parse_roots_collect();
         self.diagnostics.extend(self.lex.into_diagnostics());
+        self.ast.values = self.id;
         ParseOutput {
             ast: Some(self.ast),
             diagnostics: self.diagnostics,
@@ -271,7 +273,9 @@ impl<'p> Parser<'p> {
         }
         self.expect(Type::CurlyRight)?;
 
+        let id = self.next_id();
         Ok(self.push_node(Node::Fn {
+            id,
             docs,
             name,
             args,
@@ -346,7 +350,9 @@ impl<'p> Parser<'p> {
         }
         self.expect(Type::CurlyRight)?;
 
+        let id = self.next_id();
         Ok(self.push_node(Node::Extern {
+            id,
             src,
             docs,
             name,
@@ -530,6 +536,10 @@ impl<'p> Parser<'p> {
         | Type::GreaterThan = self.cur().t
         {
             let op = self.cur().clone();
+
+            if matches!(op.t, Type::Plus | Type::Minus) && self.lex.is_prefix_sign(op.start) {
+                break;
+            }
 
             if let Token { t: Type::As, .. } = op {
                 self.advance()?;
@@ -953,5 +963,54 @@ mod tests {
             panic!("expected recovered let root");
         };
         assert_eq!(name.t, crate::lex::Type::Ident("b"));
+    }
+
+    fn roots(source: &[u8]) -> crate::ast::Ast<'_> {
+        Parser::new(Lexer::new(source)).parse().unwrap()
+    }
+
+    #[test]
+    fn detached_sign_starts_a_new_expression() {
+        let ast = roots(b"-1\n-1.5");
+        assert_eq!(ast.roots.len(), 2);
+        assert!(
+            ast.roots
+                .iter()
+                .all(|&r| matches!(ast.node(r), Node::Unary { .. }))
+        );
+
+        let ast = roots(b"[1 -1 +2]");
+        let Node::Array { members, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected array");
+        };
+        assert_eq!(members.len(), 3);
+
+        let ast = roots(b"f(1 -1)");
+        let Node::Call { args, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected call");
+        };
+        assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn spaced_or_glued_sign_stays_infix() {
+        for source in [&b"1 - 1"[..], b"1-1", b"1 -\n1", b"a - -1"] {
+            let ast = roots(source);
+            assert_eq!(ast.roots.len(), 1, "{}", String::from_utf8_lossy(source));
+            assert!(
+                matches!(ast.node(ast.roots[0]), Node::Bin { .. }),
+                "{}",
+                String::from_utf8_lossy(source)
+            );
+        }
+    }
+
+    #[test]
+    fn number_followed_by_field_access() {
+        let ast = roots(b"1.x");
+        let Node::Field { target, .. } = ast.node(ast.roots[0]) else {
+            panic!("expected field access");
+        };
+        assert!(matches!(ast.node(*target), Node::Atom { .. }));
     }
 }

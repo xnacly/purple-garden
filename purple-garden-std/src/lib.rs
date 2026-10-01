@@ -69,6 +69,7 @@ fn insert_pkg(index: &mut HashMap<String, &'static Pkg>, parent: String, pkg: &'
 }
 
 pub static SAFE_STD: &[Pkg] = &[
+    opt::PACKAGE,
     io::PACKAGE,
     math::PACKAGE,
     str::PACKAGE,
@@ -79,6 +80,7 @@ pub static STD: &[Pkg] = &[
     io::PACKAGE,
     math::PACKAGE,
     str::PACKAGE,
+    opt::PACKAGE,
     testing::PACKAGE,
     r#unsafe::PACKAGE,
 ];

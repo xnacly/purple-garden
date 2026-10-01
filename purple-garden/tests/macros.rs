@@ -86,6 +86,17 @@ mod users {
 }
 
 #[pg_pkg]
+mod t {
+    use purple_garden::embed::Slot;
+
+    /// lx.x
+    #[purple_garden::pg_fn(with_slots)]
+    pub fn id(x: Slot<"T">) -> Slot<"T"> {
+        x
+    }
+}
+
+#[pg_pkg]
 mod tools {
     pub fn root() -> i64 {
         1
@@ -267,4 +278,39 @@ fn pg_pkg_supports_nested_records() {
     let account = Account::from_vm(&vm, *vm.r(0));
     assert_eq!(account.profile.name, "lin");
     assert!(account.active);
+}
+
+#[test]
+fn pg_fn_with_slots_declares_slot_types_and_moves_the_word() {
+    use purple_garden::embed::Type;
+
+    let id = &t::PACKAGE.fns[0];
+    assert!(id.with_slots);
+    assert_eq!(id.args, &[Type::Slot("T")]);
+    assert_eq!(id.ret, Type::Slot("T"));
+
+    let mut vm = Vm::new(VmConfig::default());
+    *vm.r_mut(0) = Value::from(42_i64);
+    unsafe { (id.ptr)((&mut vm as *mut Vm).cast()) };
+    assert_eq!(vm.r(0).as_int(), 42);
+}
+
+#[test]
+fn with_slots_identity_round_trips_word_sized_values() {
+    let mut program = purple_garden::Pg::new()
+        .with_stdlib()
+        .with_lib(&t::PACKAGE)
+        .compile(
+            br#"
+            import ("t" "str")
+            let a = t.id(3)
+            let b = t.id("hello")
+            let c = t.id(true)
+            let d = t.id(1.5)
+            str.concat(str.concat(str.from(a) t.id(b)) str.from(t.id(d) as Int))
+        "#,
+        )
+        .expect("compiles");
+    let out: String = program.run_take().expect("runs");
+    assert_eq!(out, "3hello1");
 }
