@@ -97,7 +97,7 @@ Given the identity function:
 pub mod t {
     /// lx.x
     #[pg_fn(with_slots)]
-    pub fn id(x: embed::Slot("T")) -> embed::Slot("T") {
+    pub fn id(x: embed::Slot<"T">) -> embed::Slot<"T"> {
         x
     }
 }

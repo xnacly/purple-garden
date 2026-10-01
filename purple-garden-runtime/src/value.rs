@@ -1,6 +1,9 @@
 use std::fmt::Debug;
 
-use purple_garden_ir::{constant::Const, ptype::Type};
+use purple_garden_ir::{
+    constant::Const,
+    ptype::{BoxedType, Type},
+};
 
 use crate::{AllocType, vm::Vm};
 
@@ -276,6 +279,32 @@ scalar_vm_type!(bool, Type::Bool, as_bool);
 
 impl PgType for () {
     const TYPE: Type<'static> = Type::Void;
+}
+
+impl<T: PgType> PgType for Option<T> {
+    const TYPE: Type<'static> = Type::Option(BoxedType::Static(&T::TYPE));
+}
+
+/// Generic slot `NAME` of a `#[pg_fn(with_slots)]` function, `Slot<"T">` is `Type::Slot("T")`
+/// to the typechecker, which binds it per call. The body only ever sees the erased register
+/// word, the compiler sizes and converts the concrete value at the call site
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Slot<const NAME: &'static str>(pub Value);
+
+impl<const NAME: &'static str> PgType for Slot<NAME> {
+    const TYPE: Type<'static> = Type::Slot(NAME);
+}
+
+impl<'vm, const NAME: &'static str> FromVm<'vm> for Slot<NAME> {
+    fn from_vm(_: &'vm Vm, value: Value) -> Self {
+        Self(value)
+    }
+}
+
+impl<const NAME: &'static str> IntoVm for Slot<NAME> {
+    fn into_vm(self, _: &mut Vm) -> Value {
+        self.0
+    }
 }
 
 impl<'vm> FromVm<'vm> for () {
