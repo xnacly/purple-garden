@@ -1369,9 +1369,28 @@ mod tests {
         );
     }
 
+    /// Test-only generic package from NRFC/generics.md: `t.id(x: T) T`.
+    static T: Pkg = Pkg {
+        name: "t",
+        doc: "t",
+        pkgs: &[],
+        fns: &[purple_garden_runtime::embed::Fn {
+            name: "id",
+            doc: "lx.x",
+            ptr: purple_garden_runtime::syscall_unimplemented,
+            pure: false,
+            eval: None,
+            with_slots: true,
+            arg_names: &["x"],
+            args: &[Type::Slot("T")],
+            ret: Type::Slot("T"),
+            specialises: None,
+        }],
+    };
+
     fn check<'s>(source: &'s [u8]) -> (Ast<'s>, TypecheckOutput<'s>) {
         let ast = parse(source);
-        let out = Typechecker::new(&ast).check();
+        let out = Typechecker::new(&ast).with_libs(vec![&T]).check();
         (ast, out)
     }
 
@@ -1381,10 +1400,6 @@ mod tests {
 
     fn messages<'o>(out: &'o TypecheckOutput<'_>) -> Vec<&'o str> {
         out.diagnostics.iter().map(|d| d.message.as_str()).collect()
-    }
-
-    fn opt(ty: Type<'static>) -> Type<'static> {
-        Type::Option(BoxedType::owned(ty))
     }
 
     #[test]
@@ -1605,24 +1620,28 @@ mod tests {
     #[test]
     fn generic_call_substitutes_the_return_type() {
         let (ast, out) =
-            check(b"import \"opt\"\nopt.some(1)\nopt.some(opt.some(\"s\"))\nopt.some([1 2])");
+            check(b"import \"t\"\nt.id(1)\nt.id(t.id(\"s\"))\nt.id([1 2])\nt.id({ n: 9 m: \"s\" })");
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
-        assert_eq!(root_type(&ast, &out, 1), Some(opt(Type::Int)));
-        assert_eq!(root_type(&ast, &out, 2), Some(opt(opt(Type::Str))));
+        assert_eq!(root_type(&ast, &out, 1), Some(Type::Int));
+        assert_eq!(root_type(&ast, &out, 2), Some(Type::Str));
         assert_eq!(
             root_type(&ast, &out, 3),
-            Some(opt(Type::Array(BoxedType::owned(Type::Int))))
+            Some(Type::Array(BoxedType::owned(Type::Int)))
+        );
+        assert_eq!(
+            root_type(&ast, &out, 4).map(|t| t.to_string()),
+            Some("Record<n: Int m: Str>".to_string())
         );
     }
 
     #[test]
     fn generic_result_flows_into_concrete_parameters() {
         let (_, out) = check(
-            b"import \"opt\"\nfn f(a: Option<Int>) Int { 1 }\nf(opt.some(1))\nf(opt.some(\"s\"))",
+            b"import \"t\"\nfn f(a: Array<Int>) Int { 1 }\nf(t.id([1 2]))\nf(t.id([\"s\"]))",
         );
         assert_eq!(
             messages(&out),
-            vec!["`f` expected a:Option<Int>, got a:Option<Str> instead"]
+            vec!["`f` expected a:Array<Int>, got a:Array<Str> instead"]
         );
     }
 
