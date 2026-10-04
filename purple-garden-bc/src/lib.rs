@@ -98,6 +98,13 @@ pub struct Cc<'cc> {
     /// allocation; taken out of `self` for the duration of each shuffle
     /// and restored on exit so the capacity survives across calls.
     scratch_pairs: Vec<(u8, u8)>,
+    /// Registers at or above the arg zone holding values live across the
+    /// call being lowered. The callee-saved convention leaves them in place
+    /// (no push), so [`Cc::emit_arg_shuffle`] must never borrow one as its
+    /// cycle-breaking scratch. Filled by the `Call`/`Sys` lowering alongside
+    /// the spill list in `scratch`; a `Tail` passes an empty slice since
+    /// nothing outlives it.
+    scratch_live: Vec<u8>,
     /// Callee-saved range for the function currently being compiled.
     /// Set at the top of [`Cc::cc`] and read by [`Cc::emit_arg_shuffle`]
     /// to find a free scratch register for cycle breaking.
@@ -239,6 +246,7 @@ impl<'cc> Cc<'cc> {
             arg_hints: Vec::new(),
             scratch: Vec::new(),
             scratch_pairs: Vec::new(),
+            scratch_live: Vec::new(),
             cur_lo: 0,
             cur_max_reg: 0,
             jit: purple_garden_jit::Jit::new(),
@@ -474,9 +482,13 @@ impl<'cc> Cc<'cc> {
     ///
     /// Parallel-move: emit a direct Mov for any pending pair whose
     /// dst isn't another pending move's src. When all that remains is one
-    /// or more cycles (e.g. swap r0,r1), fall back to push and pop for those
-    /// leftovers only.
-    fn emit_arg_shuffle(&mut self, args: &[Id]) {
+    /// or more cycles (e.g. swap r0,r1), break them through a free register,
+    /// or fall back to push and pop for those leftovers only.
+    ///
+    /// `live_above` lists registers at or above the arg zone that hold values
+    /// live across this call. They are not pushed (the callee preserves them),
+    /// so they are never eligible as the cycle-breaking scratch.
+    fn emit_arg_shuffle(&mut self, args: &[Id], live_above: &[u8]) {
         let mut todo = std::mem::take(&mut self.scratch_pairs);
         todo.clear();
         todo.extend(
@@ -500,11 +512,15 @@ impl<'cc> Cc<'cc> {
             }
 
             // All remaining moves form cycles. Find a callee-saved register
-            // that isn't a src or dst in any pending move and use it to break
-            // one cycle at a time without touching the spill stack.
+            // that isn't a src or dst in any pending move and isn't holding a
+            // value live across this call, and use it to break one cycle at a
+            // time without touching the spill stack.
             let arg_end = args.len() as u8;
-            let scratch = (self.cur_lo..=self.cur_max_reg)
-                .find(|&r| r >= arg_end && !todo.iter().any(|(s, d)| *s == r || *d == r));
+            let scratch = (self.cur_lo..=self.cur_max_reg).find(|&r| {
+                r >= arg_end
+                    && !live_above.contains(&r)
+                    && !todo.iter().any(|(s, d)| *s == r || *d == r)
+            });
 
             if let Some(scratch) = scratch {
                 // Break the first cycle: save its head into scratch, walk
@@ -740,7 +756,8 @@ impl<'cc> Cc<'cc> {
                 // normal call so the epilogue can restore them after the
                 // callee returns.
                 let tail_clobbers_callee_saved = args.len() as u8 > lo;
-                self.emit_arg_shuffle(args);
+                // Nothing outlives a tail call, so no register is off-limits.
+                self.emit_arg_shuffle(args, &[]);
 
                 if tail_clobbers_callee_saved {
                     match target {
@@ -871,6 +888,7 @@ impl<'cc> Cc<'cc> {
                 // the arg-shuffle zone. r{clobber_end}+ are untouched from the caller's view.
                 let clobber_end = args.len().max(1) as u8;
                 self.scratch.clear();
+                self.scratch_live.clear();
                 for (v, &(def, last_use)) in live_set.iter().enumerate() {
                     if def == u32::MAX {
                         continue;
@@ -888,6 +906,10 @@ impl<'cc> Cc<'cc> {
                                 last_use
                             );
                             self.scratch.push(src);
+                        } else {
+                            // Stays in place across the call; the shuffle
+                            // must not use it as scratch.
+                            self.scratch_live.push(src);
                         }
                     }
                 }
@@ -898,7 +920,9 @@ impl<'cc> Cc<'cc> {
                     &self.scratch,
                 );
 
-                self.emit_arg_shuffle(args);
+                let live_above = std::mem::take(&mut self.scratch_live);
+                self.emit_arg_shuffle(args, &live_above);
+                self.scratch_live = live_above;
 
                 let dst = self.ensure_register(dst.id);
                 match target {
@@ -923,6 +947,7 @@ impl<'cc> Cc<'cc> {
                 // registers, so only spill alive-across values inside that range.
                 let clobber_end = args.len().max(1) as u8;
                 self.scratch.clear();
+                self.scratch_live.clear();
                 for (v, &(def, last_use)) in live_set.iter().enumerate() {
                     if def == u32::MAX {
                         continue;
@@ -933,6 +958,10 @@ impl<'cc> Cc<'cc> {
                         };
                         if src < clobber_end {
                             self.scratch.push(src);
+                        } else {
+                            // Stays in place across the call; the shuffle
+                            // must not use it as scratch.
+                            self.scratch_live.push(src);
                         }
                     }
                 }
@@ -943,7 +972,9 @@ impl<'cc> Cc<'cc> {
                     &self.scratch,
                 );
 
-                self.emit_arg_shuffle(args);
+                let live_above = std::mem::take(&mut self.scratch_live);
+                self.emit_arg_shuffle(args, &live_above);
+                self.scratch_live = live_above;
 
                 let dst = self.ensure_register(dst.id);
                 self.emit(Op::Sys { idx: idx as u16 });

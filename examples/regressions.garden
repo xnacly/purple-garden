@@ -154,3 +154,32 @@ fn scope_shadow(x:Int) Int {
 }
 testing.assert(scope_shadow(7) == -7)
 testing.assert(scope_shadow(-4) == -4)
+
+#! Arg-shuffle scratch register must not clobber a value live across the
+#! call. Follow-up to the positioned-arg entry above: the cycle breaker
+#! learned to skip the arg zone (r0..r{N-1}) but still took the first register
+#! above it, even when that register held a value the callee-saved convention
+#! leaves in place (no push). Here the first argument's result sits in that
+#! register while the third argument's (z-1 x y) rotation needs a scratch, so
+#! it was overwritten with z-1 and the outer call got the wrong first argument.
+#! Masked in tak-shaped recursion because tak never returns x; both leaves are
+#! x-dominated so the clobber changes the answer. The Call and Sys lowerings
+#! share the shuffle, so both are covered: leaf_sys uses only same-register
+#! IMul and IAdd, which stay inside the x86 JIT subset at every opt level
+#! (an `x * 100` would fold to the unsupported IMulI at -O1 and silently turn
+#! the sys into a call); leaf_bc stays bytecode via its nested call.
+#!   leaf_sys(4 3 1) = 26, leaf_sys(2 1 5) = 10, leaf_sys(0 5 3) = 28
+#!   leaf_sys(26 10 28) = 804; clobbered: leaf_sys(0 10 28) = 128
+#!   leaf_bc(4 3 1) = 431, leaf_bc(2 1 5) = 215, leaf_bc(0 5 3) = 53
+#!   leaf_bc(431 215 53) = 45303; clobbered: leaf_bc(0 215 53) = 2203
+fn leaf_sys(x:Int y:Int z:Int) Int { x * x + y * y + z }
+fn nested_args_sys(x:Int y:Int z:Int) Int {
+    leaf_sys(leaf_sys(x-1 y z) leaf_sys(y-1 z x) leaf_sys(z-1 x y))
+}
+testing.assert(nested_args_sys(5 3 1) == 804)
+fn id(a:Int) Int { a }
+fn leaf_bc(x:Int y:Int z:Int) Int { id(x) * 100 + y * 10 + z }
+fn nested_args_call(x:Int y:Int z:Int) Int {
+    leaf_bc(leaf_bc(x-1 y z) leaf_bc(y-1 z x) leaf_bc(z-1 x y))
+}
+testing.assert(nested_args_call(5 3 1) == 45303)
