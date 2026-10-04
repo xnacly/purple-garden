@@ -145,6 +145,20 @@ pub mod math {
         n.round()
     }
 
+    /// Returns the non-negative square root of `n`.
+    ///
+    /// ## Examples
+    ///
+    /// ```garden
+    /// import "math"
+    ///
+    /// math.sqrt(2.0)
+    /// ```
+    #[pg_fn(pure)]
+    pub fn sqrt(n: f64) -> f64 {
+        n.sqrt()
+    }
+
     /// The greatest common divisor of integers a and b, at least one of which is nonzero, is the
     /// greatest positive integer d such that d is a divisor of both a and b
     ///

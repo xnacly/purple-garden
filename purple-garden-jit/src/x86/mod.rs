@@ -825,7 +825,10 @@ fn supported_bin_imm(op: BinOp) -> bool {
 
 /// Whether this register-register binary op has a direct x86 lowering.
 fn supported_bin(op: BinOp) -> bool {
-    matches!(op, BinOp::IAdd | BinOp::ISub | BinOp::IMul | BinOp::IEq)
+    matches!(
+        op,
+        BinOp::IAdd | BinOp::ISub | BinOp::IMul | BinOp::IEq | BinOp::IDiv | BinOp::IMod
+    )
 }
 
 /// Whether a constant can be materialized by the current x86 lowering.
@@ -869,7 +872,16 @@ fn validate_supported(func: &ir::Func<'_>) -> Option<SupportPlan> {
                         });
                     }
                 }
-                ir::Instr::Bin { op, .. } if supported_bin(*op) => {}
+                ir::Instr::Bin { op, .. } if supported_bin(*op) => {
+                    // A register divisor can't be special-cased at compile
+                    // time, so every IDiv/IMod here is a real `idiv`.
+                    if matches!(op, BinOp::IDiv | BinOp::IMod) {
+                        plan.fixed_clobbers.push(FixedClobber {
+                            pos,
+                            regs: IDIV_CLOBBERS,
+                        });
+                    }
+                }
                 ir::Instr::Store { offset, .. }
                 | ir::Instr::Load { offset, .. }
                 | ir::Instr::AddrOf { offset, .. }
@@ -1158,9 +1170,46 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         match op {
             BinOp::IAdd | BinOp::ISub | BinOp::IMul => emit_bin(self.out, op, d, l, r),
             BinOp::IEq => self.emit_int_eq(d, l, r),
+            BinOp::IDiv | BinOp::IMod => self.emit_idiv_reg(op, d, l, r),
             _ => skip!(self.func, "unsupported bin op {op:?}"),
         }
         Some(())
+    }
+
+    /// `d = l <op> r` for IDiv/IMod with a register divisor.
+    ///
+    /// Unlike the immediate form, zero can't be rejected at compile time, so
+    /// the divisor is tested first and a zero takes the same trap-and-return
+    /// path as `BinImm { imm: 0 }`. On the fallthrough, `l`/`r` are shuffled
+    /// into rax/rcx via `emit_parallel_moves` with rdx as scratch — safe
+    /// because `cqo` clobbers rdx immediately after, and the allocator keeps
+    /// live-across values out of all three via `IDIV_CLOBBERS`. A cycle can
+    /// only arise when both operands already sit in {rax, rcx}, so rdx is
+    /// never a live source when the scratch is needed.
+    ///
+    /// `i64::MIN % -1` faults in `idiv` (#DE); the bytecode VM panics on the
+    /// same input via Rust's checked `%`, so neither path is lenient here.
+    fn emit_idiv_reg(&mut self, op: BinOp, d: u8, l: u8, r: u8) {
+        emit(self.out, Insn::Test { lhs: r, rhs: r });
+        let skip_trap = emit_jnz_placeholder(self.out);
+        let helper: purple_garden_runtime::BuiltinFn = purple_garden_runtime::jit_trap_div_zero;
+        emit_abi_call(
+            self.out,
+            helper as usize as u64,
+            &[AbiArg::Reg(RDI)],
+            None,
+            self.abi_call_stack_bytes(),
+        );
+        self.emit_epilogue();
+        let resume = self.out.len();
+        patch_rel32(self.out, skip_trap, resume).expect("div-zero skip is a short forward jump");
+
+        let moved = emit_parallel_moves(self.out, &mut vec![(l, RAX), (r, RCX)], Some(RDX));
+        debug_assert!(moved, "idiv operand shuffle has no unresolvable cycle");
+        emit(self.out, Insn::Cqo);
+        emit(self.out, Insn::Idiv { divisor: RCX });
+        let src = if matches!(op, BinOp::IDiv) { RAX } else { RDX };
+        emit(self.out, Insn::Mov { dst: d, src });
     }
 
     /// Emit `dst = lhs == imm` as `test`/`cmp` plus `sete`.

@@ -1,0 +1,26 @@
+# fib; both the doubly-recursive and tail-recursive variants in one
+# file, since they're commonly compared. Doubly-recursive stresses call
+# overhead and arg-shuffle per recursion; tail-recursive becomes a hot
+# loop after the tailcall pass.
+import "testing"
+
+#! Compute Fibonacci numbers with the classic doubly-recursive definition.
+fn fib(n:Int) Int {
+    match {
+        n == 0 { 0 }
+        n == 1 { 1 }
+        { fib(n - 1) + fib(n - 2) }
+    }
+}
+
+#! Compute Fibonacci numbers with a tail-recursive accumulator pair.
+fn fibt(n:Int a:Int b:Int) Int {
+    match {
+        n == 0 { a }
+        n == 1 { b }
+        { fibt(n-1 b a+b) }
+    }
+}
+
+testing.assert(fib(28) == 317811)
+testing.assert(fibt(50 0 1) == 12586269025)

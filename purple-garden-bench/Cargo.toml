@@ -1,0 +1,11 @@
+[package]
+name = "purple-garden-bench"
+version = "0.1.0"
+description = "Cross-language benchmark runner: purple-garden vs CPython, JavaScriptCore (bun) and LuaJIT, measured with hyperfine"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
