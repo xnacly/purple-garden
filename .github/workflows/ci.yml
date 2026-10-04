@@ -35,7 +35,11 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: dtolnay/rust-toolchain@stable
+      # rust-toolchain.toml pins the (undated, latest) nightly channel; the
+      # action only runs `rustup default`, which rustup ranks below the
+      # toolchain file, so installing nightly directly matches it and avoids
+      # downloading an unused stable toolchain first.
+      - uses: dtolnay/rust-toolchain@nightly
         if: steps.changes.outputs.changed == 'true'
       - uses: Swatinem/rust-cache@v2
         if: steps.changes.outputs.changed == 'true'
