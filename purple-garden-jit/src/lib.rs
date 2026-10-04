@@ -421,6 +421,111 @@ mod tests_x86 {
         assert_eq!(run(jit.code(), [20, 7, 0])[0], 17);
     }
 
+    /// `fn f(a, b) int { a <op> b }` with a register divisor.
+    fn reg_div_func(op: BinOp) -> Func<'static> {
+        let mut func = Func::new("reg_div", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let params = func.intern_params(vec![Id(0), Id(1)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Bin {
+                op,
+                dst: TypeId {
+                    id: Id(2),
+                    ty: Type::Int,
+                },
+                lhs: Id(0),
+                rhs: Id(1),
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+        func
+    }
+
+    #[test]
+    fn reg_divisor_imod_and_idiv() {
+        let mut jit = Jit::new();
+        jit.compile_func(&reg_div_func(BinOp::IMod)).expect("jit imod");
+        assert_eq!(run(jit.code(), [20, 7, 0])[0], 6);
+        assert_eq!(run(jit.code(), [7, 20, 0])[0], 7);
+        assert_eq!(run(jit.code(), [-20i64 as u64, 7, 0])[0] as i64, -6);
+
+        let mut jit = Jit::new();
+        jit.compile_func(&reg_div_func(BinOp::IDiv)).expect("jit idiv");
+        assert_eq!(run(jit.code(), [20, 7, 0])[0], 2);
+        assert_eq!(run(jit.code(), [-20i64 as u64, 7, 0])[0] as i64, -2);
+    }
+
+    /// `fn f(a, b) int { b + (a % b) }`: `b` must survive the rax/rcx/rdx
+    /// clobber from the register-divisor idiv.
+    #[test]
+    fn reg_divisor_clobbers_do_not_overwrite_live_values() {
+        let mut func = Func::new("mod_plus", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let params = func.intern_params(vec![Id(0), Id(1)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Bin {
+                    op: BinOp::IMod,
+                    dst: TypeId {
+                        id: Id(2),
+                        ty: Type::Int,
+                    },
+                    lhs: Id(0),
+                    rhs: Id(1),
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::IAdd,
+                    dst: TypeId {
+                        id: Id(3),
+                        ty: Type::Int,
+                    },
+                    lhs: Id(1),
+                    rhs: Id(2),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(3)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(run(jit.code(), [20, 7, 0])[0], 13);
+    }
+
+    /// A zero register divisor must take the trap path and return, not fault.
+    /// Needs a real `Vm` because the trap helper writes `pending_trap`.
+    #[test]
+    fn reg_divisor_zero_traps_instead_of_faulting() {
+        use purple_garden_runtime::{Anomaly, Vm, VmConfig};
+
+        let mut jit = Jit::new();
+        jit.compile_func(&reg_div_func(BinOp::IMod)).expect("jit imod");
+
+        let mut vm = Vm::new(VmConfig::default());
+        let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
+        slots[0..2].copy_from_slice(&[20, 0]);
+        let page = ExecPage::new(jit.code()).expect("executable JIT page");
+        let f: unsafe extern "C" fn(*mut u64) = unsafe { std::mem::transmute(page.as_ptr()) };
+        unsafe { f(&mut vm as *mut Vm as *mut u64) };
+
+        assert!(matches!(
+            vm.take_trap(),
+            Some(Anomaly::DivisionByZero { .. })
+        ));
+    }
+
     #[test]
     fn loads_record_field_from_pointer_arg() {
         let record_ty = Type::record(vec![("first", Type::Int), ("second", Type::Int)]);

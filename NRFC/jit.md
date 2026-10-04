@@ -44,8 +44,8 @@ spaghetti
 |                | `ISub`              | yes | no      |
 |                | `IMul`              | yes | no      |
 |                | `IEq`               | yes | no      |
-|                | `IDiv`              | no  | no      |
-|                | `IMod`              | no  | no      |
+|                | `IDiv`              | yes | no      |
+|                | `IMod`              | yes | no      |
 |                | `ILt`               | no  | no      |
 |                | `IGt`               | no  | no      |
 |                | `D*` / `BEq`        | no  | no      |
