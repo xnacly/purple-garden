@@ -1136,10 +1136,69 @@ impl<'cc> Cc<'cc> {
             .unwrap_or_default();
 
         vm.bytecode = buf;
+
+        // String globals share a single `const_pool` allocation. Compute the
+        // total pool size, allocate once (len == capacity so `into_boxed_slice`
+        // won't reallocate), then write each `[u32 len | bytes...]` payload
+        // into the pool at a known offset. Values are raw pointers into that
+        // stable buffer. One allocation replaces one-per-constant.
+        //
+        // `Value::as_str` reads the length as `*(ptr as *const u32)`, which
+        // requires 4-byte alignment. Each entry is padded to a multiple of
+        // `align_of::<u32>()` so every offset is aligned. The base pointer
+        // from the system allocator is already >=16-byte aligned in practice
+        // for the sizes we hand out; asserted in debug.
+        let len_size = std::mem::size_of::<u32>();
+        let align = std::mem::align_of::<u32>();
+        let entry_size = |s: &std::borrow::Cow<'_, str>| (len_size + s.len()).next_multiple_of(align);
+
+        let pool_bytes: usize = globals
+            .map
+            .keys()
+            .filter_map(|c| match c {
+                Const::Str(s) => Some(entry_size(s)),
+                _ => None,
+            })
+            .sum();
+        let mut pool: Vec<u8> = vec![0u8; pool_bytes];
+        let base = pool.as_mut_ptr();
+        // Empty pool is a dangling 1-aligned pointer with no readers; only
+        // check alignment when we actually hand out pointers into it.
+        debug_assert!(
+            pool_bytes == 0 || (base as usize) % align == 0,
+            "const_pool base must be usize-aligned (got {base:p})",
+        );
+
+        let mut offset = 0usize;
         vm.globals = globals.into_vec_map(|constant| match constant {
-            Const::Str(str) => vm.new_const_string(str.into_owned()),
+            Const::Str(s) => {
+                let bytes = s.as_bytes();
+                let len: u32 = bytes
+                    .len()
+                    .try_into()
+                    .expect("const string exceeds 4 GiB (u32 payload header limit)");
+                // SAFETY: `pool` was created with `vec![0u8; pool_bytes]`, so
+                // its capacity equals its length and no push will relocate it.
+                // Each write stays within `pool_bytes` by construction (sum of
+                // padded `[len | bytes]` payload sizes).
+                unsafe {
+                    let dst = base.add(offset);
+                    (dst as *mut u32).write(len);
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst.add(len_size), bytes.len());
+                }
+                let value = Value::from_ptr(unsafe { base.add(offset) });
+                offset += entry_size(&s);
+                value
+            }
             constant => Value::from(constant),
         });
+        debug_assert_eq!(offset, pool_bytes);
+        // `into_boxed_slice` is zero-copy when len == capacity, which holds
+        // for `vec![0u8; n]` — so the raw `base` pointer we captured above
+        // stays valid after this move.
+        vm.const_pool = pool.into_boxed_slice();
+        debug_assert_eq!(vm.const_pool.as_ptr(), base);
+
         (
             vm,
             std_fns.into_vec(),

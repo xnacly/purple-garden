@@ -40,9 +40,13 @@ impl Value {
     #[inline(always)]
     #[must_use]
     pub fn as_str<'t>(&self) -> &'t str {
+        // Layout: `[u32 len | bytes...]`, 4-byte aligned. 4 bytes of header
+        // instead of 8 saves memory on every string allocation (const pool
+        // and GC heap) at the cost of a 4 GiB per-string cap, which is
+        // enforced in the string ctors.
         let ptr = self.as_ptr::<u8>();
-        let len_size = std::mem::size_of::<usize>();
-        let len = unsafe { *(ptr as *const usize) };
+        let len_size = std::mem::size_of::<u32>();
+        let len = unsafe { *(ptr as *const u32) } as usize;
         let bytes = unsafe { std::slice::from_raw_parts(ptr.add(len_size), len) };
         unsafe { std::str::from_utf8_unchecked(bytes) }
     }

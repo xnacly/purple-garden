@@ -85,7 +85,14 @@ pub struct Vm {
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
     pub gc: Gc,
-    pub const_strings: Vec<Box<[u8]>>,
+    /// Backing storage for string constants emitted by the compiler.
+    ///
+    /// All `Const::Str` payloads are packed into a single `Box<[u8]>` with
+    /// their `[u32 len | bytes...]` layout concatenated — the layout
+    /// [`Value::as_str`] expects. `Value`s produced for const strings point
+    /// at offsets inside this one allocation; one Box replaces one allocation
+    /// per constant.
+    pub const_pool: Box<[u8]>,
 
     /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
     /// function the virtual machine currently executes in, this behaviour only occurs if
@@ -131,7 +138,7 @@ impl Vm {
             bytecode: Vec::new(),
             globals: Vec::new(),
             gc: Gc::new(),
-            const_strings: Vec::new(),
+            const_pool: Box::new([]),
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(4096),
             pending_trap: None,
@@ -214,29 +221,21 @@ impl Vm {
 
     pub fn new_string_from_str(&mut self, s: &str) -> Value {
         let bytes = s.as_bytes();
-        let len_size = std::mem::size_of::<usize>();
-        let layout = Layout::from_size_align(len_size + bytes.len(), std::mem::align_of::<usize>())
+        let len: u32 = bytes
+            .len()
+            .try_into()
+            .expect("string length exceeds 4 GiB (u32 payload header limit)");
+        let len_size = std::mem::size_of::<u32>();
+        let layout = Layout::from_size_align(len_size + bytes.len(), std::mem::align_of::<u32>())
             .expect("string allocation layout");
         let payload = self.alloc(AllocType::String, layout).as_ptr();
 
         unsafe {
-            (payload as *mut usize).write(bytes.len());
+            (payload as *mut u32).write(len);
             std::ptr::copy_nonoverlapping(bytes.as_ptr(), payload.add(len_size), bytes.len());
         }
 
         Value::from_ptr(payload)
-    }
-
-    pub fn new_const_string(&mut self, s: String) -> Value {
-        let len_size = std::mem::size_of::<usize>();
-        let mut payload = vec![0u8; len_size + s.len()].into_boxed_slice();
-        unsafe {
-            (payload.as_mut_ptr() as *mut usize).write(s.len());
-            std::ptr::copy_nonoverlapping(s.as_ptr(), payload.as_mut_ptr().add(len_size), s.len());
-        }
-        let value = Value::from_ptr(payload.as_mut_ptr());
-        self.const_strings.push(payload);
-        value
     }
 
     pub fn run<const BACKTRACE: bool>(&mut self, syscalls: &[BuiltinFn]) -> Result<(), Anomaly> {
