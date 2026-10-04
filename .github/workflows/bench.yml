@@ -1,0 +1,77 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write # push results to the gh-pages branch
+
+env:
+  CARGO_TERM_COLOR: always
+  # Shared by both cargo steps so the workspace is not rebuilt twice with
+  # different flags.
+  RUSTFLAGS: "-C target-cpu=native"
+
+jobs:
+  cross-language:
+    name: garden vs cpython / jsc / luajit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the report records the commit sha and date
+
+      # Latest nightly, matching rust-toolchain.toml (undated `channel =
+      # "nightly"`). The action only runs `rustup default`, which sits below
+      # the toolchain file in rustup's precedence, so the toml governs either
+      # way; installing nightly directly just avoids a wasted stable download.
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install hyperfine and LuaJIT
+        run: sudo apt-get update && sudo apt-get install -y hyperfine luajit
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build purple-garden
+        run: cargo build --release -p purple-garden-cli --locked
+
+      - name: Benchmark
+        run: cargo run --release -p purple-garden-bench --locked -- run --strict --runs 10 --warmup 3 --out bench-results.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-${{ github.sha }}
+          path: bench-results.json
+
+      # The gh-pages branch is a pure deploy target: the site source lives in
+      # bench/cross/site on master and is copied over on every run, and each
+      # run appends data/<sha>.json. The first run creates the branch.
+      - name: Publish to gh-pages
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "bench-bot"
+          git config user.email "bench-bot@users.noreply.github.com"
+          if git fetch origin gh-pages 2>/dev/null; then
+            git worktree add pages origin/gh-pages
+            git -C pages checkout -B gh-pages
+          else
+            git worktree add --detach pages
+            git -C pages checkout --orphan gh-pages
+            git -C pages rm -rfq . || true
+          fi
+          mkdir -p pages/data
+          cp bench-results.json "pages/data/${SHA}.json"
+          cp bench/cross/site/* pages/
+          touch pages/.nojekyll
+          cargo run --release -p purple-garden-bench --locked -- index pages/data
+          git -C pages add -A
+          git -C pages commit -m "bench: ${SHA::7}" || echo "nothing to commit"
+          git -C pages push origin gh-pages

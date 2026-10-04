@@ -1,0 +1,25 @@
+# Count primes in [2, N] via trial division.
+# Integer modulo in a tight nested loop; outer walks candidates, inner walks
+# divisors up to sqrt(candidate) via the `d*d > n` guard.
+import "testing"
+
+#! True when n has a divisor in the range [2, floor(sqrt(n))].
+fn is_composite(n:Int d:Int) Bool {
+    match {
+        d * d > n { false }
+        n % d == 0 { true }
+        { is_composite(n d + 1) }
+    }
+}
+
+#! Count primes in the inclusive range [2, n].
+fn count_primes(i:Int n:Int acc:Int) Int {
+    match {
+        i > n { acc }
+        is_composite(i 2) { count_primes(i + 1 n acc) }
+        { count_primes(i + 1 n acc + 1) }
+    }
+}
+
+# pi(10000) = 1229 (standard reference, e.g. OEIS A000720).
+testing.assert(count_primes(2 10000 0) == 1229)

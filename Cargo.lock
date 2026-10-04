@@ -578,6 +578,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "purple-garden-bench"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "purple-garden-cli"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>purple-garden benchmarks</title>
+    <style></style>
+  </head>
+  <body>
+    <header>
+      <h1><span>purple-garden</span> cross-language benchmarks</h1>
+      <div class="meta" id="meta">loading…</div>
+    </header>
+
+    <div class="controls">
+      <div class="group" id="runtime-toggles">
+        <span class="label">runtimes</span>
+      </div>
+      <div class="group">
+        <label class="rt"
+          ><input type="checkbox" id="log-toggle" checked /> log scale</label
+        >
+      </div>
+    </div>
+
+    <main>
+      <div id="status">loading data…</div>
+      <div class="grid" id="charts" hidden>
+        <section class="panel">
+          <h2>time <small id="time-sub"></small></h2>
+          <div class="chart" style="position: relative; height: 320px">
+            <canvas id="time-canvas"></canvas>
+          </div>
+        </section>
+        <section class="panel">
+          <h2>cpu time <small id="cpu-sub"></small></h2>
+          <div class="chart" style="position: relative; height: 320px">
+            <canvas id="cpu-canvas"></canvas>
+          </div>
+        </section>
+        <section class="panel">
+          <h2>memory <small id="memory-sub"></small></h2>
+          <div class="chart" style="position: relative; height: 320px">
+            <canvas id="memory-canvas"></canvas>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer>
+      Source and ports:
+      <a href="https://github.com/xnacly/purple-garden/tree/master/bench/cross"
+        >bench/cross</a
+      >.
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,24 @@
+# Mandelbrot escape counter along a horizontal slice.
+# Mixed Double arithmetic + integer loop + branchy comparisons.
+# Each pixel iterates until |z|^2 > 4 or `max` reached, then we sum.
+import "testing"
+
+#! Return the iteration at which one point escapes, or `max` if it remains bounded.
+fn mandel_iter(zr:Double zi:Double cr:Double ci:Double i:Int max:Int) Int {
+    match {
+        i == max { max }
+        zr*zr + zi*zi > 4.0 { i }
+        { mandel_iter(zr*zr - zi*zi + cr  2.0*zr*zi + ci  cr  ci  i+1  max) }
+    }
+}
+
+#! Sum Mandelbrot escape counts across a horizontal slice of sample points.
+fn slice_sum(i:Int n:Int max:Int acc:Int) Int {
+    match {
+        i == n { acc }
+        { slice_sum(i+1 n max acc + mandel_iter(0.0 0.0 ((i as Double) / 100.0 - 1.5) 0.0 0 max)) }
+    }
+}
+
+# 300 samples across the real axis from -1.5 to 1.5, 50 iters max.
+testing.assert(slice_sum(0 300 50 0) > 0)

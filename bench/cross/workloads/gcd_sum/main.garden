@@ -1,0 +1,30 @@
+# Sum of gcd(i, j) for i, j in [1, N].
+# Nested integer loop with a recursive Euclidean GCD on the inner body.
+import "testing"
+
+#! Euclidean GCD; recurses on (b, a mod b) until b == 0.
+fn gcd(a:Int b:Int) Int {
+    match {
+        b == 0 { a }
+        { gcd(b a % b) }
+    }
+}
+
+#! Inner column: sum gcd(i, j) for j in [1, n].
+fn col_sum(i:Int j:Int n:Int acc:Int) Int {
+    match {
+        j > n { acc }
+        { col_sum(i j + 1 n acc + gcd(i j)) }
+    }
+}
+
+#! Outer row: sum of col_sum over i in [1, n].
+fn grid_sum(i:Int n:Int acc:Int) Int {
+    match {
+        i > n { acc }
+        { grid_sum(i + 1 n acc + col_sum(i 1 n 0)) }
+    }
+}
+
+# N=100: sum_{i,j=1..100} gcd(i,j) = 31080
+testing.assert(grid_sum(1 100 0) == 31080)
