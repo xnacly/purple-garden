@@ -25,25 +25,52 @@
 
     <main>
       <div id="status">loading data…</div>
-      <div class="grid" id="charts" hidden>
-        <section class="panel">
-          <h2>time <small id="time-sub"></small></h2>
-          <div class="chart" style="position: relative; height: 320px">
-            <canvas id="time-canvas"></canvas>
+      <div id="content" hidden>
+        <section class="panel" id="per-bench">
+          <h2>
+            latest run · cpu time per benchmark
+            <small id="per-bench-sub"></small>
+          </h2>
+          <div class="group">
+            <label class="rt"
+              ><input
+                type="radio"
+                name="per-bench-mode"
+                value="relative"
+                checked
+              />
+              relative to pg</label
+            >
+            <label class="rt"
+              ><input type="radio" name="per-bench-mode" value="absolute" />
+              absolute ms</label
+            >
+          </div>
+          <div class="chart" style="position: relative; height: 380px">
+            <canvas id="per-bench-canvas"></canvas>
           </div>
         </section>
-        <section class="panel">
-          <h2>cpu time <small id="cpu-sub"></small></h2>
-          <div class="chart" style="position: relative; height: 320px">
-            <canvas id="cpu-canvas"></canvas>
-          </div>
-        </section>
-        <section class="panel">
-          <h2>memory <small id="memory-sub"></small></h2>
-          <div class="chart" style="position: relative; height: 320px">
-            <canvas id="memory-canvas"></canvas>
-          </div>
-        </section>
+
+        <div class="grid" id="charts">
+          <section class="panel">
+            <h2>time <small id="time-sub"></small></h2>
+            <div class="chart" style="position: relative; height: 320px">
+              <canvas id="time-canvas"></canvas>
+            </div>
+          </section>
+          <section class="panel">
+            <h2>cpu time <small id="cpu-sub"></small></h2>
+            <div class="chart" style="position: relative; height: 320px">
+              <canvas id="cpu-canvas"></canvas>
+            </div>
+          </section>
+          <section class="panel">
+            <h2>memory <small id="memory-sub"></small></h2>
+            <div class="chart" style="position: relative; height: 320px">
+              <canvas id="memory-canvas"></canvas>
+            </div>
+          </section>
+        </div>
       </div>
     </main>
 

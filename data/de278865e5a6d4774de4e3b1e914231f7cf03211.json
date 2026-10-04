@@ -1,0 +1,369 @@
+{
+  "sha": "de27886",
+  "date": "2026-10-05T00:01:41+02:00",
+  "run_unix": 1791151453,
+  "ref": "master",
+  "runner": "linux x86_64",
+  "runs": 10,
+  "warmup": 3,
+  "runtimes": {
+    "bun": "1.4.2",
+    "garden": "purple-garden version 0.1.0 by xnacly and contributors",
+    "luajit": "LuaJIT 2.1.1703358377 -- Copyright (C) 2005-2023 Mike Pall. https://luajit.org/",
+    "python3": "Python 3.13.15"
+  },
+  "results": [
+    {
+      "workload": "ackermann",
+      "runtime": "garden",
+      "time_ms": {
+        "mean": 125.59322540000001,
+        "min": 121.722882,
+        "stddev": 2.967163161743339
+      },
+      "cpu_ms": 125.35499999999999,
+      "memory_mb": 4.13671875
+    },
+    {
+      "workload": "ackermann",
+      "runtime": "bun",
+      "time_ms": {
+        "mean": 39.006907299999995,
+        "min": 37.314183,
+        "stddev": 2.8457044385226213
+      },
+      "cpu_ms": 42.2635,
+      "memory_mb": 25.359375
+    },
+    {
+      "workload": "ackermann",
+      "runtime": "luajit",
+      "time_ms": {
+        "mean": 37.51131750000001,
+        "min": 29.661723000000002,
+        "stddev": 10.55647863658526
+      },
+      "cpu_ms": 37.3343,
+      "memory_mb": 2.765625
+    },
+    {
+      "workload": "ackermann",
+      "runtime": "python3",
+      "time_ms": {
+        "mean": 1382.2354536,
+        "min": 1359.841196,
+        "stddev": 44.29592544238514
+      },
+      "cpu_ms": 1372.0753000000002,
+      "memory_mb": 9.6015625
+    },
+    {
+      "workload": "collatz",
+      "runtime": "garden",
+      "time_ms": {
+        "mean": 67.56039550000001,
+        "min": 65.24463,
+        "stddev": 2.2443603277118256
+      },
+      "cpu_ms": 67.30930000000001,
+      "memory_mb": 4.01171875
+    },
+    {
+      "workload": "collatz",
+      "runtime": "bun",
+      "time_ms": {
+        "mean": 16.547203500000002,
+        "min": 16.235737,
+        "stddev": 0.2812080885272808
+      },
+      "cpu_ms": 22.3808,
+      "memory_mb": 26.3984375
+    },
+    {
+      "workload": "collatz",
+      "runtime": "luajit",
+      "time_ms": {
+        "mean": 14.397665500000004,
+        "min": 14.284089000000002,
+        "stddev": 0.0812344981741815
+      },
+      "cpu_ms": 14.265299999999998,
+      "memory_mb": 2.58203125
+    },
+    {
+      "workload": "collatz",
+      "runtime": "python3",
+      "time_ms": {
+        "mean": 243.0098332,
+        "min": 238.354175,
+        "stddev": 8.072208431501211
+      },
+      "cpu_ms": 242.7608,
+      "memory_mb": 8.9140625
+    },
+    {
+      "workload": "fib",
+      "runtime": "garden",
+      "time_ms": {
+        "mean": 50.169888099999994,
+        "min": 49.423809000000006,
+        "stddev": 0.7772670894903281
+      },
+      "cpu_ms": 49.9613,
+      "memory_mb": 3.88671875
+    },
+    {
+      "workload": "fib",
+      "runtime": "bun",
+      "time_ms": {
+        "mean": 13.242549799999999,
+        "min": 12.772682,
+        "stddev": 0.37413879079851886
+      },
+      "cpu_ms": 16.2057,
+      "memory_mb": 25.34375
+    },
+    {
+      "workload": "fib",
+      "runtime": "luajit",
+      "time_ms": {
+        "mean": 9.7440657,
+        "min": 6.1375020000000005,
+        "stddev": 1.7090810669545364
+      },
+      "cpu_ms": 9.6317,
+      "memory_mb": 2.58203125
+    },
+    {
+      "workload": "fib",
+      "runtime": "python3",
+      "time_ms": {
+        "mean": 138.9175208,
+        "min": 135.407796,
+        "stddev": 2.1646982995720667
+      },
+      "cpu_ms": 138.67729999999997,
+      "memory_mb": 8.91796875
+    },
+    {
+      "workload": "gcd_sum",
+      "runtime": "garden",
+      "time_ms": {
+        "mean": 44.51003730000001,
+        "min": 44.210289,
+        "stddev": 0.1997048878070129
+      },
+      "cpu_ms": 44.31889999999999,
+      "memory_mb": 3.9140625
+    },
+    {
+      "workload": "gcd_sum",
+      "runtime": "bun",
+      "time_ms": {
+        "mean": 27.802262100000004,
+        "min": 27.226938000000004,
+        "stddev": 0.5943931876399381
+      },
+      "cpu_ms": 33.90389999999999,
+      "memory_mb": 26.11328125
+    },
+    {
+      "workload": "gcd_sum",
+      "runtime": "luajit",
+      "time_ms": {
+        "mean": 45.556081600000006,
+        "min": 45.469888,
+        "stddev": 0.04828415133629945
+      },
+      "cpu_ms": 45.35660000000001,
+      "memory_mb": 2.58203125
+    },
+    {
+      "workload": "gcd_sum",
+      "runtime": "python3",
+      "time_ms": {
+        "mean": 357.08483279999996,
+        "min": 352.195215,
+        "stddev": 4.960232891164126
+      },
+      "cpu_ms": 356.82949999999994,
+      "memory_mb": 8.91796875
+    },
+    {
+      "workload": "mandelbrot",
+      "runtime": "garden",
+      "time_ms": {
+        "mean": 70.05131860000002,
+        "min": 69.511841,
+        "stddev": 0.526943830790803
+      },
+      "cpu_ms": 69.8023,
+      "memory_mb": 4.07421875
+    },
+    {
+      "workload": "mandelbrot",
+      "runtime": "bun",
+      "time_ms": {
+        "mean": 12.0202484,
+        "min": 11.592571,
+        "stddev": 0.388706523734295
+      },
+      "cpu_ms": 14.214799999999999,
+      "memory_mb": 25.21875
+    },
+    {
+      "workload": "mandelbrot",
+      "runtime": "luajit",
+      "time_ms": {
+        "mean": 6.6079902000000015,
+        "min": 6.547612,
+        "stddev": 0.029316138967393917
+      },
+      "cpu_ms": 6.4921,
+      "memory_mb": 2.70703125
+    },
+    {
+      "workload": "mandelbrot",
+      "runtime": "python3",
+      "time_ms": {
+        "mean": 254.6529853,
+        "min": 247.745948,
+        "stddev": 15.105821002989329
+      },
+      "cpu_ms": 254.3957,
+      "memory_mb": 8.91796875
+    },
+    {
+      "workload": "n_body",
+      "runtime": "garden",
+      "time_ms": {
+        "mean": 40.3520385,
+        "min": 39.266040000000004,
+        "stddev": 0.4583219972933271
+      },
+      "cpu_ms": 40.1757,
+      "memory_mb": 4.12890625
+    },
+    {
+      "workload": "n_body",
+      "runtime": "bun",
+      "time_ms": {
+        "mean": 11.6725276,
+        "min": 11.088571,
+        "stddev": 0.4194415258817902
+      },
+      "cpu_ms": 16.779100000000003,
+      "memory_mb": 25.7421875
+    },
+    {
+      "workload": "n_body",
+      "runtime": "luajit",
+      "time_ms": {
+        "mean": 5.1832628000000005,
+        "min": 5.134312,
+        "stddev": 0.03781958402967675
+      },
+      "cpu_ms": 5.071299999999999,
+      "memory_mb": 2.70703125
+    },
+    {
+      "workload": "n_body",
+      "runtime": "python3",
+      "time_ms": {
+        "mean": 121.0265435,
+        "min": 119.549417,
+        "stddev": 1.6936814062669796
+      },
+      "cpu_ms": 120.79049999999995,
+      "memory_mb": 9.03515625
+    },
+    {
+      "workload": "primes_count",
+      "runtime": "garden",
+      "time_ms": {
+        "mean": 43.101849300000005,
+        "min": 37.621294,
+        "stddev": 6.581966602838769
+      },
+      "cpu_ms": 42.8872,
+      "memory_mb": 3.88671875
+    },
+    {
+      "workload": "primes_count",
+      "runtime": "bun",
+      "time_ms": {
+        "mean": 12.511429200000002,
+        "min": 12.011626,
+        "stddev": 0.3258546710434647
+      },
+      "cpu_ms": 18.342199999999995,
+      "memory_mb": 26.22265625
+    },
+    {
+      "workload": "primes_count",
+      "runtime": "luajit",
+      "time_ms": {
+        "mean": 6.169335600000001,
+        "min": 6.125260000000001,
+        "stddev": 0.02745834501041741
+      },
+      "cpu_ms": 6.064799999999999,
+      "memory_mb": 2.70703125
+    },
+    {
+      "workload": "primes_count",
+      "runtime": "python3",
+      "time_ms": {
+        "mean": 200.83992410000002,
+        "min": 197.860838,
+        "stddev": 4.260539225580376
+      },
+      "cpu_ms": 200.6079,
+      "memory_mb": 8.91796875
+    },
+    {
+      "workload": "tak",
+      "runtime": "garden",
+      "time_ms": {
+        "mean": 295.94677160000003,
+        "min": 286.335702,
+        "stddev": 6.0095245515031674
+      },
+      "cpu_ms": 295.6911,
+      "memory_mb": 4.01171875
+    },
+    {
+      "workload": "tak",
+      "runtime": "bun",
+      "time_ms": {
+        "mean": 48.78534720000001,
+        "min": 47.684622000000005,
+        "stddev": 0.8427669192914224
+      },
+      "cpu_ms": 53.8071,
+      "memory_mb": 25.23828125
+    },
+    {
+      "workload": "tak",
+      "runtime": "luajit",
+      "time_ms": {
+        "mean": 56.2072365,
+        "min": 55.92181600000001,
+        "stddev": 0.31959313120287014
+      },
+      "cpu_ms": 56.00019999999999,
+      "memory_mb": 2.70703125
+    },
+    {
+      "workload": "tak",
+      "runtime": "python3",
+      "time_ms": {
+        "mean": 483.43784399999987,
+        "min": 476.361468,
+        "stddev": 6.35450498472538
+      },
+      "cpu_ms": 483.1741999999999,
+      "memory_mb": 8.8828125
+    }
+  ]
+}
