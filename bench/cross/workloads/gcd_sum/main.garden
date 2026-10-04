@@ -26,5 +26,5 @@ fn grid_sum(i:Int n:Int acc:Int) Int {
     }
 }
 
-# N=100: sum_{i,j=1..100} gcd(i,j) = 31080
-testing.assert(grid_sum(1 100 0) == 31080)
+# N=1000: sum_{i,j=1..1000} gcd(i,j) = 4449880 (independently computed).
+testing.assert(grid_sum(1 1000 0) == 4449880)

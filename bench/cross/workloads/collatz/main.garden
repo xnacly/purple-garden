@@ -24,5 +24,7 @@ fn sum_steps(i:Int n:Int acc:Int) Int {
     }
 }
 
-# steps for 1..1000 sums to a known value.
-testing.assert(sum_steps(1 1000 0) == 59542)
+# Steps for 1..30000 sum to 2864311 (independently computed). Sized so compute
+# dominates process startup; at 1..1000 the run was ~60k steps and LuaJIT's
+# wall time scattered by ~10% from startup and trace-compile jitter alone.
+testing.assert(sum_steps(1 30000 0) == 2864311)

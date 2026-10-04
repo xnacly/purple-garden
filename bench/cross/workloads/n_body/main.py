@@ -1,7 +1,8 @@
-# Simplified 2-body n-body (Sun + Jupiter), 1000 Euler steps, in the exact op
-# order of main.garden. This file is also the independent reference: it prints
-# nothing but computes 0.0688067665339183, which the garden source matches to
-# <1e-7, so the check band is tight. Loop form: CPython has no TCO.
+# Simplified 2-body n-body (Sun + Jupiter), 200000 semi-implicit Euler steps
+# in the exact op order of main.garden (velocities first, then positions, so
+# the integrator is symplectic and long runs stay bounded). This file is also
+# the independent reference: it computes -1.968360027403725. Loop form:
+# CPython has no TCO.
 import math
 import sys
 
@@ -34,7 +35,7 @@ r = advance(
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
     4.84143144246472090, -1.16032004402742839, -0.103622044471123109,
     0.606326392995832020, 2.81198684491626016, -0.0252183616598876821,
-    1000,
+    200000,
 )
-if not (0.0688067 < r < 0.0688068):
+if not (-1.968361 < r < -1.968359):
     sys.exit(1)

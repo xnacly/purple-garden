@@ -11,4 +11,4 @@ fn ack(m:Int n:Int) Int {
         { ack(m-1 ack(m n-1)) }
     }
 }
-testing.assert(ack(3 8) == 2045)
+testing.assert(ack(3 9) == 4093)

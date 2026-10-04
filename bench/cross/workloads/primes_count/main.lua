@@ -1,4 +1,5 @@
--- Count primes in [2, 10000] by trial division. Idiomatic Lua: loops.
+-- Count primes in [2, 100000] by trial division = 9592. Loops; the inner
+-- guard d*d <= n walks divisors up to the square root, as in main.garden.
 local function is_composite(n)
   local d = 2
   while d * d <= n do
@@ -8,7 +9,7 @@ local function is_composite(n)
   return false
 end
 local c = 0
-for i = 2, 10000 do
+for i = 2, 100000 do
   if not is_composite(i) then c = c + 1 end
 end
-if c ~= 1229 then os.exit(1) end
+if c ~= 9592 then os.exit(1) end

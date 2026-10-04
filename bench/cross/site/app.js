@@ -4,11 +4,13 @@
 //   data/index.json   [{ file, sha, date, run_unix, ref }]  sorted by run_unix
 //   data/<sha>.json   one report: { sha, date, runtimes, results: [...] }
 //
-// Three charts, all on one screen, one line per runtime over commits:
-//   time    — sum of per-workload mean wall time
-//   cpu     — sum of per-workload user+system time
-//   memory  — mean of per-workload peak RSS (summing peak RSS of separate
-//             processes is not a physical quantity; the mean is the footprint)
+// Four charts on one screen:
+//   per-bench — latest run, CPU time per benchmark, one bar per runtime,
+//               either absolute ms or relative to garden (pg = 1×)
+//   time      — history: sum of per-workload mean wall time per runtime
+//   cpu       — history: sum of per-workload user+system time per runtime
+//   memory    — history: mean of per-workload peak RSS per runtime (summing
+//               peak RSS of separate processes is not a physical quantity)
 
 const RUNTIMES = ["garden", "bun", "luajit", "python3"];
 const COLORS = {
@@ -50,6 +52,7 @@ const METRICS = [
 
 const state = {
   log: true,
+  perBench: "relative",
   enabled: new Set(RUNTIMES),
   reports: [],
   charts: {},
@@ -85,10 +88,10 @@ function aggregate(report, runtime, metric) {
   return vals.length ? { value: metric.agg(vals), n: vals.length } : null;
 }
 
-function yScale(metric) {
+function yScale(title) {
   return {
     type: state.log ? "logarithmic" : "linear",
-    title: { display: true, text: metric.label },
+    title: { display: true, text: title },
     grid: { color: "#2a2a36" },
     ticks: { callback: (v) => (Number.isInteger(v) || v < 1 ? v : v.toFixed(1)) },
   };
@@ -115,6 +118,12 @@ function renderControls() {
     state.log = e.target.checked;
     render();
   };
+  for (const radio of document.querySelectorAll('input[name="per-bench-mode"]')) {
+    radio.onchange = () => {
+      state.perBench = radio.value;
+      render();
+    };
+  }
 }
 
 function renderMeta() {
@@ -128,6 +137,76 @@ function renderMeta() {
     `latest <code>${short(latest.sha)}</code> (${latest.date}` +
     `${latest.ref ? `, ${latest.ref}` : ""}) · ${latest.runner} · ` +
     `${latest.runs} runs, ${latest.warmup} warmup<br>${versions}`;
+}
+
+/// Latest run, CPU time per benchmark. Relative mode divides every runtime
+/// by garden's CPU time for that benchmark and draws pg as a dashed 1× line
+/// instead of a column of identical bars.
+function renderPerBench() {
+  const latest = state.reports.at(-1);
+  const workloads = [...new Set(latest.results.map((m) => m.workload))].sort();
+  const cpu = (w, rt) =>
+    latest.results.find((m) => m.workload === w && m.runtime === rt)?.cpu_ms ?? null;
+  const relative = state.perBench === "relative";
+  const runtimes = RUNTIMES.filter(
+    (r) => state.enabled.has(r) && !(relative && r === "garden"),
+  );
+
+  const datasets = runtimes.map((rt) => ({
+    type: "bar",
+    label: rt,
+    data: workloads.map((w) => {
+      const v = cpu(w, rt);
+      if (v == null) return null;
+      if (!relative) return v;
+      const g = cpu(w, "garden");
+      return g ? v / g : null;
+    }),
+    backgroundColor: COLORS[rt],
+    borderRadius: 3,
+  }));
+  if (relative) {
+    datasets.push({
+      type: "line",
+      label: "garden = 1×",
+      data: workloads.map(() => 1),
+      borderColor: COLORS.garden,
+      borderDash: [5, 4],
+      borderWidth: 2,
+      pointRadius: 0,
+    });
+  }
+
+  document.getElementById("per-bench-sub").textContent = relative
+    ? `${short(latest.sha)} — each runtime's CPU time divided by garden's; below the dashed line is faster than pg`
+    : `${short(latest.sha)} — CPU time in ms, lower is better`;
+
+  state.charts.perBench?.destroy();
+  state.charts.perBench = new Chart(document.getElementById("per-bench-canvas"), {
+    type: "bar",
+    data: { labels: workloads, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: yScale(relative ? "× garden CPU time" : "CPU time (ms)"),
+        x: { grid: { display: false } },
+      },
+      plugins: {
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              if (c.dataset.type === "line") return "";
+              const rt = c.dataset.label;
+              return relative
+                ? ` ${rt}: ${fmt(c.parsed.y)}× pg (${fmt(cpu(c.label, rt))} ms)`
+                : ` ${rt}: ${fmt(c.parsed.y)} ms`;
+            },
+          },
+        },
+      },
+    },
+  });
 }
 
 function renderMetric(metric) {
@@ -166,7 +245,7 @@ function renderMetric(metric) {
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       scales: {
-        y: yScale(metric),
+        y: yScale(metric.label),
         x: { ticks: { maxTicksLimit: 12, autoSkip: true }, grid: { display: false } },
       },
       plugins: {
@@ -194,6 +273,7 @@ function renderMetric(metric) {
 
 function render() {
   renderMeta();
+  renderPerBench();
   for (const metric of METRICS) renderMetric(metric);
 }
 
@@ -202,7 +282,7 @@ function render() {
     await load();
     if (!state.reports.length) throw new Error("index.json is empty");
     document.getElementById("status").hidden = true;
-    document.getElementById("charts").hidden = false;
+    document.getElementById("content").hidden = false;
     renderControls();
     render();
   } catch (e) {

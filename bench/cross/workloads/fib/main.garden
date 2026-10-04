@@ -22,5 +22,5 @@ fn fibt(n:Int a:Int b:Int) Int {
     }
 }
 
-testing.assert(fib(28) == 317811)
+testing.assert(fib(30) == 832040)
 testing.assert(fibt(50 0 1) == 12586269025)

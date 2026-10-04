@@ -1,5 +1,5 @@
-# fib(28) doubly-recursive + fibt(50) accumulator form. Same two checks as
-# fib.garden. fibt is a loop: CPython has no TCO.
+# fib(30) doubly-recursive + fibt(50) accumulator form. Same two checks as
+# main.garden. fibt is a loop: CPython has no TCO.
 import sys
 
 
@@ -18,7 +18,7 @@ def fibt(n, a, b):
     return a if n == 0 else b
 
 
-if fib(28) != 317811:
+if fib(30) != 832040:
     sys.exit(1)
 if fibt(50, 0, 1) != 12586269025:
     sys.exit(1)

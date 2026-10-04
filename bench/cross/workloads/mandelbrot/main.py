@@ -1,6 +1,7 @@
-# 300 samples on the real axis [-1.5, 1.5), 50 max iters; sum the escape
-# counts. Same check as mandelbrot.garden (sum > 0). Loop form; arithmetic and
-# check order match exactly: test escape with the current z, then advance.
+# 6000 samples on the real axis [-1.5, 1.5), 500 max iters; sum of the escape
+# counts = 1761213, asserted exactly: every runtime performs the identical
+# IEEE op sequence. Loop form; check order matches main.garden exactly: test
+# escape with the current z, then advance.
 import sys
 
 
@@ -17,7 +18,7 @@ def mandel_iter(cr, ci, mx):
 
 
 acc = 0
-for i in range(300):
-    acc += mandel_iter(i / 100.0 - 1.5, 0.0, 50)
-if not acc > 0:
+for i in range(6000):
+    acc += mandel_iter(i / 2000.0 - 1.5, 0.0, 500)
+if acc != 1761213:
     sys.exit(1)

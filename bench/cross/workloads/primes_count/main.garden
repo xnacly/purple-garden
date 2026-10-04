@@ -21,5 +21,5 @@ fn count_primes(i:Int n:Int acc:Int) Int {
     }
 }
 
-# pi(10000) = 1229 (standard reference, e.g. OEIS A000720).
-testing.assert(count_primes(2 10000 0) == 1229)
+# pi(100000) = 9592 (standard reference, e.g. OEIS A000720).
+testing.assert(count_primes(2 100000 0) == 9592)

@@ -48,9 +48,11 @@ fn advance(x1:Double y1:Double z1:Double vx1:Double vy1:Double vz1:Double
 let result = advance(0.0 0.0 0.0 0.0 0.0 0.0
                      4.84143144246472090 -1.16032004402742839 -0.103622044471123109
                      0.606326392995832020  2.81198684491626016 -0.0252183616598876821
-                     1000)
-# Independent reference (same algorithm in Python, IEEE f64): 0.0688067665339183.
-# Garden performs the identical op sequence, so the result must agree to well
-# under 1e-7; a wider gap would indicate a codegen difference, not noise.
-testing.assert(result > 0.0688067)
-testing.assert(result < 0.0688068)
+                     200000)
+# Independent reference (same algorithm in Python, IEEE f64) after 200000
+# steps: -1.968360027403725. Garden performs the identical op sequence, so the
+# result must agree to well under 1e-6; a wider gap would indicate a codegen
+# difference, not noise. The integrator is semi-implicit Euler (velocities
+# first, then positions), which is symplectic, so the long run stays bounded.
+testing.assert(result > -1.968361)
+testing.assert(result < -1.968359)

@@ -16,9 +16,11 @@ fn mandel_iter(zr:Double zi:Double cr:Double ci:Double i:Int max:Int) Int {
 fn slice_sum(i:Int n:Int max:Int acc:Int) Int {
     match {
         i == n { acc }
-        { slice_sum(i+1 n max acc + mandel_iter(0.0 0.0 ((i as Double) / 100.0 - 1.5) 0.0 0 max)) }
+        { slice_sum(i+1 n max acc + mandel_iter(0.0 0.0 ((i as Double) / 2000.0 - 1.5) 0.0 0 max)) }
     }
 }
 
-# 300 samples across the real axis from -1.5 to 1.5, 50 iters max.
-testing.assert(slice_sum(0 300 50 0) > 0)
+# 6000 samples across the real axis from -1.5 to 1.5, 500 iters max. The sum
+# of escape counts is 1761213, asserted exactly: every runtime performs the
+# identical IEEE op sequence, so a mismatch is a real divergence.
+testing.assert(slice_sum(0 6000 500 0) == 1761213)
