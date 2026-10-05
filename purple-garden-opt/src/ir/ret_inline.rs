@@ -87,6 +87,12 @@ fn predecessor_counts(fun: &ir::Func) -> Vec<u32> {
                 counts[yes.0.0 as usize] += 1;
                 counts[no.0.0 as usize] += 1;
             }
+            Some(ir::Terminator::Switch { cases, default, .. }) => {
+                for case in fun.cases(*cases) {
+                    counts[case.target.0.0 as usize] += 1;
+                }
+                counts[default.0.0 as usize] += 1;
+            }
             _ => {}
         }
     }

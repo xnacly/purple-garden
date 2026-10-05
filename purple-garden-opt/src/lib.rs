@@ -22,6 +22,9 @@ pub fn ir(ir: &mut [purple_garden_ir::Func]) {
 
         ir::imm_fold(fun, &mut scratch);
         ir::branch_cmp(fun, &mut scratch);
+        // Order: after branch_cmp, it folds the BranchCmp/BranchCmpImm chains
+        // branch_cmp produces.
+        ir::switch_fold(fun, &mut scratch);
         ir::indirect_jump(fun);
 
         // Order: before tailcall, so a Call-then-Jump-to-Ret-join pattern

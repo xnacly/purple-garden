@@ -1,0 +1,35 @@
+# Match chains opt::ir::switch_fold turns into a Switch: one subject compared
+# against at least four distinct keys. `beta` repeats, the first arm wins.
+import "str"
+import "testing"
+
+#! Map a keyword to its index, 0 when unknown.
+fn keyword(w:Str) Int {
+    match {
+        w == "alpha" { 1 }
+        w == "beta" { 2 }
+        w == "gamma" { 3 }
+        w == "beta" { 99 }
+        w == "delta" { 4 }
+        { 0 }
+    }
+}
+
+#! Map a sparse set of integers to their position, 0 otherwise.
+fn sparse(n:Int) Int {
+    match {
+        n == 3 { 1 }
+        n == 7 { 2 }
+        n == 9 { 3 }
+        n == 42 { 4 }
+        { 0 }
+    }
+}
+
+testing.assert(keyword("alpha") == 1)
+testing.assert(keyword(str.slice("xbetax" 1 5)) == 2)
+testing.assert(keyword("delta") == 4)
+testing.assert(keyword("epsilon") == 0)
+testing.assert(sparse(9) == 3)
+testing.assert(sparse(42) == 4)
+testing.assert(sparse(8) == 0)
