@@ -46,25 +46,77 @@ impl Drop for ExecPage {
     }
 }
 
+/// Every native function of one compile, packed into a single mapping.
+///
+/// The region is reserved once and stays writable while functions are
+/// appended; [`CodeArena::seal`] then makes it executable in one step, so the
+/// code is never writable and executable at the same time. Entries handed
+/// out by [`CodeArena::push`] point into the reservation, which never moves,
+/// and are only called after sealing.
 #[derive(Debug)]
-pub struct JitFn {
-    _page: ExecPage,
-    entry: BuiltinFn,
+pub struct CodeArena {
+    ptr: NonNull<u8>,
+    cap: usize,
+    len: usize,
+    sealed: bool,
 }
 
-impl JitFn {
-    pub fn new(code: &[u8]) -> Result<Self, String> {
-        let page = ExecPage::new(code)?;
-        let entry = unsafe {
-            std::mem::transmute::<*const u8, unsafe extern "C" fn(*mut std::ffi::c_void)>(
-                page.as_ptr(),
-            )
-        };
-        Ok(Self { _page: page, entry })
+impl CodeArena {
+    /// Pages are only backed once touched, so the reservation costs address
+    /// space, not memory. 16 MiB fits hundreds of thousands of functions.
+    const CAPACITY: usize = 16 << 20;
+    /// Function entries start on 16 bytes so the decoder fetches a whole
+    /// first block.
+    const ALIGN: usize = 16;
+
+    pub fn new() -> Result<Self, String> {
+        let ptr = mmap::mmap(
+            None,
+            Self::CAPACITY,
+            MmapProt::READ | MmapProt::WRITE,
+            MmapFlags::PRIVATE | MmapFlags::ANONYMOUS,
+            -1,
+            0,
+        )?;
+        Ok(Self {
+            ptr,
+            cap: Self::CAPACITY,
+            len: 0,
+            sealed: false,
+        })
     }
 
-    #[must_use]
-    pub fn entry(&self) -> BuiltinFn {
-        self.entry
+    /// Copy `code` into the arena and return its entry, `None` once full.
+    pub fn push(&mut self, code: &[u8]) -> Option<BuiltinFn> {
+        debug_assert!(!self.sealed, "push into a sealed code arena");
+        let start = self.len.next_multiple_of(Self::ALIGN);
+        let end = start.checked_add(code.len())?;
+        if end > self.cap {
+            return None;
+        }
+        let base = self.ptr.as_ptr();
+        unsafe {
+            // int3 padding, so a stray fall-through traps.
+            std::ptr::write_bytes(base.add(self.len), 0xcc, start - self.len);
+            std::ptr::copy_nonoverlapping(code.as_ptr(), base.add(start), code.len());
+        }
+        self.len = end;
+        Some(unsafe { std::mem::transmute::<*const u8, BuiltinFn>(base.add(start)) })
+    }
+
+    /// Make the written code executable. aarch64 will additionally need an
+    /// instruction cache invalidation over `[ptr, ptr + len)` before this.
+    pub fn seal(&mut self) -> Result<(), String> {
+        self.sealed = true;
+        if self.len == 0 {
+            return Ok(());
+        }
+        mmap::mprotect(self.ptr, self.len, MmapProt::READ | MmapProt::EXEC)
+    }
+}
+
+impl Drop for CodeArena {
+    fn drop(&mut self) {
+        let _ = mmap::munmap(self.ptr, self.cap);
     }
 }

@@ -282,9 +282,12 @@ impl<'cc> Cc<'cc> {
         &mut self,
         config: &Config,
         ir: &'cc [Func<'cc>],
-    ) -> Result<Vec<purple_garden_jit::JitFn>, String> {
-        let mut native_pages: Option<Vec<purple_garden_jit::JitFn>> =
-            (!config.no_jit).then(|| Vec::with_capacity(ir.len()));
+    ) -> Result<Option<purple_garden_jit::CodeArena>, String> {
+        let mut arena = if config.no_jit {
+            None
+        } else {
+            Some(purple_garden_jit::CodeArena::new()?)
+        };
         self.native_code = (config.disassemble > 0).then(|| Vec::with_capacity(ir.len()));
         self.functions.reserve(ir.len());
 
@@ -292,16 +295,19 @@ impl<'cc> Cc<'cc> {
             if config.liveness {
                 print!("{}", func.liveness_display());
             }
-            self.cc(func, native_pages.as_mut())?;
+            self.cc(func, arena.as_mut())?;
         }
 
-        Ok(native_pages.unwrap_or_default())
+        if let Some(arena) = &mut arena {
+            arena.seal()?;
+        }
+        Ok(arena)
     }
 
     fn cc(
         &mut self,
         fun: &'cc Func<'cc>,
-        native: Option<&mut Vec<purple_garden_jit::JitFn>>,
+        native: Option<&mut purple_garden_jit::CodeArena>,
     ) -> Result<(), String> {
         // Take the reusable scratch buffers out of self so we can hold an
         // immutable borrow of `live_set` across calls to `&mut self`
@@ -317,7 +323,7 @@ impl<'cc> Cc<'cc> {
         // be run directly from the native page when it compiles to JIT.
         let is_root = fun.id == ir::Id(0);
         if let Some(native) = native
-            && self.try_compile_native(fun, &live_set, native)?
+            && self.try_compile_native(fun, &live_set, native)
         {
             purple_garden_shared::trace!("[bc::Cc::cc][{}] native", fun.name);
             if is_root {
@@ -452,20 +458,25 @@ impl<'cc> Cc<'cc> {
         &mut self,
         fun: &Func<'cc>,
         liveness: &[(u32, u32)],
-        pages: &mut Vec<purple_garden_jit::JitFn>,
-    ) -> Result<bool, String> {
+        arena: &mut purple_garden_jit::CodeArena,
+    ) -> bool {
         let Some(()) = self.jit.compile_func_with_liveness(fun, liveness) else {
             purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
-            return Ok(false);
+            return false;
+        };
+        let Some(entry) = arena.push(self.jit.code()) else {
+            purple_garden_shared::trace!(
+                "[bc::Cc::cc] code arena full, {} stays bytecode",
+                fun.name
+            );
+            return false;
         };
 
         // Retain a copy only when diagnostics need it.
-        let jit = purple_garden_jit::JitFn::new(self.jit.code())
-            .map_err(|e| format!("native code allocation failed: {e}"))?;
         if let Some(native_code) = &mut self.native_code {
             native_code.push((fun.name, self.jit.code().to_vec()));
         }
-        let idx = self.std_fns.intern(jit.entry()) as u16;
+        let idx = self.std_fns.intern(entry) as u16;
         self.functions.insert(
             fun.id,
             CcFunc::Native {
@@ -473,8 +484,7 @@ impl<'cc> Cc<'cc> {
                 idx,
             },
         );
-        pages.push(jit);
-        Ok(true)
+        true
     }
 
     /// Move `args[i]` into the i-th argument register (`r0..r{N-1}`) for a call
