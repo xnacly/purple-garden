@@ -10,6 +10,7 @@ pub fn compile_func(
     _: &mut Vec<u8>,
     _: &[(u32, u32)],
     _: &std::collections::HashMap<ir::Const<'_>, u32>,
+    _: &[purple_garden_runtime::Value],
     _: &mut crate::regalloc::Xralloc2,
     _: &mut Scratch,
 ) -> Option<()> {
