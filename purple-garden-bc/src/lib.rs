@@ -110,6 +110,13 @@ pub struct Cc<'cc> {
     /// to find a free scratch register for cycle breaking.
     cur_lo: u8,
     cur_max_reg: u8,
+    /// Values with a liveness interval, ordered by def. Together with
+    /// `live_next` and `live_active` this keeps the set of values live
+    /// across a call up to date as calls are lowered in increasing `pos`,
+    /// see [`Cc::advance_live_across`].
+    live_order: Vec<u32>,
+    live_next: usize,
+    live_active: Vec<u32>,
     /// Reusable native-code buffer for the JIT, refilled per function. Empty
     /// and untouched when `--no-jit` is set.
     jit: purple_garden_jit::Jit,
@@ -249,6 +256,9 @@ impl<'cc> Cc<'cc> {
             scratch_live: Vec::new(),
             cur_lo: 0,
             cur_max_reg: 0,
+            live_order: Vec::new(),
+            live_next: 0,
+            live_active: Vec::new(),
             jit: purple_garden_jit::Jit::new(),
         }
     }
@@ -282,9 +292,12 @@ impl<'cc> Cc<'cc> {
         &mut self,
         config: &Config,
         ir: &'cc [Func<'cc>],
-    ) -> Result<Vec<purple_garden_jit::JitFn>, String> {
-        let mut native_pages: Option<Vec<purple_garden_jit::JitFn>> =
-            (!config.no_jit).then(|| Vec::with_capacity(ir.len()));
+    ) -> Result<Option<purple_garden_jit::CodeArena>, String> {
+        let mut arena = if config.no_jit {
+            None
+        } else {
+            Some(purple_garden_jit::CodeArena::new()?)
+        };
         self.native_code = (config.disassemble > 0).then(|| Vec::with_capacity(ir.len()));
         self.functions.reserve(ir.len());
 
@@ -292,16 +305,19 @@ impl<'cc> Cc<'cc> {
             if config.liveness {
                 print!("{}", func.liveness_display());
             }
-            self.cc(func, native_pages.as_mut())?;
+            self.cc(func, arena.as_mut())?;
         }
 
-        Ok(native_pages.unwrap_or_default())
+        if let Some(arena) = &mut arena {
+            arena.seal()?;
+        }
+        Ok(arena)
     }
 
     fn cc(
         &mut self,
         fun: &'cc Func<'cc>,
-        native: Option<&mut Vec<purple_garden_jit::JitFn>>,
+        native: Option<&mut purple_garden_jit::CodeArena>,
     ) -> Result<(), String> {
         // Take the reusable scratch buffers out of self so we can hold an
         // immutable borrow of `live_set` across calls to `&mut self`
@@ -317,7 +333,7 @@ impl<'cc> Cc<'cc> {
         // be run directly from the native page when it compiles to JIT.
         let is_root = fun.id == ir::Id(0);
         if let Some(native) = native
-            && self.try_compile_native(fun, &live_set, native)?
+            && self.try_compile_native(fun, &live_set, native)
         {
             purple_garden_shared::trace!("[bc::Cc::cc][{}] native", fun.name);
             if is_root {
@@ -333,6 +349,13 @@ impl<'cc> Cc<'cc> {
 
         fun.arg_hints_into(&mut arg_hints);
         self.regalloc.rebuild(&live_set, &arg_hints);
+
+        self.live_order.clear();
+        self.live_order
+            .extend((0..live_set.len() as u32).filter(|&v| live_set[v as usize].0 != u32::MAX));
+        self.live_order.sort_by_key(|&v| live_set[v as usize].0);
+        self.live_next = 0;
+        self.live_active.clear();
 
         // binding the id of a function to its context
         let pc = self.buf.len();
@@ -452,20 +475,25 @@ impl<'cc> Cc<'cc> {
         &mut self,
         fun: &Func<'cc>,
         liveness: &[(u32, u32)],
-        pages: &mut Vec<purple_garden_jit::JitFn>,
-    ) -> Result<bool, String> {
+        arena: &mut purple_garden_jit::CodeArena,
+    ) -> bool {
         let Some(()) = self.jit.compile_func_with_liveness(fun, liveness) else {
             purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
-            return Ok(false);
+            return false;
+        };
+        let Some(entry) = arena.push(self.jit.code()) else {
+            purple_garden_shared::trace!(
+                "[bc::Cc::cc] code arena full, {} stays bytecode",
+                fun.name
+            );
+            return false;
         };
 
         // Retain a copy only when diagnostics need it.
-        let jit = purple_garden_jit::JitFn::new(self.jit.code())
-            .map_err(|e| format!("native code allocation failed: {e}"))?;
         if let Some(native_code) = &mut self.native_code {
             native_code.push((fun.name, self.jit.code().to_vec()));
         }
-        let idx = self.std_fns.intern(jit.entry()) as u16;
+        let idx = self.std_fns.intern(entry) as u16;
         self.functions.insert(
             fun.id,
             CcFunc::Native {
@@ -473,8 +501,7 @@ impl<'cc> Cc<'cc> {
                 idx,
             },
         );
-        pages.push(jit);
-        Ok(true)
+        true
     }
 
     /// Move `args[i]` into the i-th argument register (`r0..r{N-1}`) for a call
@@ -552,6 +579,23 @@ impl<'cc> Cc<'cc> {
         }
 
         self.scratch_pairs = todo;
+    }
+
+    /// Bring `live_active` to the values live across the call at `pos`:
+    /// defined before it, used after it. Calls are lowered in increasing
+    /// `pos`, so a value enters once, in def order, and leaves for good once
+    /// its last use is behind. This replaces a scan of every value per call,
+    /// which was quadratic for functions with many calls. Sorted by id so the
+    /// spills come out in the same order as that scan.
+    fn advance_live_across(&mut self, live_set: &[(u32, u32)], pos: u32) {
+        while let Some(&v) = self.live_order.get(self.live_next)
+            && live_set[v as usize].0 < pos
+        {
+            self.live_active.push(v);
+            self.live_next += 1;
+        }
+        self.live_active.retain(|&v| pos < live_set[v as usize].1);
+        self.live_active.sort_unstable();
     }
 
     /// Push r{lo}..r{max_reg} onto the spill stack (callee-saved prologue). `lo = max(nparams, 1)`;
@@ -889,28 +933,24 @@ impl<'cc> Cc<'cc> {
                 let clobber_end = args.len().max(1) as u8;
                 self.scratch.clear();
                 self.scratch_live.clear();
-                for (v, &(def, last_use)) in live_set.iter().enumerate() {
-                    if def == u32::MAX {
-                        continue;
-                    }
-                    if def < pos && pos < last_use {
-                        let regalloc::Location::Reg(src) = self.regalloc.map[v] else {
-                            unreachable!();
-                        };
-                        if src < clobber_end {
-                            purple_garden_shared::trace!(
-                                "[bc] spilled r{} at call_idx={};def={};last_use={}",
-                                src,
-                                pos,
-                                def,
-                                last_use
-                            );
-                            self.scratch.push(src);
-                        } else {
-                            // Stays in place across the call; the shuffle
-                            // must not use it as scratch.
-                            self.scratch_live.push(src);
-                        }
+                self.advance_live_across(live_set, pos);
+                for &v in &self.live_active {
+                    let regalloc::Location::Reg(src) = self.regalloc.map[v as usize] else {
+                        unreachable!();
+                    };
+                    if src < clobber_end {
+                        purple_garden_shared::trace!(
+                            "[bc] spilled r{} at call_idx={};def={};last_use={}",
+                            src,
+                            pos,
+                            live_set[v as usize].0,
+                            live_set[v as usize].1
+                        );
+                        self.scratch.push(src);
+                    } else {
+                        // Stays in place across the call; the shuffle
+                        // must not use it as scratch.
+                        self.scratch_live.push(src);
                     }
                 }
                 pack_push(
@@ -948,21 +988,17 @@ impl<'cc> Cc<'cc> {
                 let clobber_end = args.len().max(1) as u8;
                 self.scratch.clear();
                 self.scratch_live.clear();
-                for (v, &(def, last_use)) in live_set.iter().enumerate() {
-                    if def == u32::MAX {
-                        continue;
-                    }
-                    if def < pos && pos < last_use {
-                        let regalloc::Location::Reg(src) = self.regalloc.map[v] else {
-                            unreachable!();
-                        };
-                        if src < clobber_end {
-                            self.scratch.push(src);
-                        } else {
-                            // Stays in place across the call; the shuffle
-                            // must not use it as scratch.
-                            self.scratch_live.push(src);
-                        }
+                self.advance_live_across(live_set, pos);
+                for &v in &self.live_active {
+                    let regalloc::Location::Reg(src) = self.regalloc.map[v as usize] else {
+                        unreachable!();
+                    };
+                    if src < clobber_end {
+                        self.scratch.push(src);
+                    } else {
+                        // Stays in place across the call; the shuffle
+                        // must not use it as scratch.
+                        self.scratch_live.push(src);
                     }
                 }
                 pack_push(

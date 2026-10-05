@@ -20,7 +20,7 @@
 //!    registers used, size of function and other heuristics)
 //! 3. allocate physical registers from the liveness and target constraints
 //! 4. emit native code
-//! 5. expose the emitted page as a [`JitFn`]
+//! 5. append the code to the compile's [`CodeArena`]
 //!
 //! The architecture backend owns the supported IR subset. This crate should
 //! therefore be read as a conservative native lowering path, not as a second
@@ -41,7 +41,7 @@ mod arch;
 pub mod mem;
 mod regalloc;
 
-pub use mem::JitFn;
+pub use mem::CodeArena;
 use purple_garden_ir as ir;
 
 /// Reusable JIT codegen state.
@@ -49,7 +49,7 @@ use purple_garden_ir as ir;
 pub struct Jit {
     code: Vec<u8>,
     liveness: Vec<(u32, u32)>,
-    regalloc: regalloc::Allocator,
+    regalloc: regalloc::Xralloc2,
     scratch: arch::Scratch,
 }
 
@@ -160,9 +160,9 @@ mod tests_x86 {
         assert_eq!(
             jit.code(),
             [
-                0x48, 0x8b, 0x47, 0x00, // mov rax,[rdi+0]
-                0x48, 0x8b, 0x47, 0x08, // mov rax,[rdi+8]
-                0x48, 0x89, 0x47, 0x00, // mov [rdi+0],rax
+                0x48, 0x8b, 0x77, 0x00, // mov rsi,[rdi+0]
+                0x48, 0x8b, 0x77, 0x08, // mov rsi,[rdi+8]
+                0x48, 0x89, 0x77, 0x00, // mov [rdi+0],rsi
                 0xc3,
             ]
         );
@@ -637,9 +637,11 @@ mod tests_x86 {
     fn jit_fn_injected_as_syscall_and_dispatched() {
         use purple_garden_runtime::{Vm, VmConfig, op::Op};
 
-        let jit_fn = super::JitFn::new(&[0xc3]).expect("jit fn");
+        let mut arena = super::CodeArena::new().expect("code arena");
+        let entry = arena.push(&[0xc3]).expect("arena has room");
+        arena.seal().expect("seal arena");
 
-        let syscalls = vec![jit_fn.entry()];
+        let syscalls = vec![entry];
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = vec![Op::LoadI { dst: 0, value: 187 }, Op::Sys { idx: 0 }, Op::Halt];
         vm.run::<false>(&syscalls).expect("vm run");

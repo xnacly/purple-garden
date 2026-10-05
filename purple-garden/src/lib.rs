@@ -44,7 +44,7 @@ pub mod embed {
 
 use embed::{FromVm, Pkg, Vm, VmConfig};
 
-type JitFn = purple_garden_jit::JitFn;
+type CodeArena = purple_garden_jit::CodeArena;
 
 /// Configures and compiles a Purple Garden program.
 ///
@@ -247,7 +247,8 @@ pub struct Program<'p> {
     entry: usize,
     entry_native: Option<BuiltinFn>,
     syscalls: Vec<BuiltinFn>,
-    jit: Vec<JitFn>,
+    /// Keeps the native functions referenced by `syscalls` mapped.
+    jit: Option<CodeArena>,
     funcs: HashMap<&'p str, (CcCallTarget, FunctionType<'p>)>,
 }
 
@@ -363,7 +364,7 @@ impl<'p> Program<'p> {
             entry,
             entry_native: None,
             syscalls,
-            jit: Vec::new(),
+            jit: None,
             funcs: HashMap::new(),
         }
     }
@@ -657,7 +658,7 @@ fn compile<'i>(
     }
 
     let mut cc = bc::Cc::new();
-    let native_pages = cc
+    let arena = cc
         .compile(config, &ir)
         .map_err(|msg| Diagnostic::new(msg, Span::new(0, 0)))?;
     if config.opt >= 1 {
@@ -682,9 +683,7 @@ fn compile<'i>(
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let mut program = Program::from_vm(vm, syscalls).with_entry_native(entry_native);
     program.funcs = funcs;
-    if !config.no_jit {
-        program.jit = native_pages;
-    }
+    program.jit = arena;
     Ok(program)
 }
 
