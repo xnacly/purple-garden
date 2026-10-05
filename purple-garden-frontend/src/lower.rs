@@ -284,7 +284,7 @@ impl<'lower> Lower<'lower> {
             Node::Bin { op, lhs, rhs, id } => {
                 use BinOp::{
                     BEq, DAdd, DDiv, DGt, DLt, DMul, DSub, IAdd, IDiv, IEq, IGt, ILt, IMod, IMul,
-                    ISub,
+                    ISub, SEq,
                 };
                 let src_type = self.types.get(ast.value_id(*lhs)).cloned().unwrap();
                 let span = op.start as u32;
@@ -305,6 +305,10 @@ impl<'lower> Lower<'lower> {
                 let op = match src_type {
                     ptype::Type::Bool => match op.t {
                         Type::DoubleEqual => BEq,
+                        _ => unreachable!(),
+                    },
+                    ptype::Type::Str => match op.t {
+                        Type::DoubleEqual => SEq,
                         _ => unreachable!(),
                     },
                     ptype::Type::Int => match op.t {
