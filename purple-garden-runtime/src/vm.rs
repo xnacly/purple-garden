@@ -89,6 +89,8 @@ pub struct Vm {
 
     /// Backing storage for string constants emitted by the compiler.
     pub const_pool: Box<[u8]>,
+    /// Every string, constants included, see [`Vm::new_string_from_str`].
+    pub strings: string::StrTable,
 
     /// backtrace holds a list of indexes into the bytecode, pointing to the definition site of the
     /// function the virtual machine currently executes in, this behaviour only occurs if
@@ -135,6 +137,7 @@ impl Vm {
             globals: Vec::new(),
             gc: Gc::new(),
             const_pool: Box::new([]),
+            strings: string::StrTable::default(),
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(4096),
             pending_trap: None,
@@ -215,11 +218,18 @@ impl Vm {
         self.new_string_from_str(&s)
     }
 
+    /// Strings are interned: equal contents return the same payload.
     pub fn new_string_from_str(&mut self, s: &str) -> Value {
+        let hash = string::hash(s.as_bytes());
+        if let Some(v) = self.strings.get(s, hash) {
+            return v;
+        }
         let layout = Layout::from_size_align(string::payload_size(s.len()), string::ALIGN)
             .expect("string allocation layout");
         let payload = self.alloc(AllocType::String, layout).as_ptr();
-        unsafe { string::write_payload(payload, s) }
+        let v = unsafe { string::write_payload(payload, s, hash) };
+        self.strings.insert(v);
+        v
     }
 
     pub fn run<const BACKTRACE: bool>(&mut self, syscalls: &[BuiltinFn]) -> Result<(), Anomaly> {
@@ -643,6 +653,17 @@ impl Vm {
 mod ops {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Every string created before the intern table rehashes must still be
+    /// found after it.
+    #[test]
+    fn strings_stay_interned_across_table_growth() {
+        let mut vm = Vm::new(VmConfig::default());
+        let first: Vec<Value> = (0..200).map(|i| vm.new_string(i.to_string())).collect();
+        for (i, v) in first.iter().enumerate() {
+            assert_eq!(vm.new_string_from_str(&i.to_string()), *v);
+        }
+    }
 
     static SIDE_EFFECTS: AtomicUsize = AtomicUsize::new(0);
 
