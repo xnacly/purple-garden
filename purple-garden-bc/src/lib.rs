@@ -1248,8 +1248,10 @@ impl<'cc> Cc<'cc> {
         let mut offset = 0usize;
         vm.globals = globals.into_vec_map(|constant| match constant {
             Const::Str(s) => {
-                let value = unsafe { string::write_payload(base.add(offset), &s) };
+                let hash = string::hash(s.as_bytes());
+                let value = unsafe { string::write_payload(base.add(offset), &s, hash) };
                 offset += string::padded_size(s.len());
+                vm.strings.insert(value);
                 value
             }
             constant => Value::from(constant),

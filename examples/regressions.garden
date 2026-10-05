@@ -1,5 +1,6 @@
 # Regressions for codegen bugs
 import "testing"
+import "str"
 
 #! Branch successor-param liveness: if the param-shuffle into the join
 #! block's parameter register lands on cond's register, JmpF reads the
@@ -183,3 +184,15 @@ fn nested_args_call(x:Int y:Int z:Int) Int {
     leaf_bc(leaf_bc(x-1 y z) leaf_bc(y-1 z x) leaf_bc(z-1 x y))
 }
 testing.assert(nested_args_call(5 3 1) == 45303)
+
+#! String equality is a pointer compare, so a string built at runtime has to
+#! intern to the same payload as the equal literal in the const pool.
+fn is_alpha(s:Str) Int {
+    match {
+        s == "alpha" { 1 }
+        { 0 }
+    }
+}
+testing.assert(is_alpha(str.concat("al" "pha")) == 1)
+testing.assert(is_alpha(str.slice("xalphax" 1 6)) == 1)
+testing.assert(is_alpha(str.concat("al" "phb")) == 0)
