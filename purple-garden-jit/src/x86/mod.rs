@@ -9,6 +9,8 @@
 
 mod encode;
 
+use std::collections::HashMap;
+
 use crate::regalloc::Xralloc2;
 use encode::{
     Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBX, RCX, RDI, RDX, RSI, RSP, Reg,
@@ -34,6 +36,7 @@ macro_rules! skip {
 const VM: Reg = RDI;
 /// Never holds a value: breaks edge-move cycles and holds helper addresses.
 const SCRATCH: Reg = RAX;
+const GLOBALS_BASE: u32 = std::mem::offset_of!(purple_garden_runtime::Vm, globals_base) as u32;
 
 /// Allocatable GPRs, popped from the back: caller-saved first so leaf functions dont require a
 /// prologue, `rcx`/`rdx` last since `idiv` clobbers them.
@@ -49,10 +52,11 @@ const CALL_STACK: i32 = 16;
 
 /// Compile one IR function into x86-64 machine code, returning `None` if unsupported constructs are
 /// included
-pub fn compile_func(
-    func: &ir::Func<'_>,
+pub fn compile_func<'ir>(
+    func: &ir::Func<'ir>,
     out: &mut Vec<u8>,
     liveness: &[(u32, u32)],
+    globals: &HashMap<ir::Const<'ir>, u32>,
     ra: &mut Xralloc2,
     buffers: &mut Scratch,
 ) -> Option<()> {
@@ -79,7 +83,7 @@ pub fn compile_func(
     }
 
     ra.reset(liveness.len(), POOL);
-    let calls = Lowering::new(func, liveness, ra, buffers, entry).lower()?;
+    let calls = Lowering::new(func, liveness, globals, ra, buffers, entry).lower()?;
 
     // The body is emitted first since the callee-saved registers it uses are
     // only known afterwards. Wrap it into a frame:
@@ -224,6 +228,8 @@ macro_rules! bail {
 struct Lowering<'a, 'ir> {
     func: &'a ir::Func<'ir>,
     liveness: &'a [(u32, u32)],
+    /// `vm.globals` slot of each constant.
+    globals: &'a HashMap<ir::Const<'ir>, u32>,
     ra: &'a mut Xralloc2,
     out: &'a mut Vec<u8>,
     entry: ir::Id,
@@ -248,6 +254,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     fn new(
         func: &'a ir::Func<'ir>,
         liveness: &'a [(u32, u32)],
+        globals: &'a HashMap<ir::Const<'ir>, u32>,
         ra: &'a mut Xralloc2,
         buffers: &'a mut Scratch,
         entry: ir::Id,
@@ -266,6 +273,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         Self {
             func,
             liveness,
+            globals,
             ra,
             out: body,
             entry,
@@ -357,7 +365,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         }
     }
 
-    fn instr(&mut self, i: &ir::Instr<'_>) {
+    fn instr(&mut self, i: &ir::Instr<'ir>) {
         match i {
             ir::Instr::Noop => {}
             ir::Instr::Store {
@@ -415,6 +423,29 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                     Some(dst),
                 );
                 self.restore(saves);
+            }
+            ir::Instr::LoadConst {
+                dst,
+                value: value @ ir::Const::Str(_),
+                ..
+            } => {
+                // The pool is laid out after compilation, so load the string
+                // the way Op::LoadG does: vm.globals[idx].
+                let Some(&idx) = self.globals.get(value) else {
+                    bail!(self, "string constant without a vm.globals slot");
+                    return;
+                };
+                let dst = self.def(dst.id, self.pos + 1);
+                self.emit(Insn::LoadMem {
+                    dst,
+                    base: VM,
+                    offset: GLOBALS_BASE,
+                });
+                self.emit(Insn::LoadMem {
+                    dst,
+                    base: dst,
+                    offset: idx * 8,
+                });
             }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let Some(imm) = (match value {
@@ -495,7 +526,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                             self.emit(arith(*op, dst, lhs));
                         }
                     }
-                    BinOp::IEq => {
+                    // Strings are interned: equal contents share one pointer.
+                    BinOp::IEq | BinOp::SEq => {
                         let dst = self.def(dst.id, self.pos + 1);
                         self.emit(Insn::Cmp { lhs, rhs });
                         self.emit(Insn::MovImm { dst, imm: 0 });
@@ -583,6 +615,28 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                         imm: *imm,
                     });
                 }
+                self.jump(Cond::Zero, Target::Block(*yes));
+                self.edge_moves(no_src, no_dst, pos + 1);
+                self.jump(Cond::Always, Target::Block(*no));
+            }
+            ir::Terminator::BranchCmp {
+                op: BinOp::SEq,
+                lhs,
+                rhs,
+                yes: (yes, yes_params),
+                no: (no, no_params),
+                ..
+            } => {
+                let yes_src = func.params(*yes_params);
+                let yes_dst = func.params(func.blocks[yes.0 as usize].params);
+                let no_src = func.params(*no_params);
+                let no_dst = func.params(func.blocks[no.0 as usize].params);
+
+                self.edge_moves(yes_src, yes_dst, pos);
+                let lhs = self.ensure_register(*lhs);
+                let rhs = self.ensure_register(*rhs);
+                // Strings are interned: equal contents share one pointer.
+                self.emit(Insn::Cmp { lhs, rhs });
                 self.jump(Cond::Zero, Target::Block(*yes));
                 self.edge_moves(no_src, no_dst, pos + 1);
                 self.jump(Cond::Always, Target::Block(*no));

@@ -301,6 +301,22 @@ impl<'cc> Cc<'cc> {
         self.native_code = (config.disassemble > 0).then(|| Vec::with_capacity(ir.len()));
         self.functions.reserve(ir.len());
 
+        // Native code loads string constants from vm.globals, so their slots
+        // have to exist before any function is compiled.
+        for func in ir {
+            for block in func.blocks.iter().filter(|b| !b.tombstone) {
+                for instr in &block.instructions {
+                    if let ir::Instr::LoadConst {
+                        value: value @ Const::Str(_),
+                        ..
+                    } = instr
+                    {
+                        self.intern(value);
+                    }
+                }
+            }
+        }
+
         for func in ir {
             if config.liveness {
                 print!("{}", func.liveness_display());
@@ -487,7 +503,10 @@ impl<'cc> Cc<'cc> {
         liveness: &[(u32, u32)],
         arena: &mut purple_garden_jit::CodeArena,
     ) -> bool {
-        let Some(()) = self.jit.compile_func_with_liveness(fun, liveness) else {
+        let Some(()) = self
+            .jit
+            .compile_func_with_liveness(fun, liveness, &self.globals.map)
+        else {
             purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
             return false;
         };
@@ -1262,6 +1281,7 @@ impl<'cc> Cc<'cc> {
         // stays valid after this move.
         vm.const_pool = pool.into_boxed_slice();
         debug_assert_eq!(vm.const_pool.as_ptr(), base);
+        vm.globals_base = vm.globals.as_ptr();
 
         (
             vm,
