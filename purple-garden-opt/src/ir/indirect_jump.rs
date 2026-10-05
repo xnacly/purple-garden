@@ -79,6 +79,11 @@ fn branch_edges(term: &Option<ir::Terminator>) -> Option<(u32, ir::ParamsId, u32
             yes: (ir::Id(yes), yes_params),
             no: (ir::Id(no), no_params),
             ..
+        })
+        | Some(ir::Terminator::BranchCmp {
+            yes: (ir::Id(yes), yes_params),
+            no: (ir::Id(no), no_params),
+            ..
         }) => Some((*yes, *yes_params, *no, *no_params)),
         _ => None,
     }
@@ -91,7 +96,8 @@ fn rewrite_branch_edges(
 ) {
     match term {
         Some(ir::Terminator::Branch { yes, no, .. })
-        | Some(ir::Terminator::BranchCmpImm { yes, no, .. }) => {
+        | Some(ir::Terminator::BranchCmpImm { yes, no, .. })
+        | Some(ir::Terminator::BranchCmp { yes, no, .. }) => {
             *yes = yes_edge;
             *no = no_edge;
         }

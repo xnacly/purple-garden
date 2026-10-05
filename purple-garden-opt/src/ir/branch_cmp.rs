@@ -1,8 +1,9 @@
 use purple_garden_ir::{self as ir, BinOp, Instr, Terminator};
 
-/// Fuse `IEq`-with-immediate branch conditions into `BranchCmpImm`.
+/// Fuse `IEq`-with-immediate and `SEq` branch conditions into
+/// `BranchCmpImm` / `BranchCmp`.
 ///
-/// This removes the boolean-producing `BinImm`, so it only fires when the
+/// This removes the boolean-producing compare, so it only fires when the
 /// branch is the condition's sole use. Backends can then lower the terminator as
 /// a direct compare-and-branch instead of materializing `0` or `1` first.
 pub fn branch_cmp(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
@@ -29,7 +30,7 @@ pub fn branch_cmp(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
             continue;
         }
 
-        let Some((instr_idx, lhs, imm)) =
+        let Some((instr_idx, term)) =
             block
                 .instructions
                 .iter()
@@ -41,7 +42,34 @@ pub fn branch_cmp(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
                         lhs,
                         imm,
                         ..
-                    } if dst.id == cond => Some((idx, *lhs, *imm)),
+                    } if dst.id == cond => Some((
+                        idx,
+                        Terminator::BranchCmpImm {
+                            op: BinOp::IEq,
+                            lhs: *lhs,
+                            imm: *imm,
+                            yes,
+                            no,
+                            span,
+                        },
+                    )),
+                    Instr::Bin {
+                        op: BinOp::SEq,
+                        dst,
+                        lhs,
+                        rhs,
+                        ..
+                    } if dst.id == cond => Some((
+                        idx,
+                        Terminator::BranchCmp {
+                            op: BinOp::SEq,
+                            lhs: *lhs,
+                            rhs: *rhs,
+                            yes,
+                            no,
+                            span,
+                        },
+                    )),
                     _ => None,
                 })
         else {
@@ -49,22 +77,14 @@ pub fn branch_cmp(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
         };
 
         purple_garden_shared::trace!(
-            "[opt::ir::branch_cmp] folded %v{} = IEq %v{}, {} into b{} BranchCmpImm",
+            "[opt::ir::branch_cmp] folded %v{} into b{} {}",
             cond.0,
-            lhs.0,
-            imm,
-            block.id.0
+            block.id.0,
+            term
         );
 
         block.instructions[instr_idx] = Instr::Noop;
-        block.term = Some(Terminator::BranchCmpImm {
-            op: BinOp::IEq,
-            lhs,
-            imm,
-            yes,
-            no,
-            span,
-        });
+        block.term = Some(term);
     }
 }
 
