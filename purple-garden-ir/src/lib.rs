@@ -89,6 +89,17 @@ pub struct ParamsId(pub u32);
 /// hand out a valid id at construction time before real params are known.
 pub const EMPTY_PARAMS: ParamsId = ParamsId(0);
 
+/// Handle to a [`Terminator::Switch`]'s cases in [`Func::cases_pool`], same
+/// discipline as [`ParamsId`]. Keeps the keys' lifetime out of `Terminator`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CasesId(pub u32);
+
+#[derive(Debug, Clone)]
+pub struct Case<'c> {
+    pub key: Const<'c>,
+    pub target: (Id, ParamsId),
+}
+
 #[derive(Debug, Clone)]
 pub struct TypeId<'t> {
     pub id: Id,
@@ -247,6 +258,15 @@ pub enum Terminator {
         args: Vec<Id>,
         span: u32,
     },
+    /// Jump to the first case whose key equals `subject`, `default` if none
+    /// does. Produced by `opt::ir::switch_fold` from a chain of equality
+    /// branches; keys are Int or Str constants.
+    Switch {
+        subject: Id,
+        cases: CasesId,
+        default: (Id, ParamsId),
+        span: u32,
+    },
 }
 
 impl Terminator {
@@ -258,7 +278,8 @@ impl Terminator {
             | Terminator::Branch { span, .. }
             | Terminator::BranchCmpImm { span, .. }
             | Terminator::BranchCmp { span, .. }
-            | Terminator::Tail { span, .. } => *span,
+            | Terminator::Tail { span, .. }
+            | Terminator::Switch { span, .. } => *span,
         }
     }
 }
@@ -317,6 +338,8 @@ pub struct Func<'f> {
     /// `Ralloc.map`: data hangs off a long-lived owner, handles are
     /// `Copy` `u32`
     pub params_pool: Vec<Box<[Id]>>,
+    /// Owning storage for [`Terminator::Switch`] cases, see [`CasesId`].
+    pub cases_pool: Vec<Box<[Case<'f>]>>,
 }
 
 impl<'f> Func<'f> {
@@ -334,6 +357,7 @@ impl<'f> Func<'f> {
             ret,
             blocks: Vec::new(),
             params_pool: vec![Box::new([]) as Box<[Id]>],
+            cases_pool: Vec::new(),
         }
     }
 
@@ -352,6 +376,17 @@ impl<'f> Func<'f> {
     #[must_use]
     pub fn params(&self, id: ParamsId) -> &[Id] {
         &self.params_pool[id.0 as usize]
+    }
+
+    pub fn intern_cases(&mut self, cases: Vec<Case<'f>>) -> CasesId {
+        let id = CasesId(self.cases_pool.len() as u32);
+        self.cases_pool.push(cases.into_boxed_slice());
+        id
+    }
+
+    #[must_use]
+    pub fn cases(&self, id: CasesId) -> &[Case<'f>] {
+        &self.cases_pool[id.0 as usize]
     }
 }
 
@@ -408,6 +443,22 @@ impl Func<'_> {
             Terminator::Tail { args, .. } => {
                 for &a in args {
                     f(a);
+                }
+            }
+            Terminator::Switch {
+                subject,
+                cases,
+                default: (_, default_params),
+                ..
+            } => {
+                f(*subject);
+                for case in self.cases(*cases) {
+                    for &p in self.params(case.target.1) {
+                        f(p);
+                    }
+                }
+                for &p in self.params(*default_params) {
+                    f(p);
                 }
             }
             Terminator::Branch {
@@ -693,6 +744,34 @@ impl Func<'_> {
                 Terminator::Tail { func, args, .. } => {
                     format!("tail f{}({})", func.0, id_list(args))
                 }
+                Terminator::Switch {
+                    subject,
+                    cases,
+                    default: (default, default_params),
+                    ..
+                } => {
+                    let cases = func
+                        .cases(*cases)
+                        .iter()
+                        .map(|c| {
+                            let (target, params) = c.target;
+                            format!(
+                                "{} -> b{}({})",
+                                c.key,
+                                target.0,
+                                id_list(func.params(params))
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "switch %v{} [{}], b{}({})",
+                        subject.0,
+                        cases,
+                        default.0,
+                        id_list(func.params(*default_params))
+                    )
+                }
             }
         }
 
@@ -714,6 +793,9 @@ impl Func<'_> {
                     if !args.is_empty() {
                         writeln!(out, "      args: {}", value_list(args)).unwrap();
                     }
+                }
+                Terminator::Switch { subject, .. } => {
+                    writeln!(out, "      subject: {}", value(*subject)).unwrap();
                 }
                 Terminator::Branch {
                     cond,

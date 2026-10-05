@@ -892,6 +892,7 @@ impl<'cc> Cc<'cc> {
                 };
                 self.cmp_branch(fun, *yes, *no, next_block, ne, eq);
             }
+            ir::Terminator::Switch { .. } => todo!("lower Switch, see opt::ir::switch_fold"),
             ir::Terminator::Tail { func, args, .. } => {
                 let Some(target) = self.functions.get(func).map(CcCallTarget::from) else {
                     unreachable!();

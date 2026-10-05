@@ -159,6 +159,16 @@ impl Display for Terminator {
                 "br_imm {:?} %v{}, {}, b{}(params#{}), b{}(params#{})",
                 op, lhs.0, imm, yes.0, yes.1.0, no.0, no.1.0,
             )?,
+            Terminator::Switch {
+                subject,
+                cases,
+                default,
+                ..
+            } => write!(
+                f,
+                "switch %v{}, cases#{}, b{}(params#{})",
+                subject.0, cases.0, default.0.0, default.1.0,
+            )?,
             Terminator::Tail { func, args, .. } => {
                 write!(f, "tail f{}(", func.0)?;
                 for (i, arg) in args.iter().enumerate() {
@@ -271,6 +281,33 @@ impl Display for Func<'_> {
                         no.0,
                         format_ids(self.params(no.1)),
                     )?,
+                    Terminator::Switch {
+                        subject,
+                        cases,
+                        default,
+                        ..
+                    } => {
+                        write!(f, "\tswitch %v{} [", subject.0)?;
+                        for (i, case) in self.cases(*cases).iter().enumerate() {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            let (target, params) = case.target;
+                            write!(
+                                f,
+                                "{} -> b{}({})",
+                                case.key,
+                                target.0,
+                                format_ids(self.params(params))
+                            )?;
+                        }
+                        writeln!(
+                            f,
+                            "], b{}({})",
+                            default.0.0,
+                            format_ids(self.params(default.1))
+                        )?;
+                    }
                     _ => writeln!(f, "\t{term}")?,
                 }
             }
