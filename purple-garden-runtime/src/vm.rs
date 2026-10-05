@@ -85,9 +85,6 @@ pub struct Vm {
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
-    /// `globals.as_ptr()`, read by native code to load constants the way
-    /// `Op::LoadG` does. Set once the globals are final.
-    pub globals_base: *const Value,
     pub gc: Gc,
 
     /// Backing storage for string constants emitted by the compiler.
@@ -138,7 +135,6 @@ impl Vm {
             pc: 0,
             bytecode: Vec::new(),
             globals: Vec::new(),
-            globals_base: std::ptr::null(),
             gc: Gc::new(),
             const_pool: Box::new([]),
             strings: string::StrTable::default(),

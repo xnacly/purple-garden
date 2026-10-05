@@ -17,6 +17,7 @@ use encode::{
     patch_rel32,
 };
 use purple_garden_ir::{self as ir, BinOp};
+use purple_garden_runtime::Value;
 
 /// Bail out of [`compile_func`] (returning `None`) and, under the `trace`
 /// feature, log why. The reason is only formatted inside `trace!`, so it costs
@@ -36,7 +37,6 @@ macro_rules! skip {
 const VM: Reg = RDI;
 /// Never holds a value: breaks edge-move cycles and holds helper addresses.
 const SCRATCH: Reg = RAX;
-const GLOBALS_BASE: u32 = std::mem::offset_of!(purple_garden_runtime::Vm, globals_base) as u32;
 
 /// Allocatable GPRs, popped from the back: caller-saved first so leaf functions dont require a
 /// prologue, `rcx`/`rdx` last since `idiv` clobbers them.
@@ -57,6 +57,7 @@ pub fn compile_func<'ir>(
     out: &mut Vec<u8>,
     liveness: &[(u32, u32)],
     globals: &HashMap<ir::Const<'ir>, u32>,
+    strings: &[Value],
     ra: &mut Xralloc2,
     buffers: &mut Scratch,
 ) -> Option<()> {
@@ -83,7 +84,7 @@ pub fn compile_func<'ir>(
     }
 
     ra.reset(liveness.len(), POOL);
-    let calls = Lowering::new(func, liveness, globals, ra, buffers, entry).lower()?;
+    let calls = Lowering::new(func, liveness, globals, strings, ra, buffers, entry).lower()?;
 
     // The body is emitted first since the callee-saved registers it uses are
     // only known afterwards. Wrap it into a frame:
@@ -230,6 +231,8 @@ struct Lowering<'a, 'ir> {
     liveness: &'a [(u32, u32)],
     /// `vm.globals` slot of each constant.
     globals: &'a HashMap<ir::Const<'ir>, u32>,
+    /// `strings[slot]` is the final address of the string constant in `slot`.
+    strings: &'a [Value],
     ra: &'a mut Xralloc2,
     out: &'a mut Vec<u8>,
     entry: ir::Id,
@@ -255,6 +258,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         func: &'a ir::Func<'ir>,
         liveness: &'a [(u32, u32)],
         globals: &'a HashMap<ir::Const<'ir>, u32>,
+        strings: &'a [Value],
         ra: &'a mut Xralloc2,
         buffers: &'a mut Scratch,
         entry: ir::Id,
@@ -274,6 +278,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             func,
             liveness,
             globals,
+            strings,
             ra,
             out: body,
             entry,
@@ -429,23 +434,16 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 value: value @ ir::Const::Str(_),
                 ..
             } => {
-                // The pool is laid out after compilation, so load the string
-                // the way Op::LoadG does: vm.globals[idx].
-                let Some(&idx) = self.globals.get(value) else {
-                    bail!(self, "string constant without a vm.globals slot");
+                let Some(&value) = self
+                    .globals
+                    .get(value)
+                    .and_then(|&slot| self.strings.get(slot as usize))
+                else {
+                    bail!(self, "string constant missing from the const pool");
                     return;
                 };
                 let dst = self.def(dst.id, self.pos + 1);
-                self.emit(Insn::LoadMem {
-                    dst,
-                    base: VM,
-                    offset: GLOBALS_BASE,
-                });
-                self.emit(Insn::LoadMem {
-                    dst,
-                    base: dst,
-                    offset: idx * 8,
-                });
+                self.emit(Insn::MovAbs { dst, imm: value.0 });
             }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let Some(imm) = (match value {

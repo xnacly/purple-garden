@@ -66,6 +66,12 @@ pub struct Cc<'cc> {
     /// JIT. When present, `Program::run` can jump directly into the native page
     /// instead of starting from the bytecode trampoline.
     entry_native_idx: Option<u16>,
+    /// Every string constant, packed into one allocation that never moves.
+    /// Laid out before lowering so native code can embed the addresses;
+    /// `str_values[slot]` is the string in `globals` slot `slot`,
+    /// [`Value::UNDEF`] for other constants.
+    const_pool: Box<[u8]>,
+    str_values: Vec<Value>,
     /// `pc_to_span[pc]` is the byte offset into the source of the AST node
     /// that produced the op at `pc`. Threaded into Vm by `Cc::finalize` so
     /// runtime traps can be rendered with <file:line:col>. Parallel to
@@ -246,6 +252,8 @@ impl<'cc> Cc<'cc> {
             functions: HashMap::new(),
             native_code: None,
             entry_native_idx: None,
+            const_pool: Box::new([]),
+            str_values: Vec::new(),
             block_map: Vec::new(),
             regalloc: Ralloc::default(),
             cur_span: 0,
@@ -301,21 +309,46 @@ impl<'cc> Cc<'cc> {
         self.native_code = (config.disassemble > 0).then(|| Vec::with_capacity(ir.len()));
         self.functions.reserve(ir.len());
 
-        // Native code loads string constants from vm.globals, so their slots
-        // have to exist before any function is compiled.
+        // Native code embeds string constants by address, so the pool is laid
+        // out before any function is compiled, entries padded so each header
+        // stays aligned.
+        let mut strs: Vec<(u32, &'cc str)> = Vec::new();
         for func in ir {
             for block in func.blocks.iter().filter(|b| !b.tombstone) {
                 for instr in &block.instructions {
                     if let ir::Instr::LoadConst {
-                        value: value @ Const::Str(_),
+                        value: value @ Const::Str(s),
                         ..
                     } = instr
+                        && !self.globals.map.contains_key(value)
                     {
-                        self.intern(value);
+                        strs.push((self.intern(value), s));
                     }
                 }
             }
         }
+        let size = strs.iter().map(|(_, s)| string::padded_size(s.len())).sum();
+        // len == capacity, so `into_boxed_slice` keeps the allocation and the
+        // pointers written below stay valid.
+        let mut pool = vec![0u8; size];
+        let base = pool.as_mut_ptr();
+        debug_assert!(
+            size == 0 || (base as usize) % string::ALIGN == 0,
+            "const pool base must be aligned (got {base:p})",
+        );
+        let mut offset = 0;
+        for (slot, s) in strs {
+            let hash = string::hash(s.as_bytes());
+            let value = unsafe { string::write_payload(base.add(offset), s, hash) };
+            offset += string::padded_size(s.len());
+            let slot = slot as usize;
+            if self.str_values.len() <= slot {
+                self.str_values.resize(slot + 1, Value::UNDEF);
+            }
+            self.str_values[slot] = value;
+        }
+        self.const_pool = pool.into_boxed_slice();
+        debug_assert_eq!(self.const_pool.as_ptr(), base);
 
         for func in ir {
             if config.liveness {
@@ -503,9 +536,9 @@ impl<'cc> Cc<'cc> {
         liveness: &[(u32, u32)],
         arena: &mut purple_garden_jit::CodeArena,
     ) -> bool {
-        let Some(()) = self
-            .jit
-            .compile_func_with_liveness(fun, liveness, &self.globals.map)
+        let Some(()) =
+            self.jit
+                .compile_func_with_liveness(fun, liveness, &self.globals.map, &self.str_values)
         else {
             purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
             return false;
@@ -1228,6 +1261,8 @@ impl<'cc> Cc<'cc> {
             functions,
             entry_native_idx,
             mut pc_to_span,
+            const_pool,
+            str_values,
             ..
         } = self;
 
@@ -1245,43 +1280,27 @@ impl<'cc> Cc<'cc> {
 
         vm.bytecode = buf;
 
-        // String globals share a single allocation. Values are raw pointers into the
-        // buffer, each entry padded so the next header stays aligned.
-        let pool_bytes: usize = globals
-            .map
-            .keys()
-            .filter_map(|c| match c {
-                Const::Str(s) => Some(string::padded_size(s.len())),
-                _ => None,
-            })
-            .sum();
-        let mut pool: Vec<u8> = vec![0u8; pool_bytes];
-        let base = pool.as_mut_ptr();
-        // Empty pool is a dangling 1-aligned pointer with no readers; only
-        // check alignment when we actually hand out pointers into it.
-        debug_assert!(
-            pool_bytes == 0 || (base as usize) % string::ALIGN == 0,
-            "const_pool base must be usize-aligned (got {base:p})",
+        debug_assert_eq!(
+            globals
+                .map
+                .keys()
+                .filter(|c| matches!(c, Const::Str(_)))
+                .count(),
+            str_values.iter().filter(|&&v| v != Value::UNDEF).count(),
+            "every string constant is laid out before lowering",
         );
-
-        let mut offset = 0usize;
         vm.globals = globals.into_vec_map(|constant| match constant {
-            Const::Str(s) => {
-                let hash = string::hash(s.as_bytes());
-                let value = unsafe { string::write_payload(base.add(offset), &s, hash) };
-                offset += string::padded_size(s.len());
-                vm.strings.insert(value);
-                value
-            }
+            // Filled from str_values below, the closure doesn't see the slot.
+            Const::Str(_) => Value::UNDEF,
             constant => Value::from(constant),
         });
-        debug_assert_eq!(offset, pool_bytes);
-        // `into_boxed_slice` is zero-copy when len == capacity, which holds
-        // for `vec![0u8; n]` — so the raw `base` pointer we captured above
-        // stays valid after this move.
-        vm.const_pool = pool.into_boxed_slice();
-        debug_assert_eq!(vm.const_pool.as_ptr(), base);
-        vm.globals_base = vm.globals.as_ptr();
+        for (slot, &value) in str_values.iter().enumerate() {
+            if value != Value::UNDEF {
+                vm.globals[slot] = value;
+                vm.strings.insert(value);
+            }
+        }
+        vm.const_pool = const_pool;
 
         (
             vm,
