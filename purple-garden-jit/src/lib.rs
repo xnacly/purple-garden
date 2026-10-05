@@ -49,7 +49,7 @@ use purple_garden_ir as ir;
 pub struct Jit {
     code: Vec<u8>,
     liveness: Vec<(u32, u32)>,
-    regalloc: regalloc::Allocator,
+    regalloc: regalloc::Xralloc2,
     scratch: arch::Scratch,
 }
 
@@ -160,9 +160,9 @@ mod tests_x86 {
         assert_eq!(
             jit.code(),
             [
-                0x48, 0x8b, 0x47, 0x00, // mov rax,[rdi+0]
-                0x48, 0x8b, 0x47, 0x08, // mov rax,[rdi+8]
-                0x48, 0x89, 0x47, 0x00, // mov [rdi+0],rax
+                0x48, 0x8b, 0x77, 0x00, // mov rsi,[rdi+0]
+                0x48, 0x8b, 0x77, 0x08, // mov rsi,[rdi+8]
+                0x48, 0x89, 0x77, 0x00, // mov [rdi+0],rsi
                 0xc3,
             ]
         );

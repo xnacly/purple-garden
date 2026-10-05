@@ -1,255 +1,99 @@
-//! Minimal linear-scan register allocator for the JIT.
+//! Forward register allocator for the JIT:
 //!
-//! Reuses the IR liveness intervals (the same analysis the bytecode backend
-//! consumes) and assigns each SSA value a physical register from one of two
-//! classes. A value whose live range spans a call must survive it, so it takes a
-//! callee-saved register; everything else takes the cheaper caller-saved class.
-//! Target-specific fixed-clobber instructions, such as x86 `idiv`, can also
-//! exclude individual caller registers for values live across those positions.
-//! Values that don't fit spill to `Location::Stack` and the lowering bails
-//! (falls back to bytecode).
+//! - Registers are handed out while the backend emits code
+//! - A value takes a free register when first touched and keeps it for its whole interval
+//! - A register returns to the free list once the interval holding it ends or before the current allocation point
 //!
-//! Target-independent: the caller passes both register pools, so a future
-//! aarch64 backend reuses it unchanged.
+//! For instructions clobbering fixed registers (such as helper calls, or x86 `idiv`)  the live
+//! values it would clobber must be copied into free registers around the instruction and again
+//! copied back.
+//!
+//! xralloc2 is target-independent by allowing a pool of registers to be defined
 
-use purple_garden_ir as ir;
+use purple_garden_ir::Id;
 
-/// The two register classes the allocator draws from.
-pub struct RegClasses<'a> {
-    /// Clobbered by a call; cheapest, for values not live across one.
-    pub caller: &'a [u8],
-    /// Preserved across a call; for values that span one. The lowering saves the
-    /// ones it used in its prologue.
-    pub callee: &'a [u8],
-}
-
-/// Registers clobbered by one instruction at `pos` in IR liveness coordinates.
-pub struct FixedClobber<'a> {
-    pub pos: u32,
-    pub regs: &'a [u8],
-}
-
-/// `[def, last_use]` is live across a call iff a call sits strictly inside it.
-fn spans_call(def: u32, last_use: u32, call_sites: &[u32]) -> bool {
-    call_sites.iter().any(|&c| def < c && c < last_use)
-}
-
-/// Whether `reg` is clobbered by an instruction inside `[def, last_use]`.
-fn spans_fixed_clobber(def: u32, last_use: u32, reg: u8, clobbers: &[FixedClobber<'_>]) -> bool {
-    clobbers
-        .iter()
-        .any(|c| def < c.pos && c.pos < last_use && c.regs.contains(&reg))
-}
-
-/// Linear scan over `liveness` (`(def_pos, last_use_pos)` per SSA id; a
-/// `u32::MAX` start marks an unused id). `call_sites` are call positions in the
-/// same coordinate space. A value spanning a call takes a `classes.callee`
-/// register, others `classes.caller`; fixed clobbers remove specific caller
-/// registers from consideration for intervals crossing them. An exhausted class
-/// spills that value.
 #[derive(Debug, Default, Clone)]
-pub struct Allocator {
-    map: Vec<ir::Location>,
-    order: Vec<usize>,
-    caller_free: Vec<u8>,
-    callee_free: Vec<u8>,
-    active: Vec<(u32, u8, bool)>, // (last_use, reg, from_callee)
+pub struct Xralloc2 {
+    map: Vec<Option<u8>>,
+    /// `(last_use, reg)` of every value currently holding a register.
+    active: Vec<(u32, u8)>,
+    free: Vec<u8>,
+    /// Bitmask of every register handed out since [`Xralloc2::reset`].
+    used: u32,
 }
 
-impl Allocator {
-    pub fn rebuild(
-        &mut self,
-        liveness: &[(u32, u32)],
-        call_sites: &[u32],
-        fixed_clobbers: &[FixedClobber<'_>],
-        classes: RegClasses<'_>,
-    ) -> &[ir::Location] {
+impl Xralloc2 {
+    /// `pool` is popped from the back, so the preferred registers go last.
+    pub fn reset(&mut self, ids: usize, pool: &[u8]) {
         self.map.clear();
-        self.map.resize(liveness.len(), ir::Location::Unassigned);
-
-        self.order.clear();
-        let mut last_start = 0;
-        let mut already_sorted = true;
-        for (v, &(start, _)) in liveness.iter().enumerate() {
-            if start == u32::MAX {
-                continue;
-            }
-            already_sorted &= self.order.is_empty() || start >= last_start;
-            last_start = start;
-            self.order.push(v);
-        }
-        if !already_sorted {
-            self.order.sort_by_key(|&v| (liveness[v].0, v));
-        }
-
-        self.caller_free.clear();
-        self.caller_free
-            .extend(classes.caller.iter().rev().copied());
-        self.callee_free.clear();
-        self.callee_free
-            .extend(classes.callee.iter().rev().copied());
+        self.map.resize(ids, None);
         self.active.clear();
+        self.free.clear();
+        self.free.extend_from_slice(pool);
+        self.used = 0;
+    }
 
-        for &v in &self.order {
-            let (start, end) = liveness[v];
-            self.active.retain(|&(last_use, reg, from_callee)| {
-                if last_use <= start {
-                    if from_callee {
-                        self.callee_free.push(reg);
-                    } else {
-                        self.caller_free.push(reg);
-                    }
-                    false
-                } else {
-                    true
-                }
-            });
+    pub fn reg(&self, id: Id) -> Option<u8> {
+        self.map.get(id.0 as usize).copied().flatten()
+    }
 
-            let from_callee = spans_call(start, end, call_sites);
-            if from_callee {
-                self.map[v] = match self.callee_free.pop() {
-                    Some(reg) => {
-                        self.active.push((end, reg, true));
-                        ir::Location::Reg(reg)
-                    }
-                    None => ir::Location::Stack,
-                };
-            } else {
-                let free_idx = self
-                    .caller_free
-                    .iter()
-                    .rposition(|&reg| !spans_fixed_clobber(start, end, reg, fixed_clobbers));
-                self.map[v] = match free_idx {
-                    Some(i) => {
-                        let reg = self.caller_free.swap_remove(i);
-                        self.active.push((end, reg, false));
-                        ir::Location::Reg(reg)
-                    }
-                    None => ir::Location::Stack,
-                };
-            }
+    /// Assign `id` a register, reusing those of values whose last use is at or
+    /// before `at`. Idempotent for already assigned ids.
+    pub fn alloc(&mut self, id: Id, at: u32, last_use: u32) -> Option<u8> {
+        if let Some(reg) = self.reg(id) {
+            return Some(reg);
         }
+        let Self { active, free, .. } = self;
+        active.retain(|&(end, reg)| {
+            if end <= at {
+                free.push(reg);
+            }
+            end > at
+        });
+        let reg = self.free.pop()?;
+        self.active.push((last_use, reg));
+        *self.map.get_mut(id.0 as usize)? = Some(reg);
+        self.used |= 1 << reg;
+        Some(reg)
+    }
 
-        &self.map
+    /// Registers holding values still needed after `pos`.
+    pub fn live_after(&self, pos: u32) -> impl Iterator<Item = u8> + '_ {
+        self.active
+            .iter()
+            .filter(move |&&(end, _)| end > pos)
+            .map(|&(_, reg)| reg)
+    }
+
+    /// Borrow a free register matching `pred` until [`Xralloc2::give_back`].
+    pub fn take_free(&mut self, pred: impl Fn(u8) -> bool) -> Option<u8> {
+        let i = self.free.iter().rposition(|&reg| pred(reg))?;
+        let reg = self.free.swap_remove(i);
+        self.used |= 1 << reg;
+        Some(reg)
+    }
+
+    pub fn give_back(&mut self, reg: u8) {
+        self.free.push(reg);
+    }
+
+    pub fn used(&self, reg: u8) -> bool {
+        self.used & (1 << reg) != 0
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Allocator, FixedClobber, RegClasses};
-    use purple_garden_ir::Location;
+    use super::Xralloc2;
+    use purple_garden_ir::Id;
 
-    const CALLER: &[u8] = &[0, 1];
-    const CALLEE: &[u8] = &[3, 12];
-
-    fn alloc(liveness: &[(u32, u32)], call_sites: &[u32]) -> Vec<Location> {
-        alloc_with_clobbers(liveness, call_sites, &[])
-    }
-
-    fn alloc_with_clobbers(
-        liveness: &[(u32, u32)],
-        call_sites: &[u32],
-        fixed_clobbers: &[FixedClobber<'_>],
-    ) -> Vec<Location> {
-        Allocator::default()
-            .rebuild(
-                liveness,
-                call_sites,
-                fixed_clobbers,
-                RegClasses {
-                    caller: CALLER,
-                    callee: CALLEE,
-                },
-            )
-            .to_vec()
-    }
-
-    fn spills(map: &[Location]) -> usize {
-        map.iter().filter(|l| matches!(l, Location::Stack)).count()
-    }
-
+    /// A value dying at `at` frees its register for the one defined there,
+    /// which is what lets `d = l + r` reuse `l`'s register.
     #[test]
-    fn disjoint_intervals_reuse_a_register() {
-        let map = alloc(&[(0, 2), (3, 5)], &[]);
-        assert_eq!(map[0], Location::Reg(0));
-        assert_eq!(map[1], Location::Reg(0));
-    }
-
-    #[test]
-    fn overlapping_intervals_get_distinct_registers() {
-        let map = alloc(&[(0, 5), (2, 6)], &[]);
-        assert_eq!(map[0], Location::Reg(0));
-        assert_eq!(map[1], Location::Reg(1));
-    }
-
-    #[test]
-    fn out_of_order_intervals_are_sorted_by_start() {
-        let map = alloc(&[(5, 8), (0, 10)], &[]);
-        assert_eq!(map[1], Location::Reg(0));
-        assert_eq!(map[0], Location::Reg(1));
-    }
-
-    #[test]
-    fn exhausted_caller_pool_spills() {
-        assert_eq!(spills(&alloc(&[(0, 9), (1, 9), (2, 9)], &[])), 1);
-    }
-
-    #[test]
-    fn unused_ids_stay_unassigned() {
-        let map = alloc(&[(u32::MAX, 0), (0, 1)], &[]);
-        assert_eq!(map[0], Location::Unassigned);
-        assert_eq!(map[1], Location::Reg(0));
-    }
-
-    #[test]
-    fn value_spanning_a_call_takes_a_callee_register() {
-        // call at pos 5 sits inside [0,10], so v0 must survive it.
-        assert_eq!(alloc(&[(0, 10)], &[5])[0], Location::Reg(3));
-    }
-
-    #[test]
-    fn value_not_crossing_a_call_stays_caller_saved() {
-        // call at pos 20 is after v0's last use, so it doesn't span it.
-        assert_eq!(alloc(&[(0, 10)], &[20])[0], Location::Reg(0));
-    }
-
-    #[test]
-    fn value_spanning_fixed_clobber_avoids_that_register() {
-        let map = alloc_with_clobbers(
-            &[(0, 10), (0, 10)],
-            &[],
-            &[FixedClobber { pos: 5, regs: &[0] }],
-        );
-        assert_eq!(map[0], Location::Reg(1));
-        assert_eq!(map[1], Location::Stack);
-    }
-
-    #[test]
-    fn value_not_spanning_fixed_clobber_can_use_that_register() {
-        let map = alloc_with_clobbers(
-            &[(0, 5), (5, 10)],
-            &[],
-            &[FixedClobber { pos: 5, regs: &[0] }],
-        );
-        assert_eq!(map[0], Location::Reg(0));
-        assert_eq!(map[1], Location::Reg(0));
-    }
-
-    #[test]
-    fn cross_call_value_spills_when_callee_class_is_full() {
-        // all three span the call but only one callee reg exists: two spill,
-        // with no fallback to the caller class.
-        let map = Allocator::default()
-            .rebuild(
-                &[(0, 10), (0, 10), (0, 10)],
-                &[5],
-                &[],
-                RegClasses {
-                    caller: CALLER,
-                    callee: &[3],
-                },
-            )
-            .to_vec();
-        assert_eq!(spills(&map), 2);
+    fn dying_value_hands_its_register_to_the_next_def() {
+        let mut ra = Xralloc2::default();
+        ra.reset(2, &[1, 0]);
+        assert_eq!(ra.alloc(Id(0), 0, 4), Some(0));
+        assert_eq!(ra.alloc(Id(1), 4, 6), Some(0));
     }
 }

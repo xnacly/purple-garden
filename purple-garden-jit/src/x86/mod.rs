@@ -1,27 +1,15 @@
-//! x86-64 JIT lowering.
+//! x86-64 JIT backend
 //!
-//! A peer backend to the bytecode compiler: lowers IR straight to native code, with SSA values
-//! living in real x86 GPRs (its own [`crate::regalloc`] over the shared IR liveness). The native
-//! ABI passes `*mut Vm` in `rdi`, and since `Vm::r` is the first field, `rdi` is the base of the VM
-//! register file. Args arrive in `vm.r[0..n]`; the result is written back to `vm.r[0]`. All
-//! computation happens in GPRs, `vm.r[1..]` is never touched, so the syscall convention ("a syscall
-//! changes only r0") holds for free.
+//! IR is lowered to native code in a single pass, uses xralloc2 to map SSA values to x86 GPRs while emitting.
 //!
-//! This module combines admission, register planning, lowering, and a tiny encoder.
-//! The first pre-lowering walk collects constraints that must be known before register allocation.
-//! For example, the current `idiv` lowering clobbers `rax`, `rcx`, and `rdx`, so values live across
-//! that IR position must be kept out of those registers.
-//!
-//! The instruction enum contains only the x86-64 forms needed for the current set of pg Ir nodes
-//! the x86 jit supports. VM slot access uses `[rdi + slot * 8]`. Record memory access uses generic
-//! `[base + offset]` addressing where `offset` is the byte offset carried by IR.
-//!
-//! Helper calls, such as traps or future allocation support, use the platform C ABI. Such calls
-//! clobber caller-saved registers and therefore need admission planning before register allocation
+//! The native ABI passes `*mut Vm` in `rdi`. `Vm::r` being the first field, `rdi` is the base of the VM
+//! register file. Arguments arrive in `vm.r[0..n]`; return register is `vm.r[0]`. All
+//! computation happen in GPRs. The jit moves arguments from `vm.r[0..n]` to GPRs in a jitted
+//! functions prologue.
 
 use std::fmt;
 
-use crate::regalloc::FixedClobber;
+use crate::regalloc::Xralloc2;
 use purple_garden_ir::{self as ir, BinOp};
 
 /// Bail out of [`compile_func`] (returning `None`) and, under the `trace`
@@ -38,42 +26,39 @@ macro_rules! skip {
     }};
 }
 
-/// Allocatable general purpose: the caller-saved set (so a leaf needs no
-/// prologue). `rdi` is the `Vm` pointer, `rsp`/`rbp` the stack. Callee-saved
-/// regs (rbx, r12..r15) aren't used yet.
-const POOL: &[u8] = &[0, 1, 2, 6, 8, 9, 10, 11]; // rax rcx rdx rsi r8 r9 r10 r11
-/// Callee-saved class for values live across a call; the prologue saves the
-/// ones actually used.
-const POOL_CALLEE: &[u8] = &[3, 12, 13, 14, 15]; // rbx r12 r13 r14 r15
-/// `rdi` holds `*mut Vm` == `&vm.r[0]`, the base for slot loads/stores.
-const RDI: u8 = 7;
-/// `rsp`, the stack pointer; only touched to re-align for an ABI call.
-const RSP: u8 = 4;
 const RAX: u8 = 0;
 const RCX: u8 = 1;
 const RDX: u8 = 2;
+const RBX: u8 = 3;
+/// stack pointer; only touched to save registers and align calls.
+const RSP: u8 = 4;
 const RSI: u8 = 6;
+/// rdi holds `*mut Vm` == `&vm.r[0]`, base for slot loads/stores.
+const RDI: u8 = 7;
 const R8: u8 = 8;
 const R9: u8 = 9;
-/// Registers implicitly clobbered by the current `idiv` lowering.
-const IDIV_CLOBBERS: &[u8] = &[RAX, RCX, RDX];
+const R10: u8 = 10;
+const R11: u8 = 11;
+const R12: u8 = 12;
+const R13: u8 = 13;
+const R14: u8 = 14;
+const R15: u8 = 15;
 
-#[derive(Default)]
-struct SupportPlan {
-    entry: Option<ir::Id>,
-    call_sites: Vec<u32>,
-    /// Target-specific register hazards discovered before allocation. Each
-    /// entry says that a lowering at `pos` overwrites `regs`; the allocator then
-    /// avoids assigning live-across values to those registers.
-    fixed_clobbers: Vec<FixedClobber<'static>>,
-}
+/// Allocatable GPRs, popped from the back: caller-saved first so leaf functions dont require a
+/// prologue, `rcx`/`rdx` last since `idiv` clobbers. `rax` is a fixed scratch for
+/// edge-move cycles, helper addresses and `idiv`.
+const POOL: &[u8] = &[RBX, R12, R13, R14, R15, RDX, RCX, R11, R10, R9, R8, RSI];
+const CALLEE_SAVED: &[u8] = &[RBX, R12, R13, R14, R15];
+/// Allocatable registers a SysV helper call clobbers.
+const CALLER_SAVED: &[u8] = &[RCX, RDX, RSI, R8, R9, R10, R11];
 
-/// Compile one IR function into x86-64 machine code, returning `None` if unsupported.
+/// Compile one IR function into x86-64 machine code, returning `None` if unsupported constructs are
+/// included
 pub fn compile_func(
     func: &ir::Func<'_>,
     out: &mut Vec<u8>,
     liveness: &[(u32, u32)],
-    allocator: &mut crate::regalloc::Allocator,
+    ra: &mut Xralloc2,
     buffers: &mut Scratch,
 ) -> Option<()> {
     if func.params.len() > 32 {
@@ -84,47 +69,48 @@ pub fn compile_func(
         );
     }
 
-    let plan = validate_supported(func)?;
-    let Some(entry) = plan.entry else {
+    let Some(entry) = func.blocks.iter().find(|b| !b.tombstone).map(|b| b.id) else {
         skip!(func, "empty function");
     };
 
     if is_result_slot_identity(func, entry) {
-        // Native calls receive arg0 in vm.r[0] and must return through vm.r[0].
-        // When a function returns that parameter unchanged, the VM register file
-        // already holds the required boundary state; materializing it into a GPR
-        // and storing it back would only re-write the single source of truth.
+        // Native calls receive arg0 in vm.r[0] and must return through vm.r[0]
+        //
+        // When a function returns that parameter unchanged, the VM register file already holds the
+        // required boundary state, nothing to do here other than return
         emit(out, Insn::Ret);
         purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
         return Some(());
     }
 
-    out.reserve(func.params.len() * 4 + func.blocks.len() * 16 + 64);
+    ra.reset(liveness.len(), POOL);
+    let calls = Lowering::new(func, liveness, ra, buffers, entry).emit()?;
 
-    let regs = allocator.rebuild(
-        liveness,
-        &plan.call_sites,
-        &plan.fixed_clobbers,
-        crate::regalloc::RegClasses {
-            caller: POOL,
-            callee: POOL_CALLEE,
-        },
-    );
-    // Parallel edge moves only need a scratch register for cycles. If the
-    // allocator consumed every caller register, cyclic edge moves are rejected
-    // and the function falls back to bytecode.
-    let reg_scratch = POOL.iter().copied().find(|candidate| {
-        !regs
-            .iter()
-            .any(|loc| matches!(loc, ir::Location::Reg(r) if r == candidate))
-    });
-    Lowering::new(func, out, regs, reg_scratch, buffers, entry).emit()?;
-
-    // we have produced no machine code, so we just RET, this may be the case for fully optimised
-    // (dce) away IR
-    if out.is_empty() {
-        Insn::Ret.encode(out);
+    // Pushes realign rsp from 8 (mod 16) at entry; helper calls need it at 0.
+    let saved = CALLEE_SAVED.iter().copied().filter(|&reg| ra.used(reg));
+    let pad = calls && saved.clone().count() % 2 == 0;
+    if !pad && saved.clone().next().is_none() {
+        // The epilogue is a bare `ret`: return in place instead of jumping to it.
+        for &rel in &buffers.to_epilogue {
+            buffers.body[rel - 1] = 0xc3;
+            buffers.body[rel..rel + 4].fill(0xcc);
+        }
     }
+    out.reserve(buffers.body.len() + 32);
+    for reg in saved.clone() {
+        emit(out, Insn::Push { reg });
+    }
+    if pad {
+        emit(out, Insn::SubImm { dst: RSP, imm: 8 });
+    }
+    out.extend_from_slice(&buffers.body);
+    if pad {
+        emit(out, Insn::AddImm { dst: RSP, imm: 8 });
+    }
+    for reg in saved.rev() {
+        emit(out, Insn::Pop { reg });
+    }
+    emit(out, Insn::Ret);
 
     purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
     Some(())
@@ -153,17 +139,21 @@ fn is_result_slot_identity(func: &ir::Func<'_>, entry: ir::Id) -> bool {
 struct Patch {
     /// Offset of the 4-byte relative displacement inside `out`.
     rel: usize,
-    /// IR block id that owns the final machine-code target offset.
+    /// IR block id matching the final machine-code offset
     target: ir::Id,
 }
 
 /// Reusable lowering allocation storage
 #[derive(Debug, Default, Clone)]
 pub struct Scratch {
+    body: Vec<u8>,
     block_offsets: Vec<usize>,
     patches: Vec<Patch>,
+    /// rel32 offsets of jumps to the shared epilogue.
+    to_epilogue: Vec<usize>,
     move_pairs: Vec<(u8, u8)>,
-    saved_regs: Vec<u8>,
+    /// `(reg, copy)` pairs preserved across a clobbering instruction.
+    saves: Vec<(u8, u8)>,
 }
 
 /// A single x86-64 instruction. `encode` appends its machine-code bytes;
@@ -626,9 +616,7 @@ fn emit_bin(out: &mut Vec<u8>, op: BinOp, d: u8, l: u8, r: u8) {
     }
 }
 
-/// C-ABI `call addr`, rdi already holding `*mut Vm`. Leaves enter at `rsp % 16
-/// == 8`, so realign with `sub`/`add rsp, 8`. Callees clobber caller-saved regs,
-/// fine here: the only use is a trap callback that returns right after.
+/// C-ABI `call addr` argument, rdi already holding `*mut Vm`.
 #[derive(Clone, Copy)]
 enum AbiArg {
     Reg(u8),
@@ -693,20 +681,6 @@ fn emit_abi_call(
     }
 }
 
-/// `d = l <op> imm` for IDiv/IMod, nonzero constant divisor. idiv has no imm
-/// form, so the divisor goes via rcx. rax/rcx/rdx are clobbered here; the
-/// allocator keeps values live across this position out of them via
-/// `IDIV_CLOBBERS`. l (consumed into rax first) and d (written last) may reuse
-/// them.
-fn emit_idiv(out: &mut Vec<u8>, op: BinOp, d: u8, l: u8, imm: i32) {
-    emit(out, Insn::Mov { dst: RAX, src: l });
-    emit(out, Insn::Cqo);
-    emit(out, Insn::MovImm { dst: RCX, imm });
-    emit(out, Insn::Idiv { divisor: RCX });
-    let src = if matches!(op, BinOp::IDiv) { RAX } else { RDX };
-    emit(out, Insn::Mov { dst: d, src });
-}
-
 /// `r{d} <op>= r{s}` for IAdd/ISub/IMul.
 fn op_in_place(out: &mut Vec<u8>, op: BinOp, d: u8, s: u8) {
     emit(
@@ -720,13 +694,13 @@ fn op_in_place(out: &mut Vec<u8>, op: BinOp, d: u8, s: u8) {
     );
 }
 
-/// Emit a register shuffle, resolving cycles through `scratch` when needed.
-fn emit_parallel_moves(out: &mut Vec<u8>, pairs: &mut Vec<(u8, u8)>, scratch: Option<u8>) -> bool {
+/// Emit a register shuffle, resolving cycles through `scratch`.
+fn emit_parallel_moves(out: &mut Vec<u8>, pairs: &mut Vec<(u8, u8)>, scratch: u8) {
     pairs.retain(|(src, dst)| src != dst);
 
     'outer: loop {
         if pairs.is_empty() {
-            return true;
+            return;
         }
 
         for i in 0..pairs.len() {
@@ -739,17 +713,8 @@ fn emit_parallel_moves(out: &mut Vec<u8>, pairs: &mut Vec<(u8, u8)>, scratch: Op
         }
 
         // Every remaining dst is also a src: the moves contain a cycle.
-        // Break one cycle by saving its head in a free scratch register, then
-        // walk backwards through the just-freed destination registers.
-        let Some(scratch) = scratch else {
-            return false;
-        };
-        if pairs
-            .iter()
-            .any(|(src, dst)| *src == scratch || *dst == scratch)
-        {
-            return false;
-        }
+        // Break one cycle by saving its head in the scratch register, which
+        // never holds a value, then walk backwards through the freed dsts.
 
         // Example cycle: a->b, b->c, c->a.
         // Save `a` in scratch, then move c->a, b->c, scratch->b.
@@ -777,37 +742,6 @@ fn emit_parallel_moves(out: &mut Vec<u8>, pairs: &mut Vec<(u8, u8)>, scratch: Op
     }
 }
 
-/// Return the physical register allocated to an IR value.
-fn reg_of(regs: &[ir::Location], id: ir::Id) -> Option<u8> {
-    match regs.get(id.0 as usize) {
-        Some(ir::Location::Reg(r)) => Some(*r),
-        _ => None,
-    }
-}
-
-/// Move source edge arguments into destination block parameter registers.
-fn emit_param_moves(
-    out: &mut Vec<u8>,
-    regs: &[ir::Location],
-    pairs: &mut Vec<(u8, u8)>,
-    scratch: Option<u8>,
-    src_params: &[ir::Id],
-    dst_params: &[ir::Id],
-) -> bool {
-    if src_params.len() != dst_params.len() {
-        return false;
-    }
-
-    pairs.clear();
-    for (&src, &dst) in src_params.iter().zip(dst_params) {
-        let (Some(src), Some(dst)) = (reg_of(regs, src), reg_of(regs, dst)) else {
-            return false;
-        };
-        pairs.push((src, dst));
-    }
-    emit_parallel_moves(out, pairs, scratch)
-}
-
 /// Return the parameter ids owned by a branch target block.
 fn branch_target_params<'f>(func: &'f ir::Func<'_>, target: ir::Id) -> Option<&'f [ir::Id]> {
     func.blocks
@@ -815,214 +749,199 @@ fn branch_target_params<'f>(func: &'f ir::Func<'_>, target: ir::Id) -> Option<&'
         .map(|block| func.params(block.params))
 }
 
-/// Whether this immediate binary op has a direct x86 lowering.
-fn supported_bin_imm(op: BinOp) -> bool {
-    matches!(
-        op,
-        BinOp::IAdd | BinOp::ISub | BinOp::IEq | BinOp::IDiv | BinOp::IMod
-    )
-}
-
-/// Whether this register-register binary op has a direct x86 lowering.
-fn supported_bin(op: BinOp) -> bool {
-    matches!(
-        op,
-        BinOp::IAdd | BinOp::ISub | BinOp::IMul | BinOp::IEq | BinOp::IDiv | BinOp::IMod
-    )
-}
-
 /// Whether a constant can be materialized by the current x86 lowering.
-fn supported_const(value: &ir::Const<'_>) -> bool {
+fn supported_const(value: &ir::Const<'_>) -> Option<i32> {
     match value {
-        ir::Const::False | ir::Const::True => true,
-        ir::Const::Int(i) => (*i as i32) < i32::MAX && (*i as i32) > i32::MIN,
-        _ => false,
+        ir::Const::False => Some(0),
+        ir::Const::True => Some(1),
+        ir::Const::Int(i) if (*i as i32) < i32::MAX && (*i as i32) > i32::MIN => Some(*i as i32),
+        _ => None,
     }
 }
 
-fn supported_mem_offset(offset: u32) -> bool {
-    offset <= i32::MAX as u32
+/// Bytes `emit_abi_call` reserves below rsp: the saved VM base, padded so rsp
+/// stays 16-byte aligned. The prologue aligns rsp for functions with calls.
+const ABI_CALL_STACK: i32 = 16;
+
+#[derive(Clone, Copy)]
+enum Divisor {
+    Reg(u8),
+    Imm(i32),
 }
 
-/// Validate that `func` is in the x86 JIT subset and collect lowering constraints.
-fn validate_supported(func: &ir::Func<'_>) -> Option<SupportPlan> {
-    let mut plan = SupportPlan::default();
-    let mut pos = 0;
-
-    for block in func.blocks.iter().filter(|block| !block.tombstone) {
-        plan.entry.get_or_insert(block.id);
-
-        // Keep this position walk in lockstep with `Func::live_set_into`.
-        pos += 2;
-
-        for instr in &block.instructions {
-            match instr {
-                ir::Instr::Alloc { .. } => {
-                    plan.call_sites.push(pos);
-                }
-                ir::Instr::Noop => {}
-                ir::Instr::LoadConst { value, .. } if supported_const(value) => {}
-                ir::Instr::BinImm { op, imm, .. } if supported_bin_imm(*op) => {
-                    if matches!(op, BinOp::IDiv if *imm != 0)
-                        || matches!(op, BinOp::IMod if *imm != 0 && *imm != 2)
-                    {
-                        plan.fixed_clobbers.push(FixedClobber {
-                            pos,
-                            regs: IDIV_CLOBBERS,
-                        });
-                    }
-                }
-                ir::Instr::Bin { op, .. } if supported_bin(*op) => {
-                    // A register divisor can't be special-cased at compile
-                    // time, so every IDiv/IMod here is a real `idiv`.
-                    if matches!(op, BinOp::IDiv | BinOp::IMod) {
-                        plan.fixed_clobbers.push(FixedClobber {
-                            pos,
-                            regs: IDIV_CLOBBERS,
-                        });
-                    }
-                }
-                ir::Instr::Store { offset, .. }
-                | ir::Instr::Load { offset, .. }
-                | ir::Instr::AddrOf { offset, .. }
-                    if supported_mem_offset(*offset) => {}
-                _ => skip!(func, "unsupported instruction {instr:?}"),
-            }
-            pos += 2;
-        }
-
-        match block.term.as_ref() {
-            None | Some(ir::Terminator::Return { .. } | ir::Terminator::Branch { .. }) => {}
-            Some(ir::Terminator::BranchCmpImm { op: BinOp::IEq, .. }) => {}
-            Some(ir::Terminator::Tail {
-                func: tail_func, ..
-            }) if *tail_func == func.id => {}
-            Some(ir::Terminator::Jump { .. }) => {}
-            Some(_) => skip!(func, "unsupported terminator"),
-        }
-        pos += 2;
-    }
-
-    Some(plan)
-}
-
-/// Per-function x86 lowering state.
+/// Per-function x86 lowering state, allocating registers as it emits.
 ///
-/// `compile_func` performs admission and register allocation, then hands the
-/// mutable emission state here. Keeping CFG patching, edge-param shuffles, and
-/// instruction lowering in methods keeps the public entry point small.
+/// `pos` steps in lockstep with [`ir::Func::live_set_into`]: two units per
+/// block header, instruction and terminator; uses sit on `pos`, defs on
+/// `pos + 1`.
 struct Lowering<'a, 'ir> {
     func: &'a ir::Func<'ir>,
+    liveness: &'a [(u32, u32)],
+    ra: &'a mut Xralloc2,
     out: &'a mut Vec<u8>,
-    regs: &'a [ir::Location],
-    scratch: Option<u8>,
-    /// Callee-saved GPRs used by this function, saved in the prologue.
-    saved_regs: &'a Vec<u8>,
     entry: ir::Id,
+    pos: u32,
+    calls: bool,
     block_offsets: &'a mut Vec<usize>,
     patches: &'a mut Vec<Patch>,
+    to_epilogue: &'a mut Vec<usize>,
     move_pairs: &'a mut Vec<(u8, u8)>,
+    saves: &'a mut Vec<(u8, u8)>,
 }
 
 impl<'a, 'ir> Lowering<'a, 'ir> {
-    /// Create lowering state for one already-admitted IR function.
     fn new(
         func: &'a ir::Func<'ir>,
-        out: &'a mut Vec<u8>,
-        regs: &'a [ir::Location],
-        scratch: Option<u8>,
+        liveness: &'a [(u32, u32)],
+        ra: &'a mut Xralloc2,
         buffers: &'a mut Scratch,
         entry: ir::Id,
     ) -> Self {
         let Scratch {
+            body,
             block_offsets,
             patches,
+            to_epilogue,
             move_pairs,
-            saved_regs,
+            saves,
         } = buffers;
+        body.clear();
         block_offsets.clear();
         block_offsets.resize(func.blocks.len(), usize::MAX);
         patches.clear();
-        move_pairs.clear();
-        saved_regs.clear();
-        saved_regs.extend(POOL_CALLEE.iter().copied().filter(|&candidate| {
-            regs.iter()
-                .any(|loc| matches!(loc, ir::Location::Reg(r) if *r == candidate))
-        }));
+        to_epilogue.clear();
         Self {
             func,
-            out,
-            regs,
-            scratch,
-            saved_regs,
+            liveness,
+            ra,
+            out: body,
             entry,
+            pos: 0,
+            calls: false,
             block_offsets,
             patches,
+            to_epilogue,
             move_pairs,
+            saves,
         }
     }
 
-    /// Emit the full function body, then patch deferred branch displacements.
-    fn emit(mut self) -> Option<()> {
-        self.emit_prologue();
-        self.emit_entry_loads();
+    /// Emit the body, ending where the epilogue is appended. Returns whether
+    /// it calls helpers.
+    fn emit(mut self) -> Option<bool> {
+        for (slot, &param) in self.func.params.iter().enumerate() {
+            if self
+                .liveness
+                .get(param.0 as usize)
+                .is_some_and(|l| l.0 != u32::MAX)
+            {
+                let dst = self.def(param, 0)?;
+                emit(
+                    self.out,
+                    Insn::LoadSlot {
+                        dst,
+                        slot: slot as u8,
+                    },
+                );
+            }
+        }
 
         for block in &self.func.blocks {
             if block.tombstone {
                 continue;
             }
-
             self.block_offsets[block.id.0 as usize] = self.out.len();
-
+            for &param in self.func.params(block.params) {
+                self.def(param, self.pos)?;
+            }
+            self.pos += 2;
             for instr in &block.instructions {
                 self.emit_instr(instr)?;
+                self.pos += 2;
             }
             self.emit_term(block.term.as_ref())?;
+            self.pos += 2;
         }
 
-        self.patch_jumps()
+        self.patch_jumps()?;
+        Some(self.calls)
     }
 
-    fn emit_prologue(&mut self) {
-        for &reg in self.saved_regs {
-            emit(self.out, Insn::Push { reg });
-        }
+    /// Register of `id`, assigned at `at` if this is its first touch.
+    fn def(&mut self, id: ir::Id, at: u32) -> Option<u8> {
+        let Some(&(start, last_use)) = self.liveness.get(id.0 as usize) else {
+            skip!(self.func, "no liveness for %v{}", id.0);
+        };
+        let Some(reg) = self.ra.alloc(id, at.min(start), last_use) else {
+            skip!(self.func, "out of registers at %v{}", id.0);
+        };
+        Some(reg)
     }
 
-    fn emit_epilogue(&mut self) {
-        for &reg in self.saved_regs.iter().rev() {
-            emit(self.out, Insn::Pop { reg });
-        }
-        emit(self.out, Insn::Ret);
+    fn reg(&self, id: ir::Id) -> Option<u8> {
+        let Some(reg) = self.ra.reg(id) else {
+            skip!(self.func, "use of unassigned %v{}", id.0);
+        };
+        Some(reg)
     }
 
-    /// The call-local area contains the saved VM base. Its size also restores
-    /// the required 16-byte stack alignment before `call`.
-    fn abi_call_stack_bytes(&self) -> i32 {
-        if self.saved_regs.len() % 2 == 0 {
-            8
-        } else {
-            16
-        }
-    }
-
-    /// Load function parameters from `vm.r` slots into allocated registers.
-    fn emit_entry_loads(&mut self) {
-        // Args arrive in the VM register file: param i in vm.r[i] == [rdi + i*8].
-        for (i, &param) in self.func.params.iter().enumerate() {
-            if let Some(r) = reg_of(self.regs, param) {
-                emit(
-                    self.out,
-                    Insn::LoadSlot {
-                        dst: r,
-                        slot: i as u8,
-                    },
+    /// Run `body` with every register in `clobbers` free to overwrite: values
+    /// living in them past this instruction are copied out and back. Copies
+    /// are taken before `dst` is assigned so neither the copies nor `dst`
+    /// reuse an operand register `body` still reads. Locations stay fixed,
+    /// which keeps every CFG edge agreeing on them.
+    fn clobbering(
+        &mut self,
+        clobbers: &[u8],
+        dst: Option<ir::Id>,
+        body: impl FnOnce(&mut Self, Option<u8>),
+    ) -> Option<()> {
+        let mut saves = std::mem::take(self.saves);
+        saves.clear();
+        saves.extend(
+            self.ra
+                .live_after(self.pos)
+                .filter(|reg| clobbers.contains(reg))
+                .map(|reg| (reg, reg)),
+        );
+        for (_, copy) in &mut saves {
+            let Some(reg) = self.ra.take_free(|reg| !clobbers.contains(&reg)) else {
+                skip!(
+                    self.func,
+                    "no free register to preserve r{copy} across a clobber"
                 );
-            }
+            };
+            *copy = reg;
         }
+        let dst = match dst {
+            Some(dst) => Some(self.def(dst, self.pos + 1)?),
+            None => None,
+        };
+
+        for &(reg, copy) in &saves {
+            emit(
+                self.out,
+                Insn::Mov {
+                    dst: copy,
+                    src: reg,
+                },
+            );
+        }
+        body(self, dst);
+        for &(reg, copy) in &saves {
+            emit(
+                self.out,
+                Insn::Mov {
+                    dst: reg,
+                    src: copy,
+                },
+            );
+            self.ra.give_back(copy);
+        }
+        *self.saves = saves;
+        Some(())
     }
 
-    /// Emit one supported IR instruction.
     fn emit_instr(&mut self, instr: &ir::Instr<'_>) -> Option<()> {
         match instr {
             ir::Instr::Noop => {}
@@ -1031,26 +950,32 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 layout,
                 ..
             } => {
-                let Some(dst_reg) = reg_of(self.regs, *id) else {
-                    skip!(self.func, "unallocated alloc dst %v{}", id.0);
-                };
                 let Some(kind) = purple_garden_runtime::AllocType::from_ty(ty) else {
                     skip!(self.func, "unsupported allocation type");
                 };
-                emit_abi_call(
-                    self.out,
-                    purple_garden_runtime::jit_alloc as *const () as usize as u64,
-                    &[
-                        AbiArg::Reg(RDI),
-                        AbiArg::Imm(kind as u64),
-                        AbiArg::Imm(layout.size() as u64),
-                        AbiArg::Imm(layout.align() as u64),
-                    ],
-                    Some(dst_reg),
-                    self.abi_call_stack_bytes(),
-                );
+                self.clobbering(CALLER_SAVED, Some(*id), |this, dst| {
+                    this.call(
+                        purple_garden_runtime::jit_alloc as *const () as u64,
+                        &[
+                            AbiArg::Reg(RDI),
+                            AbiArg::Imm(kind as u64),
+                            AbiArg::Imm(layout.size() as u64),
+                            AbiArg::Imm(layout.align() as u64),
+                        ],
+                        dst,
+                    );
+                })?;
             }
-            ir::Instr::LoadConst { dst, value, .. } => self.emit_const(dst, value)?,
+            ir::Instr::LoadConst { dst, value, .. } => {
+                let Some(imm) = supported_const(value) else {
+                    skip!(
+                        self.func,
+                        "const not true, false or i32::MIN < i < i32::MAX"
+                    );
+                };
+                let dst = self.def(dst.id, self.pos + 1)?;
+                emit(self.out, Insn::MovImm { dst, imm });
+            }
             ir::Instr::BinImm {
                 op, dst, lhs, imm, ..
             } => self.emit_bin_imm(*op, dst.id, *lhs, *imm)?,
@@ -1059,68 +984,55 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             } => self.emit_bin(*op, dst.id, *lhs, *rhs)?,
             ir::Instr::Store {
                 src, base, offset, ..
-            } => self.emit_store(*src, *base, *offset)?,
+            } if *offset <= i32::MAX as u32 => {
+                let (src, base) = (self.reg(*src)?, self.reg(*base)?);
+                emit(
+                    self.out,
+                    Insn::StoreMem {
+                        base,
+                        offset: *offset,
+                        src,
+                    },
+                );
+            }
             ir::Instr::Load {
                 dst, base, offset, ..
-            } => self.emit_load(dst.id, *base, *offset)?,
+            } if *offset <= i32::MAX as u32 => {
+                let base = self.reg(*base)?;
+                let dst = self.def(dst.id, self.pos + 1)?;
+                emit(
+                    self.out,
+                    Insn::LoadMem {
+                        dst,
+                        base,
+                        offset: *offset,
+                    },
+                );
+            }
             ir::Instr::AddrOf {
                 dst, base, offset, ..
-            } => self.emit_addrof(dst.id, *base, *offset)?,
+            } if *offset <= i32::MAX as u32 => {
+                let base = self.reg(*base)?;
+                let dst = self.def(dst.id, self.pos + 1)?;
+                emit(
+                    self.out,
+                    Insn::LeaMem {
+                        dst,
+                        base,
+                        offset: *offset,
+                    },
+                );
+            }
             _ => skip!(self.func, "unsupported instruction {instr:?}"),
         }
         Some(())
     }
 
-    fn emit_store(&mut self, src: ir::Id, base: ir::Id, offset: u32) -> Option<()> {
-        let (Some(src), Some(base)) = (reg_of(self.regs, src), reg_of(self.regs, base)) else {
-            skip!(self.func, "unallocated store operand");
-        };
-        emit(self.out, Insn::StoreMem { base, offset, src });
-        Some(())
-    }
-
-    fn emit_load(&mut self, dst: ir::Id, base: ir::Id, offset: u32) -> Option<()> {
-        let (Some(dst), Some(base)) = (reg_of(self.regs, dst), reg_of(self.regs, base)) else {
-            skip!(self.func, "unallocated load operand");
-        };
-        emit(self.out, Insn::LoadMem { dst, base, offset });
-        Some(())
-    }
-
-    fn emit_addrof(&mut self, dst: ir::Id, base: ir::Id, offset: u32) -> Option<()> {
-        let (Some(dst), Some(base)) = (reg_of(self.regs, dst), reg_of(self.regs, base)) else {
-            skip!(self.func, "unallocated addrof operand");
-        };
-        emit(self.out, Insn::LeaMem { dst, base, offset });
-        Some(())
-    }
-
-    /// Materialize a supported IR constant into its allocated destination.
-    fn emit_const(&mut self, dst: &ir::TypeId<'_>, value: &ir::Const<'_>) -> Option<()> {
-        let Some(dst_reg) = reg_of(self.regs, dst.id) else {
-            skip!(self.func, "unallocated const dst %v{}", dst.id.0);
-        };
-        let imm = match value {
-            ir::Const::False => 0,
-            ir::Const::True => 1,
-            ir::Const::Int(i) if (*i as i32) < i32::MAX && (*i as i32) > i32::MIN => *i as i32,
-            _ => skip!(
-                self.func,
-                "const not true, false or i32::MIN < i < i32::MAX"
-            ),
-        };
-        emit(self.out, Insn::MovImm { dst: dst_reg, imm });
-        Some(())
-    }
-
-    /// Emit an immediate binary operation.
     fn emit_bin_imm(&mut self, op: BinOp, dst: ir::Id, lhs: ir::Id, imm: i32) -> Option<()> {
-        let (Some(d), Some(l)) = (reg_of(self.regs, dst), reg_of(self.regs, lhs)) else {
-            skip!(self.func, "unallocated binimm operand");
-        };
-
+        let l = self.reg(lhs)?;
         match op {
             BinOp::IAdd | BinOp::ISub => {
+                let d = self.def(dst, self.pos + 1)?;
                 if d != l {
                     emit(self.out, Insn::Mov { dst: d, src: l });
                 }
@@ -1132,100 +1044,103 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                     },
                 );
             }
-            BinOp::IEq => self.emit_int_eq_imm(d, l, imm),
+            BinOp::IEq => {
+                let d = self.def(dst, self.pos + 1)?;
+                self.emit_cmp_imm(l, imm);
+                self.emit_sete(d);
+            }
             BinOp::IDiv | BinOp::IMod if imm == 0 => {
-                let helper: purple_garden_runtime::BuiltinFn =
-                    purple_garden_runtime::jit_trap_div_zero;
-                emit_abi_call(
-                    self.out,
-                    helper as usize as u64,
-                    &[AbiArg::Reg(RDI)],
-                    None,
-                    self.abi_call_stack_bytes(),
-                );
-                self.emit_epilogue();
+                self.def(dst, self.pos + 1)?;
+                self.trap_div_zero();
             }
             BinOp::IMod if imm == 2 => {
+                let d = self.def(dst, self.pos + 1)?;
                 if d != l {
                     emit(self.out, Insn::Mov { dst: d, src: l });
                 }
                 emit(self.out, Insn::AndImm { dst: d, imm: 1 });
             }
-            BinOp::IDiv | BinOp::IMod => emit_idiv(self.out, op, d, l, imm),
+            BinOp::IDiv | BinOp::IMod => self.emit_div(op, dst, l, Divisor::Imm(imm))?,
             _ => skip!(self.func, "unsupported binimm op {op:?}"),
         }
         Some(())
     }
 
-    /// Emit a register-register binary operation.
     fn emit_bin(&mut self, op: BinOp, dst: ir::Id, lhs: ir::Id, rhs: ir::Id) -> Option<()> {
-        let (Some(d), Some(l), Some(r)) = (
-            reg_of(self.regs, dst),
-            reg_of(self.regs, lhs),
-            reg_of(self.regs, rhs),
-        ) else {
-            skip!(self.func, "unallocated bin operand");
-        };
-
+        let (l, r) = (self.reg(lhs)?, self.reg(rhs)?);
         match op {
-            BinOp::IAdd | BinOp::ISub | BinOp::IMul => emit_bin(self.out, op, d, l, r),
-            BinOp::IEq => self.emit_int_eq(d, l, r),
-            BinOp::IDiv | BinOp::IMod => self.emit_idiv_reg(op, d, l, r),
+            BinOp::IAdd | BinOp::ISub | BinOp::IMul => {
+                let d = self.def(dst, self.pos + 1)?;
+                emit_bin(self.out, op, d, l, r);
+            }
+            BinOp::IEq => {
+                let d = self.def(dst, self.pos + 1)?;
+                emit(self.out, Insn::Cmp { lhs: l, rhs: r });
+                self.emit_sete(d);
+            }
+            BinOp::IDiv | BinOp::IMod => {
+                // A register divisor can't be checked at compile time.
+                emit(self.out, Insn::Test { lhs: r, rhs: r });
+                let nonzero = emit_jnz_placeholder(self.out);
+                self.trap_div_zero();
+                let resume = self.out.len();
+                patch_rel32(self.out, nonzero, resume)?;
+                self.emit_div(op, dst, l, Divisor::Reg(r))?;
+            }
             _ => skip!(self.func, "unsupported bin op {op:?}"),
         }
         Some(())
     }
 
-    /// `d = l <op> r` for IDiv/IMod with a register divisor.
-    ///
-    /// Unlike the immediate form, zero can't be rejected at compile time, so
-    /// the divisor is tested first and a zero takes the same trap-and-return
-    /// path as `BinImm { imm: 0 }`. On the fallthrough, `l`/`r` are shuffled
-    /// into rax/rcx via `emit_parallel_moves` with rdx as scratch — safe
-    /// because `cqo` clobbers rdx immediately after, and the allocator keeps
-    /// live-across values out of all three via `IDIV_CLOBBERS`. A cycle can
-    /// only arise when both operands already sit in {rax, rcx}, so rdx is
-    /// never a live source when the scratch is needed.
+    /// `idiv` divides `rdx:rax`, so the dividend goes through the scratch
+    /// `rax` and `rdx` is clobbered by `cqo`. A divisor without a usable
+    /// register (an immediate, or one living in `rdx`) is staged in `rcx`.
     ///
     /// `i64::MIN % -1` faults in `idiv` (#DE); the bytecode VM panics on the
     /// same input via Rust's checked `%`, so neither path is lenient here.
-    fn emit_idiv_reg(&mut self, op: BinOp, d: u8, l: u8, r: u8) {
-        emit(self.out, Insn::Test { lhs: r, rhs: r });
-        let skip_trap = emit_jnz_placeholder(self.out);
-        let helper: purple_garden_runtime::BuiltinFn = purple_garden_runtime::jit_trap_div_zero;
-        emit_abi_call(
-            self.out,
-            helper as usize as u64,
-            &[AbiArg::Reg(RDI)],
-            None,
-            self.abi_call_stack_bytes(),
-        );
-        self.emit_epilogue();
-        let resume = self.out.len();
-        patch_rel32(self.out, skip_trap, resume).expect("div-zero skip is a short forward jump");
-
-        let moved = emit_parallel_moves(self.out, &mut vec![(l, RAX), (r, RCX)], Some(RDX));
-        debug_assert!(moved, "idiv operand shuffle has no unresolvable cycle");
-        emit(self.out, Insn::Cqo);
-        emit(self.out, Insn::Idiv { divisor: RCX });
-        let src = if matches!(op, BinOp::IDiv) { RAX } else { RDX };
-        emit(self.out, Insn::Mov { dst: d, src });
+    fn emit_div(&mut self, op: BinOp, dst: ir::Id, l: u8, divisor: Divisor) -> Option<()> {
+        let staged = !matches!(divisor, Divisor::Reg(r) if r != RDX);
+        let clobbers: &[u8] = if staged { &[RCX, RDX] } else { &[RDX] };
+        self.clobbering(clobbers, Some(dst), |this, d| {
+            emit(this.out, Insn::Mov { dst: RAX, src: l });
+            let divisor = match divisor {
+                Divisor::Reg(r) if r != RDX => r,
+                Divisor::Reg(r) => {
+                    emit(this.out, Insn::Mov { dst: RCX, src: r });
+                    RCX
+                }
+                Divisor::Imm(imm) => {
+                    emit(this.out, Insn::MovImm { dst: RCX, imm });
+                    RCX
+                }
+            };
+            emit(this.out, Insn::Cqo);
+            emit(this.out, Insn::Idiv { divisor });
+            let src = if matches!(op, BinOp::IDiv) { RAX } else { RDX };
+            if let Some(d) = d {
+                emit(this.out, Insn::Mov { dst: d, src });
+            }
+        })
     }
 
-    /// Emit `dst = lhs == imm` as `test`/`cmp` plus `sete`.
-    fn emit_int_eq_imm(&mut self, dst: u8, lhs: u8, imm: i32) {
+    /// Raise the trap and leave: nothing live needs to survive the call.
+    fn trap_div_zero(&mut self) {
+        let helper: purple_garden_runtime::BuiltinFn = purple_garden_runtime::jit_trap_div_zero;
+        self.call(helper as usize as u64, &[AbiArg::Reg(RDI)], None);
+        self.jmp_epilogue();
+    }
+
+    fn call(&mut self, addr: u64, args: &[AbiArg], result: Option<u8>) {
+        self.calls = true;
+        emit_abi_call(self.out, addr, args, result, ABI_CALL_STACK);
+    }
+
+    fn emit_cmp_imm(&mut self, lhs: u8, imm: i32) {
         if imm == 0 {
             emit(self.out, Insn::Test { lhs, rhs: lhs });
         } else {
             emit(self.out, Insn::CmpImm { reg: lhs, imm });
         }
-        self.emit_sete(dst);
-    }
-
-    /// Emit `dst = lhs == rhs` as `cmp` plus `sete`.
-    fn emit_int_eq(&mut self, dst: u8, lhs: u8, rhs: u8) {
-        emit(self.out, Insn::Cmp { lhs, rhs });
-        self.emit_sete(dst);
     }
 
     /// Materialize the current equality flag into a full 64-bit boolean value.
@@ -1235,193 +1150,108 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     }
 
     fn emit_term(&mut self, term: Option<&ir::Terminator>) -> Option<()> {
+        let pos = self.pos;
         match term {
             None => {}
-            Some(ir::Terminator::Return { value, .. }) => self.emit_return(*value)?,
-            Some(ir::Terminator::Branch {
-                cond,
-                yes: (yes_id, yes_params),
-                no: (no_id, no_params),
-                ..
-            }) => self.emit_branch(*cond, *yes_id, *yes_params, *no_id, *no_params)?,
+            Some(ir::Terminator::Return { value, .. }) => {
+                if let Some(value) = value {
+                    let src = self.reg(*value)?;
+                    emit(self.out, Insn::StoreSlot { src, slot: 0 });
+                }
+                self.jmp_epilogue();
+            }
+            Some(ir::Terminator::Branch { cond, yes, no, .. }) => {
+                // Same phasing as liveness: yes moves, then cond, then no moves.
+                self.edge(*yes, pos)?;
+                let cond = self.reg(*cond)?;
+                emit(
+                    self.out,
+                    Insn::Test {
+                        lhs: cond,
+                        rhs: cond,
+                    },
+                );
+                self.defer(emit_jnz_placeholder, yes.0);
+                self.edge(*no, pos + 1)?;
+                self.defer(emit_jmp_placeholder, no.0);
+            }
             Some(ir::Terminator::BranchCmpImm {
-                op,
+                op: BinOp::IEq,
                 lhs,
                 imm,
-                yes: (yes_id, yes_params),
-                no: (no_id, no_params),
+                yes,
+                no,
                 ..
-            }) => self.emit_branch_cmp_imm(
-                *op,
-                *lhs,
-                *imm,
-                (*yes_id, *yes_params),
-                (*no_id, *no_params),
-            )?,
-            Some(ir::Terminator::Jump { id, params, .. }) => self.emit_jump(*id, *params)?,
-            Some(ir::Terminator::Tail {
-                func: tail_func,
-                args,
-                ..
-            }) if *tail_func == self.func.id => self.emit_self_tail(args)?,
+            }) => {
+                self.edge(*yes, pos)?;
+                let lhs = self.reg(*lhs)?;
+                self.emit_cmp_imm(lhs, *imm);
+                self.defer(emit_jz_placeholder, yes.0);
+                self.edge(*no, pos + 1)?;
+                self.defer(emit_jmp_placeholder, no.0);
+            }
+            Some(ir::Terminator::Jump { id, params, .. }) => {
+                self.edge((*id, *params), pos)?;
+                self.defer(emit_jmp_placeholder, *id);
+            }
+            Some(ir::Terminator::Tail { func, args, .. }) if *func == self.func.id => {
+                self.moves(args, &self.func.params, pos)?;
+                self.defer(emit_jmp_placeholder, self.entry);
+            }
             Some(_) => skip!(self.func, "unsupported terminator"),
         }
         Some(())
     }
 
-    /// Store the optional return value back to `vm.r[0]` and return to Rust.
-    fn emit_return(&mut self, value: Option<ir::Id>) -> Option<()> {
-        if let Some(value) = value {
-            let Some(r) = reg_of(self.regs, value) else {
-                skip!(self.func, "return value %v{} unallocated", value.0);
-            };
-            emit(self.out, Insn::StoreSlot { src: r, slot: 0 });
+    /// Resolve the edge's block params, the IR's phi nodes, on the predecessor.
+    fn edge(&mut self, (target, params): (ir::Id, ir::ParamsId), at: u32) -> Option<()> {
+        let Some(dst) = branch_target_params(self.func, target) else {
+            skip!(self.func, "bad branch target b{}", target.0);
+        };
+        self.moves(self.func.params(params), dst, at)
+    }
+
+    /// Parallel move `src -> dst`. A forward edge reaches its target's params
+    /// before the target block does, so they are assigned here; the register
+    /// is then reserved from this edge on, keeping the move from landing on a
+    /// value still live in between.
+    fn moves(&mut self, src: &[ir::Id], dst: &[ir::Id], at: u32) -> Option<()> {
+        if src.len() != dst.len() {
+            skip!(self.func, "edge arity mismatch");
         }
-        self.emit_epilogue();
-        Some(())
-    }
-
-    /// Emit a boolean branch where the condition is already materialized.
-    fn emit_branch(
-        &mut self,
-        cond: ir::Id,
-        yes_id: ir::Id,
-        yes_params: ir::ParamsId,
-        no_id: ir::Id,
-        no_params: ir::ParamsId,
-    ) -> Option<()> {
-        let Some(yes_dst) = branch_target_params(self.func, yes_id) else {
-            skip!(self.func, "bad branch target b{}", yes_id.0);
-        };
-        let yes_src = self.func.params(yes_params);
-        // The current layout assumes each edge owns its parameter moves. Emit
-        // the yes-edge shuffle before the conditional jump to the yes block.
-        self.emit_edge_params(yes_src, yes_dst)?;
-
-        let Some(cond) = reg_of(self.regs, cond) else {
-            skip!(self.func, "unallocated branch condition");
-        };
-        emit(
-            self.out,
-            Insn::Test {
-                lhs: cond,
-                rhs: cond,
-            },
-        );
-        self.defer_jnz(yes_id);
-
-        let Some(no_dst) = branch_target_params(self.func, no_id) else {
-            skip!(self.func, "bad branch target b{}", no_id.0);
-        };
-        let no_src = self.func.params(no_params);
-        // The no edge is laid out after the conditional jump, so its shuffle
-        // happens on fallthrough and then branches to the no block.
-        self.emit_edge_params(no_src, no_dst)?;
-        self.defer_jmp(no_id);
-        Some(())
-    }
-
-    /// Emit a compare-immediate branch without materializing a boolean.
-    fn emit_branch_cmp_imm(
-        &mut self,
-        op: BinOp,
-        lhs: ir::Id,
-        imm: i32,
-        (yes_id, yes_params): (ir::Id, ir::ParamsId),
-        (no_id, no_params): (ir::Id, ir::ParamsId),
-    ) -> Option<()> {
-        let Some(yes_dst) = branch_target_params(self.func, yes_id) else {
-            skip!(self.func, "bad branch target b{}", yes_id.0);
-        };
-        let Some(no_dst) = branch_target_params(self.func, no_id) else {
-            skip!(self.func, "bad branch target b{}", no_id.0);
-        };
-        let yes_src = self.func.params(yes_params);
-        let no_src = self.func.params(no_params);
-
-        self.emit_edge_params(yes_src, yes_dst)?;
-        let Some(lhs) = reg_of(self.regs, lhs) else {
-            skip!(self.func, "unallocated branch comparison operand");
-        };
-        self.emit_cmp_imm(op, lhs, imm)?;
-
-        if op == BinOp::IEq {
-            // General case: branch to yes when equal; otherwise resolve the no
-            // edge parameters in-place and jump to the no block.
-            self.defer_jz(yes_id);
-            self.emit_edge_params(no_src, no_dst)?;
-            self.defer_jmp(no_id);
-            return Some(());
+        let mut pairs = std::mem::take(self.move_pairs);
+        pairs.clear();
+        for (&s, &d) in src.iter().zip(dst) {
+            let s = self.reg(s)?;
+            pairs.push((s, self.def(d, at)?));
         }
-
-        skip!(self.func, "unsupported branch comparison op {op:?}");
-    }
-
-    /// Set x86 flags for a supported immediate comparison.
-    fn emit_cmp_imm(&mut self, op: BinOp, lhs: u8, imm: i32) -> Option<()> {
-        match op {
-            BinOp::IEq if imm == 0 => emit(self.out, Insn::Test { lhs, rhs: lhs }),
-            BinOp::IEq => emit(self.out, Insn::CmpImm { reg: lhs, imm }),
-            _ => skip!(self.func, "unsupported branch comparison op {op:?}"),
-        }
+        emit_parallel_moves(self.out, &mut pairs, RAX);
+        *self.move_pairs = pairs;
         Some(())
     }
 
-    /// Emit an unconditional IR jump after resolving edge parameters.
-    fn emit_jump(&mut self, id: ir::Id, params: ir::ParamsId) -> Option<()> {
-        let Some(dst_params) = branch_target_params(self.func, id) else {
-            skip!(self.func, "bad jump target b{}", id.0);
-        };
-        let src_params = self.func.params(params);
-        self.emit_edge_params(src_params, dst_params)?;
-        self.defer_jmp(id);
-        Some(())
+    fn defer(&mut self, placeholder: fn(&mut Vec<u8>) -> usize, target: ir::Id) {
+        let rel = placeholder(self.out);
+        self.patches.push(Patch { rel, target });
     }
 
-    /// Lower a self tail-call as edge-parameter moves plus a jump to entry.
-    fn emit_self_tail(&mut self, args: &[ir::Id]) -> Option<()> {
-        self.emit_edge_params(args, &self.func.params)?;
-        self.defer_jmp(self.entry);
-        Some(())
-    }
-
-    /// Resolve IR edge parameters, which are phi nodes on the predecessor edge.
-    fn emit_edge_params(&mut self, src_params: &[ir::Id], dst_params: &[ir::Id]) -> Option<()> {
-        // Edge params are the IR's phi nodes. They must be resolved at the
-        // predecessor edge, before control reaches the target block.
-        if !emit_param_moves(
-            self.out,
-            self.regs,
-            &mut self.move_pairs,
-            self.scratch,
-            src_params,
-            dst_params,
-        ) {
-            skip!(self.func, "could not resolve edge-param shuffle");
-        }
-        Some(())
-    }
-
-    /// Emit an unconditional jump placeholder to be patched after all blocks.
-    fn defer_jmp(&mut self, target: ir::Id) {
+    fn jmp_epilogue(&mut self) {
         let rel = emit_jmp_placeholder(self.out);
-        self.patches.push(Patch { rel, target });
+        self.to_epilogue.push(rel);
     }
 
-    /// Emit a `jnz` placeholder to be patched after all blocks.
-    fn defer_jnz(&mut self, target: ir::Id) {
-        let rel = emit_jnz_placeholder(self.out);
-        self.patches.push(Patch { rel, target });
-    }
-
-    /// Emit a `jz` placeholder to be patched after all blocks.
-    fn defer_jz(&mut self, target: ir::Id) {
-        let rel = emit_jz_placeholder(self.out);
-        self.patches.push(Patch { rel, target });
-    }
-
-    /// Patch every deferred branch once block offsets are known.
+    /// Patch block jumps, then epilogue jumps to the end of the body. A jump
+    /// ending the body falls through into the epilogue and is dropped.
     fn patch_jumps(&mut self) -> Option<()> {
+        if self
+            .to_epilogue
+            .last()
+            .is_some_and(|&rel| rel + 4 == self.out.len())
+        {
+            self.to_epilogue.pop();
+            self.out.truncate(self.out.len() - 5);
+        }
+        let end = self.out.len();
         for Patch { rel, target } in self.patches.drain(..) {
             let Some(target) = self
                 .block_offsets
@@ -1431,7 +1261,10 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             else {
                 skip!(self.func, "bad patch target b{}", target.0);
             };
-            patch_rel32(self.out, rel, target)?;
+            patch_rel32(self.out, rel, target.min(end))?;
+        }
+        for &rel in self.to_epilogue.iter() {
+            patch_rel32(self.out, rel, end)?;
         }
         Some(())
     }
