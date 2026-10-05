@@ -52,6 +52,16 @@ impl Value {
         unsafe { (*self.as_ptr::<string::StrHeader>()).hash }
     }
 
+    /// Identical pointer, then `[len | hash]` as one word so either mismatch
+    /// rejects with a single compare, then the bytes.
+    #[inline(always)]
+    #[must_use]
+    pub fn str_eq(&self, other: &Value) -> bool {
+        self.0 == other.0
+            || unsafe { string::header_bits(self.as_ptr()) == string::header_bits(other.as_ptr()) }
+                && self.as_str() == other.as_str()
+    }
+
     #[inline(always)]
     #[must_use]
     pub fn as_ptr<T>(&self) -> *mut T {

@@ -234,6 +234,14 @@ pub enum Terminator {
         no: (Id, ParamsId),
         span: u32,
     },
+    BranchCmp {
+        op: BinOp,
+        lhs: Id,
+        rhs: Id,
+        yes: (Id, ParamsId),
+        no: (Id, ParamsId),
+        span: u32,
+    },
     Tail {
         func: Id,
         args: Vec<Id>,
@@ -249,6 +257,7 @@ impl Terminator {
             | Terminator::Jump { span, .. }
             | Terminator::Branch { span, .. }
             | Terminator::BranchCmpImm { span, .. }
+            | Terminator::BranchCmp { span, .. }
             | Terminator::Tail { span, .. } => *span,
         }
     }
@@ -420,8 +429,17 @@ impl Func<'_> {
                 yes: (_, yes_params),
                 no: (_, no_params),
                 ..
+            }
+            | Terminator::BranchCmp {
+                lhs,
+                yes: (_, yes_params),
+                no: (_, no_params),
+                ..
             } => {
                 f(*lhs);
+                if let Terminator::BranchCmp { rhs, .. } = term {
+                    f(*rhs);
+                }
                 for &p in self.params(*yes_params) {
                     f(p);
                 }
@@ -531,9 +549,15 @@ impl Func<'_> {
                         yes: (yes_id, yes_params),
                         no: (no_id, no_params),
                         ..
+                    }
+                    | Terminator::BranchCmp {
+                        lhs,
+                        yes: (yes_id, yes_params),
+                        no: (no_id, no_params),
+                        ..
                     } => {
                         // Same edge-move phasing as Branch: yes shuffle first,
-                        // comparison operand after yes moves, no shuffle last.
+                        // comparison operands after yes moves, no shuffle last.
                         for &p in self.params(*yes_params) {
                             use_value(intervals, p, pos);
                         }
@@ -541,6 +565,9 @@ impl Func<'_> {
                             define(intervals, p, pos);
                         }
                         use_value(intervals, *lhs, pos + 1);
+                        if let Terminator::BranchCmp { rhs, .. } = term {
+                            use_value(intervals, *rhs, pos + 1);
+                        }
                         for &p in self.params(*no_params) {
                             use_value(intervals, p, pos + 1);
                         }
@@ -621,6 +648,27 @@ impl Func<'_> {
                         id_list(func.params(no_params)),
                     )
                 }
+                Terminator::BranchCmp {
+                    op,
+                    lhs,
+                    rhs,
+                    yes,
+                    no,
+                    ..
+                } => {
+                    let (yes_id, yes_params) = *yes;
+                    let (no_id, no_params) = *no;
+                    format!(
+                        "br_cmp {:?} %v{}, %v{}, b{}({}), b{}({})",
+                        op,
+                        lhs.0,
+                        rhs.0,
+                        yes_id.0,
+                        id_list(func.params(yes_params)),
+                        no_id.0,
+                        id_list(func.params(no_params)),
+                    )
+                }
                 Terminator::BranchCmpImm {
                     op,
                     lhs,
@@ -690,8 +738,17 @@ impl Func<'_> {
                     yes: (yes_id, yes_params),
                     no: (no_id, no_params),
                     ..
+                }
+                | Terminator::BranchCmp {
+                    lhs,
+                    yes: (yes_id, yes_params),
+                    no: (no_id, no_params),
+                    ..
                 } => {
                     writeln!(out, "      lhs:  {}", value(*lhs)).unwrap();
+                    if let Terminator::BranchCmp { rhs, .. } = term {
+                        writeln!(out, "      rhs:  {}", value(*rhs)).unwrap();
+                    }
                     let yes_params = func.params(*yes_params);
                     let no_params = func.params(*no_params);
                     if !yes_params.is_empty() {
@@ -867,7 +924,8 @@ impl Func<'_> {
                     }
                 }
                 Some(Terminator::Branch { yes, no, .. })
-                | Some(Terminator::BranchCmpImm { yes, no, .. }) => {
+                | Some(Terminator::BranchCmpImm { yes, no, .. })
+                | Some(Terminator::BranchCmp { yes, no, .. }) => {
                     for (target_id, params) in [yes, no] {
                         let target = &self.blocks[target_id.0 as usize];
                         if target.tombstone {
