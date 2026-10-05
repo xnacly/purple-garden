@@ -82,7 +82,8 @@ fn predecessor_counts(fun: &ir::Func) -> Vec<u32> {
         match &block.term {
             Some(ir::Terminator::Jump { id, .. }) => counts[id.0 as usize] += 1,
             Some(ir::Terminator::Branch { yes, no, .. })
-            | Some(ir::Terminator::BranchCmpImm { yes, no, .. }) => {
+            | Some(ir::Terminator::BranchCmpImm { yes, no, .. })
+            | Some(ir::Terminator::BranchCmp { yes, no, .. }) => {
                 counts[yes.0.0 as usize] += 1;
                 counts[no.0.0 as usize] += 1;
             }
