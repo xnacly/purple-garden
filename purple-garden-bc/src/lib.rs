@@ -6,7 +6,7 @@ mod regalloc;
 
 use crate::{intern::Interner, regalloc::Ralloc};
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
-use purple_garden_runtime::{AllocType, BuiltinFn, DebugInfo, Value, Vm, VmConfig, op::Op};
+use purple_garden_runtime::{AllocType, BuiltinFn, DebugInfo, Value, Vm, VmConfig, op::Op, string};
 use purple_garden_shared::config::Config;
 
 #[derive(Debug, Clone)]
@@ -1172,10 +1172,42 @@ impl<'cc> Cc<'cc> {
             .unwrap_or_default();
 
         vm.bytecode = buf;
+
+        // String globals share a single allocation. Values are raw pointers into the
+        // buffer, each entry padded so the next header stays aligned.
+        let pool_bytes: usize = globals
+            .map
+            .keys()
+            .filter_map(|c| match c {
+                Const::Str(s) => Some(string::padded_size(s.len())),
+                _ => None,
+            })
+            .sum();
+        let mut pool: Vec<u8> = vec![0u8; pool_bytes];
+        let base = pool.as_mut_ptr();
+        // Empty pool is a dangling 1-aligned pointer with no readers; only
+        // check alignment when we actually hand out pointers into it.
+        debug_assert!(
+            pool_bytes == 0 || (base as usize) % string::ALIGN == 0,
+            "const_pool base must be usize-aligned (got {base:p})",
+        );
+
+        let mut offset = 0usize;
         vm.globals = globals.into_vec_map(|constant| match constant {
-            Const::Str(str) => vm.new_const_string(str.into_owned()),
+            Const::Str(s) => {
+                let value = unsafe { string::write_payload(base.add(offset), &s) };
+                offset += string::padded_size(s.len());
+                value
+            }
             constant => Value::from(constant),
         });
+        debug_assert_eq!(offset, pool_bytes);
+        // `into_boxed_slice` is zero-copy when len == capacity, which holds
+        // for `vec![0u8; n]` — so the raw `base` pointer we captured above
+        // stays valid after this move.
+        vm.const_pool = pool.into_boxed_slice();
+        debug_assert_eq!(vm.const_pool.as_ptr(), base);
+
         (
             vm,
             std_fns.into_vec(),
