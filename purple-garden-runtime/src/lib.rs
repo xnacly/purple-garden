@@ -17,6 +17,7 @@ pub mod gc;
 pub mod jit_helpers;
 /// purple garden bytecode virtual machine operations
 pub mod op;
+pub mod string;
 pub mod value;
 pub mod vm;
 

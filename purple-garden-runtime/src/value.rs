@@ -5,7 +5,7 @@ use purple_garden_ir::{
     ptype::{BoxedType, Type},
 };
 
-use crate::{AllocType, vm::Vm};
+use crate::{AllocType, string, vm::Vm};
 
 /// Raw VM word.
 ///
@@ -41,10 +41,15 @@ impl Value {
     #[must_use]
     pub fn as_str<'t>(&self) -> &'t str {
         let ptr = self.as_ptr::<u8>();
-        let len_size = std::mem::size_of::<usize>();
-        let len = unsafe { *(ptr as *const usize) };
-        let bytes = unsafe { std::slice::from_raw_parts(ptr.add(len_size), len) };
+        let len = unsafe { (*(ptr as *const string::StrHeader)).len } as usize;
+        let bytes = unsafe { std::slice::from_raw_parts(ptr.add(string::HEADER_SIZE), len) };
         unsafe { std::str::from_utf8_unchecked(bytes) }
+    }
+
+    #[inline(always)]
+    #[must_use]
+    pub fn str_hash(&self) -> u32 {
+        unsafe { (*self.as_ptr::<string::StrHeader>()).hash }
     }
 
     #[inline(always)]
