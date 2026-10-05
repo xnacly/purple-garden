@@ -455,6 +455,16 @@ impl<'cc> Cc<'cc> {
                     imm,
                     target: self.block_map[target as usize],
                 },
+                Op::JmpSEq { lhs, rhs, target } => Op::JmpSEq {
+                    lhs,
+                    rhs,
+                    target: self.block_map[target as usize],
+                },
+                Op::JmpSNe { lhs, rhs, target } => Op::JmpSNe {
+                    lhs,
+                    rhs,
+                    target: self.block_map[target as usize],
+                },
                 Op::Jmp { target } => Op::Jmp {
                     target: self.block_map[target as usize],
                 },
@@ -631,6 +641,52 @@ impl<'cc> Cc<'cc> {
         );
     }
 
+    /// Edge shuffles around a fused compare-and-branch: `ne` jumps to `no`,
+    /// `eq` to `yes`. Same fall-through fusion rule as `Branch`.
+    fn cmp_branch(
+        &mut self,
+        fun: &Func<'cc>,
+        (yes, yes_params): (ir::Id, ir::ParamsId),
+        (no, no_params): (ir::Id, ir::ParamsId),
+        next_block: Option<ir::Id>,
+        ne: Op,
+        eq: Op,
+    ) {
+        let yes_src = fun.params(yes_params);
+        let yes_dst = fun.params(fun.blocks[yes.0 as usize].params);
+        let no_src = fun.params(no_params);
+        let no_dst = fun.params(fun.blocks[no.0 as usize].params);
+
+        for (i, &param) in yes_src.iter().enumerate() {
+            let src = self.ensure_register(param);
+            let dst = self.ensure_register(yes_dst[i]);
+            if src != dst {
+                self.emit(Op::Mov { dst, src });
+            }
+        }
+
+        let no_movs_empty = no_src
+            .iter()
+            .zip(no_dst)
+            .all(|(&s, &d)| self.ensure_register(s) == self.ensure_register(d));
+
+        if Some(yes) == next_block && no_movs_empty {
+            self.emit(ne);
+        } else {
+            self.emit(eq);
+            for (i, &param) in no_src.iter().enumerate() {
+                let src = self.ensure_register(param);
+                let dst = self.ensure_register(no_dst[i]);
+                if src != dst {
+                    self.emit(Op::Mov { dst, src });
+                }
+            }
+            self.emit(Op::Jmp {
+                target: no.0 as u16,
+            });
+        }
+    }
+
     fn term(
         &mut self,
         fun: &Func<'cc>,
@@ -735,59 +791,54 @@ impl<'cc> Cc<'cc> {
                 op,
                 lhs,
                 imm,
-                yes: (yes, yes_params),
-                no: (no, no_params),
+                yes,
+                no,
                 ..
             } => {
-                let yes_target = &fun.blocks.get(yes.0 as usize).unwrap();
-                let yes_src = fun.params(*yes_params);
-                let yes_dst = fun.params(yes_target.params);
-
-                let no_target = &fun.blocks.get(no.0 as usize).unwrap();
-                let no_src = fun.params(*no_params);
-                let no_dst = fun.params(no_target.params);
-
-                for (i, &param) in yes_src.iter().enumerate() {
-                    let src = self.ensure_register(param);
-                    let dst = self.ensure_register(yes_dst[i]);
-                    if src != dst {
-                        self.emit(Op::Mov { dst, src });
-                    }
-                }
-
                 let lhs = self.ensure_register(*lhs);
-                let no_movs_empty = no_src
-                    .iter()
-                    .zip(no_dst)
-                    .all(|(&s, &d)| self.ensure_register(s) == self.ensure_register(d));
-
-                match op {
-                    ir::BinOp::IEq if Some(*yes) == next_block && no_movs_empty => {
-                        self.emit(Op::JmpNeI {
+                let (ne, eq) = match op {
+                    ir::BinOp::IEq => (
+                        Op::JmpNeI {
                             lhs,
                             imm: *imm,
-                            target: no.0 as u16,
-                        });
-                    }
-                    ir::BinOp::IEq => {
-                        self.emit(Op::JmpEqI {
+                            target: no.0.0 as u16,
+                        },
+                        Op::JmpEqI {
                             lhs,
                             imm: *imm,
-                            target: yes.0 as u16,
-                        });
-                        for (i, &param) in no_src.iter().enumerate() {
-                            let src = self.ensure_register(param);
-                            let dst = self.ensure_register(no_dst[i]);
-                            if src != dst {
-                                self.emit(Op::Mov { dst, src });
-                            }
-                        }
-                        self.emit(Op::Jmp {
-                            target: no.0 as u16,
-                        });
-                    }
+                            target: yes.0.0 as u16,
+                        },
+                    ),
                     _ => unreachable!("branch_cmp only emits supported comparison ops"),
-                }
+                };
+                self.cmp_branch(fun, *yes, *no, next_block, ne, eq);
+            }
+            ir::Terminator::BranchCmp {
+                op,
+                lhs,
+                rhs,
+                yes,
+                no,
+                ..
+            } => {
+                let lhs = self.ensure_register(*lhs);
+                let rhs = self.ensure_register(*rhs);
+                let (ne, eq) = match op {
+                    ir::BinOp::SEq => (
+                        Op::JmpSNe {
+                            lhs,
+                            rhs,
+                            target: no.0.0 as u16,
+                        },
+                        Op::JmpSEq {
+                            lhs,
+                            rhs,
+                            target: yes.0.0 as u16,
+                        },
+                    ),
+                    _ => unreachable!("branch_cmp only emits supported comparison ops"),
+                };
+                self.cmp_branch(fun, *yes, *no, next_block, ne, eq);
             }
             ir::Terminator::Tail { func, args, .. } => {
                 let Some(target) = self.functions.get(func).map(CcCallTarget::from) else {
@@ -1050,7 +1101,7 @@ impl<'cc> Cc<'cc> {
                 self.emit(emit_bins! {
                     IAdd, ISub, IMul, IDiv, IMod, ILt, IGt, IEq,
                     DAdd, DSub, DMul, DDiv, DLt, DGt,
-                    BEq
+                    BEq, SEq
                 });
             }
             ir::Instr::BinImm {
@@ -1122,7 +1173,9 @@ impl<'cc> Cc<'cc> {
                 | Op::JmpT { target, .. }
                 | Op::JmpF { target, .. }
                 | Op::JmpEqI { target, .. }
-                | Op::JmpNeI { target, .. } => {
+                | Op::JmpNeI { target, .. }
+                | Op::JmpSEq { target, .. }
+                | Op::JmpSNe { target, .. } => {
                     *target = old_to_new[*target as usize];
                 }
                 Op::Call { func } | Op::Tail { func } => {

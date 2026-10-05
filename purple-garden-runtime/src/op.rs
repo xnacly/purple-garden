@@ -135,6 +135,12 @@ pub enum Op {
         lhs: u8,
         rhs: u8,
     },
+    /// `r[dst] = r[lhs] == r[rhs]` by string content, see [`Value::str_eq`](crate::Value::str_eq).
+    SEq {
+        dst: u8,
+        lhs: u8,
+        rhs: u8,
+    },
 
     Mov {
         dst: u8,
@@ -177,6 +183,18 @@ pub enum Op {
     JmpNeI {
         lhs: u8,
         imm: i32,
+        target: u16,
+    },
+    /// Conditional jump: branch when `r[lhs] == r[rhs]` by string content.
+    JmpSEq {
+        lhs: u8,
+        rhs: u8,
+        target: u16,
+    },
+    /// Conditional jump: branch when `r[lhs] != r[rhs]` by string content.
+    JmpSNe {
+        lhs: u8,
+        rhs: u8,
         target: u16,
     },
     /// Tail call: jump to `func` (an absolute pc) without growing the

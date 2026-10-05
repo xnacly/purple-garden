@@ -135,6 +135,18 @@ impl Display for Terminator {
                 "br %v{}, b{}(params#{}), b{}(params#{})",
                 cond.0, yes.0, yes.1.0, no.0, no.1.0,
             )?,
+            Terminator::BranchCmp {
+                op,
+                lhs,
+                rhs,
+                yes,
+                no,
+                ..
+            } => write!(
+                f,
+                "br_cmp {:?} %v{}, %v{}, b{}(params#{}), b{}(params#{})",
+                op, lhs.0, rhs.0, yes.0, yes.1.0, no.0, no.1.0,
+            )?,
             Terminator::BranchCmpImm {
                 op,
                 lhs,
@@ -218,6 +230,24 @@ impl Display for Func<'_> {
                         f,
                         "\tbr %v{}, b{}({}), b{}({})",
                         cond.0,
+                        yes.0,
+                        format_ids(self.params(yes.1)),
+                        no.0,
+                        format_ids(self.params(no.1)),
+                    )?,
+                    Terminator::BranchCmp {
+                        op,
+                        lhs,
+                        rhs,
+                        yes,
+                        no,
+                        ..
+                    } => writeln!(
+                        f,
+                        "\tbr_cmp {:?} %v{}, %v{}, b{}({}), b{}({})",
+                        op,
+                        lhs.0,
+                        rhs.0,
                         yes.0,
                         format_ids(self.params(yes.1)),
                         no.0,

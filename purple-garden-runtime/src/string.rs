@@ -39,6 +39,15 @@ pub fn hash(bytes: &[u8]) -> u32 {
     (h ^ (h >> 32)) as u32
 }
 
+/// # Safety
+///
+/// `ptr` must point at a string payload.
+#[inline(always)]
+pub unsafe fn header_bits(ptr: *const u8) -> u64 {
+    const _: () = assert!(HEADER_SIZE == std::mem::size_of::<u64>());
+    unsafe { (ptr as *const u64).read_unaligned() }
+}
+
 /// Writes header and bytes of `s` to `dst` and returns the string `Value`.
 ///
 /// # Safety

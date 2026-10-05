@@ -168,7 +168,9 @@ impl<'dis> Disassembler<'dis> {
                 | Op::JmpT { target, .. }
                 | Op::JmpF { target, .. }
                 | Op::JmpEqI { target, .. }
-                | Op::JmpNeI { target, .. } => {
+                | Op::JmpNeI { target, .. }
+                | Op::JmpSEq { target, .. }
+                | Op::JmpSNe { target, .. } => {
                     let pc = *target as usize;
                     if funcs_by_pc.contains_key(&(*target as u32)) {
                         continue;
@@ -252,6 +254,7 @@ impl<'dis> Disassembler<'dis> {
                 Op::DLt { dst, lhs, rhs } => format!("dlt r{dst}, r{lhs}, r{rhs}"),
                 Op::DGt { dst, lhs, rhs } => format!("dgt r{dst}, r{lhs}, r{rhs}"),
                 Op::BEq { dst, lhs, rhs } => format!("beq r{dst}, r{lhs}, r{rhs}"),
+                Op::SEq { dst, lhs, rhs } => format!("seq r{dst}, r{lhs}, r{rhs}"),
                 Op::Mov { dst, src } => format!("mov r{dst}, r{src}"),
                 Op::LoadI { dst, value } => format!("load_imm r{dst}, #{value}"),
                 Op::LoadG { dst, idx } => format!("load_global r{dst}, {idx}"),
@@ -278,6 +281,14 @@ impl<'dis> Disassembler<'dis> {
                 ),
                 Op::JmpNeI { lhs, imm, target } => format!(
                     "jmpne_imm r{lhs}, #{imm}, {target:04x} <{}>",
+                    target_label(*target, cur_func)
+                ),
+                Op::JmpSEq { lhs, rhs, target } => format!(
+                    "jmpseq r{lhs}, r{rhs}, {target:04x} <{}>",
+                    target_label(*target, cur_func)
+                ),
+                Op::JmpSNe { lhs, rhs, target } => format!(
+                    "jmpsne r{lhs}, r{rhs}, {target:04x} <{}>",
                     target_label(*target, cur_func)
                 ),
                 Op::Call { func } => format!(

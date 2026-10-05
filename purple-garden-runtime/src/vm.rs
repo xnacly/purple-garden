@@ -378,6 +378,9 @@ impl Vm {
                     let r = r!(rhs).as_bool();
                     r_mut!(dst) = Value::from(l == r);
                 },
+                Op::SEq { dst, lhs, rhs } => unsafe {
+                    r_mut!(dst) = Value::from(r!(lhs).str_eq(r!(rhs)));
+                },
                 Op::Mov { dst, src } => unsafe {
                     r_mut!(dst) = *r!(src);
                 },
@@ -412,6 +415,18 @@ impl Vm {
                 },
                 Op::JmpNeI { lhs, imm, target } => unsafe {
                     if r!(lhs).as_int() != imm as i64 {
+                        pc = target as usize;
+                        continue;
+                    }
+                },
+                Op::JmpSEq { lhs, rhs, target } => unsafe {
+                    if r!(lhs).str_eq(r!(rhs)) {
+                        pc = target as usize;
+                        continue;
+                    }
+                },
+                Op::JmpSNe { lhs, rhs, target } => unsafe {
+                    if !r!(lhs).str_eq(r!(rhs)) {
                         pc = target as usize;
                         continue;
                     }
