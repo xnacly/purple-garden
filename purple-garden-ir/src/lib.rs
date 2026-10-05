@@ -112,6 +112,7 @@ pub enum BinOp {
     DLt,
     DGt,
     BEq,
+    SEq,
 }
 
 #[derive(Debug, Clone)]

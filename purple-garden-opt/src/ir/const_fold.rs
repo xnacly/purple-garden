@@ -245,7 +245,7 @@ fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch, previous: &[Instr<'_
                     };
                     (f64::from_bits(*lhs) > f64::from_bits(*rhs)).into()
                 }
-                BinOp::BEq => (lhs_value == rhs_value).into(),
+                BinOp::BEq | BinOp::SEq => (lhs_value == rhs_value).into(),
             };
 
             purple_garden_shared::trace!(
