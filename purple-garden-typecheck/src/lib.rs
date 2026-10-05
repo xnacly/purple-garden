@@ -291,11 +291,11 @@ impl<'a, 't> Typechecker<'a, 't> {
             },
             lex::Type::DoubleEqual | lex::Type::NotEqual => {
                 match (lhs, rhs) {
-                    (Type::Int, Type::Int) | (Type::Bool, Type::Bool) => {}
+                    (Type::Int, Type::Int) | (Type::Bool, Type::Bool) | (Type::Str, Type::Str) => {}
                     (_, _) if lhs == rhs => {
                         return Err(Diagnostic::at_token(
                             format!(
-                                "Unsupported type {} for {:?}, want Int or Bool",
+                                "Unsupported type {} for {:?}, want Int, Bool or Str",
                                 lhs,
                                 op.t.as_str()
                             ),
@@ -305,7 +305,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                     (_, _) => {
                         return Err(Diagnostic::at_token(
                             format!(
-                                "Incompatible types {} and {} for {:?}, want both sides Int or both sides Bool",
+                                "Incompatible types {} and {} for {:?}, want both sides Int, Bool or Str",
                                 lhs,
                                 rhs,
                                 op.t.as_str()
@@ -1619,8 +1619,9 @@ mod tests {
 
     #[test]
     fn generic_call_substitutes_the_return_type() {
-        let (ast, out) =
-            check(b"import \"t\"\nt.id(1)\nt.id(t.id(\"s\"))\nt.id([1 2])\nt.id({ n: 9 m: \"s\" })");
+        let (ast, out) = check(
+            b"import \"t\"\nt.id(1)\nt.id(t.id(\"s\"))\nt.id([1 2])\nt.id({ n: 9 m: \"s\" })",
+        );
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
         assert_eq!(root_type(&ast, &out, 1), Some(Type::Int));
         assert_eq!(root_type(&ast, &out, 2), Some(Type::Str));
@@ -1636,9 +1637,8 @@ mod tests {
 
     #[test]
     fn generic_result_flows_into_concrete_parameters() {
-        let (_, out) = check(
-            b"import \"t\"\nfn f(a: Array<Int>) Int { 1 }\nf(t.id([1 2]))\nf(t.id([\"s\"]))",
-        );
+        let (_, out) =
+            check(b"import \"t\"\nfn f(a: Array<Int>) Int { 1 }\nf(t.id([1 2]))\nf(t.id([\"s\"]))");
         assert_eq!(
             messages(&out),
             vec!["`f` expected a:Array<Int>, got a:Array<Str> instead"]
