@@ -110,6 +110,13 @@ pub struct Cc<'cc> {
     /// to find a free scratch register for cycle breaking.
     cur_lo: u8,
     cur_max_reg: u8,
+    /// Values with a liveness interval, ordered by def. Together with
+    /// `live_next` and `live_active` this keeps the set of values live
+    /// across a call up to date as calls are lowered in increasing `pos`,
+    /// see [`Cc::advance_live_across`].
+    live_order: Vec<u32>,
+    live_next: usize,
+    live_active: Vec<u32>,
     /// Reusable native-code buffer for the JIT, refilled per function. Empty
     /// and untouched when `--no-jit` is set.
     jit: purple_garden_jit::Jit,
@@ -249,6 +256,9 @@ impl<'cc> Cc<'cc> {
             scratch_live: Vec::new(),
             cur_lo: 0,
             cur_max_reg: 0,
+            live_order: Vec::new(),
+            live_next: 0,
+            live_active: Vec::new(),
             jit: purple_garden_jit::Jit::new(),
         }
     }
@@ -339,6 +349,13 @@ impl<'cc> Cc<'cc> {
 
         fun.arg_hints_into(&mut arg_hints);
         self.regalloc.rebuild(&live_set, &arg_hints);
+
+        self.live_order.clear();
+        self.live_order
+            .extend((0..live_set.len() as u32).filter(|&v| live_set[v as usize].0 != u32::MAX));
+        self.live_order.sort_by_key(|&v| live_set[v as usize].0);
+        self.live_next = 0;
+        self.live_active.clear();
 
         // binding the id of a function to its context
         let pc = self.buf.len();
@@ -562,6 +579,23 @@ impl<'cc> Cc<'cc> {
         }
 
         self.scratch_pairs = todo;
+    }
+
+    /// Bring `live_active` to the values live across the call at `pos`:
+    /// defined before it, used after it. Calls are lowered in increasing
+    /// `pos`, so a value enters once, in def order, and leaves for good once
+    /// its last use is behind. This replaces a scan of every value per call,
+    /// which was quadratic for functions with many calls. Sorted by id so the
+    /// spills come out in the same order as that scan.
+    fn advance_live_across(&mut self, live_set: &[(u32, u32)], pos: u32) {
+        while let Some(&v) = self.live_order.get(self.live_next)
+            && live_set[v as usize].0 < pos
+        {
+            self.live_active.push(v);
+            self.live_next += 1;
+        }
+        self.live_active.retain(|&v| pos < live_set[v as usize].1);
+        self.live_active.sort_unstable();
     }
 
     /// Push r{lo}..r{max_reg} onto the spill stack (callee-saved prologue). `lo = max(nparams, 1)`;
@@ -899,28 +933,24 @@ impl<'cc> Cc<'cc> {
                 let clobber_end = args.len().max(1) as u8;
                 self.scratch.clear();
                 self.scratch_live.clear();
-                for (v, &(def, last_use)) in live_set.iter().enumerate() {
-                    if def == u32::MAX {
-                        continue;
-                    }
-                    if def < pos && pos < last_use {
-                        let regalloc::Location::Reg(src) = self.regalloc.map[v] else {
-                            unreachable!();
-                        };
-                        if src < clobber_end {
-                            purple_garden_shared::trace!(
-                                "[bc] spilled r{} at call_idx={};def={};last_use={}",
-                                src,
-                                pos,
-                                def,
-                                last_use
-                            );
-                            self.scratch.push(src);
-                        } else {
-                            // Stays in place across the call; the shuffle
-                            // must not use it as scratch.
-                            self.scratch_live.push(src);
-                        }
+                self.advance_live_across(live_set, pos);
+                for &v in &self.live_active {
+                    let regalloc::Location::Reg(src) = self.regalloc.map[v as usize] else {
+                        unreachable!();
+                    };
+                    if src < clobber_end {
+                        purple_garden_shared::trace!(
+                            "[bc] spilled r{} at call_idx={};def={};last_use={}",
+                            src,
+                            pos,
+                            live_set[v as usize].0,
+                            live_set[v as usize].1
+                        );
+                        self.scratch.push(src);
+                    } else {
+                        // Stays in place across the call; the shuffle
+                        // must not use it as scratch.
+                        self.scratch_live.push(src);
                     }
                 }
                 pack_push(
@@ -958,21 +988,17 @@ impl<'cc> Cc<'cc> {
                 let clobber_end = args.len().max(1) as u8;
                 self.scratch.clear();
                 self.scratch_live.clear();
-                for (v, &(def, last_use)) in live_set.iter().enumerate() {
-                    if def == u32::MAX {
-                        continue;
-                    }
-                    if def < pos && pos < last_use {
-                        let regalloc::Location::Reg(src) = self.regalloc.map[v] else {
-                            unreachable!();
-                        };
-                        if src < clobber_end {
-                            self.scratch.push(src);
-                        } else {
-                            // Stays in place across the call; the shuffle
-                            // must not use it as scratch.
-                            self.scratch_live.push(src);
-                        }
+                self.advance_live_across(live_set, pos);
+                for &v in &self.live_active {
+                    let regalloc::Location::Reg(src) = self.regalloc.map[v as usize] else {
+                        unreachable!();
+                    };
+                    if src < clobber_end {
+                        self.scratch.push(src);
+                    } else {
+                        // Stays in place across the call; the shuffle
+                        // must not use it as scratch.
+                        self.scratch_live.push(src);
                     }
                 }
                 pack_push(
