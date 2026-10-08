@@ -506,7 +506,9 @@ impl Vm {
                     pc = func as usize;
                     continue;
                 }
-                Op::Sys { idx } => unsafe {
+                Op::Sys { idx, argc } => unsafe {
+                    #[cfg(not(debug_assertions))]
+                    let _ = argc;
                     #[cfg(debug_assertions)]
                     let pre_sys: [Value; REGISTER_COUNT] = self.r;
 
@@ -518,10 +520,11 @@ impl Vm {
                     (*syscalls.add(idx as usize))((self as *mut Vm).cast());
 
                     #[cfg(debug_assertions)]
-                    for (i, pre) in pre_sys.iter().enumerate().skip(1) {
+                    for (i, pre) in pre_sys.iter().enumerate().skip(usize::from(argc.max(1))) {
                         debug_assert_eq!(
                             pre.0, self.r[i].0,
-                            "syscall idx={idx} wrote r{i}; convention only permits writes to r0"
+                            "syscall idx={idx} wrote r{i}; convention only permits writes to r0..r{}",
+                            argc.max(1) - 1
                         );
                     }
 
@@ -791,7 +794,11 @@ mod ops {
         SIDE_EFFECTS.store(0, Ordering::SeqCst);
 
         let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = vec![Op::Sys { idx: 0 }, Op::Sys { idx: 1 }, Op::Halt];
+        vm.bytecode = vec![
+            Op::Sys { idx: 0, argc: 0 },
+            Op::Sys { idx: 1, argc: 0 },
+            Op::Halt,
+        ];
         let err = vm
             .run::<false>(&[trap_syscall, side_effect_syscall])
             .expect_err("trapping syscall should stop execution");

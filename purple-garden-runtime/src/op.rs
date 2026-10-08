@@ -267,8 +267,11 @@ pub enum Op {
     /// Invoke syscall. `idx` is the index into [`Vm::syscalls`]. See
     /// [`crate::BuiltinFn`] for the syscall calling convention. It matches
     /// [`Op::Call`]: args in `r0..r{argcount-1}`, result written to `r0`.
+    /// Call builtin `idx` with its `argc` arguments in `r0..argc`; it may
+    /// write `r0..max(argc, 1)`, the registers the caller spilled.
     Sys {
         idx: u16,
+        argc: u8,
     },
     /// Push `src` onto [`Vm::spilled`]. Used both for caller-save spill
     /// around [`Op::Call`] / [`Op::Sys`] and for cycle-breaking inside

@@ -307,7 +307,7 @@ impl<'dis> Disassembler<'dis> {
                     "call {func:04x} <{}>",
                     funcs_by_pc.get(func).unwrap().name()
                 ),
-                Op::Sys { idx } => format!(
+                Op::Sys { idx, .. } => format!(
                     "sys {idx} <{}>",
                     native_names
                         .get(idx)
