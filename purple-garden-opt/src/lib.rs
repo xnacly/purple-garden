@@ -25,11 +25,13 @@ pub fn ir(ir: &mut [purple_garden_ir::Func]) {
         // Order: after branch_cmp, it folds the BranchCmp/BranchCmpImm chains
         // branch_cmp produces.
         ir::switch_fold(fun, &mut scratch);
-        ir::indirect_jump(fun);
 
-        // Order: before tailcall, so a Call-then-Jump-to-Ret-join pattern
-        // becomes a direct Return that tailcall then picks up as Pattern A.
+        // Order: before indirect_jump, which would otherwise thread a jump to a
+        // ret-only join into the branch and leave the join alive. Before
+        // tailcall, so a Call-then-Jump-to-Ret-join pattern becomes a direct
+        // Return that tailcall then picks up as Pattern A.
         ir::ret_inline(fun);
+        ir::indirect_jump(fun);
         ir::tailcall(fun);
         ir::addrof_fold(fun, &mut scratch);
         ir::load_store_fold(fun);
