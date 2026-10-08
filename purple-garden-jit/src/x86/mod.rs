@@ -303,6 +303,32 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     /// Emit the body, ending where the epilogue is appended. Returns whether
     /// it calls helpers, `None` if the function can't be compiled.
     fn lower(mut self) -> Option<bool> {
+        // Native calls recurse on the machine stack: trap like the interpreter
+        // before running off its end.
+        let calls_native = self
+            .func
+            .blocks
+            .iter()
+            .filter(|b| !b.tombstone)
+            .flat_map(|b| &b.instructions)
+            .any(|i| matches!(i, ir::Instr::Call { .. }));
+        if calls_native {
+            self.emit(Insn::CmpMem {
+                reg: RSP,
+                base: VM,
+                offset: purple_garden_runtime::NATIVE_STACK_LIMIT_OFFSET as u32,
+            });
+            let fine = encode::jump(self.out, Cond::AboveEq);
+            self.call(
+                purple_garden_runtime::jit_trap_stack_overflow as *const () as u64,
+                &[AbiArg::Reg(VM)],
+                None,
+            );
+            self.jump(Cond::Always, Target::Epilogue);
+            let resume = self.out.len();
+            patch_rel32(self.out, fine, fine + 4, resume).expect("short forward jump");
+        }
+
         // Args arrive in the VM register file: param i in vm.r[i].
         for (slot, &param) in self.func.params.iter().enumerate() {
             let used = self
@@ -1076,10 +1102,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             &[AbiArg::Reg(VM), AbiArg::Imm(f as usize as u64)],
             None,
         );
-        self.emit(Insn::Test {
-            lhs: RAX,
-            rhs: RAX,
-        });
+        self.emit(Insn::Test { lhs: RAX, rhs: RAX });
         self.jump(Cond::NotZero, Target::Epilogue);
         self.restore(saves);
         let dst = self.def(dst, self.pos + 1);

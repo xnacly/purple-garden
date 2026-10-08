@@ -20,6 +20,17 @@ pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) {
     vm.trap(Anomaly::DivisionByZero { pc: vm.pc });
 }
 
+/// Raise a stack overflow from JIT code that reached
+/// [`Vm::native_stack_limit`].
+///
+/// # Safety
+///
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
+pub unsafe extern "C" fn jit_trap_stack_overflow(vm: *mut c_void) {
+    let vm = unsafe { &mut *vm.cast::<Vm>() };
+    vm.trap(Anomaly::StackOverflow { pc: vm.pc });
+}
+
 /// Call the builtin `f` from JIT code, reporting whether it trapped: the
 /// native code then returns, so the interpreter surfaces the trap.
 ///

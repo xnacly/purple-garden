@@ -185,6 +185,12 @@ pub enum Insn {
         lhs: Reg,
         rhs: Reg,
     },
+    /// `cmp r{reg}, [r{base} + offset]`
+    CmpMem {
+        reg: Reg,
+        base: Reg,
+        offset: u32,
+    },
     /// `test r{lhs}, r{rhs}`
     Test {
         lhs: Reg,
@@ -267,6 +273,8 @@ impl Insn {
             Insn::LoadMem { dst, base, offset } => mem_disp(code, 0x8b, dst.0, base.0, offset),
             Insn::StoreMem { base, offset, src } => mem_disp(code, 0x89, src.0, base.0, offset),
             Insn::LeaMem { dst, base, offset } => mem_disp(code, 0x8d, dst.0, base.0, offset),
+            // 0x3b = `cmp r64, r/m64`.
+            Insn::CmpMem { reg, base, offset } => mem_disp(code, 0x3b, reg.0, base.0, offset),
             // 0x89 = `mov r/m64, r64`.
             // ModRM.reg encodes src; ModRM.r/m encodes dst.
             Insn::Mov { dst, src } => reg_reg(code, 0x89, src.0, dst.0),
@@ -408,6 +416,9 @@ impl fmt::Display for Insn {
             Insn::AndImm { dst, imm } => write!(f, "and {}, {imm}", dst),
             Insn::CmpImm { reg, imm } => write!(f, "cmp {}, {imm}", reg),
             Insn::Cmp { lhs, rhs } => write!(f, "cmp {}, {}", lhs, rhs),
+            Insn::CmpMem { reg, base, offset } => {
+                write!(f, "cmp {}, [{}+{:#x}]", reg, base, offset)
+            }
             Insn::Test { lhs, rhs } => write!(f, "test {}, {}", lhs, rhs),
             Insn::Sete { dst } => write!(f, "sete {}b", dst),
             Insn::Setl { dst } => write!(f, "setl {}b", dst),
@@ -581,6 +592,22 @@ mod tests {
     fn compare_and_imul_imm_encodings() {
         use super::{R8, R9, R10, RAX, RCX, RSI};
 
+        assert_eq!(
+            enc(Insn::CmpMem {
+                reg: super::RSP,
+                base: super::RDI,
+                offset: 0x40
+            }),
+            [0x48, 0x3b, 0x67, 0x40]
+        ); // cmp rsp,[rdi+0x40]
+        assert_eq!(
+            enc(Insn::CmpMem {
+                reg: super::RSP,
+                base: super::RDI,
+                offset: 0x280
+            }),
+            [0x48, 0x3b, 0xa7, 0x80, 0x02, 0x00, 0x00]
+        ); // cmp rsp,[rdi+0x280]
         assert_eq!(enc(Insn::Setl { dst: RSI }), [0x40, 0x0f, 0x9c, 0xc6]); // setl sil
         assert_eq!(enc(Insn::Setg { dst: R8 }), [0x41, 0x0f, 0x9f, 0xc0]); // setg r8b
         assert_eq!(enc(Insn::Sete { dst: RSI }), [0x40, 0x0f, 0x94, 0xc6]); // sete sil

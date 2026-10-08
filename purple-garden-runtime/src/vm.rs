@@ -72,6 +72,9 @@ pub unsafe extern "C" fn syscall_unimplemented(vm: *mut c_void) {
     vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
 }
 
+/// Where JIT code reads [`Vm::native_stack_limit`] from the vm pointer.
+pub const NATIVE_STACK_LIMIT_OFFSET: usize = std::mem::offset_of!(Vm, native_stack_limit);
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct Vm {
@@ -104,6 +107,9 @@ pub struct Vm {
     /// A trap raised by a syscall via [`Vm::trap`]. Checked at each [`Op::Ret`]
     /// so the `Op::Sys` hot path stays branch-free.
     pub pending_trap: Option<Anomaly>,
+    /// Native code traps instead of growing its stack below this, see
+    /// [`NATIVE_STACK_LIMIT_OFFSET`]. 0 disables the check.
+    pub native_stack_limit: usize,
 
     pub config: VmConfig,
     /// Called when allocation wants to run a collection pass.
@@ -147,6 +153,7 @@ impl Vm {
             backtrace: Vec::new(),
             spilled: Vec::with_capacity(4096),
             pending_trap: None,
+            native_stack_limit: 0,
             config,
             collect_fn: collect,
         }
@@ -179,6 +186,10 @@ impl Vm {
         self.spilled.clear();
         self.backtrace.clear();
         self.pending_trap = None;
+        // Room for builtins and the trap path once native code hits the limit.
+        const MARGIN: usize = 256 << 10;
+        self.native_stack_limit =
+            purple_garden_shared::stack::thread_stack_low().map_or(0, |low| low + MARGIN);
     }
 
     fn collect(&mut self) {
@@ -522,7 +533,8 @@ impl Vm {
                     #[cfg(debug_assertions)]
                     for (i, pre) in pre_sys.iter().enumerate().skip(usize::from(argc.max(1))) {
                         debug_assert_eq!(
-                            pre.0, self.r[i].0,
+                            pre.0,
+                            self.r[i].0,
                             "syscall idx={idx} wrote r{i}; convention only permits writes to r0..r{}",
                             argc.max(1) - 1
                         );

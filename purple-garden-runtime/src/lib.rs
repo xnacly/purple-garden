@@ -25,12 +25,14 @@ pub const REGISTER_COUNT: usize = 64;
 
 pub use crate::anomaly::Anomaly;
 pub use crate::gc::{AllocType, Gc, Metadata};
-pub use crate::jit_helpers::{jit_alloc, jit_sys, jit_trap_div_zero};
+pub use crate::jit_helpers::{jit_alloc, jit_sys, jit_trap_div_zero, jit_trap_stack_overflow};
 pub use crate::value::{
     FromVm, IntoVm, PgType, Slot, Value, alloc_record, copy_record, decode_record_field,
     encode_record_field,
 };
-pub use crate::vm::{CallFrame, DebugInfo, Vm, VmConfig, syscall_unimplemented};
+pub use crate::vm::{
+    CallFrame, DebugInfo, NATIVE_STACK_LIMIT_OFFSET, Vm, VmConfig, syscall_unimplemented,
+};
 
 /// Compatibility namespace used by embedding macros.
 #[doc(hidden)]
