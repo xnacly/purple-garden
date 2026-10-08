@@ -8,6 +8,7 @@ use std::ffi::c_void;
 )))]
 compile_error!("purple-garden-shared currently supports only Linux or macOS on x86_64 or aarch64");
 
+pub mod ansi;
 pub mod config;
 pub mod mmap;
 

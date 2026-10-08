@@ -1,29 +1,10 @@
-use std::collections::HashMap;
-use std::io::IsTerminal;
-
 use purple_garden_ir::Id;
 use purple_garden_runtime::{BuiltinFn, op::Op};
+use purple_garden_shared::ansi::{
+    ADDR, BLOCK, COMMENT, FLOW, FUNC, IMM, LABEL, MNEM, REG, SECTION, paint,
+};
 use purple_garden_std as pstd;
-
-// ANSI SGR codes, applied only when stdout is a tty and NO_COLOR is unset.
-const ADDR: &str = "90"; // gray   - pc / addresses
-const MNEM: &str = "36"; // cyan   - data mnemonics
-const FLOW: &str = "1;35"; // magenta - control-flow mnemonics
-const REG: &str = "32"; // green  - registers
-const IMM: &str = "33"; // yellow - immediates
-const LABEL: &str = "94"; // blue   - jump targets / symbols
-const COMMENT: &str = "90"; // gray   - source/value annotations
-const FUNC: &str = "1;33"; // bold yellow - function headers
-const BLOCK: &str = "1;94"; // bold blue   - basic-block labels
-const SECTION: &str = "1"; // bold        - section headers
-
-fn paint(on: bool, code: &str, s: &str) -> String {
-    if on {
-        format!("\x1b[{code}m{s}\x1b[0m")
-    } else {
-        s.to_string()
-    }
-}
+use std::collections::HashMap;
 
 /// classifies a single operand token (`r3`, `#5`, `000d`, ...) and wraps it.
 fn paint_token(on: bool, tok: &str) -> String {
@@ -216,7 +197,7 @@ impl<'dis> Disassembler<'dis> {
             }
         };
 
-        let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+        let color = purple_garden_shared::ansi::enabled();
 
         if !globals.is_empty() {
             println!("{}", paint(color, SECTION, "globals:"));
@@ -390,7 +371,7 @@ impl<'dis> Disassembler<'dis> {
     }
 
     pub fn disassemble_native(&self) {
-        let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+        let color = purple_garden_shared::ansi::enabled();
         let mut base = 0usize;
 
         for (name, code) in self.cc.native_code.as_deref().unwrap_or_default() {
