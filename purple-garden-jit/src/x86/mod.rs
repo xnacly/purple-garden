@@ -171,6 +171,9 @@ struct Patch {
     /// Offset of the rel32 displacement in the body.
     rel: usize,
     target: Target,
+    /// Body offset the displacement counts from: the end of the instruction
+    /// for jumps, the table start for switch table entries.
+    from: usize,
 }
 
 /// Reusable lowering allocation storage
@@ -539,7 +542,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                         let nonzero = encode::jump(self.out, Cond::NotZero);
                         self.trap_div_zero();
                         let resume = self.out.len();
-                        patch_rel32(self.out, nonzero, resume).expect("short forward jump");
+                        patch_rel32(self.out, nonzero, nonzero + 4, resume)
+                            .expect("short forward jump");
                         self.div(*op, dst.id, lhs, Divisor::Reg(rhs));
                     }
                     _ => bail!(self, "unsupported bin op {op:?}"),
@@ -854,7 +858,11 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
 
     fn jump(&mut self, cond: Cond, target: Target) {
         let rel = encode::jump(self.out, cond);
-        self.patches.push(Patch { rel, target });
+        self.patches.push(Patch {
+            rel,
+            target,
+            from: rel + 4,
+        });
     }
 
     /// Resolve every jump. The body ends where the epilogue is appended, so a
@@ -869,13 +877,13 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         }
         let end = self.out.len();
         for i in 0..self.patches.len() {
-            let Patch { rel, target } = self.patches[i];
+            let Patch { rel, target, from } = self.patches[i];
             let offset = match target {
                 Target::Epilogue => end,
                 // A block that started at the dropped jump now starts at the epilogue.
                 Target::Block(id) => self.block_offsets[id.0 as usize].min(end),
             };
-            if patch_rel32(self.out, rel, offset).is_none() {
+            if patch_rel32(self.out, rel, from, offset).is_none() {
                 bail!(self, "jump out of rel32 range");
             }
         }

@@ -82,12 +82,12 @@ pub fn jump(code: &mut Vec<u8>, cond: Cond) -> usize {
     rel
 }
 
-/// Point the rel32 at `rel` to `target`. x86 displacements are relative to
-/// the end of the instruction, which is the end of the displacement here.
-pub fn patch_rel32(code: &mut [u8], rel: usize, target: usize) -> Option<()> {
-    let next = rel + 4;
-    let disp = i32::try_from(target as isize - next as isize).ok()?;
-    code[rel..next].copy_from_slice(&disp.to_le_bytes());
+/// Point the rel32 at `rel` to `target`, as a distance from `from`. For a
+/// jump that is the end of the instruction, `rel + 4`, as x86 counts
+/// displacements from there.
+pub fn patch_rel32(code: &mut [u8], rel: usize, from: usize, target: usize) -> Option<()> {
+    let disp = i32::try_from(target as isize - from as isize).ok()?;
+    code[rel..rel + 4].copy_from_slice(&disp.to_le_bytes());
     Some(())
 }
 
