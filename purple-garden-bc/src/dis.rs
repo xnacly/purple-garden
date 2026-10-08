@@ -278,6 +278,19 @@ impl<'dis> Disassembler<'dis> {
                     "jmpsne r{lhs}, r{rhs}, {target:04x} <{}>",
                     target_label(*target, cur_func)
                 ),
+                Op::Lookup {
+                    kind,
+                    dst,
+                    subject,
+                    table,
+                } => format!(
+                    "lookup.{} r{dst}, r{subject}, {} slots",
+                    match kind {
+                        SwitchKind::Str => "str",
+                        SwitchKind::Int => "int",
+                    },
+                    unsafe { table.as_ref() }.values.len()
+                ),
                 Op::Switch {
                     kind,
                     subject,

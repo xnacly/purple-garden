@@ -11,6 +11,15 @@ pub enum SwitchKind {
     Int,
 }
 
+/// The value table of an [`Op::Lookup`], owned by [`crate::vm::Vm::lookup_tables`].
+#[derive(Debug, Clone)]
+pub struct LookupTable {
+    pub first: u64,
+    /// A value per slot, slots without a key hold `default`.
+    pub values: Box<[crate::Value]>,
+    pub default: crate::Value,
+}
+
 /// The jump table of an [`Op::Switch`], owned by [`crate::vm::Vm::switch_tables`]
 /// so the op can point at it while staying `Copy`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,6 +233,14 @@ pub enum Op {
         kind: SwitchKind,
         subject: u8,
         table: NonNull<SwitchTable>,
+    },
+    /// `r[dst] = table.values[slot]`, slot as for [`Op::Switch`];
+    /// `table.default` when `slot` is out of range.
+    Lookup {
+        kind: SwitchKind,
+        dst: u8,
+        subject: u8,
+        table: NonNull<LookupTable>,
     },
     /// Tail call: jump to `func` (an absolute pc) without growing the
     /// callstack. Same calling convention as [`Op::Call`].

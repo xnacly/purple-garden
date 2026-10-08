@@ -1,7 +1,7 @@
 use crate::{
     Anomaly, BuiltinFn, DEFAULT_STACK_SIZE, MIB, REGISTER_COUNT, Value,
     gc::{AllocType, Gc},
-    op::{Op, SwitchKind, SwitchTable},
+    op::{LookupTable, Op, SwitchKind, SwitchTable},
     string,
 };
 use std::{alloc::Layout, ffi::c_void};
@@ -87,6 +87,8 @@ pub struct Vm {
     pub globals: Vec<Value>,
     /// Owns the tables [`Op::Switch`] points into; boxed so they stay put.
     pub switch_tables: Vec<Box<SwitchTable>>,
+    /// Owns the tables [`Op::Lookup`] points into.
+    pub lookup_tables: Vec<Box<LookupTable>>,
     pub gc: Gc,
 
     /// Backing storage for string constants emitted by the compiler.
@@ -138,6 +140,7 @@ impl Vm {
             bytecode: Vec::new(),
             globals: Vec::new(),
             switch_tables: Vec::new(),
+            lookup_tables: Vec::new(),
             gc: Gc::new(),
             const_pool: Box::new([]),
             strings: string::StrTable::default(),
@@ -466,6 +469,20 @@ impl Vm {
                         pc = target as usize;
                         continue;
                     }
+                },
+                Op::Lookup {
+                    kind,
+                    dst,
+                    subject,
+                    table,
+                } => unsafe {
+                    let table = table.as_ref();
+                    let offset = r!(subject).0.wrapping_sub(table.first);
+                    let slot = match kind {
+                        SwitchKind::Str => offset / string::ALIGN as u64,
+                        SwitchKind::Int => offset,
+                    };
+                    r_mut!(dst) = *table.values.get(slot as usize).unwrap_or(&table.default);
                 },
                 Op::Call { func } => {
                     if BACKTRACE {
@@ -937,6 +954,41 @@ mod ops {
         assert_eq!(switch(SwitchKind::Str, key(0), key(slot)), -1);
         assert_eq!(switch(SwitchKind::Str, key(0), key(3 * slot)), -1);
         assert_eq!(switch(SwitchKind::Str, key(slot), key(0)), -1);
+    }
+
+    #[test]
+    fn lookup_takes_the_default_outside_its_keys() {
+        let lookup = |subject: i64| {
+            let mut vm = Vm::new(VmConfig::default());
+            vm.lookup_tables.push(Box::new(LookupTable {
+                first: Value::from(-1_i64).0,
+                values: Box::new([
+                    Value::from(10_i64),
+                    Value::from(-1_i64),
+                    Value::from(30_i64),
+                ]),
+                default: Value::from(-1_i64),
+            }));
+            let table = std::ptr::NonNull::from(&*vm.lookup_tables[0]);
+            vm.globals.push(Value::from(subject));
+            vm.bytecode = vec![
+                Op::LoadG { dst: 0, idx: 0 },
+                Op::Lookup {
+                    kind: SwitchKind::Int,
+                    dst: 1,
+                    subject: 0,
+                    table,
+                },
+                Op::Halt,
+            ];
+            vm.run::<false>(&[]).unwrap();
+            vm.r(1).as_int()
+        };
+        assert_eq!(lookup(-1), 10);
+        assert_eq!(lookup(1), 30);
+        assert_eq!(lookup(0), -1);
+        assert_eq!(lookup(2), -1);
+        assert_eq!(lookup(-2), -1);
     }
 
     #[test]
