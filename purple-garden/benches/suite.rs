@@ -36,6 +36,7 @@ fn programs() -> Vec<(String, Vec<u8>)> {
 
 fn cfg() -> Config {
     let mut c = Config::default();
+    c.opt = 0;
     c.no_jit = true;
     c
 }

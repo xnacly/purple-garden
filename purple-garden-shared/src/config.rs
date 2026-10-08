@@ -15,7 +15,7 @@ pub struct Config {
     /// O2  Whole-function optimization.
     ///
     /// O3  Aggressive optimization prioritizing runtime performance.
-    #[cfg_attr(feature = "cli", arg(short = 'O', default_value_t = 1))]
+    #[cfg_attr(feature = "cli", arg(short = 'O', default_value_t = Config::default().opt))]
     pub opt: usize,
 
     /// Dump generated code.
@@ -55,7 +55,7 @@ impl Config {
     #[must_use]
     pub const fn default() -> Self {
         Config {
-            opt: 0,
+            opt: 1,
             disassemble: 0,
             backtrace: false,
             no_gc: false,
