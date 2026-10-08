@@ -24,7 +24,8 @@ fn examples() -> Vec<(String, Vec<u8>)> {
 }
 
 fn run_source(name: &str, input: &[u8]) {
-    let config = Config::default();
+    let mut config = Config::default();
+    config.opt = 0;
     let mut program = purple_garden::Pg::new()
         .with_stdlib()
         .with_unsafe_stdlib()
