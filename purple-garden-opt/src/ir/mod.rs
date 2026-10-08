@@ -13,6 +13,7 @@ mod indirect_jump;
 mod load_store_fold;
 mod ret_inline;
 mod switch_fold;
+mod switch_lookup;
 mod tailcall;
 
 use purple_garden_ir::{self as ir, Id};
@@ -162,4 +163,5 @@ pub use indirect_jump::indirect_jump;
 pub use load_store_fold::load_store_fold;
 pub use ret_inline::ret_inline;
 pub use switch_fold::switch_fold;
+pub use switch_lookup::switch_lookup;
 pub use tailcall::tailcall;
