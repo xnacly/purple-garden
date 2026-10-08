@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ptr::NonNull};
 
 pub mod dis;
 mod intern;
@@ -6,7 +6,11 @@ mod regalloc;
 
 use crate::{intern::Interner, regalloc::Ralloc};
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
-use purple_garden_runtime::{AllocType, BuiltinFn, DebugInfo, Value, Vm, VmConfig, op::Op, string};
+use purple_garden_runtime::{
+    AllocType, BuiltinFn, DebugInfo, Value, Vm, VmConfig,
+    op::{Op, SwitchKind, SwitchTable},
+    string,
+};
 use purple_garden_shared::config::Config;
 
 #[derive(Debug, Clone)]
@@ -82,6 +86,9 @@ pub struct Cc<'cc> {
     /// tombstoned blocks). Block ids are dense per-function so a Vec
     /// indexed by id beats a `HashMap` on both alloc cost and lookup speed.
     block_map: Vec<u16>,
+    /// Tables of the emitted [`Op::Switch`]es. Targets are block ids until the
+    /// end of [`Cc::cc`] maps them to pcs, like jump targets.
+    pub switch_tables: Vec<Box<SwitchTable>>,
     regalloc: Ralloc,
     /// Set once per IR Instr / Terminator before lowering, consumed by
     /// every `emit` call within that lowering. Saves threading a span
@@ -255,6 +262,7 @@ impl<'cc> Cc<'cc> {
             const_pool: Box::new([]),
             str_values: Vec::new(),
             block_map: Vec::new(),
+            switch_tables: Vec::new(),
             regalloc: Ralloc::default(),
             cur_span: 0,
             live_set: Vec::new(),
@@ -323,6 +331,18 @@ impl<'cc> Cc<'cc> {
                         && !self.globals.map.contains_key(value)
                     {
                         strs.push((self.intern(value), s));
+                    }
+                }
+                // switch_fold dropped the LoadConsts of a string switch's keys,
+                // they only live in its cases now. Lay them out too, back to
+                // back, so the switch's jump table has few holes.
+                if let Some(ir::Terminator::Switch { cases, .. }) = &block.term {
+                    for case in func.cases(*cases) {
+                        if let Const::Str(s) = &case.key
+                            && !self.globals.map.contains_key(&case.key)
+                        {
+                            strs.push((self.intern(&case.key), s));
+                        }
                     }
                 }
             }
@@ -405,6 +425,7 @@ impl<'cc> Cc<'cc> {
 
         // binding the id of a function to its context
         let pc = self.buf.len();
+        let tables = self.switch_tables.len();
         self.functions
             .insert(fun.id, CcFunc::Bc { pc, name: fun.name });
 
@@ -516,6 +537,11 @@ impl<'cc> Cc<'cc> {
                 },
                 other => other,
             };
+        }
+        for table in &mut self.switch_tables[tables..] {
+            for target in &mut table.targets {
+                *target = self.block_map[*target as usize];
+            }
         }
 
         purple_garden_shared::trace!("[bc::Cc::cc][{}] size={}", fun.name, self.buf.len() - pc);
@@ -889,17 +915,60 @@ impl<'cc> Cc<'cc> {
                 };
                 self.cmp_branch(fun, *yes, *no, next_block, ne, eq);
             }
-            ir::Terminator::Switch { .. } => todo!("lower Switch, see opt::ir::switch_fold"),
+            ir::Terminator::Switch {
+                subject,
+                cases,
+                default,
+                ..
+            } => {
+                let subject = self.ensure_register(*subject);
+                let cases = fun.cases(*cases);
+                let default = default.0.0 as u16;
+                let block = |case: &ir::Case| case.target.0.0 as u16;
+
+                // Strings are interned, so a string key is its address in the
+                // pool, where strings sit ALIGN bytes apart.
+                let (kind, step) = match cases[0].key {
+                    Const::Str(_) => (SwitchKind::Str, string::ALIGN as i64),
+                    _ => (SwitchKind::Int, 1),
+                };
+                let key = |case: &ir::Case| match &case.key {
+                    Const::Str(_) => self.str_values[self.globals.map[&case.key] as usize].0 as i64,
+                    Const::Int(v) => *v,
+                    _ => unreachable!("switch_fold only folds Str and Int keys"),
+                };
+                let first = cases.iter().map(key).min().unwrap();
+                let slot = |case: &ir::Case| ((key(case) - first) / step) as usize;
+                let len = cases.iter().map(slot).max().unwrap() + 1;
+
+                let mut targets = vec![default; len].into_boxed_slice();
+                for case in cases {
+                    targets[slot(case)] = block(case);
+                }
+                let table = Box::new(SwitchTable {
+                    first: first as u64,
+                    targets,
+                });
+                let ptr = NonNull::from(&*table);
+                self.switch_tables.push(table);
+                self.emit(Op::Switch {
+                    kind,
+                    subject,
+                    table: ptr,
+                });
+
+                if Some(ir::Id(u32::from(default))) != next_block {
+                    self.emit(Op::Jmp { target: default });
+                }
+            }
             ir::Terminator::Tail { func, args, .. } => {
                 let Some(target) = self.functions.get(func).map(CcCallTarget::from) else {
                     unreachable!();
                 };
 
-                // If the tail target needs a wider argument zone than this
-                // function owns, the shuffle would write into registers that
-                // this function still owes back to its caller. Fall back to a
-                // normal call so the epilogue can restore them after the
-                // callee returns.
+                // If the tail target needs a wider argument zone than this the shuffle would write
+                // into registers that this function still owes back to its caller. Fall back to a
+                // normal call so the epilogue can restore them after the callee returns.
                 let tail_clobbers_callee_saved = args.len() as u8 > lo;
                 // Nothing outlives a tail call, so no register is off-limits.
                 self.emit_arg_shuffle(args, &[]);
@@ -1242,6 +1311,12 @@ impl<'cc> Cc<'cc> {
         bc.truncate(w);
         self.pc_to_span.truncate(w);
 
+        for table in &mut self.switch_tables {
+            for target in &mut table.targets {
+                *target = old_to_new[*target as usize];
+            }
+        }
+
         for f in self.functions.values_mut() {
             if let CcFunc::Bc { pc, .. } = f {
                 *pc = old_to_new[*pc] as usize;
@@ -1261,6 +1336,7 @@ impl<'cc> Cc<'cc> {
             mut pc_to_span,
             const_pool,
             str_values,
+            switch_tables,
             ..
         } = self;
 
@@ -1277,6 +1353,7 @@ impl<'cc> Cc<'cc> {
             .unwrap_or_default();
 
         vm.bytecode = buf;
+        vm.switch_tables = switch_tables;
 
         debug_assert_eq!(
             globals
@@ -1333,6 +1410,20 @@ mod tests {
     use ir::BinOp;
     use ir::{Block, EMPTY_PARAMS, Instr, Terminator, ptype::Type};
     use std::alloc::Layout;
+
+    #[test]
+    fn compact_nops_remaps_switch_targets() {
+        let mut cc = Cc::new();
+        cc.buf = vec![Op::Nop, Op::Halt, Op::Nop, Op::Ret];
+        cc.pc_to_span = vec![0; cc.buf.len()];
+        cc.switch_tables.push(Box::new(SwitchTable {
+            first: 0,
+            targets: Box::new([1, 3]),
+        }));
+        cc.compact_nops();
+        assert_eq!(cc.buf, [Op::Halt, Op::Ret]);
+        assert_eq!(&*cc.switch_tables[0].targets, [0, 1]);
+    }
 
     fn type_id(id: u32, ty: Type<'static>) -> TypeId<'static> {
         TypeId { id: Id(id), ty }
