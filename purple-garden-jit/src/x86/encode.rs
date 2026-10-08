@@ -222,6 +222,12 @@ pub enum Insn {
         base: Reg,
         index: Reg,
     },
+    /// `mov r{dst}, qword [r{base} + r{index}*8]`; load a value table entry.
+    LoadScaled8 {
+        dst: Reg,
+        base: Reg,
+        index: Reg,
+    },
     /// `jmp r{reg}`
     JmpReg {
         reg: Reg,
@@ -332,20 +338,12 @@ impl Insn {
                 code.extend_from_slice(&[rex(dst.0, 0), 0x8d, ((dst.0 & 7) << 3) | 0b101]);
                 code.extend_from_slice(&disp.to_le_bytes());
             }
-            // REX.W 0x63 /r = `movsxd r64, r/m32`. ModRM r/m=100 means a SIB
-            // byte follows: scale=10 (*4), index, base. The index register's
-            // high bit is REX.X, which [`rex`] doesn't set. A base with low
-            // bits 101 (rbp/r13) and mod=00 would mean "no base, disp32", so
-            // those take mod=01 with a zero disp8.
+            // REX.W 0x63 /r = `movsxd r64, r/m32`, see [`scaled`] for the SIB form.
             Insn::LoadI32Scaled { dst, base, index } => {
-                let rex = rex(dst.0, base.0) | (u8::from(index.0 >= 8) << 1);
-                let mode = if base.0 & 7 == 0b101 { 0x40 } else { 0x00 };
-                let sib = 0x80 | ((index.0 & 7) << 3) | (base.0 & 7);
-                code.extend_from_slice(&[rex, 0x63, mode | ((dst.0 & 7) << 3) | 0b100, sib]);
-                if mode == 0x40 {
-                    code.push(0);
-                }
+                scaled(code, 0x63, 0b10, dst, base, index);
             }
+            // REX.W 0x8b /r = `mov r64, r/m64`, same SIB form with scale=11 (*8).
+            Insn::LoadScaled8 { dst, base, index } => scaled(code, 0x8b, 0b11, dst, base, index),
             // 0xff /4 = `jmp r/m64`, the indirect sibling of `call r/m64`.
             Insn::JmpReg { reg } => {
                 if reg.0 >= 8 {
@@ -402,6 +400,9 @@ impl fmt::Display for Insn {
             Insn::LeaRip { dst, disp } => write!(f, "lea {}, [rip+{disp:#x}]", dst),
             Insn::LoadI32Scaled { dst, base, index } => {
                 write!(f, "movsxd {}, dword [{}+{}*4]", dst, base, index)
+            }
+            Insn::LoadScaled8 { dst, base, index } => {
+                write!(f, "mov {}, qword [{}+{}*8]", dst, base, index)
             }
             Insn::JmpReg { reg } => write!(f, "jmp {}", reg),
             Insn::Cqo => write!(f, "cqo"),
@@ -515,6 +516,20 @@ fn mem_disp(code: &mut Vec<u8>, opcode: u8, reg: u8, base: u8, offset: u32) {
     }
 }
 
+/// `opcode r64, [base + index*(1 << scale)]`: ModRM r/m=100 means a SIB byte
+/// follows. The index register's high bit is REX.X, which [`rex`] doesn't set.
+/// A base with low bits 101 (rbp/r13) and mod=00 would mean "no base, disp32",
+/// so those take mod=01 with a zero disp8.
+fn scaled(code: &mut Vec<u8>, opcode: u8, scale: u8, dst: Reg, base: Reg, index: Reg) {
+    let rex = rex(dst.0, base.0) | (u8::from(index.0 >= 8) << 1);
+    let mode = if base.0 & 7 == 0b101 { 0x40 } else { 0x00 };
+    let sib = (scale << 6) | ((index.0 & 7) << 3) | (base.0 & 7);
+    code.extend_from_slice(&[rex, opcode, mode | ((dst.0 & 7) << 3) | 0b100, sib]);
+    if mode == 0x40 {
+        code.push(0);
+    }
+}
+
 fn needs_sib(base: u8) -> bool {
     base & 7 == RSP.0
 }
@@ -538,7 +553,7 @@ mod tests {
     #[test]
     /// The jump table forms of a switch, bytes checked against objdump.
     fn switch_encodings() {
-        use super::{Cond, R9, R11, R12, R13, RAX, RBX, RCX, jump};
+        use super::{Cond, R9, R11, R12, R13, RAX, RBX, RCX, RSI, jump};
 
         assert_eq!(
             enc(Insn::ShrImm { dst: RAX, imm: 3 }),
@@ -594,6 +609,22 @@ mod tests {
             }),
             [0x4f, 0x63, 0x04, 0x8c]
         ); // movsxd r8,[r12+r9*4]: r9 as index needs REX.X
+        assert_eq!(
+            enc(Insn::LoadScaled8 {
+                dst: RAX,
+                base: RCX,
+                index: RAX
+            }),
+            [0x48, 0x8b, 0x04, 0xc1]
+        ); // mov rax,[rcx+rax*8]
+        assert_eq!(
+            enc(Insn::LoadScaled8 {
+                dst: RSI,
+                base: R13,
+                index: RAX
+            }),
+            [0x49, 0x8b, 0x74, 0xc5, 0x00]
+        ); // mov rsi,[r13+rax*8+0]
         assert_eq!(enc(Insn::JmpReg { reg: RAX }), [0xff, 0xe0]); // jmp rax
         assert_eq!(enc(Insn::JmpReg { reg: R11 }), [0x41, 0xff, 0xe3]); // jmp r11
 
