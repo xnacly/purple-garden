@@ -150,6 +150,12 @@ pub enum Insn {
         dst: Reg,
         src: Reg,
     },
+    /// `imul r{dst}, r{src}, imm`
+    ImulImm {
+        dst: Reg,
+        src: Reg,
+        imm: i32,
+    },
     /// `neg r{reg}` (two's-complement negate)
     Neg {
         reg: Reg,
@@ -186,6 +192,14 @@ pub enum Insn {
     },
     /// `sete r{dst}b`; set r{dst}'s low byte to 1 if the last compare was equal.
     Sete {
+        dst: Reg,
+    },
+    /// `setl r{dst}b`; signed less than.
+    Setl {
+        dst: Reg,
+    },
+    /// `setg r{dst}b`; signed greater than.
+    Setg {
         dst: Reg,
     },
     /// `movabs r{dst}, imm64`; `MovImm` is i32-only, addresses need 64 bits.
@@ -291,13 +305,17 @@ impl Insn {
                 code.push(modrm(0, dst.0));
                 code.extend_from_slice(&imm.to_le_bytes());
             }
-            // 0x0f 0x94 = `sete r/m8`.
+            // 0x0f 0x94/0x9c/0x9f = `sete/setl/setg r/m8`.
             // The REX prefix is not REX.W here; it exists only so byte-register
             // names are the modern low-byte registers (`sil`, `dil`, `r8b`, ...).
             // ModRM.reg is /0, ModRM.r/m names the byte destination.
-            Insn::Sete { dst } => {
-                code.push(0x40 | u8::from(dst.0 >= 8));
-                code.extend_from_slice(&[0x0f, 0x94, modrm(0, dst.0)]);
+            Insn::Sete { dst } => setcc(code, 0x94, dst),
+            Insn::Setl { dst } => setcc(code, 0x9c, dst),
+            Insn::Setg { dst } => setcc(code, 0x9f, dst),
+            // REX.W 0x69 /r id = `imul r64, r/m64, imm32`, ModRM.reg is dst.
+            Insn::ImulImm { dst, src, imm } => {
+                code.extend_from_slice(&[rex(dst.0, src.0), 0x69, modrm(dst.0, src.0)]);
+                code.extend_from_slice(&imm.to_le_bytes());
             }
             // REX.W 0xb8+rd io64 = `movabs r64, imm64`.
             // This form has no ModRM byte; the low 3 register bits are embedded
@@ -392,6 +410,9 @@ impl fmt::Display for Insn {
             Insn::Cmp { lhs, rhs } => write!(f, "cmp {}, {}", lhs, rhs),
             Insn::Test { lhs, rhs } => write!(f, "test {}, {}", lhs, rhs),
             Insn::Sete { dst } => write!(f, "sete {}b", dst),
+            Insn::Setl { dst } => write!(f, "setl {}b", dst),
+            Insn::Setg { dst } => write!(f, "setg {}b", dst),
+            Insn::ImulImm { dst, src, imm } => write!(f, "imul {}, {}, {imm}", dst, src),
             Insn::MovAbs { dst, imm } => write!(f, "movabs {}, {imm:#x}", dst),
             Insn::CallReg { reg } => write!(f, "call {}", reg),
             Insn::Push { reg } => write!(f, "push {}", reg),
@@ -530,6 +551,11 @@ fn scaled(code: &mut Vec<u8>, opcode: u8, scale: u8, dst: Reg, base: Reg, index:
     }
 }
 
+fn setcc(code: &mut Vec<u8>, opcode: u8, dst: Reg) {
+    code.push(0x40 | u8::from(dst.0 >= 8));
+    code.extend_from_slice(&[0x0f, opcode, modrm(0, dst.0)]);
+}
+
 fn needs_sib(base: u8) -> bool {
     base & 7 == RSP.0
 }
@@ -548,6 +574,32 @@ mod tests {
         let mut code = Vec::new();
         insn.encode(&mut code);
         code
+    }
+
+    #[test]
+    /// Signed compares and the immediate multiply, bytes checked against objdump.
+    fn compare_and_imul_imm_encodings() {
+        use super::{R8, R9, R10, RAX, RCX, RSI};
+
+        assert_eq!(enc(Insn::Setl { dst: RSI }), [0x40, 0x0f, 0x9c, 0xc6]); // setl sil
+        assert_eq!(enc(Insn::Setg { dst: R8 }), [0x41, 0x0f, 0x9f, 0xc0]); // setg r8b
+        assert_eq!(enc(Insn::Sete { dst: RSI }), [0x40, 0x0f, 0x94, 0xc6]); // sete sil
+        assert_eq!(
+            enc(Insn::ImulImm {
+                dst: RAX,
+                src: RCX,
+                imm: 600
+            }),
+            [0x48, 0x69, 0xc1, 0x58, 0x02, 0x00, 0x00]
+        ); // imul rax,rcx,600
+        assert_eq!(
+            enc(Insn::ImulImm {
+                dst: R9,
+                src: R10,
+                imm: 3
+            }),
+            [0x4d, 0x69, 0xca, 0x03, 0x00, 0x00, 0x00]
+        ); // imul r9,r10,3
     }
 
     #[test]

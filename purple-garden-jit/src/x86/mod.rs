@@ -498,6 +498,19 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                         self.emit(Insn::MovImm { dst, imm: 0 });
                         self.emit(Insn::Sete { dst });
                     }
+                    BinOp::ILt | BinOp::IGt => {
+                        let dst = self.def(dst.id, self.pos + 1);
+                        self.emit(Insn::CmpImm { reg: lhs, imm });
+                        self.emit(Insn::MovImm { dst, imm: 0 });
+                        self.emit(match op {
+                            BinOp::ILt => Insn::Setl { dst },
+                            _ => Insn::Setg { dst },
+                        });
+                    }
+                    BinOp::IMul => {
+                        let dst = self.def(dst.id, self.pos + 1);
+                        self.emit(Insn::ImulImm { dst, src: lhs, imm });
+                    }
                     BinOp::IDiv | BinOp::IMod if imm == 0 => {
                         self.def(dst.id, self.pos + 1);
                         self.trap_div_zero();
@@ -538,11 +551,15 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                         }
                     }
                     // Strings are interned: equal contents share one pointer.
-                    BinOp::IEq | BinOp::SEq => {
+                    BinOp::IEq | BinOp::SEq | BinOp::ILt | BinOp::IGt => {
                         let dst = self.def(dst.id, self.pos + 1);
                         self.emit(Insn::Cmp { lhs, rhs });
                         self.emit(Insn::MovImm { dst, imm: 0 });
-                        self.emit(Insn::Sete { dst });
+                        self.emit(match op {
+                            BinOp::ILt => Insn::Setl { dst },
+                            BinOp::IGt => Insn::Setg { dst },
+                            _ => Insn::Sete { dst },
+                        });
                     }
                     BinOp::IDiv | BinOp::IMod => {
                         // A register divisor can't be checked at compile time.
