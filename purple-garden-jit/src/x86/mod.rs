@@ -630,6 +630,49 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                         });
                         self.emit(Insn::MovqFromXmm { dst, src: XMM0 });
                     }
+                    BinOp::DDiv => {
+                        // ±0.0 is all zero bits once the sign is shifted out; a
+                        // NaN divisor doesn't trap, like in the interpreter.
+                        self.emit(Insn::Mov {
+                            dst: SCRATCH,
+                            src: rhs,
+                        });
+                        self.emit(Insn::Add {
+                            dst: SCRATCH,
+                            src: SCRATCH,
+                        });
+                        let nonzero = encode::jump(self.out, Cond::NotZero);
+                        self.trap_div_zero();
+                        let resume = self.out.len();
+                        patch_rel32(self.out, nonzero, nonzero + 4, resume)
+                            .expect("short forward jump");
+                        let dst = self.def(dst.id, self.pos + 1);
+                        self.emit(Insn::MovqToXmm { dst: XMM0, src: lhs });
+                        self.emit(Insn::MovqToXmm { dst: XMM1, src: rhs });
+                        self.emit(Insn::ArithSd {
+                            op: SdOp::Div,
+                            dst: XMM0,
+                            src: XMM1,
+                        });
+                        self.emit(Insn::MovqFromXmm { dst, src: XMM0 });
+                    }
+                    BinOp::DLt | BinOp::DGt => {
+                        let dst = self.def(dst.id, self.pos + 1);
+                        self.emit(Insn::MovqToXmm { dst: XMM0, src: lhs });
+                        self.emit(Insn::MovqToXmm { dst: XMM1, src: rhs });
+                        // seta is false for an unordered compare, so NaN compares
+                        // false both ways; lhs < rhs is rhs > lhs.
+                        let (above, below) = match op {
+                            BinOp::DGt => (XMM0, XMM1),
+                            _ => (XMM1, XMM0),
+                        };
+                        self.emit(Insn::Ucomisd {
+                            lhs: above,
+                            rhs: below,
+                        });
+                        self.emit(Insn::MovImm { dst, imm: 0 });
+                        self.emit(Insn::Seta { dst });
+                    }
                     // Strings are interned: equal contents share one pointer.
                     BinOp::IEq | BinOp::SEq | BinOp::ILt | BinOp::IGt => {
                         let dst = self.def(dst.id, self.pos + 1);
