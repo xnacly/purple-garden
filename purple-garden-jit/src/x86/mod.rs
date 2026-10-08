@@ -126,13 +126,20 @@ pub fn compile_func<'ir>(
     }
 
     out.reserve(buffers.body.len() + 32);
+    let start = out.len();
     for reg in saved.clone() {
         Insn::Push { reg }.encode(out);
     }
     if pad {
         Insn::SubImm { dst: RSP, imm: 8 }.encode(out);
     }
+    let body_at = out.len();
     out.extend_from_slice(&buffers.body);
+    // Self calls take the address of the function's first byte, in front of
+    // the prologue that is only laid out now.
+    for &rel in &buffers.self_refs {
+        patch_rel32(out, body_at + rel, body_at + rel + 4, start).expect("within the function");
+    }
     if pad {
         Insn::AddImm { dst: RSP, imm: 8 }.encode(out);
     }
@@ -186,6 +193,16 @@ pub struct Scratch {
     move_pairs: Vec<(Reg, Reg)>,
     /// `(reg, copy)` pairs preserved across a clobbering instruction.
     saves: Vec<(Reg, Reg)>,
+    /// Body offsets of the rel32s that address the function's own start.
+    self_refs: Vec<usize>,
+}
+
+/// Target of a native call.
+#[derive(Clone, Copy)]
+enum Callee {
+    Fn(BuiltinFn),
+    /// The function being compiled, whose address isn't known yet.
+    This,
 }
 
 /// Argument of a SysV helper call.
@@ -257,6 +274,7 @@ struct Lowering<'a, 'ir> {
     move_pairs: &'a mut Vec<(Reg, Reg)>,
     /// Reusable `(reg, copy)` buffer of [`Lowering::save_clobbered`].
     saves: &'a mut Vec<(Reg, Reg)>,
+    self_refs: &'a mut Vec<usize>,
 }
 
 impl<'a, 'ir> Lowering<'a, 'ir> {
@@ -276,11 +294,13 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             patches,
             move_pairs,
             saves,
+            self_refs,
         } = buffers;
         body.clear();
         block_offsets.clear();
         block_offsets.resize(func.blocks.len(), usize::MAX);
         patches.clear();
+        self_refs.clear();
         Self {
             func,
             liveness,
@@ -297,6 +317,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             patches,
             move_pairs,
             saves,
+            self_refs,
         }
     }
 
@@ -699,18 +720,24 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 patch_rel32(self.out, to_done, to_done + 4, done)
                     .expect("lookup ends after the default");
             }
-            ir::Instr::Sys { dst, fun, args, .. } => self.call_builtin(fun.ptr, args, dst.id),
+            ir::Instr::Sys { dst, fun, args, .. } => {
+                self.call_builtin(Callee::Fn(fun.ptr), args, dst.id);
+            }
             ir::Instr::Call {
                 dst,
                 func: callee,
                 args,
                 ..
             } => {
-                let Some(&f) = self.natives.get(callee) else {
+                let callee = if *callee == self.func.id {
+                    Callee::This
+                } else if let Some(&f) = self.natives.get(callee) {
+                    Callee::Fn(f)
+                } else {
                     bail!(self, "f{} is not compiled natively", callee.0);
                     return;
                 };
-                self.call_builtin(f, args, dst.id);
+                self.call_builtin(callee, args, dst.id);
             }
             _ => bail!(self, "unsupported instruction {i:?}"),
         }
@@ -1080,7 +1107,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     /// this function's caller only spilled those up to this function's own
     /// arity; only `entry`, which nothing calls with live registers, may pass
     /// more.
-    fn call_builtin(&mut self, f: BuiltinFn, args: &[ir::Id], dst: ir::Id) {
+    fn call_builtin(&mut self, callee: Callee, args: &[ir::Id], dst: ir::Id) {
         if args.len() > self.func.params.len().max(1) && self.func.id != ir::Id(0) {
             bail!(self, "{} args would clobber registers the caller kept", args.len());
             return;
@@ -1097,9 +1124,17 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             });
         }
         let saves = self.save_clobbered(CALLER_SAVED);
+        let f = match callee {
+            Callee::Fn(f) => AbiArg::Imm(f as usize as u64),
+            Callee::This => {
+                self.emit(Insn::LeaRip { dst: RSI, disp: 0 });
+                self.self_refs.push(self.out.len() - 4);
+                AbiArg::Reg(RSI)
+            }
+        };
         self.call(
             purple_garden_runtime::jit_sys as *const () as u64,
-            &[AbiArg::Reg(VM), AbiArg::Imm(f as usize as u64)],
+            &[AbiArg::Reg(VM), f],
             None,
         );
         self.emit(Insn::Test { lhs: RAX, rhs: RAX });
