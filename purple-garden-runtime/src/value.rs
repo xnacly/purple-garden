@@ -266,7 +266,7 @@ impl<'vm> FromVm<'vm> for &'vm str {
 
 impl IntoVm for &str {
     fn into_vm(self, vm: &mut Vm) -> Value {
-        vm.new_string(self.to_owned())
+        vm.new_string_from_str(self)
     }
 }
 
