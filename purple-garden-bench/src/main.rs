@@ -85,7 +85,22 @@ fn main() {
     }
 }
 
+/// Child processes get their main thread stack from the stack rlimit. JIT
+/// compiled recursion runs there instead of in the interpreter's frames, so
+/// raise it for every runtime, keeping deep recursion working with the JIT.
+fn raise_stack_limit() {
+    const STACK: libc::rlim_t = 256 << 20;
+    unsafe {
+        let mut limit: libc::rlimit = std::mem::zeroed();
+        if libc::getrlimit(libc::RLIMIT_STACK, &mut limit) == 0 && limit.rlim_cur < STACK {
+            limit.rlim_cur = STACK.min(limit.rlim_max);
+            libc::setrlimit(libc::RLIMIT_STACK, &limit);
+        }
+    }
+}
+
 fn run(args: &RunArgs) -> Result<(), String> {
+    raise_stack_limit();
     let garden = args.garden.canonicalize().map_err(|e| {
         format!(
             "garden binary {}: {e} (build it with `cargo build --release -p purple-garden-cli`)",
