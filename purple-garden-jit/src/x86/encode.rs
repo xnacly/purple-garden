@@ -48,6 +48,10 @@ pub enum Cond {
     Always,
     Zero,
     NotZero,
+    /// Unsigned `>=`, the carry flag is clear.
+    AboveEq,
+    /// Unsigned `<`, the carry flag is set.
+    Below,
 }
 
 impl Cond {
@@ -56,6 +60,8 @@ impl Cond {
         match self {
             Cond::Zero => Cond::NotZero,
             Cond::NotZero => Cond::Zero,
+            Cond::AboveEq => Cond::Below,
+            Cond::Below => Cond::AboveEq,
             Cond::Always => unreachable!("an unconditional jump has no inverse"),
         }
     }
@@ -68,6 +74,8 @@ pub fn jump(code: &mut Vec<u8>, cond: Cond) -> usize {
         Cond::Always => code.push(0xe9),
         Cond::Zero => code.extend_from_slice(&[0x0f, 0x84]),
         Cond::NotZero => code.extend_from_slice(&[0x0f, 0x85]),
+        Cond::AboveEq => code.extend_from_slice(&[0x0f, 0x83]),
+        Cond::Below => code.extend_from_slice(&[0x0f, 0x82]),
     }
     let rel = code.len();
     code.extend_from_slice(&[0; 4]);
@@ -196,6 +204,28 @@ pub enum Insn {
     Pop {
         reg: Reg,
     },
+    /// `shr r{dst}, imm`; logical shift right.
+    ShrImm {
+        dst: Reg,
+        imm: u8,
+    },
+    /// `lea r{dst}, [rip + disp]`; `disp` counts from the end of the
+    /// instruction, so it patches like a jump's rel32.
+    LeaRip {
+        dst: Reg,
+        disp: i32,
+    },
+    /// `movsxd r{dst}, dword [r{base} + r{index}*4]`; load a sign-extended i32
+    /// table entry.
+    LoadI32Scaled {
+        dst: Reg,
+        base: Reg,
+        index: Reg,
+    },
+    /// `jmp r{reg}`
+    JmpReg {
+        reg: Reg,
+    },
     /// `cqo`; sign-extend rax into rdx:rax (the idiv dividend).
     Cqo,
     /// `idiv r{divisor}`; rdx:rax / divisor, quotient to rax, remainder to rdx.
@@ -292,6 +322,37 @@ impl Insn {
                 }
                 code.push(0x58 + (reg.0 & 7));
             }
+            // REX.W 0xc1 /5 ib = `shr r/m64, imm8`.
+            Insn::ShrImm { dst, imm } => {
+                code.extend_from_slice(&[rex(0, dst.0), 0xc1, modrm(5, dst.0), imm]);
+            }
+            // REX.W 0x8d /r = `lea r64, m`. ModRM mod=00 r/m=101 is the
+            // rip-relative form, a disp32 follows.
+            Insn::LeaRip { dst, disp } => {
+                code.extend_from_slice(&[rex(dst.0, 0), 0x8d, ((dst.0 & 7) << 3) | 0b101]);
+                code.extend_from_slice(&disp.to_le_bytes());
+            }
+            // REX.W 0x63 /r = `movsxd r64, r/m32`. ModRM r/m=100 means a SIB
+            // byte follows: scale=10 (*4), index, base. The index register's
+            // high bit is REX.X, which [`rex`] doesn't set. A base with low
+            // bits 101 (rbp/r13) and mod=00 would mean "no base, disp32", so
+            // those take mod=01 with a zero disp8.
+            Insn::LoadI32Scaled { dst, base, index } => {
+                let rex = rex(dst.0, base.0) | (u8::from(index.0 >= 8) << 1);
+                let mode = if base.0 & 7 == 0b101 { 0x40 } else { 0x00 };
+                let sib = 0x80 | ((index.0 & 7) << 3) | (base.0 & 7);
+                code.extend_from_slice(&[rex, 0x63, mode | ((dst.0 & 7) << 3) | 0b100, sib]);
+                if mode == 0x40 {
+                    code.push(0);
+                }
+            }
+            // 0xff /4 = `jmp r/m64`, the indirect sibling of `call r/m64`.
+            Insn::JmpReg { reg } => {
+                if reg.0 >= 8 {
+                    code.push(0x41);
+                }
+                code.extend_from_slice(&[0xff, modrm(4, reg.0)]);
+            }
             // REX.W 0x99 ; cqo.
             Insn::Cqo => code.extend_from_slice(&[0x48, 0x99]),
             // REX.W 0xf7 /7 = `idiv r/m64`.
@@ -337,6 +398,12 @@ impl fmt::Display for Insn {
             Insn::CallReg { reg } => write!(f, "call {}", reg),
             Insn::Push { reg } => write!(f, "push {}", reg),
             Insn::Pop { reg } => write!(f, "pop {}", reg),
+            Insn::ShrImm { dst, imm } => write!(f, "shr {}, {imm}", dst),
+            Insn::LeaRip { dst, disp } => write!(f, "lea {}, [rip+{disp:#x}]", dst),
+            Insn::LoadI32Scaled { dst, base, index } => {
+                write!(f, "movsxd {}, dword [{}+{}*4]", dst, base, index)
+            }
+            Insn::JmpReg { reg } => write!(f, "jmp {}", reg),
             Insn::Cqo => write!(f, "cqo"),
             Insn::Idiv { divisor } => write!(f, "idiv {}", divisor),
         }
@@ -466,6 +533,74 @@ mod tests {
         let mut code = Vec::new();
         insn.encode(&mut code);
         code
+    }
+
+    #[test]
+    /// The jump table forms of a switch, bytes checked against objdump.
+    fn switch_encodings() {
+        use super::{Cond, R9, R11, R12, R13, RAX, RBX, RCX, jump};
+
+        assert_eq!(
+            enc(Insn::ShrImm { dst: RAX, imm: 3 }),
+            [0x48, 0xc1, 0xe8, 0x03]
+        ); // shr rax,3
+        assert_eq!(
+            enc(Insn::ShrImm { dst: R9, imm: 3 }),
+            [0x49, 0xc1, 0xe9, 0x03]
+        ); // shr r9,3
+        assert_eq!(
+            enc(Insn::LeaRip {
+                dst: RCX,
+                disp: 0x10
+            }),
+            [0x48, 0x8d, 0x0d, 0x10, 0x00, 0x00, 0x00]
+        ); // lea rcx,[rip+0x10]
+        assert_eq!(
+            enc(Insn::LeaRip {
+                dst: R13,
+                disp: 0x10
+            }),
+            [0x4c, 0x8d, 0x2d, 0x10, 0x00, 0x00, 0x00]
+        ); // lea r13,[rip+0x10]
+        assert_eq!(
+            enc(Insn::LoadI32Scaled {
+                dst: RAX,
+                base: RCX,
+                index: RAX
+            }),
+            [0x48, 0x63, 0x04, 0x81]
+        ); // movsxd rax,[rcx+rax*4]
+        assert_eq!(
+            enc(Insn::LoadI32Scaled {
+                dst: RAX,
+                base: RBX,
+                index: RAX
+            }),
+            [0x48, 0x63, 0x04, 0x83]
+        ); // movsxd rax,[rbx+rax*4]
+        assert_eq!(
+            enc(Insn::LoadI32Scaled {
+                dst: RAX,
+                base: R13,
+                index: RAX
+            }),
+            [0x49, 0x63, 0x44, 0x85, 0x00]
+        ); // movsxd rax,[r13+rax*4+0]: r13 can't be a disp-less base
+        assert_eq!(
+            enc(Insn::LoadI32Scaled {
+                dst: Reg(8),
+                base: R12,
+                index: R9
+            }),
+            [0x4f, 0x63, 0x04, 0x8c]
+        ); // movsxd r8,[r12+r9*4]: r9 as index needs REX.X
+        assert_eq!(enc(Insn::JmpReg { reg: RAX }), [0xff, 0xe0]); // jmp rax
+        assert_eq!(enc(Insn::JmpReg { reg: R11 }), [0x41, 0xff, 0xe3]); // jmp r11
+
+        let mut code = Vec::new();
+        jump(&mut code, Cond::AboveEq);
+        jump(&mut code, Cond::Below);
+        assert_eq!(code, [0x0f, 0x83, 0, 0, 0, 0, 0x0f, 0x82, 0, 0, 0, 0]); // jae, jb
     }
 
     #[test]
