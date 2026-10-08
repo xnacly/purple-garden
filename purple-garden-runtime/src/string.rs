@@ -77,6 +77,24 @@ pub unsafe fn write_payload(dst: *mut u8, s: &str, hash: u32) -> Value {
     Value::from_ptr(dst)
 }
 
+/// Equality of two equally long byte strings without a call into libc's
+/// memcmp, which branches on the length to pick a strategy and mispredicts on
+/// mixed lengths. Short strings take two overlapping loads.
+#[inline]
+fn same_bytes(a: &[u8], b: &[u8]) -> bool {
+    debug_assert_eq!(a.len(), b.len());
+    let len = a.len();
+    let u64_at = |s: &[u8], at: usize| u64::from_le_bytes(s[at..at + 8].try_into().unwrap());
+    let u32_at = |s: &[u8], at: usize| u32::from_le_bytes(s[at..at + 4].try_into().unwrap());
+    match len {
+        0 => true,
+        1..=3 => (a[0] == b[0]) & (a[len / 2] == b[len / 2]) & (a[len - 1] == b[len - 1]),
+        4..=7 => (u32_at(a, 0) ^ u32_at(b, 0)) | (u32_at(a, len - 4) ^ u32_at(b, len - 4)) == 0,
+        8..=16 => (u64_at(a, 0) ^ u64_at(b, 0)) | (u64_at(a, len - 8) ^ u64_at(b, len - 8)) == 0,
+        _ => a == b,
+    }
+}
+
 /// Every string the VM knows, so equal contents share one payload and string
 /// equality is a pointer compare. Open addressing on the header hash with
 /// linear probing, kept at most half full.
@@ -103,7 +121,9 @@ impl StrTable {
             if v == Value::UNDEF {
                 return None;
             }
-            if unsafe { header_bits(v.as_ptr()) } == word && v.as_str() == s {
+            if unsafe { header_bits(v.as_ptr()) } == word
+                && same_bytes(v.as_str().as_bytes(), s.as_bytes())
+            {
                 return Some(v);
             }
             i = (i + 1) & mask;
@@ -136,6 +156,19 @@ impl StrTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn same_bytes_sees_every_byte() {
+        for len in 0..40 {
+            let a: Vec<u8> = (0..len as u8).collect();
+            assert!(same_bytes(&a, &a.clone()), "len {len}");
+            for at in 0..len {
+                let mut b = a.clone();
+                b[at] ^= 0x80;
+                assert!(!same_bytes(&a, &b), "len {len}, differs at {at}");
+            }
+        }
+    }
 
     /// The tail chunk is zero padded, so only the length seed separates these.
     #[test]
