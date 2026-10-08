@@ -991,7 +991,10 @@ impl<'cc> Cc<'cc> {
                 if tail_clobbers_callee_saved {
                     match target {
                         CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
-                        CcCallTarget::Native { idx } => self.emit(Op::Sys { idx }),
+                        CcCallTarget::Native { idx } => self.emit(Op::Sys {
+                            idx,
+                            argc: args.len() as u8,
+                        }),
                     };
                     self.emit_epilogue(lo, max_reg);
                     self.emit(Op::Ret);
@@ -1002,7 +1005,10 @@ impl<'cc> Cc<'cc> {
                             self.emit(Op::Tail { func: pc as u32 });
                         }
                         CcCallTarget::Native { idx } => {
-                            self.emit(Op::Sys { idx });
+                            self.emit(Op::Sys {
+                                idx,
+                                argc: args.len() as u8,
+                            });
                             self.emit(Op::Ret);
                         }
                     }
@@ -1192,7 +1198,10 @@ impl<'cc> Cc<'cc> {
                 let dst = self.ensure_register(dst.id);
                 match target {
                     CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
-                    CcCallTarget::Native { idx } => self.emit(Op::Sys { idx }),
+                    CcCallTarget::Native { idx } => self.emit(Op::Sys {
+                        idx,
+                        argc: args.len() as u8,
+                    }),
                 };
                 self.emit(Op::Mov { dst, src: 0 });
                 self.scratch.reverse();
@@ -1238,7 +1247,10 @@ impl<'cc> Cc<'cc> {
                 self.scratch_live = live_above;
 
                 let dst = self.ensure_register(dst.id);
-                self.emit(Op::Sys { idx: idx as u16 });
+                self.emit(Op::Sys {
+                    idx: idx as u16,
+                    argc: args.len() as u8,
+                });
                 self.emit(Op::Mov { dst, src: 0 });
                 self.scratch.reverse();
                 pack_pop(
