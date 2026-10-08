@@ -11,7 +11,9 @@ pub fn load_store_fold(fun: &mut ir::Func<'_>) {
     }
 }
 
-fn fold_block(_instructions: &mut [ir::Instr<'_>]) {}
+fn fold_block(_instructions: &mut [ir::Instr<'_>]) {
+    // TODO:fold_block
+}
 
 #[cfg(test)]
 mod tests {
