@@ -11,6 +11,7 @@ pub fn compile_func(
     _: &[(u32, u32)],
     _: &std::collections::HashMap<ir::Const<'_>, u32>,
     _: &[purple_garden_runtime::Value],
+    _: &std::collections::HashMap<ir::Id, purple_garden_runtime::BuiltinFn>,
     _: &mut crate::regalloc::Xralloc2,
     _: &mut Scratch,
 ) -> Option<()> {

@@ -43,7 +43,7 @@ mod regalloc;
 
 pub use mem::CodeArena;
 use purple_garden_ir as ir;
-use purple_garden_runtime::Value;
+use purple_garden_runtime::{BuiltinFn, Value};
 use std::collections::HashMap;
 
 /// Reusable JIT codegen state.
@@ -66,20 +66,23 @@ impl Jit {
         self.liveness.clear();
         func.live_set_into(&mut self.liveness);
         let liveness = std::mem::take(&mut self.liveness);
-        let result = self.compile_func_with_liveness(func, &liveness, &HashMap::new(), &[]);
+        let result =
+            self.compile_func_with_liveness(func, &liveness, &HashMap::new(), &[], &HashMap::new());
         self.liveness = liveness;
         result
     }
 
     /// Lower and encode `func` using precomputed liveness.
     /// `globals` maps constants to their `vm.globals` slot, `strings[slot]` is
-    /// the final address of a string constant native code embeds.
+    /// the final address of a string constant native code embeds. `natives`
+    /// holds the entry points of the functions already compiled natively.
     pub fn compile_func_with_liveness<'ir>(
         &mut self,
         func: &ir::Func<'ir>,
         liveness: &[(u32, u32)],
         globals: &HashMap<ir::Const<'ir>, u32>,
         strings: &[Value],
+        natives: &HashMap<ir::Id, BuiltinFn>,
     ) -> Option<()> {
         self.code.clear();
         let result = arch::compile_func(
@@ -88,6 +91,7 @@ impl Jit {
             liveness,
             globals,
             strings,
+            natives,
             &mut self.regalloc,
             &mut self.scratch,
         );

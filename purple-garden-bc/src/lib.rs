@@ -91,6 +91,8 @@ pub struct Cc<'cc> {
     pub switch_tables: Vec<Box<SwitchTable>>,
     /// Tables of the emitted [`Op::Lookup`]s.
     pub lookup_tables: Vec<Box<LookupTable>>,
+    /// Entry points of the functions compiled natively, for native callers.
+    native_fns: HashMap<ir::Id, BuiltinFn>,
     regalloc: Ralloc,
     /// Set once per IR Instr / Terminator before lowering, consumed by
     /// every `emit` call within that lowering. Saves threading a span
@@ -266,6 +268,7 @@ impl<'cc> Cc<'cc> {
             block_map: Vec::new(),
             switch_tables: Vec::new(),
             lookup_tables: Vec::new(),
+            native_fns: HashMap::new(),
             regalloc: Ralloc::default(),
             cur_span: 0,
             live_set: Vec::new(),
@@ -576,7 +579,13 @@ impl<'cc> Cc<'cc> {
     ) -> bool {
         let Some(()) =
             self.jit
-                .compile_func_with_liveness(fun, liveness, &self.globals.map, &self.str_values)
+                .compile_func_with_liveness(
+                    fun,
+                    liveness,
+                    &self.globals.map,
+                    &self.str_values,
+                    &self.native_fns,
+                )
         else {
             purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
             return false;
@@ -593,6 +602,7 @@ impl<'cc> Cc<'cc> {
         if let Some(native_code) = &mut self.native_code {
             native_code.push((fun.name, self.jit.code().to_vec()));
         }
+        self.native_fns.insert(fun.id, entry);
         let idx = self.std_fns.intern(entry) as u16;
         self.functions.insert(
             fun.id,

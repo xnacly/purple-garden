@@ -1,7 +1,7 @@
 use std::{alloc::Layout, ffi::c_void};
 
 use crate::{
-    Anomaly, Vm,
+    Anomaly, BuiltinFn, Vm,
     gc::{AllocType, MAX_ALLOC_SIZE},
 };
 
@@ -18,6 +18,18 @@ use crate::{
 pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) {
     let vm = unsafe { &mut *vm.cast::<Vm>() };
     vm.trap(Anomaly::DivisionByZero { pc: vm.pc });
+}
+
+/// Call the builtin `f` from JIT code, reporting whether it trapped: the
+/// native code then returns, so the interpreter surfaces the trap.
+///
+/// # Safety
+///
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`] whose `r0..`
+/// hold `f`'s arguments.
+pub unsafe extern "C" fn jit_sys(vm: *mut c_void, f: BuiltinFn) -> u64 {
+    unsafe { f(vm) };
+    u64::from(unsafe { &*vm.cast::<Vm>() }.pending_trap.is_some())
 }
 
 /// Allocate GC-managed memory from JIT code through [`Vm::try_alloc`].
