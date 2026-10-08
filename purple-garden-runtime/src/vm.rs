@@ -1,7 +1,7 @@
 use crate::{
     Anomaly, BuiltinFn, DEFAULT_STACK_SIZE, MIB, REGISTER_COUNT, Value,
     gc::{AllocType, Gc},
-    op::Op,
+    op::{Op, SwitchKind, SwitchTable},
     string,
 };
 use std::{alloc::Layout, ffi::c_void};
@@ -85,6 +85,8 @@ pub struct Vm {
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
+    /// Owns the tables [`Op::Switch`] points into; boxed so they stay put.
+    pub switch_tables: Vec<Box<SwitchTable>>,
     pub gc: Gc,
 
     /// Backing storage for string constants emitted by the compiler.
@@ -135,6 +137,7 @@ impl Vm {
             pc: 0,
             bytecode: Vec::new(),
             globals: Vec::new(),
+            switch_tables: Vec::new(),
             gc: Gc::new(),
             const_pool: Box::new([]),
             strings: string::StrTable::default(),
@@ -437,6 +440,29 @@ impl Vm {
                 },
                 Op::JmpSNe { lhs, rhs, target } => unsafe {
                     if !r!(lhs).str_eq(r!(rhs)) {
+                        pc = target as usize;
+                        continue;
+                    }
+                },
+                Op::Switch {
+                    kind,
+                    subject,
+                    table,
+                } => unsafe {
+                    let table = table.as_ref();
+                    // Strings are interned, equal strings share one address. string key is its
+                    // address in the string pool, an int key its value. Wrapping keeps a subject
+                    // below `first` huge, so the bounds check below rejects it along with those
+                    // past the end.
+                    let offset = r!(subject).0.wrapping_sub(table.first);
+                    // Pool strings sit ALIGN bytes apart, one slot each.
+                    let slot = match kind {
+                        SwitchKind::Str => offset / string::ALIGN as u64,
+                        SwitchKind::Int => offset,
+                    };
+                    // Slots between keys hold the default's pc; outside the
+                    // table, fall through to the `jmp default` after this op.
+                    if let Some(&target) = table.targets.get(slot as usize) {
                         pc = target as usize;
                         continue;
                     }
@@ -872,6 +898,55 @@ mod ops {
             },
         ]);
         assert!(matches!(err, Anomaly::DivisionByZero { .. }));
+    }
+
+    /// Table of 3 slots from `first`: slot 0 loads 10, slot 1 has no key and
+    /// holds the miss pc, slot 2 loads 30, a miss loads -1.
+    fn switch(kind: SwitchKind, first: Value, subject: Value) -> i64 {
+        let mut vm = Vm::new(VmConfig::default());
+        vm.switch_tables.push(Box::new(SwitchTable {
+            first: first.0,
+            targets: Box::new([4, 2, 6]),
+        }));
+        let table = std::ptr::NonNull::from(&*vm.switch_tables[0]);
+        vm.globals.push(subject);
+        vm.bytecode = vec![
+            Op::LoadG { dst: 0, idx: 0 },
+            Op::Switch {
+                kind,
+                subject: 0,
+                table,
+            },
+            Op::LoadI { dst: 1, value: -1 },
+            Op::Halt,
+            Op::LoadI { dst: 1, value: 10 },
+            Op::Halt,
+            Op::LoadI { dst: 1, value: 30 },
+            Op::Halt,
+        ];
+        vm.run::<false>(&[]).unwrap();
+        vm.r(1).as_int()
+    }
+
+    #[test]
+    fn switch_indexes_strings_by_pool_offset() {
+        let key = |offset: u64| Value(0x1000 + offset);
+        let slot = string::ALIGN as u64;
+        assert_eq!(switch(SwitchKind::Str, key(0), key(0)), 10);
+        assert_eq!(switch(SwitchKind::Str, key(0), key(2 * slot)), 30);
+        assert_eq!(switch(SwitchKind::Str, key(0), key(slot)), -1);
+        assert_eq!(switch(SwitchKind::Str, key(0), key(3 * slot)), -1);
+        assert_eq!(switch(SwitchKind::Str, key(slot), key(0)), -1);
+    }
+
+    #[test]
+    fn switch_indexes_ints_from_the_smallest_key() {
+        let int = |v: i64| Value::from(v);
+        assert_eq!(switch(SwitchKind::Int, int(-1), int(-1)), 10);
+        assert_eq!(switch(SwitchKind::Int, int(-1), int(1)), 30);
+        assert_eq!(switch(SwitchKind::Int, int(-1), int(0)), -1);
+        assert_eq!(switch(SwitchKind::Int, int(-1), int(2)), -1);
+        assert_eq!(switch(SwitchKind::Int, int(-1), int(-2)), -1);
     }
 
     #[test]

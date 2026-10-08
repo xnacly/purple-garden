@@ -1,5 +1,8 @@
 use purple_garden_ir::Id;
-use purple_garden_runtime::{BuiltinFn, op::Op};
+use purple_garden_runtime::{
+    BuiltinFn,
+    op::{Op, SwitchKind},
+};
 use purple_garden_shared::ansi::{
     ADDR, BLOCK, COMMENT, FLOW, FUNC, IMM, LABEL, MNEM, REG, SECTION, paint,
 };
@@ -144,26 +147,29 @@ impl<'dis> Disassembler<'dis> {
 
         let mut block_labels: HashMap<usize, String> = HashMap::new();
         for instr in self.bc {
-            match instr {
+            let targets = match instr {
                 Op::Jmp { target }
                 | Op::JmpT { target, .. }
                 | Op::JmpF { target, .. }
                 | Op::JmpEqI { target, .. }
                 | Op::JmpNeI { target, .. }
                 | Op::JmpSEq { target, .. }
-                | Op::JmpSNe { target, .. } => {
-                    let pc = *target as usize;
-                    if funcs_by_pc.contains_key(&(*target as u32)) {
-                        continue;
-                    }
-                    let name = containing_func(pc)
-                        .map(crate::CcFunc::name)
-                        .unwrap_or("bytecode");
-                    block_labels
-                        .entry(pc)
-                        .or_insert_with(|| format!("{name}.bb_{pc:04x}"));
+                | Op::JmpSNe { target, .. } => std::slice::from_ref(target),
+                // The tables outlive the disassembler, the vm owns them.
+                Op::Switch { table, .. } => unsafe { &table.as_ref().targets[..] },
+                _ => continue,
+            };
+            for &target in targets {
+                let pc = target as usize;
+                if funcs_by_pc.contains_key(&u32::from(target)) {
+                    continue;
                 }
-                _ => {}
+                let name = containing_func(pc)
+                    .map(crate::CcFunc::name)
+                    .unwrap_or("bytecode");
+                block_labels
+                    .entry(pc)
+                    .or_insert_with(|| format!("{name}.bb_{pc:04x}"));
             }
         }
 
@@ -271,6 +277,18 @@ impl<'dis> Disassembler<'dis> {
                 Op::JmpSNe { lhs, rhs, target } => format!(
                     "jmpsne r{lhs}, r{rhs}, {target:04x} <{}>",
                     target_label(*target, cur_func)
+                ),
+                Op::Switch {
+                    kind,
+                    subject,
+                    table,
+                } => format!(
+                    "switch.{} r{subject}, {} slots",
+                    match kind {
+                        SwitchKind::Str => "str",
+                        SwitchKind::Int => "int",
+                    },
+                    unsafe { table.as_ref() }.targets.len()
                 ),
                 Op::Call { func } => format!(
                     "call {func:04x} <{}>",
