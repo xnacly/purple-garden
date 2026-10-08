@@ -632,34 +632,34 @@ impl<'lower> Lower<'lower> {
                 let mut check_blocks = Vec::with_capacity(cases.len());
                 let mut body_blocks = Vec::with_capacity(cases.len());
 
-                // pre"allocating" ebbs
-                for _ in cases {
-                    check_blocks.push(self.new_block());
+                // The first check is lowered into the current block, so the
+                // match needs no jump into it.
+                let entry = self.ctx.block;
+                for i in 0..cases.len() {
+                    check_blocks.push(if i == 0 { entry } else { self.new_block() });
                     body_blocks.push(self.new_block());
                 }
 
                 // All check/body/default blocks of this match inherit the
-                // enclosing block's params verbatim. Intern that list once
-                // and hand the same ParamsId to every sink; 4 * per case,
-                // plus the default block, plus the two Branch arms. Each
-                // assignment is a u32 copy, no allocation.
+                // enclosing block's params
+                //
+                // Intern that list once and hand the same ParamsId to every sink; 4 * per case,
+                // plus the default block, plus the two Branch arms. Each assignment is a u32 copy,
+                // no allocation.
                 let case_params = {
                     let entry_params = self.cur().params;
                     let cloned: Vec<Id> = self.ctx.func.params(entry_params).to_vec();
                     self.ctx.func.intern_params(cloned)
                 };
 
-                // INFO:
-                // this is only for correctness to jump into the match statements first check, we
-                // will just leave the block empty and add no terminator, meaning it will be
-                // skipped fully
-                // self.block_mut(self.block).term = Some(Terminator::Jump {
-                //     id: *check_blocks.first().unwrap(),
-                //     params: case_params,
-                // });
-
-                // the default block
                 let default_block = self.new_block();
+                if cases.is_empty() {
+                    self.block_mut(entry).term = Some(Terminator::Jump {
+                        id: default_block,
+                        params: case_params,
+                        span: default.0.start as u32,
+                    });
+                }
 
                 // the single join block, merging all value results into a single branch
                 let join = self.new_block();
@@ -690,6 +690,7 @@ impl<'lower> Lower<'lower> {
 
                     self.switch_to_block(body_blocks[i]);
                     self.block_mut(body_blocks[i]).params = case_params;
+
                     // A match arm is its own scope: `let` bindings inside it
                     // (including ones that shadow a param) must not leak into
                     // sibling arms, the default arm, or code after the match.
