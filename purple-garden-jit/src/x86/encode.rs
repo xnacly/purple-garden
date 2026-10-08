@@ -50,6 +50,17 @@ pub enum Cond {
     NotZero,
 }
 
+impl Cond {
+    #[must_use]
+    pub fn invert(self) -> Self {
+        match self {
+            Cond::Zero => Cond::NotZero,
+            Cond::NotZero => Cond::Zero,
+            Cond::Always => unreachable!("an unconditional jump has no inverse"),
+        }
+    }
+}
+
 /// Emit a near jump with a zero rel32, returning the displacement's offset
 /// for [`patch_rel32`].
 pub fn jump(code: &mut Vec<u8>, cond: Cond) -> usize {
