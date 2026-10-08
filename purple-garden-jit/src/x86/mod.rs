@@ -17,7 +17,7 @@ use encode::{
     patch_rel32,
 };
 use purple_garden_ir::{self as ir, BinOp};
-use purple_garden_runtime::{Value, string};
+use purple_garden_runtime::{BuiltinFn, Value, string};
 
 /// Bail out of [`compile_func`] (returning `None`) and, under the `trace`
 /// feature, log why. The reason is only formatted inside `trace!`, so it costs
@@ -58,6 +58,7 @@ pub fn compile_func<'ir>(
     liveness: &[(u32, u32)],
     globals: &HashMap<ir::Const<'ir>, u32>,
     strings: &[Value],
+    natives: &HashMap<ir::Id, BuiltinFn>,
     ra: &mut Xralloc2,
     buffers: &mut Scratch,
 ) -> Option<()> {
@@ -84,7 +85,7 @@ pub fn compile_func<'ir>(
     }
 
     ra.reset(liveness.len(), POOL);
-    let calls = Lowering::new(func, liveness, globals, strings, ra, buffers, entry).lower()?;
+    let calls = Lowering::new(func, liveness, globals, strings, natives, ra, buffers, entry).lower()?;
 
     // The body is emitted first since the callee-saved registers it uses are
     // only known afterwards. Wrap it into a frame:
@@ -236,6 +237,8 @@ struct Lowering<'a, 'ir> {
     globals: &'a HashMap<ir::Const<'ir>, u32>,
     /// `strings[slot]` is the final address of the string constant in `slot`.
     strings: &'a [Value],
+    /// Entry points of the functions already compiled natively.
+    natives: &'a HashMap<ir::Id, BuiltinFn>,
     ra: &'a mut Xralloc2,
     out: &'a mut Vec<u8>,
     entry: ir::Id,
@@ -262,6 +265,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         liveness: &'a [(u32, u32)],
         globals: &'a HashMap<ir::Const<'ir>, u32>,
         strings: &'a [Value],
+        natives: &'a HashMap<ir::Id, BuiltinFn>,
         ra: &'a mut Xralloc2,
         buffers: &'a mut Scratch,
         entry: ir::Id,
@@ -282,6 +286,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             liveness,
             globals,
             strings,
+            natives,
             ra,
             out: body,
             entry,
@@ -651,6 +656,19 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 patch_rel32(self.out, to_done, to_done + 4, done)
                     .expect("lookup ends after the default");
             }
+            ir::Instr::Sys { dst, fun, args, .. } => self.call_builtin(fun.ptr, args, dst.id),
+            ir::Instr::Call {
+                dst,
+                func: callee,
+                args,
+                ..
+            } => {
+                let Some(&f) = self.natives.get(callee) else {
+                    bail!(self, "f{} is not compiled natively", callee.0);
+                    return;
+                };
+                self.call_builtin(f, args, dst.id);
+            }
             _ => bail!(self, "unsupported instruction {i:?}"),
         }
     }
@@ -1011,6 +1029,44 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         self.emit(Insn::Mov { dst, src });
 
         self.restore(saves);
+    }
+
+    /// Call `f` the way the interpreter calls a builtin: arguments in
+    /// `vm.r[0..]`, the result in `vm.r[0]`, a trap leaves this function so
+    /// the interpreter surfaces it. `f` may write its argument registers, but
+    /// this function's caller only spilled those up to this function's own
+    /// arity; only `entry`, which nothing calls with live registers, may pass
+    /// more.
+    fn call_builtin(&mut self, f: BuiltinFn, args: &[ir::Id], dst: ir::Id) {
+        if args.len() > self.func.params.len().max(1) && self.func.id != ir::Id(0) {
+            bail!(self, "{} args would clobber registers the caller kept", args.len());
+            return;
+        }
+        if args.len() > 15 {
+            bail!(self, "too many args for disp8 slot stores: {}", args.len());
+            return;
+        }
+        for (slot, &arg) in args.iter().enumerate() {
+            let src = self.ensure_register(arg);
+            self.emit(Insn::StoreSlot {
+                src,
+                slot: slot as u8,
+            });
+        }
+        let saves = self.save_clobbered(CALLER_SAVED);
+        self.call(
+            purple_garden_runtime::jit_sys as *const () as u64,
+            &[AbiArg::Reg(VM), AbiArg::Imm(f as usize as u64)],
+            None,
+        );
+        self.emit(Insn::Test {
+            lhs: RAX,
+            rhs: RAX,
+        });
+        self.jump(Cond::NotZero, Target::Epilogue);
+        self.restore(saves);
+        let dst = self.def(dst, self.pos + 1);
+        self.emit(Insn::LoadSlot { dst, slot: 0 });
     }
 
     /// Raise the trap and leave: nothing live needs to survive the call.
