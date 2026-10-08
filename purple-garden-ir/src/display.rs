@@ -1,5 +1,9 @@
 use std::{borrow::Cow, fmt::Display};
 
+use purple_garden_shared::ansi::{
+    BLOCK, COMMENT, DEAD, FLOW, FUNC, IMM, LABEL, MNEM, REG, TYPE, paint,
+};
+
 use crate::{Const, Func, Id, Instr, Terminator, TypeId};
 
 const MAX_STRING_DISPLAY_CHARS: usize = 65;
@@ -330,39 +334,52 @@ impl Func<'_> {
         }
     }
 
-    /// The `Display` dump with one column per SSA value on the right, marking
-    /// every row its [`Func::live_set_into`] interval overlaps.
+    /// The `-I` dump. With `liveness`, every SSA value gets a column on the
+    /// right marking the rows its [`Func::live_set_into`] interval overlaps.
     #[must_use]
-    pub fn liveness_display(&self) -> String {
+    pub fn pretty(&self, liveness: bool, color: bool) -> String {
         use std::fmt::Write as _;
 
-        let mut intervals = Vec::new();
-        self.live_set_into(&mut intervals);
-
         let rows = self.rows();
+        let mut intervals = Vec::new();
+        if liveness {
+            self.live_set_into(&mut intervals);
+        }
+        // tabs would throw off the gutter alignment
+        let indent = if liveness { "    " } else { "\t" };
         let text_width = |r: &Row| r.text.chars().count() + 4 * r.indent;
         let width = rows.iter().map(text_width).max().unwrap_or(0) + 2;
         let labels: Vec<String> = (0..intervals.len()).map(|id| format!("%v{id}")).collect();
 
         let mut out = String::new();
         for (i, row) in rows.iter().enumerate() {
-            write!(out, "{}{}", "    ".repeat(row.indent), row.text).unwrap();
+            out.push_str(&indent.repeat(row.indent));
+            if color {
+                out.push_str(&colorize(&row.text));
+            } else {
+                out.push_str(&row.text);
+            }
+            if !liveness {
+                out.push('\n');
+                continue;
+            }
+
             let gutter: Option<Vec<String>> = if i == 1 {
-                Some(labels.clone())
+                Some(labels.iter().map(|l| paint(color, REG, l)).collect())
             } else {
                 row.pos.map(|p| {
                     intervals
                         .iter()
                         .zip(&labels)
                         .map(|(&(def, last), label)| {
-                            let mark = if def == u32::MAX || def > p + 1 || last < p {
-                                ' '
+                            let pad = " ".repeat(label.len() - 1);
+                            if def == u32::MAX || def > p + 1 || last < p {
+                                format!(" {pad}")
                             } else if def == last {
-                                'X'
+                                format!("{}{pad}", paint(color, DEAD, "X"))
                             } else {
-                                '|'
-                            };
-                            format!("{mark:<w$}", w = label.len())
+                                format!("{}{pad}", paint(color, REG, "|"))
+                            }
                         })
                         .collect()
                 })
@@ -376,6 +393,87 @@ impl Func<'_> {
         }
         out
     }
+}
+
+/// Colors one rendered row without changing its visible width.
+fn colorize(text: &str) -> String {
+    const FLOWS: &[&str] = &[
+        "br", "br_cmp", "br_imm", "jmp", "ret", "tail", "switch", "Call", "Sys",
+    ];
+
+    if text.starts_with("//") || text == "<tombstone>" {
+        return paint(true, COMMENT, text);
+    }
+
+    let word_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '.');
+    let mut out = String::with_capacity(text.len() * 2);
+    let mut i = 0;
+    while let Some(c) = text[i..].chars().next() {
+        let rest = &text[i..];
+        let before = &text[..i];
+        if c == '`' {
+            let end = rest[1..].find('`').map_or(text.len(), |j| i + j + 2);
+            out.push_str(&paint(true, IMM, &text[i..end]));
+            i = end;
+        } else if c == '%' {
+            let end = i
+                + 1
+                + rest[1..]
+                    .find(|c: char| !word_char(c))
+                    .unwrap_or(rest.len() - 1);
+            out.push_str(&paint(true, REG, &text[i..end]));
+            i = end;
+            if text[i..].starts_with(':') {
+                let end = text[i..].find(' ').map_or(text.len(), |j| i + j);
+                out.push(':');
+                out.push_str(&paint(true, TYPE, &text[i + 1..end]));
+                i = end;
+            }
+        } else if word_char(c)
+            || (c == '-'
+                && before.ends_with(' ')
+                && rest[1..].starts_with(|c: char| c.is_ascii_digit()))
+        {
+            let end = i
+                + 1
+                + rest[1..]
+                    .find(|c: char| !word_char(c))
+                    .unwrap_or(rest.len() - 1);
+            let word = &text[i..end];
+            let numbered = |p: char| {
+                word.len() > 1
+                    && word.starts_with(p)
+                    && word[1..].bytes().all(|b| b.is_ascii_digit())
+            };
+            let code = if numbered('b') {
+                if i == 0 { BLOCK } else { LABEL }
+            } else if numbered('f') || word == "fn" {
+                FUNC
+            } else if FLOWS.contains(&word) {
+                FLOW
+            } else if matches!(word, "true" | "false") || !c.is_ascii_alphabetic() {
+                IMM
+            } else if c.is_ascii_uppercase() && before.trim_end().ends_with(['<', '>']) {
+                TYPE
+            } else if c.is_ascii_uppercase() {
+                MNEM
+            } else if word.contains('.') {
+                LABEL
+            } else {
+                ""
+            };
+            if code.is_empty() {
+                out.push_str(word);
+            } else {
+                out.push_str(&paint(true, code, word));
+            }
+            i = end;
+        } else {
+            out.push(c);
+            i += c.len_utf8();
+        }
+    }
+    out
 }
 
 impl Display for Func<'_> {

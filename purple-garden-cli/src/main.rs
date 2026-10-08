@@ -197,12 +197,9 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if cli.ir > 0 {
+        let color = purple_garden_shared::ansi::enabled();
         for func in &ir {
-            if cli.ir > 1 {
-                println!("{}", func.liveness_display());
-            } else {
-                println!("{func}");
-            }
+            println!("{}", func.pretty(cli.ir > 1, color));
         }
     }
 
