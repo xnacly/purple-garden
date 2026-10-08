@@ -31,10 +31,6 @@ pub struct Config {
     #[cfg_attr(feature = "cli", arg(short = 'D', long, action = clap::ArgAction::Count))]
     pub disassemble: u8,
 
-    /// Dump SSA live intervals with the IR positions that define, use, or pass them.
-    #[cfg_attr(feature = "cli", arg(short = 'L', long))]
-    pub liveness: bool,
-
     /// Generate backtraces for function calls
     ///
     /// Technically a brain child of my interview at apple in which we talked about ways of implementing
@@ -64,7 +60,6 @@ impl Config {
             backtrace: false,
             no_gc: false,
             no_jit: false,
-            liveness: false,
             stack_size: DEFAULT_STACK_SIZE,
         }
     }

@@ -351,9 +351,6 @@ impl<'cc> Cc<'cc> {
         debug_assert_eq!(self.const_pool.as_ptr(), base);
 
         for func in ir {
-            if config.liveness {
-                print!("{}", func.liveness_display());
-            }
             self.cc(func, arena.as_mut())?;
         }
 

@@ -192,128 +192,198 @@ fn format_ids(ids: &[crate::Id]) -> String {
         .join(", ")
 }
 
-impl Display for Func<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "// {}\nfn f{}(", self.name, self.id.0)?;
-        for (i, arg) in self.params.iter().enumerate() {
-            if i + 1 == self.params.len() {
-                write!(f, "%v{arg}")?;
-            } else {
-                write!(f, "%v{arg}, ")?;
-            }
-        }
+/// One line of the `Func` dump. `pos` is the [`Func::live_set_into`]
+/// position of the row, so the liveness view can line intervals up with it.
+struct Row {
+    pos: Option<u32>,
+    indent: usize,
+    text: String,
+}
 
-        writeln!(
-            f,
-            ") -> {} {{",
-            self.ret
-                .as_ref()
-                .map_or_else(|| "Void".to_string(), std::string::ToString::to_string)
-        )?;
+impl Func<'_> {
+    fn rows(&self) -> Vec<Row> {
+        let mut rows = Vec::new();
+        let mut push = |pos, indent, text| rows.push(Row { pos, indent, text });
 
+        push(None, 0, format!("// {}", self.name));
+        push(
+            None,
+            0,
+            format!(
+                "fn f{}({}) -> {} {{",
+                self.id.0,
+                format_ids(&self.params),
+                self.ret
+                    .as_ref()
+                    .map_or_else(|| "Void".to_string(), std::string::ToString::to_string)
+            ),
+        );
+
+        let mut pos = 0;
         for block in &self.blocks {
-            writeln!(
-                f,
+            let label = format!(
                 "b{}({}):",
                 block.id.0,
                 format_ids(self.params(block.params))
-            )?;
-
+            );
             if block.tombstone {
-                writeln!(f, "\t<tombstone>")?;
+                push(None, 1, label);
+                push(None, 2, "<tombstone>".to_string());
                 continue;
             }
+            push(Some(pos), 1, label);
+            pos += 2;
 
             for ins in &block.instructions {
-                if let Instr::Noop = ins {
-                    continue;
-                };
-                writeln!(f, "\t{ins}")?;
+                if !matches!(ins, Instr::Noop) {
+                    push(Some(pos), 2, ins.to_string());
+                }
+                pos += 2;
             }
 
             if let Some(term) = &block.term {
-                match term {
-                    Terminator::Jump { id, params, .. } => {
-                        writeln!(f, "\tjmp b{}({})", id.0, format_ids(self.params(*params)))?;
-                    }
-                    Terminator::Branch { cond, yes, no, .. } => writeln!(
-                        f,
-                        "\tbr %v{}, b{}({}), b{}({})",
-                        cond.0,
-                        yes.0,
-                        format_ids(self.params(yes.1)),
-                        no.0,
-                        format_ids(self.params(no.1)),
-                    )?,
-                    Terminator::BranchCmp {
-                        op,
-                        lhs,
-                        rhs,
-                        yes,
-                        no,
-                        ..
-                    } => writeln!(
-                        f,
-                        "\tbr_cmp {:?} %v{}, %v{}, b{}({}), b{}({})",
-                        op,
-                        lhs.0,
-                        rhs.0,
-                        yes.0,
-                        format_ids(self.params(yes.1)),
-                        no.0,
-                        format_ids(self.params(no.1)),
-                    )?,
-                    Terminator::BranchCmpImm {
-                        op,
-                        lhs,
-                        imm,
-                        yes,
-                        no,
-                        ..
-                    } => writeln!(
-                        f,
-                        "\tbr_imm {:?} %v{}, {}, b{}({}), b{}({})",
-                        op,
-                        lhs.0,
-                        imm,
-                        yes.0,
-                        format_ids(self.params(yes.1)),
-                        no.0,
-                        format_ids(self.params(no.1)),
-                    )?,
-                    Terminator::Switch {
-                        subject,
-                        cases,
-                        default,
-                        ..
-                    } => {
-                        write!(f, "\tswitch %v{} [", subject.0)?;
-                        for (i, case) in self.cases(*cases).iter().enumerate() {
-                            if i > 0 {
-                                write!(f, ", ")?;
-                            }
-                            let (target, params) = case.target;
-                            write!(
-                                f,
-                                "{} -> b{}({})",
-                                case.key,
-                                target.0,
-                                format_ids(self.params(params))
-                            )?;
-                        }
-                        writeln!(
-                            f,
-                            "], b{}({})",
-                            default.0.0,
-                            format_ids(self.params(default.1))
-                        )?;
-                    }
-                    _ => writeln!(f, "\t{term}")?,
-                }
+                push(Some(pos), 2, self.term_display(term));
             }
+            pos += 2;
         }
 
-        writeln!(f, "}}")
+        push(None, 0, "}".to_string());
+        rows
+    }
+
+    fn term_display(&self, term: &Terminator) -> String {
+        match term {
+            Terminator::Jump { id, params, .. } => {
+                format!("jmp b{}({})", id.0, format_ids(self.params(*params)))
+            }
+            Terminator::Branch { cond, yes, no, .. } => format!(
+                "br %v{}, b{}({}), b{}({})",
+                cond.0,
+                yes.0,
+                format_ids(self.params(yes.1)),
+                no.0,
+                format_ids(self.params(no.1)),
+            ),
+            Terminator::BranchCmp {
+                op,
+                lhs,
+                rhs,
+                yes,
+                no,
+                ..
+            } => format!(
+                "br_cmp {:?} %v{}, %v{}, b{}({}), b{}({})",
+                op,
+                lhs.0,
+                rhs.0,
+                yes.0,
+                format_ids(self.params(yes.1)),
+                no.0,
+                format_ids(self.params(no.1)),
+            ),
+            Terminator::BranchCmpImm {
+                op,
+                lhs,
+                imm,
+                yes,
+                no,
+                ..
+            } => format!(
+                "br_imm {:?} %v{}, {}, b{}({}), b{}({})",
+                op,
+                lhs.0,
+                imm,
+                yes.0,
+                format_ids(self.params(yes.1)),
+                no.0,
+                format_ids(self.params(no.1)),
+            ),
+            Terminator::Switch {
+                subject,
+                cases,
+                default,
+                ..
+            } => {
+                let cases = self
+                    .cases(*cases)
+                    .iter()
+                    .map(|case| {
+                        let (target, params) = case.target;
+                        format!(
+                            "{} -> b{}({})",
+                            case.key,
+                            target.0,
+                            format_ids(self.params(params))
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "switch %v{} [{}], b{}({})",
+                    subject.0,
+                    cases,
+                    default.0.0,
+                    format_ids(self.params(default.1))
+                )
+            }
+            _ => term.to_string(),
+        }
+    }
+
+    /// The `Display` dump with one column per SSA value on the right, marking
+    /// every row its [`Func::live_set_into`] interval overlaps.
+    #[must_use]
+    pub fn liveness_display(&self) -> String {
+        use std::fmt::Write as _;
+
+        let mut intervals = Vec::new();
+        self.live_set_into(&mut intervals);
+
+        let rows = self.rows();
+        let text_width = |r: &Row| r.text.chars().count() + 4 * r.indent;
+        let width = rows.iter().map(text_width).max().unwrap_or(0) + 2;
+        let labels: Vec<String> = (0..intervals.len()).map(|id| format!("%v{id}")).collect();
+
+        let mut out = String::new();
+        for (i, row) in rows.iter().enumerate() {
+            write!(out, "{}{}", "    ".repeat(row.indent), row.text).unwrap();
+            let gutter: Option<Vec<String>> = if i == 1 {
+                Some(labels.clone())
+            } else {
+                row.pos.map(|p| {
+                    intervals
+                        .iter()
+                        .zip(&labels)
+                        .map(|(&(def, last), label)| {
+                            let mark = if def == u32::MAX || def > p + 1 || last < p {
+                                ' '
+                            } else if def == last {
+                                'X'
+                            } else {
+                                '|'
+                            };
+                            format!("{mark:<w$}", w = label.len())
+                        })
+                        .collect()
+                })
+            };
+            if let Some(gutter) = gutter {
+                let pad = width - text_width(row);
+                write!(out, "{:pad$}{}", "", gutter.join(" ")).unwrap();
+            }
+            out.truncate(out.trim_end().len());
+            out.push('\n');
+        }
+        out
+    }
+}
+
+impl Display for Func<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for row in self.rows() {
+            writeln!(f, "{}{}", "\t".repeat(row.indent), row.text)?;
+        }
+        Ok(())
     }
 }
 

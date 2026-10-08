@@ -27,8 +27,10 @@ pub struct Cli {
     pub ast: bool,
 
     /// Readable immediate representation
-    #[arg(short = 'I', long)]
-    pub ir: bool,
+    ///
+    /// -II additionally draws each SSA value's live interval as a column on the right.
+    #[arg(short = 'I', long, action = clap::ArgAction::Count)]
+    pub ir: u8,
 
     /// Print typechecker output.
     ///

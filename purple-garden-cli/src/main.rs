@@ -196,9 +196,13 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         purple_garden_opt::ir(&mut ir);
     }
 
-    if cli.ir {
+    if cli.ir > 0 {
         for func in &ir {
-            println!("{func}");
+            if cli.ir > 1 {
+                println!("{}", func.liveness_display());
+            } else {
+                println!("{func}");
+            }
         }
     }
 
