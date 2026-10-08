@@ -31,6 +31,8 @@ pub fn ir(ir: &mut [purple_garden_ir::Func]) {
         // tailcall, so a Call-then-Jump-to-Ret-join pattern becomes a direct
         // Return that tailcall then picks up as Pattern A.
         ir::ret_inline(fun);
+        // Order: after ret_inline, which turns the arms' jumps to the join into returns.
+        ir::switch_lookup(fun);
         ir::indirect_jump(fun);
         ir::tailcall(fun);
         ir::addrof_fold(fun, &mut scratch);
