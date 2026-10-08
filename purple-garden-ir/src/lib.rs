@@ -553,8 +553,17 @@ impl Func<'_> {
                 continue;
             }
 
+            // A header redeclaring an already live param writes nothing, the
+            // edge move into it happened in the predecessor, so it must not
+            // extend the interval past the param's last real use.
             for param in self.params(block.params) {
-                define(intervals, *param, pos);
+                ensure(intervals, param.0);
+                let e = &mut intervals[param.0 as usize];
+                if e.0 == u32::MAX {
+                    *e = (pos, pos);
+                } else {
+                    e.0 = e.0.min(pos);
+                }
             }
             pos += 2;
 
