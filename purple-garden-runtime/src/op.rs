@@ -1,4 +1,24 @@
+use std::ptr::NonNull;
+
 use crate::AllocType;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwitchKind {
+    /// Interned string keys in the string pool, `first` is the lowest key's
+    /// address and a slot spans [`crate::string::ALIGN`] bytes.
+    Str,
+    /// Integer keys, `first` is the smallest.
+    Int,
+}
+
+/// The jump table of an [`Op::Switch`], owned by [`crate::vm::Vm::switch_tables`]
+/// so the op can point at it while staying `Copy`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchTable {
+    pub first: u64,
+    /// A pc per slot, slots without a key hold the default's pc.
+    pub targets: Box<[u16]>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
@@ -197,6 +217,14 @@ pub enum Op {
         rhs: u8,
         target: u16,
     },
+    /// Jump table on `r[subject]`: jump to `table.targets[slot]` for
+    /// `slot = r[subject] - table.first`, scaled per [`SwitchKind`]. Falls
+    /// through to the next op when `slot` is out of range.
+    Switch {
+        kind: SwitchKind,
+        subject: u8,
+        table: NonNull<SwitchTable>,
+    },
     /// Tail call: jump to `func` (an absolute pc) without growing the
     /// callstack. Same calling convention as [`Op::Call`].
     Tail {
@@ -304,7 +332,7 @@ pub enum Op {
 #[cfg(test)]
 mod op_test {
     #[test]
-    fn op_size_8_byte() {
-        assert_eq!(std::mem::size_of::<crate::op::Op>(), 8);
+    fn op_size_16_byte() {
+        assert_eq!(std::mem::size_of::<crate::op::Op>(), 16);
     }
 }
