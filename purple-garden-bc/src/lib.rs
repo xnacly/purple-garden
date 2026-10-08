@@ -8,7 +8,7 @@ use crate::{intern::Interner, regalloc::Ralloc};
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
 use purple_garden_runtime::{
     AllocType, BuiltinFn, DebugInfo, Value, Vm, VmConfig,
-    op::{Op, SwitchKind, SwitchTable},
+    op::{LookupTable, Op, SwitchKind, SwitchTable},
     string,
 };
 use purple_garden_shared::config::Config;
@@ -89,6 +89,8 @@ pub struct Cc<'cc> {
     /// Tables of the emitted [`Op::Switch`]es. Targets are block ids until the
     /// end of [`Cc::cc`] maps them to pcs, like jump targets.
     pub switch_tables: Vec<Box<SwitchTable>>,
+    /// Tables of the emitted [`Op::Lookup`]s.
+    pub lookup_tables: Vec<Box<LookupTable>>,
     regalloc: Ralloc,
     /// Set once per IR Instr / Terminator before lowering, consumed by
     /// every `emit` call within that lowering. Saves threading a span
@@ -263,6 +265,7 @@ impl<'cc> Cc<'cc> {
             str_values: Vec::new(),
             block_map: Vec::new(),
             switch_tables: Vec::new(),
+            lookup_tables: Vec::new(),
             regalloc: Ralloc::default(),
             cur_span: 0,
             live_set: Vec::new(),
@@ -331,6 +334,18 @@ impl<'cc> Cc<'cc> {
                         && !self.globals.map.contains_key(value)
                     {
                         strs.push((self.intern(value), s));
+                    }
+                    if let ir::Instr::Lookup {
+                        entries, default, ..
+                    } = instr
+                    {
+                        for value in entries.iter().flat_map(|(k, v)| [k, v]).chain([default]) {
+                            if let Const::Str(s) = value
+                                && !self.globals.map.contains_key(value)
+                            {
+                                strs.push((self.intern(value), s));
+                            }
+                        }
                     }
                 }
                 // switch_fold dropped the LoadConsts of a string switch's keys,
@@ -1070,6 +1085,46 @@ impl<'cc> Cc<'cc> {
                 };
                 self.emit(op);
             }
+            ir::Instr::Lookup {
+                dst,
+                subject,
+                entries,
+                default,
+                ..
+            } => {
+                // Slots as for Op::Switch, holding values instead of pcs.
+                let (kind, step) = match entries[0].0 {
+                    Const::Str(_) => (SwitchKind::Str, string::ALIGN as i64),
+                    _ => (SwitchKind::Int, 1),
+                };
+                let value = |c: &Const<'cc>| match c {
+                    Const::Str(_) => self.str_values[self.globals.map[c] as usize],
+                    c => Value::from(c.clone()),
+                };
+                let key = |c: &Const<'cc>| value(c).0 as i64;
+                let first = entries.iter().map(|(k, _)| key(k)).min().unwrap();
+                let slot = |k: &Const<'cc>| ((key(k) - first) / step) as usize;
+                let len = entries.iter().map(|(k, _)| slot(k)).max().unwrap() + 1;
+                let mut values = vec![value(default); len].into_boxed_slice();
+                for (k, v) in entries {
+                    values[slot(k)] = value(v);
+                }
+                let table = Box::new(LookupTable {
+                    first: first as u64,
+                    values,
+                    default: value(default),
+                });
+                let dst = self.ensure_register(dst.id);
+                let subject = self.ensure_register(*subject);
+                let ptr = NonNull::from(&*table);
+                self.lookup_tables.push(table);
+                self.emit(Op::Lookup {
+                    kind,
+                    dst,
+                    subject,
+                    table: ptr,
+                });
+            }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let dst = self.ensure_register(dst.id);
                 match value {
@@ -1337,6 +1392,7 @@ impl<'cc> Cc<'cc> {
             const_pool,
             str_values,
             switch_tables,
+            lookup_tables,
             ..
         } = self;
 
@@ -1354,6 +1410,7 @@ impl<'cc> Cc<'cc> {
 
         vm.bytecode = buf;
         vm.switch_tables = switch_tables;
+        vm.lookup_tables = lookup_tables;
 
         debug_assert_eq!(
             globals

@@ -191,6 +191,15 @@ pub enum Instr<'i> {
         offset: u32,
         span: u32,
     },
+    /// `dst` is the value of the entry whose key equals `subject`, else
+    /// `default`: a switch whose arms only return constants.
+    Lookup {
+        dst: TypeId<'i>,
+        subject: Id,
+        entries: Box<[(Const<'i>, Const<'i>)]>,
+        default: Const<'i>,
+        span: u32,
+    },
     Noop,
 }
 
@@ -209,7 +218,8 @@ impl Instr<'_> {
             | Instr::LoadConst { span, .. }
             | Instr::Call { span, .. }
             | Instr::Sys { span, .. }
-            | Instr::Cast { span, .. } => *span,
+            | Instr::Cast { span, .. }
+            | Instr::Lookup { span, .. } => *span,
             Instr::Noop => 0,
         }
     }
@@ -402,7 +412,8 @@ impl Func<'_> {
             | Instr::LoadConst { dst, .. }
             | Instr::Call { dst, .. }
             | Instr::Sys { dst, .. }
-            | Instr::Cast { dst, .. } => Some(dst.id),
+            | Instr::Cast { dst, .. }
+            | Instr::Lookup { dst, .. } => Some(dst.id),
             Instr::Store { .. } | Instr::Noop => None,
         }
     }
@@ -420,6 +431,7 @@ impl Func<'_> {
                 }
             }
             Instr::Cast { from, .. } => f(from.id),
+            Instr::Lookup { subject, .. } => f(*subject),
             Instr::Store { src, base, .. } => {
                 f(*src);
                 f(*base);
