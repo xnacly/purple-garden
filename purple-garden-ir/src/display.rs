@@ -118,6 +118,22 @@ impl Display for Instr<'_> {
                 "%v{} = Cast<{}->{}> %v{}",
                 value, from.ty, value.ty, from.id.0
             )?,
+            Instr::Lookup {
+                dst,
+                subject,
+                entries,
+                default,
+                ..
+            } => {
+                write!(f, "%v{dst} = Lookup %v{} [", subject.0)?;
+                for (i, (key, value)) in entries.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{key} -> {value}")?;
+                }
+                write!(f, "], {default}")?;
+            }
         }
         Ok(())
     }
