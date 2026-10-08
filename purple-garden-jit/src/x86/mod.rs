@@ -310,7 +310,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             }
         }
 
-        for block in &self.func.blocks {
+        let blocks = &self.func.blocks;
+        for (idx, block) in blocks.iter().enumerate() {
             if block.tombstone {
                 continue;
             }
@@ -328,7 +329,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 self.pos += 2;
             }
 
-            self.term(block.term.as_ref());
+            let next = blocks[idx + 1..].iter().find(|b| !b.tombstone).map(|b| b.id);
+            self.term(block.term.as_ref(), next);
             if self.unsupported {
                 return None;
             }
@@ -547,7 +549,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         }
     }
 
-    fn term(&mut self, t: Option<&ir::Terminator>) {
+    fn term(&mut self, t: Option<&ir::Terminator>, next: Option<ir::Id>) {
         let Some(term) = t else {
             return;
         };
@@ -566,7 +568,9 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 let src = func.params(*params);
                 let dst = func.params(func.blocks[id.0 as usize].params);
                 self.edge_moves(src, dst, pos);
-                self.jump(Cond::Always, Target::Block(*id));
+                if Some(*id) != next {
+                    self.jump(Cond::Always, Target::Block(*id));
+                }
             }
             ir::Terminator::Branch {
                 cond,
@@ -586,9 +590,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                     lhs: cond,
                     rhs: cond,
                 });
-                self.jump(Cond::NotZero, Target::Block(*yes));
-                self.edge_moves(no_src, no_dst, pos + 1);
-                self.jump(Cond::Always, Target::Block(*no));
+                self.branch(Cond::NotZero, *yes, *no, no_src, no_dst, next);
             }
             ir::Terminator::BranchCmpImm {
                 op: BinOp::IEq,
@@ -613,9 +615,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                         imm: *imm,
                     });
                 }
-                self.jump(Cond::Zero, Target::Block(*yes));
-                self.edge_moves(no_src, no_dst, pos + 1);
-                self.jump(Cond::Always, Target::Block(*no));
+                self.branch(Cond::Zero, *yes, *no, no_src, no_dst, next);
             }
             ir::Terminator::BranchCmp {
                 op: BinOp::SEq,
@@ -635,9 +635,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 let rhs = self.ensure_register(*rhs);
                 // Strings are interned: equal contents share one pointer.
                 self.emit(Insn::Cmp { lhs, rhs });
-                self.jump(Cond::Zero, Target::Block(*yes));
-                self.edge_moves(no_src, no_dst, pos + 1);
-                self.jump(Cond::Always, Target::Block(*no));
+                self.branch(Cond::Zero, *yes, *no, no_src, no_dst, next);
             }
             ir::Terminator::Tail {
                 func: callee, args, ..
@@ -647,6 +645,34 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             }
             _ => bail!(self, "unsupported terminator"),
         }
+    }
+
+    /// Jump to `yes` on `cond`, else move the no edge and go to `no`. Whichever
+    /// target is laid out `next` is reached by falling through instead.
+    fn branch(
+        &mut self,
+        cond: Cond,
+        yes: ir::Id,
+        no: ir::Id,
+        no_src: &[ir::Id],
+        no_dst: &[ir::Id],
+        next: Option<ir::Id>,
+    ) {
+        self.jump(cond, Target::Block(yes));
+        let moves_at = self.out.len();
+        self.edge_moves(no_src, no_dst, self.pos + 1);
+        if Some(no) == next {
+            return;
+        }
+        // The no edge moved nothing, so the jcc is still the last instruction
+        // and can be flipped to target `no`, falling through to `yes`.
+        if Some(yes) == next && self.out.len() == moves_at {
+            self.patches.pop();
+            self.out.truncate(moves_at - 6);
+            self.jump(cond.invert(), Target::Block(no));
+            return;
+        }
+        self.jump(Cond::Always, Target::Block(no));
     }
 
     /// Move edge args `src` into the target's block params `dst`, the IR's phi
