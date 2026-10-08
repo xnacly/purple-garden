@@ -29,6 +29,18 @@ add x2, x1, x0
 This is the goal since the current x86 jit implementation is a collection of
 spaghetti
 
+### Calling builtins and native functions without the register file
+
+- today native code calls builtins and native functions through `vm.r` and
+  `jit_sys`: memory round trips only for the convention
+- `pg_fn` generates two entries per builtin: the interpreter `BuiltinFn` that
+  unpacks `vm.r`, and a native entry taking Values in registers, returning the
+  value and a trap flag
+- the JIT calls the native entry directly, JIT compiled functions get the same
+  internal entry, so builtins, native and self calls share one call site
+- open: `unsafe` and `with_slots` builtins, more than 5 args, a depth guard
+  for native recursion, GC roots once `Gc::collect` traces
+
 ## Progress
 
 | IR node        | variant             | x86 | aarch64 |
