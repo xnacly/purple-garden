@@ -245,14 +245,41 @@ impl Func<'_> {
                 pos += 2;
             }
 
-            if let Some(term) = &block.term {
-                push(Some(pos), 2, self.term_display(term));
+            match &block.term {
+                Some(Terminator::Switch {
+                    subject,
+                    cases,
+                    default,
+                    ..
+                }) => {
+                    push(Some(pos), 2, format!("switch %v{}", subject.0));
+                    let arms: Vec<(String, String)> = self
+                        .cases(*cases)
+                        .iter()
+                        .map(|case| (case.key.to_string(), self.target_display(case.target)))
+                        .chain([("_".to_string(), self.target_display(*default))])
+                        .collect();
+                    let width = arms
+                        .iter()
+                        .map(|(k, _)| k.chars().count())
+                        .max()
+                        .unwrap_or(0);
+                    for (key, target) in arms {
+                        push(Some(pos), 3, format!("{key:<width$} -> {target}"));
+                    }
+                }
+                Some(term) => push(Some(pos), 2, self.term_display(term)),
+                None => {}
             }
             pos += 2;
         }
 
         push(None, 0, "}".to_string());
         rows
+    }
+
+    fn target_display(&self, (target, params): (Id, crate::ParamsId)) -> String {
+        format!("b{}({})", target.0, format_ids(self.params(params)))
     }
 
     fn term_display(&self, term: &Terminator) -> String {
@@ -302,34 +329,6 @@ impl Func<'_> {
                 no.0,
                 format_ids(self.params(no.1)),
             ),
-            Terminator::Switch {
-                subject,
-                cases,
-                default,
-                ..
-            } => {
-                let cases = self
-                    .cases(*cases)
-                    .iter()
-                    .map(|case| {
-                        let (target, params) = case.target;
-                        format!(
-                            "{} -> b{}({})",
-                            case.key,
-                            target.0,
-                            format_ids(self.params(params))
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!(
-                    "switch %v{} [{}], b{}({})",
-                    subject.0,
-                    cases,
-                    default.0.0,
-                    format_ids(self.params(default.1))
-                )
-            }
             _ => term.to_string(),
         }
     }
