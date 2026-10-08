@@ -10,8 +10,10 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   # Shared by both cargo steps so the workspace is not rebuilt twice with
-  # different flags.
-  RUSTFLAGS: "-C target-cpu=native"
+  # different flags. Not `native`: rust-cache keys on this string, so a cache
+  # built on one runner CPU would be restored onto another lacking its
+  # features (SIGILL). x86-64-v3 (AVX2) runs on every GitHub x86 runner.
+  RUSTFLAGS: "-C target-cpu=x86-64-v3"
 
 jobs:
   cross-language:
