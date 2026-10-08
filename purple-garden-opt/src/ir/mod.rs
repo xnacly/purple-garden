@@ -121,6 +121,36 @@ pub(super) fn record_uses(fun: &ir::Func<'_>, scratch: &mut Scratch<'_>) {
     }
 }
 
+/// Number of live edges into each block, indexed by block id.
+pub(super) fn predecessor_counts(fun: &ir::Func) -> Vec<u32> {
+    let mut counts = vec![0; fun.blocks.len()];
+
+    for block in &fun.blocks {
+        if block.tombstone {
+            continue;
+        }
+
+        match &block.term {
+            Some(ir::Terminator::Jump { id, .. }) => counts[id.0 as usize] += 1,
+            Some(ir::Terminator::Branch { yes, no, .. })
+            | Some(ir::Terminator::BranchCmpImm { yes, no, .. })
+            | Some(ir::Terminator::BranchCmp { yes, no, .. }) => {
+                counts[yes.0.0 as usize] += 1;
+                counts[no.0.0 as usize] += 1;
+            }
+            Some(ir::Terminator::Switch { cases, default, .. }) => {
+                for case in fun.cases(*cases) {
+                    counts[case.target.0.0 as usize] += 1;
+                }
+                counts[default.0.0 as usize] += 1;
+            }
+            _ => {}
+        }
+    }
+
+    counts
+}
+
 // reexports
 pub use addrof_fold::addrof_fold;
 pub use branch_cmp::branch_cmp;

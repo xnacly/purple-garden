@@ -1,30 +1,157 @@
-use purple_garden_ir as ir;
+use purple_garden_ir::{self as ir, BinOp, Case, Const, Id, Instr, ParamsId, Terminator};
 
 /// Chains shorter than this stay linear, a few compares beat a table lookup.
+// PERF: benchmark this claim
 pub const MIN_CASES: usize = 4;
+
+/// A switch's jump table has a slot for every value between its lowest and
+/// highest key. Integer chains spread wider than this per case would leave it
+/// mostly holes and stay compare chains.
+pub const MAX_SLOTS_PER_CASE: usize = 4;
 
 /// Fold a chain of equality branches on one subject into a single
 /// [`ir::Terminator::Switch`]:
 ///
 /// ```text
 /// b1(%v0):                                        b1(%v0):
-///     %v1:Str = `alpha`                               switch %v0 [`alpha` -> b2(%v0),
-///     br_cmp SEq %v0, %v1, b2(%v0), b3(%v0)                       `beta` -> b4(%v0), ...], b7(%v0)
-/// b3(%v0):                                   =>   b3(%v0):
-///     %v4:Str = `beta`                                <tombstone>
-///     br_cmp SEq %v0, %v4, b4(%v0), b5(%v0)
-/// ...
+///     %v1:Str = `alpha`                               switch %v0
+///     br_cmp SEq %v0, %v1, b2(%v0), b3(%v0)               `alpha` -> b2(%v0)
+/// b3(%v0):                                   =>           `beta`  -> b4(%v0)
+///     %v4:Str = `beta`                                    ...
+///     br_cmp SEq %v0, %v4, b4(%v0), b5(%v0)               _       -> b7(%v0)
+/// ...                                             b3(%v0):
+///                                                     <tombstone>
 /// ```
 ///
-/// Integer chains (`br_imm IEq %v0, k, ...`) fold the same way. A block joins
-/// the chain if it compares the same subject, holds nothing but the
-/// single-use key `LoadConst` (nothing for integers), is only reached from
-/// the previous chain block, and every edge passes its target's params
-/// unchanged, so the switch needs no edge moves. A repeated key keeps its
-/// first arm, as `match` takes the first one.
+/// Integer chains (`br_imm IEq %v0, k, ...`) fold the same way
 pub fn switch_fold(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
-    // TODO: not implemented yet, the tests below describe the rewrite.
-    let _ = (fun, scratch, MIN_CASES);
+    super::record_uses(fun, scratch);
+    let preds = super::predecessor_counts(fun);
+
+    for head in 0..fun.blocks.len() {
+        if fun.blocks[head].tombstone {
+            continue;
+        }
+        let Some((subject, key, head_key, yes, mut default)) = compare(fun, head) else {
+            continue;
+        };
+
+        let mut cases = vec![Case { key, target: yes }];
+        let mut chain = Vec::new();
+        loop {
+            let b = default.0.0 as usize;
+            // The block is dropped whole, so only the previous chain block may lead here.
+            if b == head || preds[b] != 1 {
+                break;
+            }
+            let Some((lhs, key, key_load, yes, no)) = compare(fun, b) else {
+                break;
+            };
+            // Besides its key, a chain block may only hold constants imm_fold left dead.
+            let only_constants = fun.blocks[b].instructions.iter().all(|instr| match instr {
+                Instr::Noop => true,
+                Instr::LoadConst { dst, .. } => {
+                    Some(dst.id) == key_load || scratch.use_count(dst.id) == 0
+                }
+                _ => false,
+            });
+            if lhs != subject || !only_constants {
+                break;
+            }
+            if !cases.iter().any(|case| case.key == key) {
+                cases.push(Case { key, target: yes });
+            }
+            chain.push(b);
+            default = no;
+        }
+
+        if cases.len() < MIN_CASES {
+            continue;
+        }
+        let ints: Vec<i64> = cases
+            .iter()
+            .filter_map(|case| match case.key {
+                Const::Int(v) => Some(v),
+                _ => None,
+            })
+            .collect();
+        if let (Some(min), Some(max)) = (ints.iter().min(), ints.iter().max())
+            && (max - min) as usize >= MAX_SLOTS_PER_CASE * cases.len()
+        {
+            continue;
+        }
+
+        purple_garden_shared::trace!(
+            "[opt::ir::switch_fold] b{head} switches over {} cases",
+            cases.len()
+        );
+
+        for b in chain {
+            fun.blocks[b].tombstone = true;
+        }
+        let cases = fun.intern_cases(cases);
+        let block = &mut fun.blocks[head];
+        if let Some(key) = head_key
+            && scratch.use_count(key) == 1
+        {
+            for instr in &mut block.instructions {
+                if ir::Func::def_of(instr) == Some(key) {
+                    *instr = Instr::Noop;
+                }
+            }
+        }
+        let span = block.term.as_ref().map_or(0, Terminator::span);
+        block.term = Some(Terminator::Switch {
+            subject,
+            cases,
+            default,
+            span,
+        });
+    }
+}
+
+type Edge = (Id, ParamsId);
+
+/// `(subject, key, key_load, yes, no)` of a `subject == key` branch. `key_load`
+/// is the `LoadConst` of a string key, integer keys are immediates. A switch
+/// moves nothing along its edges, so both must pass their target's params
+/// unchanged.
+fn compare<'f>(fun: &ir::Func<'f>, b: usize) -> Option<(Id, Const<'f>, Option<Id>, Edge, Edge)> {
+    let block = &fun.blocks[b];
+    let (subject, key, key_load, yes, no) = match block.term {
+        Some(Terminator::BranchCmp {
+            op: BinOp::SEq,
+            lhs,
+            rhs,
+            yes,
+            no,
+            ..
+        }) => {
+            let key = block.instructions.iter().find_map(|instr| match instr {
+                Instr::LoadConst {
+                    dst,
+                    value: value @ Const::Str(_),
+                    ..
+                } if dst.id == rhs => Some(value.clone()),
+                _ => None,
+            })?;
+            (lhs, key, Some(rhs), yes, no)
+        }
+        Some(Terminator::BranchCmpImm {
+            op: BinOp::IEq,
+            lhs,
+            imm,
+            yes,
+            no,
+            ..
+        }) => (lhs, Const::Int(i64::from(imm)), None, yes, no),
+        _ => return None,
+    };
+
+    let unchanged = |(target, params): Edge| {
+        fun.params(params) == fun.params(fun.blocks[target.0 as usize].params)
+    };
+    (unchanged(yes) && unchanged(no)).then_some((subject, key, key_load, yes, no))
 }
 
 #[cfg(test)]
@@ -72,8 +199,16 @@ mod tests {
                         span: 0,
                     },
                 ),
+                // imm_fold leaves the key's LoadConst dead for dce
                 Key::Int(imm) => (
-                    vec![],
+                    vec![Instr::LoadConst {
+                        dst: TypeId {
+                            id: Id(100 + k),
+                            ty: Type::Int,
+                        },
+                        value: Const::Int(i64::from(imm)),
+                        span: 0,
+                    }],
                     Terminator::BranchCmpImm {
                         op: BinOp::IEq,
                         lhs: subject,
@@ -149,7 +284,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "switch_fold is a stub"]
     fn folds_a_string_chain() {
         let fun = fold(&[
             (V0, Key::Str("alpha")),
@@ -184,7 +318,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "switch_fold is a stub"]
     fn folds_an_int_chain() {
         let fun = fold(&[
             (V0, Key::Int(3)),
@@ -209,6 +342,21 @@ mod tests {
     }
 
     #[test]
+    fn leaves_a_sparse_int_chain() {
+        let fun = fold(&[
+            (V0, Key::Int(3)),
+            (V0, Key::Int(7)),
+            (V0, Key::Int(9)),
+            (V0, Key::Int(42)),
+        ]);
+        assert!(matches!(
+            fun.blocks[0].term,
+            Some(Terminator::BranchCmpImm { .. })
+        ));
+        assert!(fun.blocks.iter().all(|b| !b.tombstone));
+    }
+
+    #[test]
     fn leaves_a_chain_shorter_than_min_cases() {
         let fun = fold(&[
             (V0, Key::Str("alpha")),
@@ -223,7 +371,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "switch_fold is a stub"]
     fn first_arm_wins_for_a_repeated_key() {
         let fun = fold(&[
             (V0, Key::Str("alpha")),
@@ -246,7 +393,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "switch_fold is a stub"]
     fn chain_stops_at_a_different_subject() {
         let fun = fold(&[
             (V0, Key::Str("alpha")),

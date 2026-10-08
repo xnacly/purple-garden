@@ -6,7 +6,7 @@ use purple_garden_ir as ir;
 /// place the result in r0 instead of routing through a join-block param.
 pub fn ret_inline(fun: &mut ir::Func) {
     let mut rewrites: Vec<(usize, ir::Id, u32)> = Vec::new();
-    let mut pred_counts = predecessor_counts(fun);
+    let mut pred_counts = super::predecessor_counts(fun);
     let mut touched_targets = vec![false; fun.blocks.len()];
 
     for i in 0..fun.blocks.len() {
@@ -69,35 +69,6 @@ pub fn ret_inline(fun: &mut ir::Func) {
             fun.blocks[target_id].tombstone = true;
         }
     }
-}
-
-fn predecessor_counts(fun: &ir::Func) -> Vec<u32> {
-    let mut counts = vec![0; fun.blocks.len()];
-
-    for block in &fun.blocks {
-        if block.tombstone {
-            continue;
-        }
-
-        match &block.term {
-            Some(ir::Terminator::Jump { id, .. }) => counts[id.0 as usize] += 1,
-            Some(ir::Terminator::Branch { yes, no, .. })
-            | Some(ir::Terminator::BranchCmpImm { yes, no, .. })
-            | Some(ir::Terminator::BranchCmp { yes, no, .. }) => {
-                counts[yes.0.0 as usize] += 1;
-                counts[no.0.0 as usize] += 1;
-            }
-            Some(ir::Terminator::Switch { cases, default, .. }) => {
-                for case in fun.cases(*cases) {
-                    counts[case.target.0.0 as usize] += 1;
-                }
-                counts[default.0.0 as usize] += 1;
-            }
-            _ => {}
-        }
-    }
-
-    counts
 }
 
 #[cfg(test)]
