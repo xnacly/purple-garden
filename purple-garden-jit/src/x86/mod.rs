@@ -332,7 +332,10 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 self.pos += 2;
             }
 
-            let next = blocks[idx + 1..].iter().find(|b| !b.tombstone).map(|b| b.id);
+            let next = blocks[idx + 1..]
+                .iter()
+                .find(|b| !b.tombstone)
+                .map(|b| b.id);
             self.term(block.term.as_ref(), next);
             if self.unsupported {
                 return None;
@@ -548,6 +551,105 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                     }
                     _ => bail!(self, "unsupported bin op {op:?}"),
                 }
+            }
+            ir::Instr::Lookup {
+                dst,
+                subject,
+                entries,
+                default,
+                ..
+            } => {
+                // Slots as for a switch, holding values instead of targets.
+                let step = match entries[0].0 {
+                    ir::Const::Str(_) => string::ALIGN as i64,
+                    _ => 1,
+                };
+                let mut values = Vec::with_capacity(entries.len() * 2 + 1);
+                for c in entries.iter().flat_map(|(k, v)| [k, v]).chain([default]) {
+                    let value = match c {
+                        ir::Const::Str(_) => {
+                            let Some(&value) = self
+                                .globals
+                                .get(c)
+                                .and_then(|&slot| self.strings.get(slot as usize))
+                            else {
+                                bail!(self, "lookup string missing from the const pool");
+                                return;
+                            };
+                            value
+                        }
+                        c => Value::from(c.clone()),
+                    };
+                    values.push(value.0);
+                }
+                let default = values.pop().unwrap();
+                let pairs: Vec<(i64, u64)> = values
+                    .chunks(2)
+                    .map(|kv| (kv[0] as i64, kv[1]))
+                    .collect();
+                let first = pairs.iter().map(|&(key, _)| key).min().unwrap();
+                let slot = |key: i64| ((key - first) / step) as usize;
+                let len = pairs.iter().map(|&(key, _)| slot(key)).max().unwrap() + 1;
+                let Ok(len_imm) = i32::try_from(len) else {
+                    bail!(self, "lookup table of {len} slots");
+                    return;
+                };
+
+                let subject = self.ensure_register(*subject);
+                let dst = self.def(dst.id, self.pos + 1);
+
+                // rax = the subject's slot, everything outside the table wraps
+                // to a huge slot and takes the default.
+                self.emit(Insn::MovAbs {
+                    dst: SCRATCH,
+                    imm: (first as u64).wrapping_neg(),
+                });
+                self.emit(Insn::Add {
+                    dst: SCRATCH,
+                    src: subject,
+                });
+                if step > 1 {
+                    self.emit(Insn::ShrImm {
+                        dst: SCRATCH,
+                        imm: step.trailing_zeros() as u8,
+                    });
+                }
+                self.emit(Insn::CmpImm {
+                    reg: SCRATCH,
+                    imm: len_imm,
+                });
+                let to_default = encode::jump(self.out, Cond::AboveEq);
+
+                // dst holds the table address until it holds the value.
+                self.emit(Insn::LeaRip { dst, disp: 0 });
+                let lea = self.out.len() - 4;
+                self.emit(Insn::LoadScaled8 {
+                    dst,
+                    base: dst,
+                    index: SCRATCH,
+                });
+                let to_done = encode::jump(self.out, Cond::Always);
+
+                while !self.out.len().is_multiple_of(8) {
+                    self.out.push(0xcc);
+                }
+                let table = self.out.len();
+                patch_rel32(self.out, lea, lea + 4, table).expect("table follows the lea");
+                let mut slots = vec![default; len];
+                for &(key, value) in &pairs {
+                    slots[slot(key)] = value;
+                }
+                for value in slots {
+                    self.out.extend_from_slice(&value.to_le_bytes());
+                }
+
+                let default_at = self.out.len();
+                patch_rel32(self.out, to_default, to_default + 4, default_at)
+                    .expect("default follows the table");
+                self.emit(Insn::MovAbs { dst, imm: default });
+                let done = self.out.len();
+                patch_rel32(self.out, to_done, to_done + 4, done)
+                    .expect("lookup ends after the default");
             }
             _ => bail!(self, "unsupported instruction {i:?}"),
         }
