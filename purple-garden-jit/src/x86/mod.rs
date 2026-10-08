@@ -17,7 +17,7 @@ use encode::{
     patch_rel32,
 };
 use purple_garden_ir::{self as ir, BinOp};
-use purple_garden_runtime::Value;
+use purple_garden_runtime::{Value, string};
 
 /// Bail out of [`compile_func`] (returning `None`) and, under the `trace`
 /// feature, log why. The reason is only formatted inside `trace!`, so it costs
@@ -646,6 +646,110 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             } if *callee == func.id => {
                 self.edge_moves(args, &func.params, pos);
                 self.jump(Cond::Always, Target::Block(self.entry));
+            }
+            ir::Terminator::Switch {
+                subject,
+                cases,
+                default,
+                ..
+            } => {
+                // The table of bc's Op::Switch: a slot per value from the lowest
+                // key. Strings are interned, so a string key is its address in
+                // the string pool, where strings sit ALIGN bytes apart.
+                let cases = func.cases(*cases);
+                let step = match cases[0].key {
+                    ir::Const::Str(_) => string::ALIGN as i64,
+                    _ => 1,
+                };
+                let mut keys = Vec::with_capacity(cases.len());
+                for case in cases {
+                    let key = match &case.key {
+                        ir::Const::Int(v) => *v,
+                        key => {
+                            let Some(&value) = self
+                                .globals
+                                .get(key)
+                                .and_then(|&slot| self.strings.get(slot as usize))
+                            else {
+                                bail!(self, "switch key missing from the const pool");
+                                return;
+                            };
+                            value.0 as i64
+                        }
+                    };
+                    keys.push((key, case.target.0));
+                }
+                let first = keys.iter().map(|&(key, _)| key).min().unwrap();
+                let slot = |key: i64| ((key - first) / step) as usize;
+                let len = keys.iter().map(|&(key, _)| slot(key)).max().unwrap() + 1;
+                let Ok(len_imm) = i32::try_from(len) else {
+                    bail!(self, "switch table of {len} slots");
+                    return;
+                };
+
+                let subject = self.ensure_register(*subject);
+                let Some(base) = self.ra.take_free(|_| true) else {
+                    bail!(self, "no free register for the switch table");
+                    return;
+                };
+                let base = Reg(base);
+
+                // rax = the subject's slot. A subject below `first` wraps around
+                // to a huge slot, so one unsigned compare sends everything
+                // outside the table to the default.
+                self.emit(Insn::MovAbs {
+                    dst: SCRATCH,
+                    imm: (first as u64).wrapping_neg(),
+                });
+                self.emit(Insn::Add {
+                    dst: SCRATCH,
+                    src: subject,
+                });
+                if step > 1 {
+                    self.emit(Insn::ShrImm {
+                        dst: SCRATCH,
+                        imm: step.trailing_zeros() as u8,
+                    });
+                }
+                self.emit(Insn::CmpImm {
+                    reg: SCRATCH,
+                    imm: len_imm,
+                });
+                self.jump(Cond::AboveEq, Target::Block(default.0));
+
+                // Jump through the table placed right after the jmp. Its entries
+                // are offsets from the table start, so the code stays relocatable.
+                self.emit(Insn::LeaRip { dst: base, disp: 0 });
+                let lea = self.out.len() - 4;
+                self.emit(Insn::LoadI32Scaled {
+                    dst: SCRATCH,
+                    base,
+                    index: SCRATCH,
+                });
+                self.emit(Insn::Add {
+                    dst: SCRATCH,
+                    src: base,
+                });
+                self.emit(Insn::JmpReg { reg: SCRATCH });
+                self.ra.give_back(base.0);
+
+                while !self.out.len().is_multiple_of(4) {
+                    self.out.push(0xcc);
+                }
+                let table = self.out.len();
+                patch_rel32(self.out, lea, lea + 4, table).expect("table follows the lea");
+                let mut targets = vec![default.0; len];
+                for &(key, target) in &keys {
+                    targets[slot(key)] = target;
+                }
+                for target in targets {
+                    self.patches.push(Patch {
+                        rel: self.out.len(),
+                        target: Target::Block(target),
+                        from: table,
+                    });
+                    self.out.extend_from_slice(&[0; 4]);
+                }
             }
             _ => bail!(self, "unsupported terminator"),
         }
