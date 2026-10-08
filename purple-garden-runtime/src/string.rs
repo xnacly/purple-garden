@@ -32,9 +32,13 @@ pub fn hash(bytes: &[u8]) -> u32 {
         h = (h.rotate_left(5) ^ u64::from_le_bytes(*c)).wrapping_mul(K);
     }
     if !tail.is_empty() {
-        let mut buf = [0u8; 8];
-        buf[..tail.len()].copy_from_slice(tail);
-        h = (h.rotate_left(5) ^ u64::from_le_bytes(buf)).wrapping_mul(K);
+        // Assembled in a register: copying into a stack buffer and loading it
+        // as one u64 stalls on store forwarding.
+        let tail = tail
+            .iter()
+            .enumerate()
+            .fold(0u64, |acc, (i, &b)| acc | u64::from(b) << (8 * i));
+        h = (h.rotate_left(5) ^ tail).wrapping_mul(K);
     }
     (h ^ (h >> 32)) as u32
 }
