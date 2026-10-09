@@ -91,7 +91,7 @@ fn language_doc_query(token: &Token<'_>) -> Option<(LanguageDocKind, &'static st
 }
 
 pub(super) fn fn_detail(
-    ast: &Ast<'_>,
+    ast: &Ast<'_, '_>,
     name: &Token<'_>,
     args: &[(Token<'_>, TypeExprId)],
     return_type: TypeExprId,
@@ -145,7 +145,7 @@ fn doc_text(docs: &[Token<'_>]) -> String {
 }
 
 pub(super) fn call_hover(
-    ast: &Ast<'_>,
+    ast: &Ast<'_, '_>,
     target: NodeId,
     analysis: &DocumentAnalysis,
 ) -> Option<AnalysisHover> {
@@ -172,7 +172,7 @@ pub(super) fn call_hover(
 }
 
 pub(super) fn ident_hover(
-    ast: &Ast<'_>,
+    ast: &Ast<'_, '_>,
     typecheck: &TypecheckOutput<'_>,
     node_id: NodeId,
     name: &Token<'_>,
@@ -183,7 +183,7 @@ pub(super) fn ident_hover(
     })
 }
 
-fn local_function_hover(ast: &Ast<'_>, query: &str) -> Option<HoverMarkup> {
+fn local_function_hover(ast: &Ast<'_, '_>, query: &str) -> Option<HoverMarkup> {
     ast.roots.iter().find_map(|&root| match ast.node(root) {
         Node::Fn {
             docs,
@@ -231,7 +231,7 @@ pub(super) fn import_hover(pkg: &Token<'_>, analysis: &DocumentAnalysis) -> Opti
 }
 
 pub(super) fn package_target_hover(
-    ast: &Ast<'_>,
+    ast: &Ast<'_, '_>,
     target: NodeId,
     analysis: &DocumentAnalysis,
 ) -> Option<(Span, String)> {
@@ -265,7 +265,7 @@ pub(super) fn garden_block(contents: impl std::fmt::Display) -> String {
 }
 
 pub(super) fn type_for_node(
-    ast: &Ast<'_>,
+    ast: &Ast<'_, '_>,
     typecheck: &TypecheckOutput<'_>,
     node_id: NodeId,
 ) -> Option<String> {

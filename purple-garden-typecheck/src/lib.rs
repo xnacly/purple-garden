@@ -22,7 +22,7 @@ use typedefs::{CallName, CallSink, TcType};
 
 #[derive(Debug)]
 pub struct Typechecker<'a, 't> {
-    ast: &'a Ast<'t>,
+    ast: &'a Ast<'t, 'a>,
     /// Node id -> Type. Indexed by id; Node ids are dense from the parser, the slot past the last
     /// id holds `Void` for results without a node of their own, see [`Self::void`]
     map: TypeMap<'t>,
@@ -43,7 +43,7 @@ pub struct Typechecker<'a, 't> {
 
 impl<'a, 't> Typechecker<'a, 't> {
     #[must_use]
-    pub fn new(ast: &'a Ast<'t>) -> Self {
+    pub fn new(ast: &'a Ast<'t, 'a>) -> Self {
         let mut s = Self {
             ast,
             map: TypeMap::with_slots(ast.values + 1),
@@ -142,7 +142,7 @@ impl<'a, 't> Typechecker<'a, 't> {
         };
 
         let mut registered: HashMap<&str, Vec<FunctionType>> = HashMap::new();
-        for fun in fns {
+        for fun in *fns {
             let lex::Type::Ident(fun_name) = fun.name.t else {
                 unreachable!();
             };
@@ -178,7 +178,7 @@ impl<'a, 't> Typechecker<'a, 't> {
 
     #[must_use]
     pub fn check(mut self) -> TypecheckOutput<'t> {
-        for &node in &self.ast.roots {
+        for &node in self.ast.roots {
             self.node(node);
         }
 
@@ -682,7 +682,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                 let mut typed_fields = Vec::with_capacity(fields.len());
                 let mut poisoned = false;
 
-                for (key, value) in fields {
+                for (key, value) in *fields {
                     let lex::Type::Ident(inner_name) = key.t else {
                         unreachable!()
                     };
@@ -809,7 +809,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                 let prev_env = std::mem::take(&mut self.env);
                 self.env.push(HashMap::new());
                 let mut typed_arguments = Vec::with_capacity(args.len());
-                for (arg_name, arg_type) in args {
+                for (arg_name, arg_type) in *args {
                     let lex::Token {
                         t: lex::Type::Ident(inner_name),
                         ..
@@ -932,7 +932,7 @@ impl<'a, 't> Typechecker<'a, 't> {
 
                 // we simply use the default branches type as the canonical type of the match, its
                 // the easiest way to deal with this
-                let Some(first_type) = self.block_type(&default.1).known() else {
+                let Some(first_type) = self.block_type(default.1).known() else {
                     return TcType::Poison;
                 };
 
@@ -963,7 +963,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                     return self.alias(*id, self.void);
                 }
 
-                for pkg_tok in pkgs {
+                for pkg_tok in *pkgs {
                     let lex::Type::S(pkg_name) = pkg_tok.t else {
                         unreachable!();
                     };
@@ -1001,13 +1001,17 @@ impl<'a, 't> Typechecker<'a, 't> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use purple_garden_allocators::bump::BumpAlloc;
     use purple_garden_frontend::{lex::Lexer, parser::Parser};
 
-    fn parse(source: &[u8]) -> Ast<'_> {
-        Parser::new(Lexer::new(source)).parse().unwrap()
+    fn parse(source: &[u8]) -> Ast<'_, '_> {
+        let arena = Box::leak(Box::new(BumpAlloc::new()));
+        Parser::new(Lexer::new(source), arena, &BumpAlloc::new())
+            .parse()
+            .unwrap()
     }
 
-    fn type_of<'t>(ast: &Ast<'t>, out: &TypecheckOutput<'t>, node: NodeId) -> Option<Type<'t>> {
+    fn type_of<'t>(ast: &Ast<'t, '_>, out: &TypecheckOutput<'t>, node: NodeId) -> Option<Type<'t>> {
         out.types.get(ast.value_id(node)).cloned()
     }
 
@@ -1388,13 +1392,13 @@ mod tests {
         }],
     };
 
-    fn check<'s>(source: &'s [u8]) -> (Ast<'s>, TypecheckOutput<'s>) {
+    fn check<'s>(source: &'s [u8]) -> (Ast<'s, 's>, TypecheckOutput<'s>) {
         let ast = parse(source);
         let out = Typechecker::new(&ast).with_libs(vec![&T]).check();
         (ast, out)
     }
 
-    fn root_type<'t>(ast: &Ast<'t>, out: &TypecheckOutput<'t>, root: usize) -> Option<Type<'t>> {
+    fn root_type<'t>(ast: &Ast<'t, '_>, out: &TypecheckOutput<'t>, root: usize) -> Option<Type<'t>> {
         type_of(ast, out, ast.roots[root])
     }
 

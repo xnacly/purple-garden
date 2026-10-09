@@ -151,7 +151,7 @@ impl<'lower> Lower<'lower> {
 
     fn lower_node_into(
         &mut self,
-        ast: &'lower Ast<'lower>,
+        ast: &'lower Ast<'lower, 'lower>,
         node_id: NodeId,
         ty: &ptype::Type<'lower>,
         base: Id,
@@ -163,7 +163,7 @@ impl<'lower> Lower<'lower> {
                 unreachable!("record literal was typechecked as non-record")
             };
 
-            for (tok, value) in fields {
+            for (tok, value) in *fields {
                 let lex::Type::Ident(name) = tok.t else {
                     unreachable!();
                 };
@@ -192,7 +192,7 @@ impl<'lower> Lower<'lower> {
 
     fn lower_node(
         &mut self,
-        ast: &'lower Ast<'lower>,
+        ast: &'lower Ast<'lower, 'lower>,
         node_id: NodeId,
     ) -> Result<Option<Id>, Diagnostic> {
         let node = ast.node(node_id);
@@ -444,7 +444,7 @@ impl<'lower> Lower<'lower> {
                 self.block_mut(entry).params = entry_params;
 
                 let mut last = None;
-                for &node in body {
+                for &node in *body {
                     self.switch_to_block(entry);
                     last = self.lower_node(ast, node)?;
                 }
@@ -468,7 +468,7 @@ impl<'lower> Lower<'lower> {
             }
             Node::Call { target, args, id } => {
                 let mut a = vec![];
-                for &arg in args {
+                for &arg in *args {
                     let Some(id) = self.lower_node(ast, arg)? else {
                         unreachable!();
                     };
@@ -573,7 +573,7 @@ impl<'lower> Lower<'lower> {
                 Some(dst_id)
             }
             Node::Import { pkgs, .. } => {
-                for pkg_tok in pkgs {
+                for pkg_tok in *pkgs {
                     let Token {
                         t: Type::S(as_str), ..
                     } = pkg_tok
@@ -697,7 +697,7 @@ impl<'lower> Lower<'lower> {
                     // env is a flat map, so snapshot it and restore afterwards.
                     let saved_env = self.ctx.env.clone();
                     let mut last = None;
-                    for &node in body {
+                    for &node in *body {
                         last = self.lower_node(ast, node)?;
                     }
                     let value = last.expect("match body must produce value");
@@ -719,7 +719,7 @@ impl<'lower> Lower<'lower> {
                 // `let` bindings stay local to it.
                 let saved_env = self.ctx.env.clone();
                 let mut last = None;
-                for &node in body {
+                for &node in *body {
                     last = self.lower_node(ast, node)?;
                 }
 
@@ -815,7 +815,7 @@ impl<'lower> Lower<'lower> {
                 });
 
                 let base = id;
-                for (tok, value) in fields {
+                for (tok, value) in *fields {
                     let lex::Type::Ident(name) = tok.t else {
                         unreachable!();
                     };
@@ -837,7 +837,7 @@ impl<'lower> Lower<'lower> {
     /// The entry point is always `entry`.
     pub fn ir_from_types(
         mut self,
-        ast: &'lower Ast<'lower>,
+        ast: &'lower Ast<'lower, 'lower>,
         types: TypeMap<'lower>,
     ) -> Result<Vec<Func<'lower>>, Diagnostic> {
         self.types = types;
@@ -853,7 +853,7 @@ impl<'lower> Lower<'lower> {
 
         let mut last = None;
         let last_span = ast.entry_span().unwrap_or(0);
-        for &node in &ast.roots {
+        for &node in ast.roots {
             last = self.lower_node(ast, node)?;
             // reset to the main entry point block to keep emitting nodes into the correct conext
             self.switch_to_block(entry);

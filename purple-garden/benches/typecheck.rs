@@ -14,6 +14,7 @@
 use std::path::PathBuf;
 
 use criterion::Criterion;
+use purple_garden_allocators::bump::BumpAlloc;
 use purple_garden_frontend::{ast::Ast, lex, parser};
 use purple_garden_typecheck::Typechecker;
 
@@ -229,8 +230,9 @@ fn synth_long_body() -> Vec<u8> {
     src.into_bytes()
 }
 
-fn parse<'s>(name: &str, source: &'s [u8]) -> Ast<'s> {
-    let parse = parser::Parser::new(lex::Lexer::new(source)).parse_collect();
+fn parse<'s>(name: &str, source: &'s [u8]) -> Ast<'s, 's> {
+    let arena = Box::leak(Box::new(BumpAlloc::new()));
+    let parse = parser::Parser::new(lex::Lexer::new(source), arena, &BumpAlloc::new()).parse_collect();
     assert!(
         parse.diagnostics.is_empty(),
         "parse failed for {name}: {:?}",

@@ -5,7 +5,7 @@ use purple_garden_frontend::{
     lex::Token,
 };
 
-pub(super) fn node_span(ast: &Ast<'_>, node_id: NodeId) -> Option<Span> {
+pub(super) fn node_span(ast: &Ast<'_, '_>, node_id: NodeId) -> Option<Span> {
     let node = ast.node(node_id);
     match node {
         Node::Atom { raw, .. } | Node::Ident { name: raw, .. } => Some(token_span(raw)),
@@ -17,14 +17,14 @@ pub(super) fn node_span(ast: &Ast<'_>, node_id: NodeId) -> Option<Span> {
         Node::Unary { op, rhs, .. } => Some(cover_spans(&[token_span(op), node_span(ast, *rhs)?])),
         Node::Array { src, members, .. } => {
             let mut spans = vec![token_span(src)];
-            for &member in members {
+            for &member in *members {
                 spans.push(node_span(ast, member)?);
             }
             Some(cover_spans(&spans))
         }
         Node::Record { src, fields, .. } => {
             let mut spans = vec![token_span(src)];
-            for (field, value) in fields {
+            for (field, value) in *fields {
                 spans.push(token_span(field));
                 spans.push(node_span(ast, *value)?);
             }
@@ -40,7 +40,7 @@ pub(super) fn node_span(ast: &Ast<'_>, node_id: NodeId) -> Option<Span> {
         }),
         Node::Match { cases, default, .. } => {
             let mut spans = Vec::new();
-            for &((ref token, condition), ref body) in cases {
+            for &((ref token, condition), body) in *cases {
                 spans.push(token_span(token));
                 spans.push(node_span(ast, condition)?);
                 if let Some(body_span) = cover_node_list(ast, body) {
@@ -48,14 +48,14 @@ pub(super) fn node_span(ast: &Ast<'_>, node_id: NodeId) -> Option<Span> {
                 }
             }
             spans.push(token_span(&default.0));
-            if let Some(default_span) = cover_node_list(ast, &default.1) {
+            if let Some(default_span) = cover_node_list(ast, default.1) {
                 spans.push(default_span);
             }
             Some(cover_spans(&spans))
         }
         Node::Call { target, args, .. } => {
             let mut spans = vec![node_span(ast, *target)?];
-            for &arg in args {
+            for &arg in *args {
                 spans.push(node_span(ast, arg)?);
             }
             Some(cover_spans(&spans))
@@ -75,9 +75,9 @@ pub(super) fn node_span(ast: &Ast<'_>, node_id: NodeId) -> Option<Span> {
         }
         Node::Extern { src, name, fns, .. } => {
             let mut spans = vec![token_span(src), token_span(name)];
-            for fun in fns {
+            for fun in *fns {
                 spans.push(token_span(&fun.name));
-                for (arg, ty) in &fun.args {
+                for (arg, ty) in fun.args {
                     spans.push(token_span(arg));
                     spans.push(type_expr_span(ast, *ty));
                 }
@@ -88,7 +88,7 @@ pub(super) fn node_span(ast: &Ast<'_>, node_id: NodeId) -> Option<Span> {
     }
 }
 
-pub(super) fn type_expr_span(ast: &Ast<'_>, id: TypeExprId) -> Span {
+pub(super) fn type_expr_span(ast: &Ast<'_, '_>, id: TypeExprId) -> Span {
     token_span(ast.type_token(id))
 }
 
@@ -152,7 +152,7 @@ pub(super) fn apply_content_changes(
     }
 }
 
-fn cover_node_list(ast: &Ast<'_>, nodes: &[NodeId]) -> Option<Span> {
+fn cover_node_list(ast: &Ast<'_, '_>, nodes: &[NodeId]) -> Option<Span> {
     let spans = nodes
         .iter()
         .copied()

@@ -553,6 +553,7 @@ name = "purple-garden"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "purple-garden-allocators",
  "purple-garden-bc",
  "purple-garden-frontend",
  "purple-garden-ir",
@@ -617,6 +618,7 @@ dependencies = [
 name = "purple-garden-frontend"
 version = "0.1.0"
 dependencies = [
+ "purple-garden-allocators",
  "purple-garden-bc",
  "purple-garden-ir",
  "purple-garden-runtime",
@@ -688,6 +690,7 @@ dependencies = [
 name = "purple-garden-typecheck"
 version = "0.1.0"
 dependencies = [
+ "purple-garden-allocators",
  "purple-garden-frontend",
  "purple-garden-ir",
  "purple-garden-runtime",

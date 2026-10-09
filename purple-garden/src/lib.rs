@@ -15,6 +15,7 @@ use std::{
     marker::PhantomData,
 };
 
+use purple_garden_allocators::bump::BumpAlloc;
 use purple_garden_bc::{self as bc, CcCallTarget};
 use purple_garden_frontend::{
     diagnostic::{Diagnostic, Span},
@@ -665,9 +666,15 @@ fn compile<'i, A: Allocator + Clone>(
     libs: &[&'i Pkg],
     stdlib: bool,
     unsafe_stdlib: bool,
-    _alloc: A,
+    alloc: A,
 ) -> Result<Program<'i>, Diagnostic> {
-    let parse = parser::Parser::new(lex::Lexer::new(input)).parse_collect();
+    let arena = BumpAlloc::new_in(alloc.clone());
+    let parse = parser::Parser::new(
+        lex::Lexer::new(input),
+        &arena,
+        &BumpAlloc::new_in(alloc),
+    )
+    .parse_collect();
     if let Some(diagnostic) = parse.diagnostics.into_iter().next() {
         return Err(diagnostic);
     }

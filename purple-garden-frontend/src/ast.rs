@@ -11,40 +11,25 @@ pub struct NodeId(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeExprId(pub usize);
 
+/// Lives in the arena the parser was given, see
+/// [`Arena`](purple_garden_allocators::bump::Arena).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Ast<'ast> {
-    pub roots: Vec<NodeId>,
-    pub nodes: Vec<Node<'ast>>,
-    pub types: Vec<TypeExpr<'ast>>,
+pub struct Ast<'src, 'ast> {
+    pub roots: &'ast [NodeId],
+    pub nodes: &'ast [Node<'src, 'ast>],
+    pub types: &'ast [TypeExpr<'src, 'ast>],
     /// Number of value ids the parser handed out, every `Node` id is below it
     pub values: usize,
 }
 
-impl<'ast> Ast<'ast> {
+impl<'src, 'ast> Ast<'src, 'ast> {
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn push_node(&mut self, node: Node<'ast>) -> NodeId {
-        let id = NodeId(self.nodes.len());
-        self.nodes.push(node);
-        id
-    }
-
-    pub fn push_type(&mut self, ty: TypeExpr<'ast>) -> TypeExprId {
-        let id = TypeExprId(self.types.len());
-        self.types.push(ty);
-        id
-    }
-
-    #[must_use]
-    pub fn node(&self, id: NodeId) -> &Node<'ast> {
+    pub fn node(&self, id: NodeId) -> &Node<'src, 'ast> {
         &self.nodes[id.0]
     }
 
     #[must_use]
-    pub fn ty(&self, id: TypeExprId) -> &TypeExpr<'ast> {
+    pub fn ty(&self, id: TypeExprId) -> &TypeExpr<'src, 'ast> {
         &self.types[id.0]
     }
 
@@ -76,7 +61,7 @@ impl<'ast> Ast<'ast> {
             }),
             Node::Match { cases, default, .. } => {
                 let mut spans = Vec::new();
-                for ((token, condition), body) in cases {
+                for ((token, condition), body) in *cases {
                     spans.push(Span::from_token(token));
                     spans.push(self.span(*condition)?);
                     if let Some(body_span) = self.span_nodes(body) {
@@ -84,14 +69,14 @@ impl<'ast> Ast<'ast> {
                     }
                 }
                 spans.push(Span::from_token(&default.0));
-                if let Some(default_span) = self.span_nodes(&default.1) {
+                if let Some(default_span) = self.span_nodes(default.1) {
                     spans.push(default_span);
                 }
                 Some(Self::cover_spans(&spans))
             }
             Node::Call { target, args, .. } => {
                 let mut spans = vec![self.span(*target)?];
-                for &arg in args {
+                for &arg in *args {
                     spans.push(self.span(arg)?);
                 }
                 Some(Self::cover_spans(&spans))
@@ -112,9 +97,9 @@ impl<'ast> Ast<'ast> {
             }
             Node::Extern { src, name, fns, .. } => {
                 let mut spans = vec![Span::from_token(src), Span::from_token(name)];
-                for fun in fns {
+                for fun in *fns {
                     spans.push(Span::from_token(&fun.name));
-                    for (arg, ty) in &fun.args {
+                    for (arg, ty) in fun.args {
                         spans.push(Span::from_token(arg));
                         spans.push(self.type_span(*ty));
                     }
@@ -124,7 +109,7 @@ impl<'ast> Ast<'ast> {
             }
             Node::Record { src, fields, .. } => {
                 let mut spans = vec![Span::from_token(src)];
-                for (field, value) in fields {
+                for (field, value) in *fields {
                     spans.push(Span::from_token(field));
                     spans.push(self.span(*value)?);
                 }
@@ -132,7 +117,7 @@ impl<'ast> Ast<'ast> {
             }
             Node::Array { src, members, .. } => {
                 let mut spans = vec![Span::from_token(src)];
-                for &member in members {
+                for &member in *members {
                     spans.push(self.span(member)?);
                 }
                 Some(Self::cover_spans(&spans))
@@ -179,12 +164,12 @@ impl<'ast> Ast<'ast> {
     }
 
     #[must_use]
-    pub fn type_display(&self, id: TypeExprId) -> TypeDisplay<'_, 'ast> {
+    pub fn type_display(&self, id: TypeExprId) -> TypeDisplay<'_, 'src> {
         TypeDisplay { ast: self, id }
     }
 
     #[must_use]
-    pub fn type_token(&self, id: TypeExprId) -> &Token<'ast> {
+    pub fn type_token(&self, id: TypeExprId) -> &Token<'src> {
         match self.ty(id) {
             TypeExpr::Atom(token) | TypeExpr::Foreign(token) => token,
             TypeExpr::Option(inner) | TypeExpr::Array(inner) => self.type_token(*inner),
@@ -222,17 +207,17 @@ impl<'ast> Ast<'ast> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Node<'node> {
+pub enum Node<'src, 'ast> {
     /// String|Double|Integer|True|False
-    Atom { id: usize, raw: Token<'node> },
+    Atom { id: usize, raw: Token<'src> },
 
     /// <identifier>
-    Ident { id: usize, name: Token<'node> },
+    Ident { id: usize, name: Token<'src> },
 
     /// <lhs> <op> <rhs>
     Bin {
         id: usize,
-        op: Token<'node>,
+        op: Token<'src>,
         lhs: NodeId,
         rhs: NodeId,
     },
@@ -240,15 +225,15 @@ pub enum Node<'node> {
     /// <op> <rhs>
     Unary {
         id: usize,
-        op: Token<'node>,
+        op: Token<'src>,
         rhs: NodeId,
     },
 
     /// let <name> = <rhs>
     Let {
         id: usize,
-        docs: Vec<Token<'node>>,
-        name: Token<'node>,
+        docs: &'ast [Token<'src>],
+        name: Token<'src>,
         rhs: NodeId,
     },
 
@@ -257,12 +242,12 @@ pub enum Node<'node> {
     /// }
     Fn {
         id: usize,
-        docs: Vec<Token<'node>>,
-        name: Token<'node>,
+        docs: &'ast [Token<'src>],
+        name: Token<'src>,
         /// (<identifier>, <type>)
-        args: Vec<(Token<'node>, TypeExprId)>,
+        args: &'ast [(Token<'src>, TypeExprId)],
         return_type: TypeExprId,
-        body: Vec<NodeId>,
+        body: &'ast [NodeId],
     },
 
     /// match {
@@ -273,28 +258,28 @@ pub enum Node<'node> {
     Match {
         id: usize,
         /// [((`condition_token`, condition), body)]
-        cases: Vec<((Token<'node>, NodeId), Vec<NodeId>)>,
-        default: (Token<'node>, Vec<NodeId>),
+        cases: &'ast [((Token<'src>, NodeId), &'ast [NodeId])],
+        default: (Token<'src>, &'ast [NodeId]),
     },
 
     /// <target>(<args>)
     Call {
         id: usize,
         target: NodeId,
-        args: Vec<NodeId>,
+        args: &'ast [NodeId],
     },
 
     /// <target>.<name>
     Field {
         id: usize,
         target: NodeId,
-        name: Token<'node>,
+        name: Token<'src>,
     },
 
     /// <lhs> as <rhs>
     Cast {
         id: usize,
-        src: Token<'node>,
+        src: Token<'src>,
         lhs: NodeId,
         rhs: TypeExprId,
     },
@@ -302,44 +287,44 @@ pub enum Node<'node> {
     /// import ("<pkg name>" "<pkg name>")
     Import {
         id: usize,
-        src: Token<'node>,
+        src: Token<'src>,
         /// list of packages to import as strings
-        pkgs: Vec<Token<'node>>,
+        pkgs: &'ast [Token<'src>],
     },
 
     /// extern "<pkg name>" { fn <name>(<arg0:type0>) <return_type> }
     Extern {
         id: usize,
-        src: Token<'node>,
-        docs: Vec<Token<'node>>,
-        name: Token<'node>,
-        fns: Vec<ExternFn<'node>>,
+        src: Token<'src>,
+        docs: &'ast [Token<'src>],
+        name: Token<'src>,
+        fns: &'ast [ExternFn<'src, 'ast>],
     },
 
     /// { <field> <value> }
     Record {
         id: usize,
-        src: Token<'node>,
-        fields: Vec<(Token<'node>, NodeId)>,
+        src: Token<'src>,
+        fields: &'ast [(Token<'src>, NodeId)],
     },
 
     /// [<member>]
     Array {
         id: usize,
-        src: Token<'node>,
-        members: Vec<NodeId>,
+        src: Token<'src>,
+        members: &'ast [NodeId],
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExternFn<'node> {
-    pub docs: Vec<Token<'node>>,
-    pub name: Token<'node>,
-    pub args: Vec<(Token<'node>, TypeExprId)>,
+pub struct ExternFn<'src, 'ast> {
+    pub docs: &'ast [Token<'src>],
+    pub name: Token<'src>,
+    pub args: &'ast [(Token<'src>, TypeExprId)],
     pub return_type: TypeExprId,
 }
 
-impl Node<'_> {
+impl Node<'_, '_> {
     #[must_use]
     fn value_id(&self) -> usize {
         match self {
@@ -362,19 +347,19 @@ impl Node<'_> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypeExpr<'te> {
-    Atom(Token<'te>),
-    Foreign(Token<'te>),
+pub enum TypeExpr<'src, 'ast> {
+    Atom(Token<'src>),
+    Foreign(Token<'src>),
     Option(TypeExprId),
     Array(TypeExprId),
     Record {
-        src: Token<'te>,
-        fields: Vec<(Token<'te>, TypeExprId)>,
+        src: Token<'src>,
+        fields: &'ast [(Token<'src>, TypeExprId)],
     },
 }
 
 pub struct TypeDisplay<'ast, 'src> {
-    ast: &'ast Ast<'src>,
+    ast: &'ast Ast<'src, 'ast>,
     id: TypeExprId,
 }
 
@@ -405,7 +390,7 @@ impl Display for TypeDisplay<'_, '_> {
     }
 }
 
-impl Ast<'_> {
+impl Ast<'_, '_> {
     fn fmt_ident_token<'src>(token: &Token<'src>) -> &'src str {
         let Type::Ident(name) = token.t else {
             unreachable!();
@@ -437,7 +422,7 @@ impl Ast<'_> {
         match self.node(id) {
             Node::Record { fields, .. } => {
                 write!(f, "(record")?;
-                for (name, value) in fields {
+                for (name, value) in *fields {
                     write!(f, " {}: ", Self::fmt_ident_token(name))?;
                     self.fmt_node_inline(*value, f)?;
                 }
@@ -462,7 +447,7 @@ impl Ast<'_> {
             }
             Node::Array { members, .. } => {
                 write!(f, "(array")?;
-                for member in members {
+                for member in *members {
                     write!(f, " ")?;
                     self.fmt_node_inline(*member, f)?;
                 }
@@ -471,7 +456,7 @@ impl Ast<'_> {
             Node::Call { target, args, .. } => {
                 write!(f, "(call target: ")?;
                 self.fmt_node_inline(*target, f)?;
-                for arg in args {
+                for arg in *args {
                     write!(f, " arg: ")?;
                     self.fmt_node_inline(*arg, f)?;
                 }
@@ -565,7 +550,7 @@ impl Ast<'_> {
             }
             Node::Array { members, .. } => {
                 writeln!(f, "{pad}(array")?;
-                for member in members {
+                for member in *members {
                     self.fmt_node_sexpr(*member, f, indent + 1)?;
                 }
                 writeln!(f, "{pad})")
@@ -585,7 +570,7 @@ impl Ast<'_> {
                 write!(f, "{}(fn {} ", pad, Self::fmt_ident_token(name))?;
                 self.fmt_arg_list(f, args)?;
                 writeln!(f, " -> {}", self.type_display(*return_type))?;
-                for node in body {
+                for node in *body {
                     self.fmt_node_sexpr(*node, f, indent + 1)?;
                 }
                 writeln!(f, "{pad})")
@@ -596,7 +581,7 @@ impl Ast<'_> {
                 writeln!(f, "{pad}(call")?;
                 writeln!(f, "{child_pad}target:")?;
                 self.fmt_node_sexpr(*target, f, indent + 2)?;
-                for arg in args {
+                for arg in *args {
                     writeln!(f, "{child_pad}arg:")?;
                     self.fmt_node_sexpr(*arg, f, indent + 2)?;
                 }
@@ -612,19 +597,19 @@ impl Ast<'_> {
                 let label_pad = "  ".repeat(indent + 2);
 
                 writeln!(f, "{pad}(match")?;
-                for ((_, condition), body) in cases {
+                for ((_, condition), body) in *cases {
                     writeln!(f, "{case_pad}(case")?;
                     writeln!(f, "{label_pad}when:")?;
                     self.fmt_node_sexpr(*condition, f, indent + 3)?;
                     writeln!(f, "{label_pad}then:")?;
-                    for body_member in body {
+                    for body_member in *body {
                         self.fmt_node_sexpr(*body_member, f, indent + 3)?;
                     }
                     writeln!(f, "{case_pad})")?;
                 }
                 let (_, default) = default;
                 writeln!(f, "{case_pad}(default")?;
-                for default_member in default {
+                for default_member in *default {
                     self.fmt_node_sexpr(*default_member, f, indent + 2)?;
                 }
                 writeln!(f, "{case_pad})")?;
@@ -632,7 +617,7 @@ impl Ast<'_> {
             }
             Node::Import { pkgs, .. } => {
                 write!(f, "{pad}(import")?;
-                for pkg in pkgs {
+                for pkg in *pkgs {
                     let Token { t: Type::S(s), .. } = pkg else {
                         unreachable!();
                     };
@@ -644,9 +629,9 @@ impl Ast<'_> {
                 let child_pad = "  ".repeat(indent + 1);
 
                 writeln!(f, "{}(extern \"{}\"", pad, name.t.as_str())?;
-                for fun in fns {
+                for fun in *fns {
                     write!(f, "{}(fn {} ", child_pad, Self::fmt_ident_token(&fun.name))?;
-                    self.fmt_arg_list(f, &fun.args)?;
+                    self.fmt_arg_list(f, fun.args)?;
                     writeln!(f, " -> {})", self.type_display(fun.return_type))?;
                 }
                 writeln!(f, "{pad})")
@@ -664,9 +649,9 @@ impl Ast<'_> {
     }
 }
 
-impl std::fmt::Display for Ast<'_> {
+impl std::fmt::Display for Ast<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for root in &self.roots {
+        for root in self.roots {
             self.fmt_node_sexpr(*root, f, 0)?;
         }
         Ok(())

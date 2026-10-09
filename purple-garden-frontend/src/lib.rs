@@ -1,4 +1,4 @@
-#![feature(portable_simd)]
+#![feature(portable_simd, allocator_api)]
 
 pub mod ast;
 pub mod diagnostic;
@@ -45,7 +45,7 @@ pub fn type_from_lex_type<'a>(t: lex::Type<'a>) -> ptype::Type<'a> {
 }
 
 #[must_use]
-pub fn type_from_type_expr<'a>(ast: &Ast<'a>, id: TypeExprId) -> ptype::Type<'a> {
+pub fn type_from_type_expr<'a>(ast: &Ast<'a, '_>, id: TypeExprId) -> ptype::Type<'a> {
     match ast.ty(id) {
         TypeExpr::Atom(token) => type_from_lex_type(token.t),
         TypeExpr::Foreign(token) => ptype::Type::Foreign(token.t.as_str()),

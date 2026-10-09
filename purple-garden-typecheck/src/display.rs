@@ -10,9 +10,9 @@ use crate::typedefs::{FunctionType, TypecheckOutput};
 impl<'t> TypecheckOutput<'t> {
     /// Render top-level binding and function types for `-T`.
     #[must_use]
-    pub fn render_summary(&self, ast: &Ast<'t>) -> String {
+    pub fn render_summary(&self, ast: &Ast<'t, '_>) -> String {
         let mut out = String::new();
-        for &node in &ast.roots {
+        for &node in ast.roots {
             match ast.node(node) {
                 Node::Let { id, name, .. } => {
                     use std::fmt::Write as _;
@@ -46,9 +46,9 @@ impl<'t> TypecheckOutput<'t> {
 
     /// Render every typed AST value node for `-TT`.
     #[must_use]
-    pub fn render_nodes(&self, ast: &Ast<'t>) -> String {
+    pub fn render_nodes(&self, ast: &Ast<'t, '_>) -> String {
         let mut out = String::new();
-        for &node in &ast.roots {
+        for &node in ast.roots {
             self.render_node(ast, node, 0, &mut out);
         }
         out
@@ -65,13 +65,13 @@ impl<'t> TypecheckOutput<'t> {
         writeln!(out, "{}{}: {ty}", "  ".repeat(indent), label).unwrap();
     }
 
-    fn render_node(&self, ast: &Ast<'t>, node_id: NodeId, indent: usize, out: &mut String) {
+    fn render_node(&self, ast: &Ast<'t, '_>, node_id: NodeId, indent: usize, out: &mut String) {
         match ast.node(node_id) {
             Node::Record { id, fields, .. } => {
                 use std::fmt::Write as _;
 
                 self.render_value(indent, "record", self.type_at(*id), out);
-                for (field, value) in fields {
+                for (field, value) in *fields {
                     let lex::Type::Ident(name) = field.t else {
                         unreachable!()
                     };
@@ -96,7 +96,7 @@ impl<'t> TypecheckOutput<'t> {
             }
             Node::Array { id, members, .. } => {
                 self.render_value(indent, "array", self.type_at(*id), out);
-                for &member in members {
+                for &member in *members {
                     self.render_node(ast, member, indent + 1, out);
                 }
             }
@@ -130,26 +130,26 @@ impl<'t> TypecheckOutput<'t> {
                     ast.type_display(*return_type)
                 )
                 .unwrap();
-                for &node in body {
+                for &node in *body {
                     self.render_node(ast, node, indent + 1, out);
                 }
             }
             Node::Match { id, cases, default } => {
                 self.render_value(indent, "match", self.type_at(*id), out);
-                for &((_, condition), ref body) in cases {
+                for &((_, condition), body) in *cases {
                     self.render_node(ast, condition, indent + 1, out);
                     for &node in body {
                         self.render_node(ast, node, indent + 2, out);
                     }
                 }
-                for &node in &default.1 {
+                for &node in default.1 {
                     self.render_node(ast, node, indent + 1, out);
                 }
             }
             Node::Call { id, target, args } => {
                 self.render_value(indent, "call", self.type_at(*id), out);
                 self.render_callee(ast, *target, indent + 1, out);
-                for &arg in args {
+                for &arg in *args {
                     self.render_node(ast, arg, indent + 1, out);
                 }
             }
@@ -173,14 +173,14 @@ impl<'t> TypecheckOutput<'t> {
             }
             Node::Import { pkgs, .. } => {
                 use std::fmt::Write as _;
-                for pkg in pkgs {
+                for pkg in *pkgs {
                     writeln!(out, "{}import {}", "  ".repeat(indent), pkg.t.as_str()).unwrap();
                 }
             }
             Node::Extern { name, fns, .. } => {
                 use std::fmt::Write as _;
                 writeln!(out, "{}extern {}", "  ".repeat(indent), name.t.as_str()).unwrap();
-                for fun in fns {
+                for fun in *fns {
                     let args = fun
                         .args
                         .iter()
@@ -200,7 +200,7 @@ impl<'t> TypecheckOutput<'t> {
         }
     }
 
-    fn render_callee(&self, ast: &Ast<'t>, node_id: NodeId, indent: usize, out: &mut String) {
+    fn render_callee(&self, ast: &Ast<'t, '_>, node_id: NodeId, indent: usize, out: &mut String) {
         use std::fmt::Write as _;
         match ast.node(node_id) {
             Node::Ident { name, .. } => {

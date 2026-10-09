@@ -1,6 +1,6 @@
 #![feature(allocator_api)]
 
-use purple_garden_allocators::metric::MetricAlloc;
+use purple_garden_allocators::{bump::BumpAlloc, metric::MetricAlloc};
 use purple_garden_bc as bc;
 use purple_garden_frontend::{
     diagnostic::{Diagnostic, Help, Span},
@@ -154,11 +154,13 @@ fn pipeline<A: Allocator + Clone>(
     cli: &Cli,
     input_source: &str,
     source: &[u8],
-    _allocs: Phases<A>,
+    allocs: Phases<A>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let conf = &cli.config;
 
-    let parse = Parser::new(Lexer::new(source)).parse_collect();
+    let arena = BumpAlloc::new_in(allocs.parse.clone());
+    let scratch = BumpAlloc::new_in(allocs.parse);
+    let parse = Parser::new(Lexer::new(source), &arena, &scratch).parse_collect();
     let purple_garden_frontend::parser::ParseOutput {
         ast,
         diagnostics: parse_diagnostics,

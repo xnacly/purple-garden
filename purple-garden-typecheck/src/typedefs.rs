@@ -49,7 +49,7 @@ impl TcType {
 /// while the call is checked, which rules out `&mut Typechecker`, so the written fields are split
 /// off instead of cloning the signature.
 pub(super) struct CallSink<'s, 'a, 't> {
-    pub(super) ast: &'a Ast<'t>,
+    pub(super) ast: &'a Ast<'t, 'a>,
     pub(super) map: &'s mut TypeMap<'t>,
     pub(super) diagnostics: &'s mut Vec<Diagnostic>,
 }

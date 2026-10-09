@@ -12,3 +12,6 @@ purple-garden-ir = { path = "../purple-garden-ir" }
 purple-garden-runtime = { path = "../purple-garden-runtime" }
 purple-garden-shared = { path = "../purple-garden-shared" }
 purple-garden-std = { path = "../purple-garden-std" }
+
+[dev-dependencies]
+purple-garden-allocators = { path = "../purple-garden-allocators" }
