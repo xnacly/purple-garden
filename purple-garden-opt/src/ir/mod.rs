@@ -131,7 +131,7 @@ pub(super) fn record_uses<S: Allocator>(fun: &ir::Func<'_>, scratch: &mut Scratc
             if let Some(id) = ir::Func::def_of(instr) {
                 scratch.ensure(id);
             }
-            ir::Func::for_each_use_of_instr(instr, |id| scratch.bump(id));
+            fun.for_each_use_of_instr(instr, |id| scratch.bump(id));
         }
 
         if let Some(term) = &block.term {

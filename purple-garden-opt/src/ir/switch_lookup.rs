@@ -50,12 +50,14 @@ pub fn switch_lookup<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::
 
         // The default arm is dropped, its value id now names the lookup.
         let (dst, default) = returns.pop().unwrap();
-        let entries = fun
-            .cases(cases)
-            .iter()
-            .zip(returns)
-            .map(|(case, (_, value))| (case.key.clone(), value))
-            .collect();
+        let mut keyed = Vec::with_capacity_in(returns.len(), alloc);
+        keyed.extend(
+            fun.cases(cases)
+                .iter()
+                .zip(returns)
+                .map(|(case, (_, value))| (case.key.clone(), value)),
+        );
+        let entries = fun.intern_entries(keyed);
 
         purple_garden_shared::trace!("[opt::ir::switch_lookup] b{head} looks up its result");
 
@@ -132,7 +134,7 @@ mod tests {
                 key: Const::Int(key),
                 target: (Id(arm), params),
             })
-            .collect();
+            .collect::<Vec<_>>();
         let cases = fun.intern_cases(cases);
         let default = keys.len() as u32 + 1;
         fun.blocks.push(Block {
@@ -181,7 +183,7 @@ mod tests {
         // The default arm's value id now names the lookup.
         assert_eq!(dst.id, Id(104));
         assert_eq!(
-            &**entries,
+            fun.entries(*entries),
             [
                 (Const::Int(3), Const::Int(1)),
                 (Const::Int(7), Const::Int(2)),

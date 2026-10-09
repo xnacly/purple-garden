@@ -61,7 +61,7 @@ fn remove_dead_load_consts<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut S
             if let Some(id) = ir::Func::def_of(instr) {
                 scratch.ensure(id);
             }
-            ir::Func::for_each_use_of_instr(instr, |id| scratch.bump(id));
+            fun.for_each_use_of_instr(instr, |id| scratch.bump(id));
         }
 
         if let Some(term) = &block.term {

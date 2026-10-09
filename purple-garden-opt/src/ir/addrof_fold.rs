@@ -17,7 +17,7 @@ pub fn addrof_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Sc
             if let Some(id) = ir::Func::def_of(instr) {
                 scratch.ensure(id);
             }
-            ir::Func::for_each_use_of_instr(instr, |id| scratch.bump(id));
+            fun.for_each_use_of_instr(instr, |id| scratch.bump(id));
             collect_addrof_def(instr, &mut defs);
         }
         if let Some(term) = &block.term {

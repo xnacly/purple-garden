@@ -24,7 +24,7 @@ pub fn imm_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Scrat
             continue;
         }
         for instr in &block.instructions {
-            ir::Func::for_each_use_of_instr(instr, |id| bump_if_const(scratch, id));
+            fun.for_each_use_of_instr(instr, |id| bump_if_const(scratch, id));
         }
         if let Some(term) = &block.term {
             fun.for_each_use_of_term(term, |id| bump_if_const(scratch, id));

@@ -348,6 +348,7 @@ mod tests_x86 {
     #[test]
     fn compiles_tail_recursive_factorial_loop() {
         let mut func = Func::new("factorial", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let args0 = func.intern_params([Id(5), Id(6)]);
         let params = func.intern_params(vec![Id(0), Id(1)]);
         let ret_args = func.intern_params(vec![Id(1)]);
         let ret_params = func.intern_params(vec![Id(7)]);
@@ -415,7 +416,7 @@ mod tests_x86 {
                 params,
                 term: Some(Terminator::Tail {
                     func: Id(0),
-                    args: vec![Id(5), Id(6)],
+                    args: args0,
                     span: 0,
                 }),
             },

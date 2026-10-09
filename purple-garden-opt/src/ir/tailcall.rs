@@ -86,7 +86,7 @@ pub fn tailcall(fun: &mut ir::Func) {
             };
 
             if is_tail {
-                Some((*func, args.clone(), *span))
+                Some((*func, *args, *span))
             } else {
                 None
             }
@@ -115,6 +115,7 @@ mod tests {
     #[test]
     fn rewrites_call_return_pattern_a() {
         let mut fun = ir::Func::new("tail", Id(0), vec![Id(0)], Some(Type::Int));
+        let args0 = fun.intern_params([Id(0)]);
         let b0_params = fun.intern_params(vec![Id(0)]);
         fun.blocks = vec![Block {
             tombstone: false,
@@ -126,7 +127,7 @@ mod tests {
                     ty: Type::Int,
                 },
                 func: Id(42),
-                args: vec![Id(0)],
+                args: args0,
                 span: 0,
             }],
             term: Some(Terminator::Return {
@@ -140,7 +141,7 @@ mod tests {
         assert!(fun.blocks[0].instructions.is_empty());
         assert!(matches!(
             &fun.blocks[0].term,
-            Some(Terminator::Tail { func, args, .. }) if *func == Id(42) && args == &vec![Id(0)]
+            Some(Terminator::Tail { func, args, .. }) if *func == Id(42) && fun.params(*args) == [Id(0)]
         ));
     }
 
@@ -150,6 +151,7 @@ mod tests {
     #[test]
     fn rewrites_call_jump_to_trivial_return_pattern_b() {
         let mut fun = ir::Func::new("tail", Id(0), vec![Id(0)], Some(Type::Int));
+        let args0 = fun.intern_params([Id(0)]);
         let b0_params = fun.intern_params(vec![Id(0)]);
         let b1_params = fun.intern_params(vec![Id(2)]);
         let jump_params = fun.intern_params(vec![Id(1)]);
@@ -164,7 +166,7 @@ mod tests {
                         ty: Type::Int,
                     },
                     func: Id(42),
-                    args: vec![Id(0)],
+                    args: args0,
                     span: 0,
                 }],
                 term: Some(Terminator::Jump {
@@ -199,6 +201,7 @@ mod tests {
     #[test]
     fn leaves_non_tail_call_alone() {
         let mut fun = ir::Func::new("nontail", Id(0), vec![Id(0)], Some(Type::Int));
+        let args0 = fun.intern_params([Id(0)]);
         let b0_params = fun.intern_params(vec![Id(0)]);
         fun.blocks = vec![Block {
             tombstone: false,
@@ -210,7 +213,7 @@ mod tests {
                     ty: Type::Int,
                 },
                 func: Id(42),
-                args: vec![Id(0)],
+                args: args0,
                 span: 0,
             }],
             // Returns %v0, not the call's dst %v1.

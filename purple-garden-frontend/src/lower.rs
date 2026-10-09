@@ -492,7 +492,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
                 None
             }
             Node::Call { target, args, id } => {
-                let mut a = vec![];
+                let mut a = Vec::new_in(self.scratch.clone());
                 for &arg in *args {
                     let Some(id) = self.lower_node(ast, arg)? else {
                         unreachable!();
@@ -558,11 +558,12 @@ impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
                             .get(*id)
                             .cloned()
                             .expect("typechecker should have typed the call");
+                        let args = self.ctx.func.intern_params(a);
                         self.emit(Instr::Sys {
                             dst,
                             path: pkg_name,
                             fun,
-                            args: a,
+                            args,
                             span: name.start as u32,
                         });
                     }
@@ -585,10 +586,11 @@ impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
                         };
 
                         dst.ty = ret.unwrap_or(ptype::Type::Void);
+                        let args = self.ctx.func.intern_params(a);
                         self.emit(Instr::Call {
                             dst,
                             func: target_id,
-                            args: a,
+                            args,
                             span: name.start as u32,
                         });
                     }

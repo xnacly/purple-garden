@@ -95,6 +95,11 @@ pub const EMPTY_PARAMS: ParamsId = ParamsId(0);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CasesId(pub u32);
 
+/// Handle to an [`Instr::Lookup`]'s entries in [`Func::entries_pool`], same
+/// discipline as [`ParamsId`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EntriesId(pub u32);
+
 #[derive(Debug, Clone)]
 pub struct Case<'c> {
     pub key: Const<'c>,
@@ -154,14 +159,14 @@ pub enum Instr<'i> {
     Call {
         dst: TypeId<'i>,
         func: Id,
-        args: Vec<Id>,
+        args: ParamsId,
         span: u32,
     },
     Sys {
         dst: TypeId<'i>,
         path: &'i str,
         fun: &'i Fn<'i>,
-        args: Vec<Id>,
+        args: ParamsId,
         span: u32,
     },
     Cast {
@@ -197,7 +202,7 @@ pub enum Instr<'i> {
     Lookup {
         dst: TypeId<'i>,
         subject: Id,
-        entries: Box<[(Const<'i>, Const<'i>)]>,
+        entries: EntriesId,
         default: Const<'i>,
         span: u32,
     },
@@ -266,7 +271,7 @@ pub enum Terminator {
     },
     Tail {
         func: Id,
-        args: Vec<Id>,
+        args: ParamsId,
         span: u32,
     },
     /// Jump to the first case whose key equals `subject`, `default` if none
@@ -348,9 +353,47 @@ pub struct Func<'f> {
     /// This is the same discipline as `bc::Cc::block_map` and
     /// `Ralloc.map`: data hangs off a long-lived owner, handles are
     /// `Copy` `u32`
-    pub params_pool: Vec<Box<[Id]>>,
+    pub params_pool: Pool<Id>,
     /// Owning storage for [`Terminator::Switch`] cases, see [`CasesId`].
-    pub cases_pool: Vec<Box<[Case<'f>]>>,
+    pub cases_pool: Pool<Case<'f>>,
+    /// Owning storage for [`Instr::Lookup`] entries, see [`EntriesId`].
+    pub entries_pool: Pool<(Const<'f>, Const<'f>)>,
+}
+
+/// The lists of one kind of a function, back to back in one allocation and
+/// addressed by the index [`Pool::intern`] returns. Interned lists never
+/// change, a rewrite interns a new one and the old stays until the function is
+/// dropped.
+#[derive(Debug, Clone)]
+pub struct Pool<T> {
+    items: Vec<T>,
+    /// `(start, len)` into `items` per interned list.
+    spans: Vec<(u32, u32)>,
+}
+
+impl<T> Default for Pool<T> {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            spans: Vec::new(),
+        }
+    }
+}
+
+impl<T> Pool<T> {
+    pub fn intern(&mut self, list: impl IntoIterator<Item = T>) -> u32 {
+        let start = self.items.len();
+        self.items.extend(list);
+        self.spans
+            .push((start as u32, (self.items.len() - start) as u32));
+        self.spans.len() as u32 - 1
+    }
+
+    #[must_use]
+    pub fn get(&self, id: u32) -> &[T] {
+        let (start, len) = self.spans[id as usize];
+        &self.items[start as usize..][..len as usize]
+    }
 }
 
 impl<'f> Func<'f> {
@@ -367,8 +410,13 @@ impl<'f> Func<'f> {
             params,
             ret,
             blocks: Vec::new(),
-            params_pool: vec![Box::new([]) as Box<[Id]>],
-            cases_pool: Vec::new(),
+            params_pool: {
+                let mut pool = Pool::default();
+                pool.intern([]);
+                pool
+            },
+            cases_pool: Pool::default(),
+            entries_pool: Pool::default(),
         }
     }
 
@@ -378,26 +426,34 @@ impl<'f> Func<'f> {
         self
     }
 
-    pub fn intern_params(&mut self, params: Vec<Id>) -> ParamsId {
-        let id = ParamsId(self.params_pool.len() as u32);
-        self.params_pool.push(params.into_boxed_slice());
-        id
+    pub fn intern_params(&mut self, params: impl IntoIterator<Item = Id>) -> ParamsId {
+        ParamsId(self.params_pool.intern(params))
     }
 
     #[must_use]
     pub fn params(&self, id: ParamsId) -> &[Id] {
-        &self.params_pool[id.0 as usize]
+        self.params_pool.get(id.0)
     }
 
-    pub fn intern_cases(&mut self, cases: Vec<Case<'f>>) -> CasesId {
-        let id = CasesId(self.cases_pool.len() as u32);
-        self.cases_pool.push(cases.into_boxed_slice());
-        id
+    pub fn intern_cases(&mut self, cases: impl IntoIterator<Item = Case<'f>>) -> CasesId {
+        CasesId(self.cases_pool.intern(cases))
     }
 
     #[must_use]
     pub fn cases(&self, id: CasesId) -> &[Case<'f>] {
-        &self.cases_pool[id.0 as usize]
+        self.cases_pool.get(id.0)
+    }
+
+    pub fn intern_entries(
+        &mut self,
+        entries: impl IntoIterator<Item = (Const<'f>, Const<'f>)>,
+    ) -> EntriesId {
+        EntriesId(self.entries_pool.intern(entries))
+    }
+
+    #[must_use]
+    pub fn entries(&self, id: EntriesId) -> &[(Const<'f>, Const<'f>)] {
+        self.entries_pool.get(id.0)
     }
 }
 
@@ -419,7 +475,7 @@ impl Func<'_> {
         }
     }
 
-    pub fn for_each_use_of_instr(instr: &Instr<'_>, mut f: impl FnMut(Id)) {
+    pub fn for_each_use_of_instr(&self, instr: &Instr<'_>, mut f: impl FnMut(Id)) {
         match instr {
             Instr::Bin { lhs, rhs, .. } => {
                 f(*lhs);
@@ -427,7 +483,7 @@ impl Func<'_> {
             }
             Instr::BinImm { lhs, .. } => f(*lhs),
             Instr::Call { args, .. } | Instr::Sys { args, .. } => {
-                for &a in args {
+                for &a in self.params(*args) {
                     f(a);
                 }
             }
@@ -454,7 +510,7 @@ impl Func<'_> {
                 }
             }
             Terminator::Tail { args, .. } => {
-                for &a in args {
+                for &a in self.params(*args) {
                     f(a);
                 }
             }
@@ -581,7 +637,7 @@ impl Func<'_> {
             pos += 2;
 
             for instr in &block.instructions {
-                Self::for_each_use_of_instr(instr, |use_id| {
+                self.for_each_use_of_instr(instr, |use_id| {
                     use_value(intervals, use_id, pos);
                 });
 
@@ -724,7 +780,7 @@ impl Func<'_> {
             for instr in &block.instructions {
                 match instr {
                     Instr::Call { dst, args, .. } | Instr::Sys { dst, args, .. } => {
-                        for (i, arg) in args.iter().enumerate() {
+                        for (i, arg) in self.params(*args).iter().enumerate() {
                             put(hints, *arg, i as u8);
                         }
                         put(hints, dst.id, 0u8);
@@ -733,7 +789,7 @@ impl Func<'_> {
                 }
             }
             if let Some(Terminator::Tail { args, .. }) = &block.term {
-                for (i, arg) in args.iter().enumerate() {
+                for (i, arg) in self.params(*args).iter().enumerate() {
                     put(hints, *arg, i as u8);
                 }
             }

@@ -645,6 +645,8 @@ impl<'a, 'ir, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, S, N> {
                 default,
                 ..
             } => {
+                let func = self.func;
+                let entries = func.entries(*entries);
                 // Slots as for a switch, holding values instead of targets.
                 let step = match entries[0].0 {
                     ir::Const::Str(_) => string::ALIGN as i64,
@@ -737,7 +739,8 @@ impl<'a, 'ir, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, S, N> {
                     .expect("lookup ends after the default");
             }
             ir::Instr::Sys { dst, fun, args, .. } => {
-                self.call_builtin(Callee::Fn(fun.ptr), args, dst.id);
+                let func = self.func;
+                self.call_builtin(Callee::Fn(fun.ptr), func.params(*args), dst.id);
             }
             ir::Instr::Call {
                 dst,
@@ -753,7 +756,8 @@ impl<'a, 'ir, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, S, N> {
                     bail!(self, "f{} is not compiled natively", callee.0);
                     return;
                 };
-                self.call_builtin(callee, args, dst.id);
+                let func = self.func;
+                self.call_builtin(callee, func.params(*args), dst.id);
             }
             _ => bail!(self, "unsupported instruction {i:?}"),
         }
@@ -850,7 +854,7 @@ impl<'a, 'ir, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, S, N> {
             ir::Terminator::Tail {
                 func: callee, args, ..
             } if *callee == func.id => {
-                self.edge_moves(args, &func.params, pos);
+                self.edge_moves(func.params(*args), &func.params, pos);
                 self.jump(Cond::Always, Target::Block(self.entry));
             }
             ir::Terminator::Switch {

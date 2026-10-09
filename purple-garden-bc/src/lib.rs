@@ -365,7 +365,12 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                         entries, default, ..
                     } = instr
                     {
-                        for value in entries.iter().flat_map(|(k, v)| [k, v]).chain([default]) {
+                        for value in func
+                            .entries(*entries)
+                            .iter()
+                            .flat_map(|(k, v)| [k, v])
+                            .chain([default])
+                        {
                             if let Const::Str(s) = value
                                 && !self.globals.map.contains_key(value)
                             {
@@ -512,7 +517,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             pos += 2; // block params row
             for instruction in &block.instructions {
                 self.cur_span = instruction.span();
-                self.instr(&live_set, pos, instruction);
+                self.instr(fun, &live_set, pos, instruction);
                 pos += 2;
             }
 
@@ -1014,6 +1019,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     unreachable!();
                 };
 
+                let args = fun.params(*args);
                 // If the tail target needs a wider argument zone than this the shuffle would write
                 // into registers that this function still owes back to its caller. Fall back to a
                 // normal call so the epilogue can restore them after the callee returns.
@@ -1050,7 +1056,14 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         }
     }
 
-    fn instr(&mut self, live_set: &[(u32, u32)], pos: u32, i: &'cc ir::Instr<'cc>) {
+    /// `owner` is the function `i` belongs to, it holds the lists `i` refers to.
+    fn instr(
+        &mut self,
+        owner: &'cc Func<'cc>,
+        live_set: &[(u32, u32)],
+        pos: u32,
+        i: &'cc ir::Instr<'cc>,
+    ) {
         match i {
             ir::Instr::Store {
                 src, base, offset, ..
@@ -1131,6 +1144,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 default,
                 ..
             } => {
+                let entries = owner.entries(*entries);
                 // Slots as for Op::Switch, holding values instead of pcs.
                 let (kind, step) = match entries[0].0 {
                     Const::Str(_) => (SwitchKind::Str, string::ALIGN as i64),
@@ -1187,6 +1201,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             ir::Instr::Call {
                 dst, func, args, ..
             } => {
+                let args = owner.params(*args);
                 let Some(target) = self.functions.get(func).map(CcCallTarget::from) else {
                     unreachable!();
                 };
@@ -1246,6 +1261,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 );
             }
             ir::Instr::Sys { dst, fun, args, .. } => {
+                let args = owner.params(*args);
                 let idx = self.std_fns.intern(fun.ptr);
 
                 // Syscall convention: shuffle writes r0..r{argcount-1}, syscall
