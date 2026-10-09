@@ -4,9 +4,8 @@
 //   data/index.json   [{ file, sha, date, run_unix, ref }]  sorted by run_unix
 //   data/<sha>.json   one report: { sha, date, runtimes, results: [...] }
 //
-// Four charts on one screen:
-//   per-bench — latest run, CPU time per benchmark, one bar per runtime,
-//               either absolute ms or relative to garden (pg = 1×)
+// Four charts on one screen, each switchable to a table of the same data:
+//   per-bench — latest run, CPU time per benchmark in ms, one bar per runtime
 //   time      — history: sum of per-workload mean wall time per runtime
 //   cpu       — history: sum of per-workload user+system time per runtime
 //   memory    — history: mean of per-workload peak RSS per runtime (summing
@@ -52,7 +51,6 @@ const METRICS = [
 
 const state = {
   log: true,
-  perBench: "relative",
   enabled: new Set(RUNTIMES),
   reports: [],
   charts: {},
@@ -97,6 +95,15 @@ function yScale(title) {
   };
 }
 
+function renderTable(id, head, rows) {
+  const table = document.getElementById(id);
+  const tr = (cells, tag) =>
+    `<tr>${cells.map((c) => `<${tag}>${c ?? "–"}</${tag}>`).join("")}</tr>`;
+  table.innerHTML =
+    `<thead>${tr(head, "th")}</thead>` +
+    `<tbody>${rows.map((r) => tr(r, "td")).join("")}</tbody>`;
+}
+
 function renderControls() {
   const toggles = document.getElementById("runtime-toggles");
   for (const rt of RUNTIMES) {
@@ -114,16 +121,17 @@ function renderControls() {
     l.append(cb, swatch, document.createTextNode(rt));
     toggles.appendChild(l);
   }
+  for (const toggle of document.querySelectorAll(".table-toggle")) {
+    const panel = toggle.closest("section");
+    toggle.onchange = () => {
+      panel.querySelector(".chart").hidden = toggle.checked;
+      panel.querySelector("table").hidden = !toggle.checked;
+    };
+  }
   document.getElementById("log-toggle").onchange = (e) => {
     state.log = e.target.checked;
     render();
   };
-  for (const radio of document.querySelectorAll('input[name="per-bench-mode"]')) {
-    radio.onchange = () => {
-      state.perBench = radio.value;
-      render();
-    };
-  }
 }
 
 function renderMeta() {
@@ -139,47 +147,35 @@ function renderMeta() {
     `${latest.runs} runs, ${latest.warmup} warmup<br>${versions}`;
 }
 
-/// Latest run, CPU time per benchmark. Relative mode divides every runtime
-/// by garden's CPU time for that benchmark and draws pg as a dashed 1× line
-/// instead of a column of identical bars.
+/// Latest run, CPU time per benchmark.
 function renderPerBench() {
   const latest = state.reports.at(-1);
   const workloads = [...new Set(latest.results.map((m) => m.workload))].sort();
   const cpu = (w, rt) =>
     latest.results.find((m) => m.workload === w && m.runtime === rt)?.cpu_ms ?? null;
-  const relative = state.perBench === "relative";
-  const runtimes = RUNTIMES.filter(
-    (r) => state.enabled.has(r) && !(relative && r === "garden"),
-  );
+  const runtimes = RUNTIMES.filter((r) => state.enabled.has(r));
 
   const datasets = runtimes.map((rt) => ({
-    type: "bar",
     label: rt,
-    data: workloads.map((w) => {
-      const v = cpu(w, rt);
-      if (v == null) return null;
-      if (!relative) return v;
-      const g = cpu(w, "garden");
-      return g ? v / g : null;
-    }),
+    data: workloads.map((w) => cpu(w, rt)),
     backgroundColor: COLORS[rt],
     borderRadius: 3,
   }));
-  if (relative) {
-    datasets.push({
-      type: "line",
-      label: "garden = 1×",
-      data: workloads.map(() => 1),
-      borderColor: COLORS.garden,
-      borderDash: [5, 4],
-      borderWidth: 2,
-      pointRadius: 0,
-    });
-  }
 
-  document.getElementById("per-bench-sub").textContent = relative
-    ? `${short(latest.sha)} — each runtime's CPU time divided by garden's; below the dashed line is faster than pg`
-    : `${short(latest.sha)} — CPU time in ms, lower is better`;
+  document.getElementById("per-bench-sub").textContent =
+    `${short(latest.sha)} — CPU time in ms, lower is better`;
+
+  renderTable(
+    "per-bench-table",
+    ["workload", ...runtimes.map((rt) => `${rt} ms`)],
+    workloads.map((w) => [
+      w,
+      ...runtimes.map((rt) => {
+        const v = cpu(w, rt);
+        return v == null ? null : fmt(v);
+      }),
+    ]),
+  );
 
   state.charts.perBench?.destroy();
   state.charts.perBench = new Chart(document.getElementById("per-bench-canvas"), {
@@ -189,19 +185,13 @@ function renderPerBench() {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        y: yScale(relative ? "× garden CPU time" : "CPU time (ms)"),
+        y: yScale("CPU time (ms)"),
         x: { grid: { display: false } },
       },
       plugins: {
         tooltip: {
           callbacks: {
-            label: (c) => {
-              if (c.dataset.type === "line") return "";
-              const rt = c.dataset.label;
-              return relative
-                ? ` ${rt}: ${fmt(c.parsed.y)}× pg (${fmt(cpu(c.label, rt))} ms)`
-                : ` ${rt}: ${fmt(c.parsed.y)} ms`;
-            },
+            label: (c) => ` ${c.dataset.label}: ${fmt(c.parsed.y)} ms`,
           },
         },
       },
@@ -224,6 +214,21 @@ function renderMetric(metric) {
     .join(" · ");
   document.getElementById(`${metric.key}-sub`).textContent =
     `${latest} ${metric.unit} — ${metric.sub}`;
+
+  renderTable(
+    `${metric.key}-table`,
+    ["commit", "date", ...runtimes.map((rt) => `${rt} ${metric.unit}`)],
+    state.reports
+      .map((r, i) => [
+        `<a href="https://github.com/xnacly/purple-garden/commit/${r.sha}">${short(r.sha)}</a>`,
+        r.date,
+        ...runtimes.map((rt) => {
+          const a = series[rt][i];
+          return a ? fmt(a.value) : null;
+        }),
+      ])
+      .reverse(),
+  );
 
   state.charts[metric.key]?.destroy();
   state.charts[metric.key] = new Chart(document.getElementById(`${metric.key}-canvas`), {

@@ -31,44 +31,45 @@
             latest run · cpu time per benchmark
             <small id="per-bench-sub"></small>
           </h2>
-          <div class="group">
-            <label class="rt"
-              ><input
-                type="radio"
-                name="per-bench-mode"
-                value="relative"
-                checked
-              />
-              relative to pg</label
-            >
-            <label class="rt"
-              ><input type="radio" name="per-bench-mode" value="absolute" />
-              absolute ms</label
-            >
-          </div>
+          <label class="rt"
+            ><input type="checkbox" class="table-toggle" /> table</label
+          >
           <div class="chart" style="position: relative; height: 380px">
             <canvas id="per-bench-canvas"></canvas>
           </div>
+          <table id="per-bench-table" hidden></table>
         </section>
 
         <div class="grid" id="charts">
           <section class="panel">
             <h2>time <small id="time-sub"></small></h2>
+            <label class="rt"
+              ><input type="checkbox" class="table-toggle" /> table</label
+            >
             <div class="chart" style="position: relative; height: 320px">
               <canvas id="time-canvas"></canvas>
             </div>
+            <table id="time-table" hidden></table>
           </section>
           <section class="panel">
             <h2>cpu time <small id="cpu-sub"></small></h2>
+            <label class="rt"
+              ><input type="checkbox" class="table-toggle" /> table</label
+            >
             <div class="chart" style="position: relative; height: 320px">
               <canvas id="cpu-canvas"></canvas>
             </div>
+            <table id="cpu-table" hidden></table>
           </section>
           <section class="panel">
             <h2>memory <small id="memory-sub"></small></h2>
+            <label class="rt"
+              ><input type="checkbox" class="table-toggle" /> table</label
+            >
             <div class="chart" style="position: relative; height: 320px">
               <canvas id="memory-canvas"></canvas>
             </div>
+            <table id="memory-table" hidden></table>
           </section>
         </div>
       </div>
