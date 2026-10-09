@@ -669,12 +669,8 @@ fn compile<'i, A: Allocator + Clone>(
     alloc: A,
 ) -> Result<Program<'i>, Diagnostic> {
     let arena = BumpAlloc::new_in(alloc.clone());
-    let parse = parser::Parser::new(
-        lex::Lexer::new(input),
-        &arena,
-        &BumpAlloc::new_in(alloc),
-    )
-    .parse_collect();
+    let scratch = BumpAlloc::new_in(alloc.clone());
+    let parse = parser::Parser::new(lex::Lexer::new(input), &arena, &scratch).parse_collect();
     if let Some(diagnostic) = parse.diagnostics.into_iter().next() {
         return Err(diagnostic);
     }
@@ -684,7 +680,7 @@ fn compile<'i, A: Allocator + Clone>(
 
     let stdlib = stdlib_packages(stdlib, unsafe_stdlib);
 
-    let typecheck = Typechecker::new(&ast)
+    let typecheck = Typechecker::new_in(&ast, alloc, &scratch)
         .with_libs(libs.to_vec())
         .with_stdlib(stdlib)
         .check();
@@ -714,7 +710,12 @@ fn compile<'i, A: Allocator + Clone>(
         .values()
         .filter_map(|f| {
             let (name, ft) = typecheck.functions.get_key_value(f.name())?;
-            Some((*name, (CcCallTarget::from(f), ft.clone())))
+            let ft = FunctionType {
+                args: ft.args.to_vec(),
+                ret: ft.ret.clone(),
+                with_slots: ft.with_slots,
+            };
+            Some((*name, (CcCallTarget::from(f), ft)))
         })
         .collect();
 

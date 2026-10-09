@@ -1,10 +1,11 @@
 #![allow(clippy::result_large_err)]
+#![feature(allocator_api)]
 
 mod display;
 mod err;
 mod typedefs;
 
-use std::collections::HashMap;
+use std::alloc::{Allocator, Global};
 
 use purple_garden_frontend::typemap::{TypeMap, TypeRef};
 use purple_garden_frontend::{
@@ -18,46 +19,60 @@ use purple_garden_std as pstd;
 
 pub use typedefs::FunctionType;
 pub use typedefs::TypecheckOutput;
-use typedefs::{CallName, CallSink, TcType};
+use typedefs::{CallName, CallSink, Map, TcType};
 
+/// Its output lives in `A`, everything only needed while checking in `scratch`.
 #[derive(Debug)]
-pub struct Typechecker<'a, 't> {
+pub struct Typechecker<'a, 't, A: Allocator + Clone = Global, S: Allocator = Global> {
     ast: &'a Ast<'t, 'a>,
+    alloc: A,
+    scratch: &'a S,
     /// Node id -> Type. Indexed by id; Node ids are dense from the parser, the slot past the last
     /// id holds `Void` for results without a node of their own, see [`Self::void`]
-    map: TypeMap<'t>,
+    map: TypeMap<'t, A>,
     void: usize,
     /// scope stack; innermost frame last; lookups walk from top to bottom. Bindings point at
     /// the arena entry of the expression that produced them
-    env: Vec<HashMap<&'t str, TypeRef>>,
+    env: Vec<Map<&'t str, TypeRef, &'a S>, &'a S>,
     /// map a function name to its type(s)
-    functions: HashMap<&'t str, FunctionType<'t>>,
+    functions: Map<&'t str, FunctionType<'t, A>, A>,
     /// map a pkg name to a map of its public method names to overload groups
     /// (one entry per specialisation; >1 means a `specialises` group)
-    packages: HashMap<&'t str, HashMap<&'t str, Vec<FunctionType<'t>>>>,
-    pkg_cache: HashMap<&'t str, Option<&'t Pkg>>,
+    packages: Map<&'t str, Overloads<'a, 't, S>, &'a S>,
+    pkg_cache: Map<&'t str, Option<&'t Pkg>, &'a S>,
     libs: Vec<&'t Pkg>,
     stdlib: &'t [Pkg],
     diagnostics: Vec<Diagnostic>,
 }
 
+type Overloads<'a, 't, S> = Map<&'t str, Vec<FunctionType<'t, &'a S>, &'a S>, &'a S>;
+
 impl<'a, 't> Typechecker<'a, 't> {
     #[must_use]
     pub fn new(ast: &'a Ast<'t, 'a>) -> Self {
+        Self::new_in(ast, Global, &Global)
+    }
+}
+
+impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
+    #[must_use]
+    pub fn new_in(ast: &'a Ast<'t, 'a>, alloc: A, scratch: &'a S) -> Self {
         let mut s = Self {
             ast,
-            map: TypeMap::with_slots(ast.values + 1),
+            map: TypeMap::with_slots_in(ast.values + 1, alloc.clone()),
             void: ast.values,
-            env: Vec::new(),
-            functions: HashMap::new(),
-            packages: HashMap::new(),
-            pkg_cache: HashMap::new(),
+            env: Vec::new_in(scratch),
+            functions: Map::new_in(alloc.clone()),
+            packages: Map::new_in(scratch),
+            pkg_cache: Map::new_in(scratch),
             libs: Vec::new(),
             stdlib: pstd::STD,
             diagnostics: Vec::new(),
+            alloc,
+            scratch,
         };
         s.map.insert(s.void, Type::Void);
-        s.env.push(HashMap::new());
+        s.env.push(Map::new_in(scratch));
         s
     }
 
@@ -108,7 +123,8 @@ impl<'a, 't> Typechecker<'a, 't> {
     }
 
     fn register_pkg(&mut self, pkg: &'t Pkg) {
-        let mut registered: HashMap<&str, Vec<FunctionType>> = HashMap::new();
+        let scratch = self.scratch;
+        let mut registered: Overloads<'a, 't, S> = Map::new_in(scratch);
         for f in pkg.fns {
             debug_assert!(
                 !(f.with_slots && f.specialises.is_some()),
@@ -117,17 +133,17 @@ impl<'a, 't> Typechecker<'a, 't> {
                 f.name,
                 f.specialises.unwrap_or_default()
             );
+            let mut args = Vec::with_capacity_in(f.args.len(), scratch);
+            args.extend(f.arg_names.iter().copied().zip(f.args.iter().cloned()));
             let f_type = FunctionType {
-                args: f
-                    .arg_names
-                    .iter()
-                    .copied()
-                    .zip(f.args.iter().cloned())
-                    .collect(),
+                args,
                 ret: f.ret.clone(),
                 with_slots: f.with_slots,
             };
-            registered.entry(f.group_name()).or_default().push(f_type);
+            registered
+                .entry(f.group_name())
+                .or_insert_with(|| Vec::new_in(scratch))
+                .push(f_type);
         }
 
         self.packages.insert(pkg.name, registered);
@@ -141,24 +157,22 @@ impl<'a, 't> Typechecker<'a, 't> {
             unreachable!();
         };
 
-        let mut registered: HashMap<&str, Vec<FunctionType>> = HashMap::new();
+        let scratch = self.scratch;
+        let mut registered: Overloads<'a, 't, S> = Map::new_in(scratch);
         for fun in *fns {
             let lex::Type::Ident(fun_name) = fun.name.t else {
                 unreachable!();
             };
-            let args = fun
-                .args
-                .iter()
-                .map(|(arg_name, arg_type)| {
-                    let lex::Type::Ident(arg_name) = arg_name.t else {
-                        unreachable!();
-                    };
-                    (
-                        arg_name,
-                        purple_garden_frontend::type_from_type_expr(self.ast, *arg_type),
-                    )
-                })
-                .collect();
+            let mut args = Vec::with_capacity_in(fun.args.len(), scratch);
+            args.extend(fun.args.iter().map(|(arg_name, arg_type)| {
+                let lex::Type::Ident(arg_name) = arg_name.t else {
+                    unreachable!();
+                };
+                (
+                    arg_name,
+                    purple_garden_frontend::type_from_type_expr(self.ast, *arg_type),
+                )
+            }));
             let f_type = FunctionType {
                 args,
                 ret: purple_garden_frontend::type_from_type_expr(self.ast, fun.return_type),
@@ -170,14 +184,17 @@ impl<'a, 't> Typechecker<'a, 't> {
                 fun_name,
                 f_type
             );
-            registered.entry(fun_name).or_default().push(f_type);
+            registered
+                .entry(fun_name)
+                .or_insert_with(|| Vec::new_in(scratch))
+                .push(f_type);
         }
 
         self.packages.insert(pkg_name, registered);
     }
 
     #[must_use]
-    pub fn check(mut self) -> TypecheckOutput<'t> {
+    pub fn check(mut self) -> TypecheckOutput<'t, A> {
         for &node in self.ast.roots {
             self.node(node);
         }
@@ -194,7 +211,7 @@ impl<'a, 't> Typechecker<'a, 't> {
     }
 
     #[inline]
-    fn store_known(map: &mut TypeMap<'t>, id: usize, t: Type<'t>) -> TcType {
+    fn store_known(map: &mut TypeMap<'t, A>, id: usize, t: Type<'t>) -> TcType {
         map.insert(id, t);
         TcType::Known(id)
     }
@@ -374,7 +391,7 @@ impl<'a, 't> Typechecker<'a, 't> {
     }
 
     fn block_type(&mut self, nodes: &[NodeId]) -> TcType {
-        self.env.push(HashMap::new());
+        self.env.push(Map::new_in(self.scratch));
         let mut last_type = TcType::Known(self.void);
         for &node in nodes {
             last_type = self.node(node);
@@ -483,6 +500,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                 ast: self.ast,
                 map: &mut self.map,
                 diagnostics: &mut self.diagnostics,
+                scratch: self.scratch,
             },
             call_id,
             name,
@@ -521,6 +539,7 @@ impl<'a, 't> Typechecker<'a, 't> {
                 ast: self.ast,
                 map: &mut self.map,
                 diagnostics: &mut self.diagnostics,
+                scratch: self.scratch,
             },
             call_id,
             name,
@@ -534,18 +553,19 @@ impl<'a, 't> Typechecker<'a, 't> {
     }
 
     /// Arguments must already be typed, see [`CallSink`] for why `fun` is borrowed
-    fn check_call_args(
-        sink: CallSink<'_, 'a, 't>,
+    fn check_call_args<B: Allocator>(
+        sink: CallSink<'_, 'a, 't, A, S>,
         call_id: usize,
         tok: &lex::Token,
         display_name: &CallName<'_>,
-        fun: &FunctionType<'t>,
+        fun: &FunctionType<'t, B>,
         args: &[NodeId],
     ) -> TcType {
         let CallSink {
             ast,
             map,
             diagnostics,
+            scratch,
         } = sink;
 
         if args.len() != fun.args.len() {
@@ -561,8 +581,7 @@ impl<'a, 't> Typechecker<'a, 't> {
             return Self::store_known(map, call_id, fun.ret.clone());
         }
 
-        // PERF: replace with scratch storage
-        let mut slot_to_type_bindings: HashMap<&str, Type<'_>> = HashMap::new();
+        let mut slot_to_type_bindings = Map::new_in(scratch);
 
         for (i, &provided_node) in args.iter().enumerate() {
             let Some(provided_type) = map.get(ast.value_id(provided_node)) else {
@@ -806,9 +825,9 @@ impl<'a, 't> Typechecker<'a, 't> {
                     return TcType::Poison;
                 }
 
-                let prev_env = std::mem::take(&mut self.env);
-                self.env.push(HashMap::new());
-                let mut typed_arguments = Vec::with_capacity(args.len());
+                let prev_env = std::mem::replace(&mut self.env, Vec::new_in(self.scratch));
+                self.env.push(Map::new_in(self.scratch));
+                let mut typed_arguments = Vec::with_capacity_in(args.len(), self.alloc.clone());
                 for (arg_name, arg_type) in *args {
                     let lex::Token {
                         t: lex::Type::Ident(inner_name),
@@ -909,7 +928,8 @@ impl<'a, 't> Typechecker<'a, 't> {
             },
             Node::Match { id, cases, default } => {
                 // all branches MUST resolve to the same type :)
-                let mut branch_types: Vec<Option<(&Token, usize)>> = vec![None; cases.len()];
+                let mut branch_types = Vec::with_capacity_in(cases.len(), self.scratch);
+                branch_types.resize(cases.len(), None::<(&Token, usize)>);
 
                 for (i, ((condition_token, condition), body)) in cases.iter().enumerate() {
                     if let Some(condition_type) = self.node(*condition).known()

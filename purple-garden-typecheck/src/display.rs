@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{alloc::Allocator, fmt::Display};
 
 use purple_garden_frontend::{
     ast::{Ast, Node, NodeId},
@@ -7,7 +7,7 @@ use purple_garden_frontend::{
 
 use crate::typedefs::{FunctionType, TypecheckOutput};
 
-impl<'t> TypecheckOutput<'t> {
+impl<'t, A: Allocator> TypecheckOutput<'t, A> {
     /// Render top-level binding and function types for `-T`.
     #[must_use]
     pub fn render_summary(&self, ast: &Ast<'t, '_>) -> String {
@@ -224,7 +224,7 @@ impl<'t> TypecheckOutput<'t> {
     }
 }
 
-impl Display for FunctionType<'_> {
+impl<A: Allocator> Display for FunctionType<'_, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(")?;
         for (i, (name, t)) in self.args.iter().enumerate() {

@@ -1,25 +1,33 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    alloc::{Allocator, Global},
+    collections::HashMap,
+    fmt::Display,
+    hash::RandomState,
+};
 
 use purple_garden_frontend::{ast::Ast, diagnostic::Diagnostic, typemap::TypeMap};
 use purple_garden_ir::ptype::Type;
 
+/// A std [`HashMap`] whose table lives in `A`.
+pub type Map<K, V, A> = HashMap<K, V, RandomState, A>;
+
 #[derive(Debug, Clone)]
-pub struct FunctionType<'t> {
-    pub args: Vec<(&'t str, Type<'t>)>,
+pub struct FunctionType<'t, A: Allocator = Global> {
+    pub args: Vec<(&'t str, Type<'t>), A>,
     pub ret: Type<'t>,
     /// Signature contains `Type::Slot`s, gates the generic binding path in call checking
     pub with_slots: bool,
 }
 
 #[derive(Debug)]
-pub struct TypecheckOutput<'t> {
+pub struct TypecheckOutput<'t, A: Allocator = Global> {
     /// Node value id -> inferred type. Poisoned nodes have no type.
     ///
     /// This lets analysis clients use all types that were still knowable after
     /// errors without pretending the whole file typechecked successfully.
-    pub types: TypeMap<'t>,
+    pub types: TypeMap<'t, A>,
     pub diagnostics: Vec<Diagnostic>,
-    pub functions: HashMap<&'t str, FunctionType<'t>>,
+    pub functions: Map<&'t str, FunctionType<'t, A>, A>,
 }
 
 /// Internal typechecking result for one AST node.
@@ -48,10 +56,11 @@ impl TcType {
 /// Everything a call check writes to. A signature is borrowed straight out of the function tables
 /// while the call is checked, which rules out `&mut Typechecker`, so the written fields are split
 /// off instead of cloning the signature.
-pub(super) struct CallSink<'s, 'a, 't> {
+pub(super) struct CallSink<'s, 'a, 't, A: Allocator, S: Allocator> {
     pub(super) ast: &'a Ast<'t, 'a>,
-    pub(super) map: &'s mut TypeMap<'t>,
+    pub(super) map: &'s mut TypeMap<'t, A>,
     pub(super) diagnostics: &'s mut Vec<Diagnostic>,
+    pub(super) scratch: &'a S,
 }
 
 /// `pkg.name` or `name`, only formatted when a diagnostic needs it

@@ -2,6 +2,8 @@ use purple_garden_allocators::metric::{MetricAlloc, Metrics};
 
 #[derive(Debug, Default)]
 pub struct Phases<A> {
+    /// Shared by every phase for memory only needed while it runs
+    pub scratch: A,
     pub parse: A,
     pub typecheck: A,
     pub lower: A,
@@ -13,6 +15,7 @@ pub struct Phases<A> {
 impl<A> Phases<A> {
     pub fn each_ref(&self) -> Phases<&A> {
         Phases {
+            scratch: &self.scratch,
             parse: &self.parse,
             typecheck: &self.typecheck,
             lower: &self.lower,
@@ -27,6 +30,7 @@ impl<A> Phases<MetricAlloc<A>> {
     /// Total peak sums the phase peaks, an upper bound of the real one.
     pub fn table(&self) -> String {
         let rows = [
+            ("scratch", self.scratch.metrics()),
             ("parse", self.parse.metrics()),
             ("typecheck", self.typecheck.metrics()),
             ("lower ir", self.lower.metrics()),

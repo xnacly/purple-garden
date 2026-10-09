@@ -1,5 +1,11 @@
 //! Purple garden type system
-use std::{alloc::Layout, borrow::Cow, collections::HashMap, fmt::Display, hash::Hash};
+use std::{
+    alloc::{Allocator, Layout},
+    borrow::Cow,
+    collections::HashMap,
+    fmt::Display,
+    hash::{BuildHasher, Hash},
+};
 
 use crate::Const;
 
@@ -213,10 +219,10 @@ impl<'t> Type<'t> {
     ///
     /// If `possible_filler` contains a slot: argument types are always concrete, a slot on that
     /// side means a generic return type escaped without substitution.
-    pub fn bind_slots(
+    pub fn bind_slots<S: BuildHasher, A: Allocator>(
         &self,
         possible_filler: &Self,
-        bindings: &mut HashMap<&'t str, Self>,
+        bindings: &mut HashMap<&'t str, Self, S, A>,
     ) -> Result<(), BindError<'t>> {
         match (self, possible_filler) {
             (_, Self::Slot(_)) => {
@@ -266,7 +272,10 @@ impl<'t> Type<'t> {
     ///
     /// Returns `Cow::Borrowed` when nothing was substituted so concrete types are never cloned.
     #[must_use]
-    pub fn apply_slot_binding<'s>(&'s self, bindings: &HashMap<&'t str, Self>) -> Cow<'s, Self> {
+    pub fn apply_slot_binding<'s, S: BuildHasher, A: Allocator>(
+        &'s self,
+        bindings: &HashMap<&'t str, Self, S, A>,
+    ) -> Cow<'s, Self> {
         match self {
             Self::Slot(slot) => bindings
                 .get(slot)

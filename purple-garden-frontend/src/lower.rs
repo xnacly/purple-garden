@@ -2,7 +2,11 @@
 // allocation-free error path; boxing them would make the internal API noisier.
 #![allow(clippy::result_large_err)]
 
-use std::{alloc::Layout, collections::HashMap, num};
+use std::{
+    alloc::{Allocator, Global, Layout},
+    collections::HashMap,
+    num,
+};
 
 use crate::typemap::TypeMap;
 use crate::{
@@ -46,11 +50,11 @@ struct LowerCtx<'lower> {
     env: HashMap<&'lower str, Id>,
 }
 
-pub struct Lower<'lower> {
+pub struct Lower<'lower, A: Allocator = Global> {
     ctx: LowerCtx<'lower>,
     functions: Vec<Func<'lower>>,
     func_name_to_id: HashMap<&'lower str, (Id, Option<ptype::Type<'lower>>)>,
-    types: TypeMap<'lower>,
+    types: TypeMap<'lower, A>,
     packages: HashMap<
         &'lower str,
         (
@@ -78,12 +82,14 @@ impl Default for Lower<'_> {
     }
 }
 
-impl<'lower> Lower<'lower> {
+impl Lower<'_> {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
+}
 
+impl<'lower, A: Allocator> Lower<'lower, A> {
     #[must_use]
     pub fn with_libs(mut self, libs: Vec<&'lower Pkg>) -> Self {
         self.libs = libs;
@@ -835,12 +841,25 @@ impl<'lower> Lower<'lower> {
     /// Lower [ast] using a type map produced by the typechecker.
     ///
     /// The entry point is always `entry`.
-    pub fn ir_from_types(
-        mut self,
+    pub fn ir_from_types<B: Allocator>(
+        self,
         ast: &'lower Ast<'lower, 'lower>,
-        types: TypeMap<'lower>,
+        types: TypeMap<'lower, B>,
     ) -> Result<Vec<Func<'lower>>, Diagnostic> {
-        self.types = types;
+        Lower {
+            ctx: self.ctx,
+            functions: self.functions,
+            func_name_to_id: self.func_name_to_id,
+            types,
+            packages: self.packages,
+            pkg_cache: self.pkg_cache,
+            libs: self.libs,
+            stdlib: self.stdlib,
+        }
+        .lower(ast)
+    }
+
+    fn lower(mut self, ast: &'lower Ast<'lower, 'lower>) -> Result<Vec<Func<'lower>>, Diagnostic> {
         // Most roots are declarations or expressions becoming functions later;
         // thus reserving this avoids repeated growth
         self.functions.reserve(ast.roots.len() + 1);

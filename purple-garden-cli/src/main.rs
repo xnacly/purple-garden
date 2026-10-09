@@ -159,7 +159,7 @@ fn pipeline<A: Allocator + Clone>(
     let conf = &cli.config;
 
     let arena = BumpAlloc::new_in(allocs.parse.clone());
-    let scratch = BumpAlloc::new_in(allocs.parse);
+    let scratch = BumpAlloc::new_in(allocs.scratch);
     let parse = Parser::new(Lexer::new(source), &arena, &scratch).parse_collect();
     let purple_garden_frontend::parser::ParseOutput {
         ast,
@@ -181,7 +181,7 @@ fn pipeline<A: Allocator + Clone>(
     }
 
     let libs = Vec::new();
-    let typecheck = Typechecker::new(&ast)
+    let typecheck = Typechecker::new_in(&ast, allocs.typecheck, &scratch)
         .with_libs(libs.clone())
         .with_stdlib(stdlib_packages(cli))
         .check();

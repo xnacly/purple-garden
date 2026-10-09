@@ -18,6 +18,7 @@
 //! - inlining
 //! - tail call optimisation
 //! - jump threading
+#![feature(allocator_api)]
 
 pub mod constant;
 mod display;
