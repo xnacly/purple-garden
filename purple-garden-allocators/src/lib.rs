@@ -5,6 +5,7 @@
 //! interact with a list of allocators, ranging from low level allocators like the PageAlloc, to the
 //! ArenaAlloc, the StackAlloc and the MetricAlloc.
 
+pub mod bump;
 pub mod metric;
 pub mod page;
 pub mod stack;
