@@ -89,22 +89,32 @@ mod tests {
         }
     }
 
-    /// Resident pages of this process, see `proc_pid_statm(5)`.
+    /// Resident pages in `[ptr, ptr + len)`, see `mincore(2)`. Unlike the
+    /// process RSS it doesn't see what tests running in parallel touch.
     #[cfg(target_os = "linux")]
-    fn resident_pages() -> usize {
-        let statm = std::fs::read_to_string("/proc/self/statm").unwrap();
-        statm.split_whitespace().nth(1).unwrap().parse().unwrap()
+    fn resident_pages(ptr: std::ptr::NonNull<u8>, len: usize) -> usize {
+        unsafe extern "C" {
+            fn mincore(addr: *mut std::ffi::c_void, len: usize, vec: *mut u8) -> i32;
+        }
+        let mut pages = vec![0u8; len.div_ceil(mmap::page_size())];
+        assert_eq!(
+            unsafe { mincore(ptr.as_ptr().cast(), len, pages.as_mut_ptr()) },
+            0
+        );
+        pages.iter().filter(|&&page| page & 1 != 0).count()
     }
 
     #[test]
     #[cfg(target_os = "linux")]
     fn zeroed_allocations_stay_untouched() {
         let layout = Layout::from_size_align(64 << 20, 8).unwrap();
-        let before = resident_pages();
         let block = PageAlloc {}.allocate_zeroed(layout).unwrap();
-        let grown = (resident_pages() - before) * mmap::page_size();
+        let resident = resident_pages(block.cast(), block.len());
+        unsafe { block.cast::<u8>().write(1) };
+        let touched = resident_pages(block.cast(), block.len());
         unsafe { PageAlloc {}.deallocate(block.cast(), layout) };
-        assert!(grown < 1 << 20, "{grown} bytes became resident");
+        assert_eq!(resident, 0);
+        assert!(touched >= 1);
     }
 
     #[test]
