@@ -135,8 +135,7 @@ macro_rules! trap_if {
 
 /// The allocator a [`Vm`] was built with. Builtins and native code receive the
 /// VM as a pointer and cast it to one `Vm` type, so its allocator can't be a
-/// type parameter and is erased here instead. Only the GC's page refills go
-/// through it, never the bump allocation inside a page.
+/// type parameter and is erased here instead
 pub struct VmAlloc<'vm>(Box<dyn Allocator + 'vm>);
 
 impl std::fmt::Debug for VmAlloc<'_> {
