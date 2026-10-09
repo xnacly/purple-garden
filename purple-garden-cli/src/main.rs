@@ -181,7 +181,8 @@ fn pipeline<A: Allocator + Clone>(
     }
 
     let libs = Vec::new();
-    let typecheck = Typechecker::new_in(&ast, allocs.typecheck, &scratch)
+    let types = BumpAlloc::new_in(allocs.typecheck);
+    let typecheck = Typechecker::new(&ast, &types, &scratch)
         .with_libs(libs.clone())
         .with_stdlib(stdlib_packages(cli))
         .check();

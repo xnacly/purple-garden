@@ -8,6 +8,7 @@ pub mod parser;
 pub mod typemap;
 
 use ast::{Ast, TypeExpr, TypeExprId};
+use purple_garden_allocators::bump::Arena;
 use purple_garden_ir::ptype;
 
 /// Exact arg-type match used to pick one specialisation from an overload group.
@@ -45,21 +46,25 @@ pub fn type_from_lex_type<'a>(t: lex::Type<'a>) -> ptype::Type<'a> {
 }
 
 #[must_use]
-pub fn type_from_type_expr<'a>(ast: &Ast<'a, '_>, id: TypeExprId) -> ptype::Type<'a> {
+pub fn type_from_type_expr<'a>(
+    ast: &Ast<'a, '_>,
+    id: TypeExprId,
+    arena: &'a impl Arena,
+) -> ptype::Type<'a> {
     match ast.ty(id) {
         TypeExpr::Atom(token) => type_from_lex_type(token.t),
         TypeExpr::Foreign(token) => ptype::Type::Foreign(token.t.as_str()),
-        TypeExpr::Option(type_expr) => ptype::Type::Option(ptype::BoxedType::owned(
-            type_from_type_expr(ast, *type_expr),
+        TypeExpr::Option(type_expr) => {
+            ptype::Type::Option(arena.alloc(type_from_type_expr(ast, *type_expr, arena)))
+        }
+        TypeExpr::Array(type_expr) => {
+            ptype::Type::Array(arena.alloc(type_from_type_expr(ast, *type_expr, arena)))
+        }
+        TypeExpr::Record { fields, .. } => ptype::Type::Record(arena.alloc_slice(
+            fields.iter().map(|(key, value)| ptype::Field {
+                name: key.t.as_str(),
+                ty: type_from_type_expr(ast, *value, arena),
+            }),
         )),
-        TypeExpr::Array(type_expr) => ptype::Type::Array(ptype::BoxedType::owned(
-            type_from_type_expr(ast, *type_expr),
-        )),
-        TypeExpr::Record { fields, .. } => ptype::Type::record(
-            fields
-                .iter()
-                .map(|(key, value)| (key.t.as_str(), type_from_type_expr(ast, *value)))
-                .collect(),
-        ),
     }
 }

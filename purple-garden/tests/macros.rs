@@ -207,18 +207,16 @@ fn pg_fn_unsafe_passes_vm_and_exposes_remaining_signature() {
 fn pg_pkg_exposes_record_metadata() {
     assert_eq!(
         users::PACKAGE.fns[0].args,
-        &[purple_garden::embed::Type::Record(
-            purple_garden::embed::RecordFields::Static(&[
-                purple_garden::embed::Field {
-                    name: "name",
-                    ty: purple_garden::embed::Type::Str,
-                },
-                purple_garden::embed::Field {
-                    name: "age",
-                    ty: purple_garden::embed::Type::Int,
-                },
-            ])
-        )]
+        &[purple_garden::embed::Type::Record(&[
+            purple_garden::embed::Field {
+                name: "name",
+                ty: purple_garden::embed::Type::Str,
+            },
+            purple_garden::embed::Field {
+                name: "age",
+                ty: purple_garden::embed::Type::Int,
+            },
+        ])]
     );
     assert!(
         users::PACKAGE

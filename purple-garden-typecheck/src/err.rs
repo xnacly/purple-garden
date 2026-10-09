@@ -7,17 +7,19 @@ use purple_garden_ir::ptype::{BindError, Type};
 
 use std::alloc::Allocator;
 
+use purple_garden_allocators::bump::Arena;
+
 use crate::{FunctionType, Typechecker, typedefs::CallName};
 
-impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
+impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
     pub(crate) fn report(&mut self, diagnostic: Diagnostic) {
         self.diagnostics.push(diagnostic);
     }
 
-    pub(crate) fn redundant_conversion_note<B: Allocator>(
+    pub(crate) fn redundant_conversion_note(
         &self,
         args: &[NodeId],
-        candidates: &[FunctionType<'t, B>],
+        candidates: &[FunctionType<'t>],
     ) -> Option<String> {
         if args.len() != 1 {
             return None;
@@ -60,13 +62,13 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
         err
     }
 
-    pub(crate) fn specialisation_miss_error<B: Allocator>(
+    pub(crate) fn specialisation_miss_error(
         &self,
         pkg_name: &str,
         inner_name: &str,
         name: &lex::Token,
         args: &[NodeId],
-        candidates: &[FunctionType<'t, B>],
+        candidates: &[FunctionType<'t>],
     ) -> Diagnostic {
         fn sig<'a, 'b: 'a>(types: impl Iterator<Item = &'a Type<'b>>) -> String {
             types
@@ -136,8 +138,8 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
         }
     }
 
-    pub(crate) fn common_return<B: Allocator>(candidates: &[FunctionType<'t, B>]) -> Option<Type<'t>> {
-        let first = candidates.first()?.ret.clone();
+    pub(crate) fn common_return(candidates: &[FunctionType<'t>]) -> Option<Type<'t>> {
+        let first = candidates.first()?.ret;
         candidates.iter().all(|c| c.ret == first).then_some(first)
     }
 }

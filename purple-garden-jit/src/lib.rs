@@ -117,8 +117,19 @@ mod tests_x86 {
     use super::Jit;
     use super::mem::ExecPage;
     use purple_garden_ir::{
-        BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype::Type,
+        BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId,
+        ptype::{Field, Type},
     };
+
+    fn record(fields: Vec<(&'static str, Type<'static>)>) -> Type<'static> {
+        Type::Record(
+            fields
+                .into_iter()
+                .map(|(name, ty)| Field { name, ty })
+                .collect::<Vec<_>>()
+                .leak(),
+        )
+    }
 
     /// Run native code that takes `*mut u64` (the VM register file) and return
     /// the resulting register slots.
@@ -217,7 +228,7 @@ mod tests_x86 {
         use purple_garden_runtime::{Vm, VmConfig};
         use std::alloc::Layout;
 
-        let record_ty = Type::record(vec![
+        let record_ty = record(vec![
             ("r", Type::Int),
             ("g", Type::Int),
             ("b", Type::Int),
@@ -227,7 +238,7 @@ mod tests_x86 {
             "alloc_live",
             Id(0),
             vec![Id(0), Id(1), Id(2)],
-            Some(record_ty.clone()),
+            Some(record_ty),
         );
         let params = func.intern_params(vec![Id(0), Id(1), Id(2)]);
         let alloc_id = Id(3);
@@ -239,7 +250,7 @@ mod tests_x86 {
                 Instr::Alloc {
                     dst: TypeId {
                         id: alloc_id,
-                        ty: record_ty.clone(),
+                        ty: record_ty,
                     },
                     layout: Layout::from_size_align(32, 8).unwrap(),
                     span: 0,
@@ -462,13 +473,15 @@ mod tests_x86 {
     #[test]
     fn reg_divisor_imod_and_idiv() {
         let mut jit = Jit::new();
-        jit.compile_func(&reg_div_func(BinOp::IMod)).expect("jit imod");
+        jit.compile_func(&reg_div_func(BinOp::IMod))
+            .expect("jit imod");
         assert_eq!(run(jit.code(), [20, 7, 0])[0], 6);
         assert_eq!(run(jit.code(), [7, 20, 0])[0], 7);
         assert_eq!(run(jit.code(), [-20i64 as u64, 7, 0])[0] as i64, -6);
 
         let mut jit = Jit::new();
-        jit.compile_func(&reg_div_func(BinOp::IDiv)).expect("jit idiv");
+        jit.compile_func(&reg_div_func(BinOp::IDiv))
+            .expect("jit idiv");
         assert_eq!(run(jit.code(), [20, 7, 0])[0], 2);
         assert_eq!(run(jit.code(), [-20i64 as u64, 7, 0])[0] as i64, -2);
     }
@@ -523,7 +536,8 @@ mod tests_x86 {
         use purple_garden_runtime::{Anomaly, Vm, VmConfig};
 
         let mut jit = Jit::new();
-        jit.compile_func(&reg_div_func(BinOp::IMod)).expect("jit imod");
+        jit.compile_func(&reg_div_func(BinOp::IMod))
+            .expect("jit imod");
 
         let mut vm = Vm::new(VmConfig::default());
         let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
@@ -540,7 +554,7 @@ mod tests_x86 {
 
     #[test]
     fn loads_record_field_from_pointer_arg() {
-        let record_ty = Type::record(vec![("first", Type::Int), ("second", Type::Int)]);
+        let record_ty = record(vec![("first", Type::Int), ("second", Type::Int)]);
         let mut func = Func::new("field", Id(0), vec![Id(0)], Some(Type::Int));
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
@@ -566,14 +580,14 @@ mod tests_x86 {
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
         assert_eq!(run(jit.code(), [record.as_mut_ptr() as u64, 0, 0])[0], 42);
-        drop(record_ty);
+        let _ = record_ty;
     }
 
     #[test]
     fn takes_nested_record_address_and_loads_field() {
-        let record_ty = Type::record(vec![(
+        let record_ty = record(vec![(
             "nested",
-            Type::record(vec![("first", Type::Int), ("second", Type::Int)]),
+            record(vec![("first", Type::Int), ("second", Type::Int)]),
         )]);
         let mut func = Func::new("nested_field", Id(0), vec![Id(0)], Some(Type::Int));
         let params = func.intern_params(vec![Id(0)]);
@@ -585,7 +599,7 @@ mod tests_x86 {
                 Instr::AddrOf {
                     dst: TypeId {
                         id: Id(1),
-                        ty: Type::record(vec![("first", Type::Int), ("second", Type::Int)]),
+                        ty: record(vec![("first", Type::Int), ("second", Type::Int)]),
                     },
                     base: Id(0),
                     offset: 8,
@@ -611,7 +625,7 @@ mod tests_x86 {
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
         assert_eq!(run(jit.code(), [record.as_mut_ptr() as u64, 0, 0])[0], 42);
-        drop(record_ty);
+        let _ = record_ty;
     }
 
     #[test]
@@ -655,7 +669,11 @@ mod tests_x86 {
 
         let syscalls = vec![entry];
         let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = vec![Op::LoadI { dst: 0, value: 187 }, Op::Sys { idx: 0, argc: 1 }, Op::Halt];
+        vm.bytecode = vec![
+            Op::LoadI { dst: 0, value: 187 },
+            Op::Sys { idx: 0, argc: 1 },
+            Op::Halt,
+        ];
         vm.run::<false>(&syscalls).expect("vm run");
         assert_eq!(vm.r(0).as_int(), 187);
     }

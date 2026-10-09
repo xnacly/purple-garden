@@ -16,6 +16,11 @@ use crate::page::PageAlloc;
 /// Memory that is never deallocated must stay valid until the arena is reset
 /// through `&mut` or dropped, and dropping must reclaim it.
 pub unsafe trait Arena: Allocator {
+    /// Moves `value` into the arena, it is never dropped.
+    fn alloc<T>(&self, value: T) -> &mut T {
+        Box::leak(Box::new_in(value, self))
+    }
+
     /// Moves `items` into the arena, they are never dropped.
     fn alloc_slice<T>(&self, items: impl IntoIterator<Item = T>) -> &mut [T] {
         let mut v = Vec::new_in(self);

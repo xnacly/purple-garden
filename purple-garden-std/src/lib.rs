@@ -3,16 +3,16 @@ use std::{collections::HashMap, sync::OnceLock};
 extern crate self as purple_garden;
 
 pub use purple_garden_runtime::{
-    Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Type, Value, Vm, alloc_record,
-    copy_record, decode_record_field, encode_record_field,
+    Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, Type, Value, Vm, alloc_record, copy_record,
+    decode_record_field, encode_record_field,
 };
 
 /// Compatibility namespace used by embedding macros.
 #[doc(hidden)]
 pub mod embed {
     pub use super::{
-        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Type, Value, Vm,
-        alloc_record, copy_record, decode_record_field, encode_record_field,
+        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, Type, Value, Vm, alloc_record,
+        copy_record, decode_record_field, encode_record_field,
     };
 }
 
@@ -120,7 +120,6 @@ mod tests {
         let Type::Record(fields) = &fun.ret else {
             panic!("uname should return a record, got {}", fun.ret);
         };
-        let fields = fields.as_slice();
 
         assert!(fun.args.is_empty());
         assert_eq!(fields[0].name, "sysname");

@@ -157,7 +157,7 @@ fn expand_record_pg_type(api: &Path, input: &DeriveInput, fields: &FieldsNamed) 
     quote! {
         impl #impl_generics #api::embed::PgType for #ident #ty_generics #where_clause {
             const TYPE: #api::embed::Type<'static> = #api::embed::Type::Record(
-                #api::embed::RecordFields::Static(&[#(#record_fields),*])
+                &[#(#record_fields),*]
             );
         }
     }

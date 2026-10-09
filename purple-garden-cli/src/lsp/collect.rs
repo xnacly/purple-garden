@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use lsp_types::CompletionItemKind;
+use purple_garden_allocators::bump::BumpAlloc;
 use purple_garden_frontend::ast::{Ast, Node, NodeId};
 use purple_garden_ir::ptype::Type;
 use purple_garden_typecheck::TypecheckOutput;
@@ -83,7 +84,7 @@ fn collect_package_docs(ast: &Ast<'_, '_>, analysis: &mut DocumentAnalysis) {
 
 fn collect_node(
     ast: &Ast<'_, '_>,
-    typecheck: &TypecheckOutput<'_>,
+    typecheck: &TypecheckOutput<'_, &BumpAlloc>,
     node_id: NodeId,
     analysis: &mut DocumentAnalysis,
 ) {
@@ -112,8 +113,9 @@ fn collect_node(
             let detail = fn_detail(ast, name, args, *return_type);
             add_decl_hover(analysis, token_span(name), detail.clone(), docs);
             analysis.add_completion(name.t.as_str(), CompletionItemKind::FUNCTION, Some(detail));
+            let types = BumpAlloc::new();
             for (name, ty) in *args {
-                let ty = purple_garden_frontend::type_from_type_expr(ast, *ty);
+                let ty = purple_garden_frontend::type_from_type_expr(ast, *ty, &types);
                 let detail = format!("{}: {}", name.t.as_str(), ty);
                 analysis.add_garden_hover(token_span(name), detail.clone());
                 analysis.add_completion(
@@ -230,7 +232,7 @@ fn collect_node(
 
 fn ty_for_node<'a>(
     ast: &Ast<'a, '_>,
-    typecheck: &'a TypecheckOutput<'a>,
+    typecheck: &'a TypecheckOutput<'a, &'a BumpAlloc>,
     node_id: NodeId,
 ) -> Option<&'a Type<'a>> {
     typecheck.types.get(ast.value_id(node_id))
@@ -238,7 +240,7 @@ fn ty_for_node<'a>(
 
 fn collect_nodes(
     ast: &Ast<'_, '_>,
-    typecheck: &TypecheckOutput<'_>,
+    typecheck: &TypecheckOutput<'_, &BumpAlloc>,
     nodes: &[NodeId],
     analysis: &mut DocumentAnalysis,
 ) {

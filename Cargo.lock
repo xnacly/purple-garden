@@ -630,6 +630,7 @@ dependencies = [
 name = "purple-garden-ir"
 version = "0.1.0"
 dependencies = [
+ "purple-garden-allocators",
  "purple-garden-shared",
 ]
 

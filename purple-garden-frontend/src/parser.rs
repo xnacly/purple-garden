@@ -1020,7 +1020,9 @@ mod tests {
 
     fn roots(source: &[u8]) -> crate::ast::Ast<'_, '_> {
         let arena = Box::leak(Box::new(BumpAlloc::new()));
-        Parser::new(Lexer::new(source), arena, &Global).parse().unwrap()
+        Parser::new(Lexer::new(source), arena, &Global)
+            .parse()
+            .unwrap()
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use purple_garden_allocators::bump::BumpAlloc;
 use purple_garden_frontend::{
     ast::{Ast, Node, NodeId, TypeExprId},
     diagnostic::Span,
@@ -173,7 +174,7 @@ pub(super) fn call_hover(
 
 pub(super) fn ident_hover(
     ast: &Ast<'_, '_>,
-    typecheck: &TypecheckOutput<'_>,
+    typecheck: &TypecheckOutput<'_, &BumpAlloc>,
     node_id: NodeId,
     name: &Token<'_>,
 ) -> Option<HoverMarkup> {
@@ -266,7 +267,7 @@ pub(super) fn garden_block(contents: impl std::fmt::Display) -> String {
 
 pub(super) fn type_for_node(
     ast: &Ast<'_, '_>,
-    typecheck: &TypecheckOutput<'_>,
+    typecheck: &TypecheckOutput<'_, &BumpAlloc>,
     node_id: NodeId,
 ) -> Option<String> {
     typecheck

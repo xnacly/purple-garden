@@ -13,7 +13,6 @@ use crate::{
     ast::{Ast, Node, NodeId, TypeExpr},
     diagnostic::Diagnostic,
     lex::{self, Token, Type},
-    type_from_type_expr,
 };
 use purple_garden_ir::{
     BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype,
@@ -369,7 +368,7 @@ impl<'lower, A: Allocator> Lower<'lower, A> {
                         self.emit(Instr::LoadConst {
                             dst: TypeId {
                                 id: zero_id,
-                                ty: inner_ty.clone(),
+                                ty: inner_ty,
                             },
                             value: zero_const,
                             span,
@@ -425,10 +424,10 @@ impl<'lower, A: Allocator> Lower<'lower, A> {
                 } else if let TypeExpr::Atom(Token { t, .. }) = ast.ty(*return_type) {
                     Some(crate::type_from_lex_type(*t))
                 } else {
-                    Some(crate::type_from_type_expr(ast, *return_type))
+                    self.types.get(ast.value_id(node_id)).copied()
                 };
 
-                self.func_name_to_id.insert(ident_name, (id, ret.clone()));
+                self.func_name_to_id.insert(ident_name, (id, ret));
                 let func_params: Vec<Id> = args
                     .iter()
                     .map(|(token, _)| {
@@ -607,7 +606,7 @@ impl<'lower, A: Allocator> Lower<'lower, A> {
                 None
             }
             Node::Extern { .. } => None,
-            Node::Cast { lhs, rhs, src, .. } => {
+            Node::Cast { id, lhs, src, .. } => {
                 let src_ty = self
                     .types
                     .get(ast.value_id(*lhs))
@@ -621,7 +620,11 @@ impl<'lower, A: Allocator> Lower<'lower, A> {
                 let dst = self.ctx.id_store.new_value();
                 let value = TypeId {
                     id: dst,
-                    ty: type_from_type_expr(ast, *rhs),
+                    ty: self
+                        .types
+                        .get(*id)
+                        .copied()
+                        .expect("typechecker should have typed the cast"),
                 };
 
                 self.emit(Instr::Cast {
@@ -752,11 +755,11 @@ impl<'lower, A: Allocator> Lower<'lower, A> {
 
                 // we need the inner type T of Array<T> to compute its size and its alignment and
                 // multiply it up with the size of the array, since all arrays in pg are immutable
-                let ptype::Type::Array(ref inner) = ty else {
+                let ptype::Type::Array(inner) = ty else {
                     unreachable!();
                 };
 
-                let inner = inner.as_ref().clone();
+                let inner = *inner;
                 let word_size = std::mem::size_of::<purple_garden_runtime::Value>();
                 let header_size = align_up(word_size, inner.align());
                 let member_size = align_up(inner.size(), inner.align());
@@ -812,10 +815,7 @@ impl<'lower, A: Allocator> Lower<'lower, A> {
                 let layout = record_ty.layout();
                 let id = self.ctx.id_store.new_value();
                 self.emit(Instr::Alloc {
-                    dst: TypeId {
-                        id,
-                        ty: record_ty.clone(),
-                    },
+                    dst: TypeId { id, ty: record_ty },
                     layout,
                     span: src.start as u32,
                 });

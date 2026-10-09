@@ -5,15 +5,16 @@ mod display;
 mod err;
 mod typedefs;
 
-use std::alloc::{Allocator, Global};
+use std::alloc::Allocator;
 
+use purple_garden_allocators::bump::Arena;
 use purple_garden_frontend::typemap::{TypeMap, TypeRef};
 use purple_garden_frontend::{
     ast::{Ast, Node, NodeId},
     diagnostic::{Diagnostic, Span},
     lex::{self, Token},
 };
-use purple_garden_ir::ptype::{BoxedType, Type};
+use purple_garden_ir::ptype::{Field, Type};
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
 
@@ -21,21 +22,22 @@ pub use typedefs::FunctionType;
 pub use typedefs::TypecheckOutput;
 use typedefs::{CallName, CallSink, Map, TcType};
 
-/// Its output lives in `A`, everything only needed while checking in `scratch`.
+/// Its output and every type it builds live in `arena`, everything only needed while checking in
+/// `scratch`.
 #[derive(Debug)]
-pub struct Typechecker<'a, 't, A: Allocator + Clone = Global, S: Allocator = Global> {
+pub struct Typechecker<'a, 't, B: Arena, S: Allocator> {
     ast: &'a Ast<'t, 'a>,
-    alloc: A,
+    arena: &'t B,
     scratch: &'a S,
     /// Node id -> Type. Indexed by id; Node ids are dense from the parser, the slot past the last
     /// id holds `Void` for results without a node of their own, see [`Self::void`]
-    map: TypeMap<'t, A>,
+    map: TypeMap<'t, &'t B>,
     void: usize,
     /// scope stack; innermost frame last; lookups walk from top to bottom. Bindings point at
     /// the arena entry of the expression that produced them
     env: Vec<Map<&'t str, TypeRef, &'a S>, &'a S>,
     /// map a function name to its type(s)
-    functions: Map<&'t str, FunctionType<'t, A>, A>,
+    functions: Map<&'t str, FunctionType<'t>, &'t B>,
     /// map a pkg name to a map of its public method names to overload groups
     /// (one entry per specialisation; >1 means a `specialises` group)
     packages: Map<&'t str, Overloads<'a, 't, S>, &'a S>,
@@ -45,30 +47,23 @@ pub struct Typechecker<'a, 't, A: Allocator + Clone = Global, S: Allocator = Glo
     diagnostics: Vec<Diagnostic>,
 }
 
-type Overloads<'a, 't, S> = Map<&'t str, Vec<FunctionType<'t, &'a S>, &'a S>, &'a S>;
+type Overloads<'a, 't, S> = Map<&'t str, Vec<FunctionType<'t>, &'a S>, &'a S>;
 
-impl<'a, 't> Typechecker<'a, 't> {
+impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
     #[must_use]
-    pub fn new(ast: &'a Ast<'t, 'a>) -> Self {
-        Self::new_in(ast, Global, &Global)
-    }
-}
-
-impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
-    #[must_use]
-    pub fn new_in(ast: &'a Ast<'t, 'a>, alloc: A, scratch: &'a S) -> Self {
+    pub fn new(ast: &'a Ast<'t, 'a>, arena: &'t B, scratch: &'a S) -> Self {
         let mut s = Self {
             ast,
-            map: TypeMap::with_slots_in(ast.values + 1, alloc.clone()),
+            map: TypeMap::with_slots_in(ast.values + 1, arena),
             void: ast.values,
             env: Vec::new_in(scratch),
-            functions: Map::new_in(alloc.clone()),
+            functions: Map::new_in(arena),
             packages: Map::new_in(scratch),
             pkg_cache: Map::new_in(scratch),
             libs: Vec::new(),
             stdlib: pstd::STD,
             diagnostics: Vec::new(),
-            alloc,
+            arena,
             scratch,
         };
         s.map.insert(s.void, Type::Void);
@@ -133,11 +128,12 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                 f.name,
                 f.specialises.unwrap_or_default()
             );
-            let mut args = Vec::with_capacity_in(f.args.len(), scratch);
-            args.extend(f.arg_names.iter().copied().zip(f.args.iter().cloned()));
+            let args = self
+                .arena
+                .alloc_slice(f.arg_names.iter().copied().zip(f.args.iter().copied()));
             let f_type = FunctionType {
                 args,
-                ret: f.ret.clone(),
+                ret: f.ret,
                 with_slots: f.with_slots,
             };
             registered
@@ -163,19 +159,26 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
             let lex::Type::Ident(fun_name) = fun.name.t else {
                 unreachable!();
             };
-            let mut args = Vec::with_capacity_in(fun.args.len(), scratch);
-            args.extend(fun.args.iter().map(|(arg_name, arg_type)| {
-                let lex::Type::Ident(arg_name) = arg_name.t else {
-                    unreachable!();
-                };
-                (
-                    arg_name,
-                    purple_garden_frontend::type_from_type_expr(self.ast, *arg_type),
-                )
-            }));
+            let args = self
+                .arena
+                .alloc_slice(fun.args.iter().map(|(arg_name, arg_type)| {
+                    let lex::Type::Ident(arg_name) = arg_name.t else {
+                        unreachable!();
+                    };
+                    (
+                        arg_name,
+                        purple_garden_frontend::type_from_type_expr(
+                            self.ast, *arg_type, self.arena,
+                        ),
+                    )
+                }));
             let f_type = FunctionType {
                 args,
-                ret: purple_garden_frontend::type_from_type_expr(self.ast, fun.return_type),
+                ret: purple_garden_frontend::type_from_type_expr(
+                    self.ast,
+                    fun.return_type,
+                    self.arena,
+                ),
                 with_slots: false,
             };
             purple_garden_shared::trace!(
@@ -194,7 +197,7 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
     }
 
     #[must_use]
-    pub fn check(mut self) -> TypecheckOutput<'t, A> {
+    pub fn check(mut self) -> TypecheckOutput<'t, &'t B> {
         for &node in self.ast.roots {
             self.node(node);
         }
@@ -211,7 +214,7 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
     }
 
     #[inline]
-    fn store_known(map: &mut TypeMap<'t, A>, id: usize, t: Type<'t>) -> TcType {
+    fn store_known(map: &mut TypeMap<'t, &'t B>, id: usize, t: Type<'t>) -> TcType {
         map.insert(id, t);
         TcType::Known(id)
     }
@@ -479,7 +482,7 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                 return TcType::Poison;
             };
 
-            let ret = candidates[idx].ret.clone();
+            let ret = candidates[idx].ret;
             purple_garden_shared::trace!(
                 "[ir::typecheck::Typechecker::node] resolved `{}.{}` to specialisation {}/{} ({}) -> {}",
                 pkg_name,
@@ -500,6 +503,7 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                 ast: self.ast,
                 map: &mut self.map,
                 diagnostics: &mut self.diagnostics,
+                arena: self.arena,
                 scratch: self.scratch,
             },
             call_id,
@@ -539,6 +543,7 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                 ast: self.ast,
                 map: &mut self.map,
                 diagnostics: &mut self.diagnostics,
+                arena: self.arena,
                 scratch: self.scratch,
             },
             call_id,
@@ -553,18 +558,19 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
     }
 
     /// Arguments must already be typed, see [`CallSink`] for why `fun` is borrowed
-    fn check_call_args<B: Allocator>(
-        sink: CallSink<'_, 'a, 't, A, S>,
+    fn check_call_args(
+        sink: CallSink<'_, 'a, 't, B, S>,
         call_id: usize,
         tok: &lex::Token,
         display_name: &CallName<'_>,
-        fun: &FunctionType<'t, B>,
+        fun: &FunctionType<'t>,
         args: &[NodeId],
     ) -> TcType {
         let CallSink {
             ast,
             map,
             diagnostics,
+            arena,
             scratch,
         } = sink;
 
@@ -578,7 +584,7 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                 ),
                 tok,
             ));
-            return Self::store_known(map, call_id, fun.ret.clone());
+            return Self::store_known(map, call_id, fun.ret);
         }
 
         let mut slot_to_type_bindings = Map::new_in(scratch);
@@ -614,8 +620,9 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                 continue;
             }
 
-            let expected_arg_type = expected_arg_type.apply_slot_binding(&slot_to_type_bindings);
-            if *expected_arg_type != *provided_type {
+            let expected_arg_type =
+                expected_arg_type.apply_slot_binding(&slot_to_type_bindings, arena);
+            if expected_arg_type != *provided_type {
                 diagnostics.push(Self::arg_mismatch(
                     display_name,
                     expected_arg_name,
@@ -627,11 +634,9 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
         }
 
         let ret = if fun.with_slots {
-            fun.ret
-                .apply_slot_binding(&slot_to_type_bindings)
-                .into_owned()
+            fun.ret.apply_slot_binding(&slot_to_type_bindings, arena)
         } else {
-            fun.ret.clone()
+            fun.ret
         };
 
         Self::store_known(map, call_id, ret)
@@ -694,11 +699,11 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                     return TcType::Poison;
                 }
 
-                let elem = self.ty(first).clone();
-                self.set_known(*id, Type::Array(BoxedType::owned(elem)))
+                let elem = *self.ty(first);
+                self.set_known(*id, Type::Array(self.arena.alloc(elem)))
             }
             Node::Record { id, fields, .. } => {
-                let mut typed_fields = Vec::with_capacity(fields.len());
+                let mut typed_fields = Vec::with_capacity_in(fields.len(), self.scratch);
                 let mut poisoned = false;
 
                 for (key, value) in *fields {
@@ -707,9 +712,9 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                     };
 
                     match self.node(*value).known() {
-                        Some(ty) => typed_fields.push(purple_garden_ir::ptype::Field {
+                        Some(ty) => typed_fields.push(Field {
                             name: inner_name,
-                            ty: self.ty(ty).clone(),
+                            ty: *self.ty(ty),
                         }),
                         None => poisoned = true,
                     }
@@ -719,7 +724,7 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                     return TcType::Poison;
                 }
 
-                self.set_known(*id, Type::Record(typed_fields.into()))
+                self.set_known(*id, Type::Record(self.arena.alloc_slice(typed_fields)))
             }
             Node::Atom { id, raw } => {
                 let t = purple_garden_frontend::type_from_atom_token_type(&raw.t);
@@ -827,7 +832,7 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
 
                 let prev_env = std::mem::replace(&mut self.env, Vec::new_in(self.scratch));
                 self.env.push(Map::new_in(self.scratch));
-                let mut typed_arguments = Vec::with_capacity_in(args.len(), self.alloc.clone());
+                let mut typed_arguments = Vec::with_capacity_in(args.len(), self.scratch);
                 for (arg_name, arg_type) in *args {
                     let lex::Token {
                         t: lex::Type::Ident(inner_name),
@@ -838,17 +843,19 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                     };
                     let inner_name = *inner_name;
 
-                    let t = purple_garden_frontend::type_from_type_expr(self.ast, *arg_type);
-                    let binding = self.map.alloc(t.clone());
+                    let t = purple_garden_frontend::type_from_type_expr(
+                        self.ast, *arg_type, self.arena,
+                    );
+                    let binding = self.map.alloc(t);
                     self.env_insert(inner_name, binding);
                     typed_arguments.push((inner_name, t));
                 }
 
                 let ret: Type<'t> =
-                    purple_garden_frontend::type_from_type_expr(self.ast, *return_type);
+                    purple_garden_frontend::type_from_type_expr(self.ast, *return_type, self.arena);
                 let f_type = FunctionType {
-                    args: typed_arguments,
-                    ret: ret.clone(),
+                    args: self.arena.alloc_slice(typed_arguments),
+                    ret,
                     with_slots: false,
                 };
                 purple_garden_shared::trace!(
@@ -875,7 +882,7 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                 self.set_known(*id, ret)
             }
             Node::Cast { id, lhs, rhs, src } => {
-                let rhs = purple_garden_frontend::type_from_type_expr(self.ast, *rhs);
+                let rhs = purple_garden_frontend::type_from_type_expr(self.ast, *rhs, self.arena);
                 let Some(lhs) = self.node(*lhs).known() else {
                     return TcType::Poison;
                 };
@@ -902,11 +909,7 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                 };
 
                 // PERF: this record path lookup should mabye be a map
-                let Some(field) = fields
-                    .as_slice()
-                    .iter()
-                    .find(|field| field.name == idx_path_end)
-                else {
+                let Some(field) = fields.iter().find(|field| field.name == idx_path_end) else {
                     let err = Diagnostic::at_token(
                         format!(
                             "{} does not have a field called {idx_path_end}",
@@ -918,7 +921,7 @@ impl<'a, 't, A: Allocator + Clone, S: Allocator> Typechecker<'a, 't, A, S> {
                     return TcType::Poison;
                 };
 
-                let t = field.ty.clone();
+                let t = field.ty;
                 self.set_known(*id, t)
             }
             Node::Call { id, target, args } => match self.ast.node(*target) {
@@ -1024,6 +1027,27 @@ mod tests {
     use purple_garden_allocators::bump::BumpAlloc;
     use purple_garden_frontend::{lex::Lexer, parser::Parser};
 
+    type Output<'t> = TypecheckOutput<'t, &'t BumpAlloc>;
+
+    fn checker<'a, 't>(ast: &'a Ast<'t, 'a>) -> Typechecker<'a, 't, BumpAlloc, BumpAlloc> {
+        let arena = Box::leak(Box::new(BumpAlloc::new()));
+        Typechecker::new(ast, arena, Box::leak(Box::new(BumpAlloc::new())))
+    }
+
+    fn leak(ty: Type<'static>) -> &'static Type<'static> {
+        Box::leak(Box::new(ty))
+    }
+
+    fn record(fields: Vec<(&'static str, Type<'static>)>) -> Type<'static> {
+        Type::Record(
+            fields
+                .into_iter()
+                .map(|(name, ty)| Field { name, ty })
+                .collect::<Vec<_>>()
+                .leak(),
+        )
+    }
+
     fn parse(source: &[u8]) -> Ast<'_, '_> {
         let arena = Box::leak(Box::new(BumpAlloc::new()));
         Parser::new(Lexer::new(source), arena, &BumpAlloc::new())
@@ -1031,28 +1055,28 @@ mod tests {
             .unwrap()
     }
 
-    fn type_of<'t>(ast: &Ast<'t, '_>, out: &TypecheckOutput<'t>, node: NodeId) -> Option<Type<'t>> {
+    fn type_of<'t>(ast: &Ast<'t, '_>, out: &Output<'t>, node: NodeId) -> Option<Type<'t>> {
         out.types.get(ast.value_id(node)).cloned()
     }
 
     #[test]
     fn output_outlives_the_ast_it_was_checked_against() {
-        fn check(source: &[u8]) -> TypecheckOutput<'_> {
+        fn check(source: &[u8]) -> Output<'_> {
             let ast = parse(source);
-            Typechecker::new(&ast).check()
+            checker(&ast).check()
         }
 
         let out = check(br#"fn wrap(value:Int) Record<value: Int> { { value: value } }"#);
         let wrap = out.functions.get("wrap").expect("fn is registered");
 
-        assert_eq!(wrap.args, vec![("value", Type::Int)]);
-        assert_eq!(wrap.ret, Type::record(vec![("value", Type::Int)]));
+        assert_eq!(wrap.args, [("value", Type::Int)]);
+        assert_eq!(wrap.ret, record(vec![("value", Type::Int)]));
     }
 
     #[test]
     fn record_field_access_resolves_field_type() {
         let ast = parse(br#"{ name: "teo" age: 23 }.name"#);
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
 
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
         assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Str));
@@ -1061,7 +1085,7 @@ mod tests {
     #[test]
     fn nested_record_field_access_resolves_inner_field_type() {
         let ast = parse(br#"{ name: "teo" job: { title: "dev" since: 2024 } }.job.since"#);
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
 
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
         assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Int));
@@ -1070,7 +1094,7 @@ mod tests {
     #[test]
     fn unknown_record_field_reports_error() {
         let ast = parse(br#"{ name: "teo" age: 23 }.missing"#);
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
 
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(
@@ -1082,7 +1106,7 @@ mod tests {
     #[test]
     fn field_call_with_non_package_target_reports_error() {
         let ast = parse(br#"{ job: { run: "nope" } }.job.run()"#);
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
 
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(
@@ -1094,19 +1118,19 @@ mod tests {
     #[test]
     fn homogeneous_array_resolves_element_type() {
         let ast = parse(b"[1 2 3]");
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
 
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
         assert_eq!(
             type_of(&ast, &out, ast.roots[0]),
-            Some(Type::Array(BoxedType::owned(Type::Int)))
+            Some(Type::Array(leak(Type::Int)))
         );
     }
 
     #[test]
     fn mixed_array_members_report_error_at_offending_member() {
         let ast = parse(br#"[1 "two" 3]"#);
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
 
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(
@@ -1127,7 +1151,7 @@ mod tests {
     #[test]
     fn empty_array_reports_inference_error() {
         let ast = parse(b"[]");
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
 
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(
@@ -1145,7 +1169,7 @@ mod tests {
     #[test]
     fn array_typecheck_does_not_report_first_member_errors_twice() {
         let ast = parse(br#"[{ jobs: ["opfer"] } { jobs: [opfer] }]"#);
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
 
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(out.diagnostics[0].message, "binding `opfer` not found");
@@ -1157,7 +1181,7 @@ mod tests {
         use purple_garden_ir::{Id, Instr};
 
         let ast = parse(br#"{ name: "teo" age: 23 job: { name: "dev" since: 2024 } }"#);
-        let typecheck = Typechecker::new(&ast).check();
+        let typecheck = checker(&ast).check();
         assert!(
             typecheck.diagnostics.is_empty(),
             "{:?}",
@@ -1191,7 +1215,7 @@ mod tests {
         use purple_garden_ir::{Const, Id, Instr};
 
         let ast = parse(b"[1 2]");
-        let typecheck = Typechecker::new(&ast).check();
+        let typecheck = checker(&ast).check();
         assert!(
             typecheck.diagnostics.is_empty(),
             "{:?}",
@@ -1203,7 +1227,7 @@ mod tests {
         let alloc = instructions
             .iter()
             .find_map(|instr| match instr {
-                Instr::Alloc { dst, layout, .. } => Some((dst.id, dst.ty.clone(), *layout)),
+                Instr::Alloc { dst, layout, .. } => Some((dst.id, dst.ty, *layout)),
                 _ => None,
             })
             .expect("array literal should allocate");
@@ -1225,7 +1249,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(alloc.0, Id(0));
-        assert_eq!(alloc.1, Type::Array(BoxedType::owned(Type::Int)));
+        assert_eq!(alloc.1, Type::Array(leak(Type::Int)));
         assert_eq!(alloc.2.size(), 24);
         assert_eq!(alloc.2.align(), 8);
         assert_eq!(
@@ -1248,7 +1272,7 @@ mod tests {
         use purple_garden_ir::{Id, Instr};
 
         let ast = parse(b"[{ x: 1 y: 2 } { x: 3 y: 4 }]");
-        let typecheck = Typechecker::new(&ast).check();
+        let typecheck = checker(&ast).check();
         assert!(
             typecheck.diagnostics.is_empty(),
             "{:?}",
@@ -1260,7 +1284,7 @@ mod tests {
         let allocs = instructions
             .iter()
             .filter_map(|instr| match instr {
-                Instr::Alloc { dst, layout, .. } => Some((dst.id, dst.ty.clone(), *layout)),
+                Instr::Alloc { dst, layout, .. } => Some((dst.id, dst.ty, *layout)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1276,10 +1300,7 @@ mod tests {
         assert_eq!(allocs[0].0, Id(0));
         assert_eq!(
             allocs[0].1,
-            Type::Array(BoxedType::owned(Type::record(vec![
-                ("x", Type::Int),
-                ("y", Type::Int),
-            ])))
+            Type::Array(leak(record(vec![("x", Type::Int), ("y", Type::Int),])))
         );
         assert_eq!(allocs[0].2.size(), 40);
         assert_eq!(allocs[0].2.align(), 8);
@@ -1298,7 +1319,7 @@ mod tests {
     #[test]
     fn binary_int_arithmetic_produces_int() {
         let ast = parse(b"1 + 2");
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
         assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Int));
     }
@@ -1306,7 +1327,7 @@ mod tests {
     #[test]
     fn binary_comparison_produces_bool() {
         let ast = parse(b"1 < 2");
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
         assert_eq!(type_of(&ast, &out, ast.roots[0]), Some(Type::Bool));
     }
@@ -1314,7 +1335,7 @@ mod tests {
     #[test]
     fn binary_mismatched_operands_report_error() {
         let ast = parse(br#"1 + "s""#);
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(
             out.diagnostics[0].message,
@@ -1325,7 +1346,7 @@ mod tests {
     #[test]
     fn fn_return_type_mismatch_reports_error() {
         let ast = parse(b"fn one() Str { 1 }");
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(
             out.diagnostics[0].message,
@@ -1336,7 +1357,7 @@ mod tests {
     #[test]
     fn fn_redeclaration_reports_error() {
         let ast = parse(b"fn dup() Int { 1 } fn dup() Int { 2 }");
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(out.diagnostics[0].message, "`dup` is already defined");
     }
@@ -1344,7 +1365,7 @@ mod tests {
     #[test]
     fn match_non_bool_condition_reports_error() {
         let ast = parse(b"match { 1 { 2 } { 3 } }");
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(
             out.diagnostics[0].message,
@@ -1355,7 +1376,7 @@ mod tests {
     #[test]
     fn match_branches_type_mismatch_reports_error() {
         let ast = parse(br#"match { 1 == 1 { "yes" } { 0 } }"#);
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(
             out.diagnostics[0].message,
@@ -1366,7 +1387,7 @@ mod tests {
     #[test]
     fn cast_illegal_reports_error() {
         let ast = parse(br#""foo" as Int"#);
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(out.diagnostics[0].message, "Can not cast Str to Int");
     }
@@ -1374,7 +1395,7 @@ mod tests {
     #[test]
     fn call_wrong_arity_reports_error() {
         let ast = parse(b"fn add(a:Int b:Int) Int { a + b } add(1)");
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(
             out.diagnostics[0].message,
@@ -1385,7 +1406,7 @@ mod tests {
     #[test]
     fn call_wrong_arg_type_reports_error() {
         let ast = parse(br#"fn add(a:Int b:Int) Int { a + b } add(1 "s")"#);
-        let out = Typechecker::new(&ast).check();
+        let out = checker(&ast).check();
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(
             out.diagnostics[0].message,
@@ -1412,17 +1433,17 @@ mod tests {
         }],
     };
 
-    fn check<'s>(source: &'s [u8]) -> (Ast<'s, 's>, TypecheckOutput<'s>) {
+    fn check<'s>(source: &'s [u8]) -> (Ast<'s, 's>, Output<'s>) {
         let ast = parse(source);
-        let out = Typechecker::new(&ast).with_libs(vec![&T]).check();
+        let out = checker(&ast).with_libs(vec![&T]).check();
         (ast, out)
     }
 
-    fn root_type<'t>(ast: &Ast<'t, '_>, out: &TypecheckOutput<'t>, root: usize) -> Option<Type<'t>> {
+    fn root_type<'t>(ast: &Ast<'t, '_>, out: &Output<'t>, root: usize) -> Option<Type<'t>> {
         type_of(ast, out, ast.roots[root])
     }
 
-    fn messages<'o>(out: &'o TypecheckOutput<'_>) -> Vec<&'o str> {
+    fn messages<'o>(out: &'o Output<'_>) -> Vec<&'o str> {
         out.diagnostics.iter().map(|d| d.message.as_str()).collect()
     }
 
@@ -1649,10 +1670,7 @@ mod tests {
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
         assert_eq!(root_type(&ast, &out, 1), Some(Type::Int));
         assert_eq!(root_type(&ast, &out, 2), Some(Type::Str));
-        assert_eq!(
-            root_type(&ast, &out, 3),
-            Some(Type::Array(BoxedType::owned(Type::Int)))
-        );
+        assert_eq!(root_type(&ast, &out, 3), Some(Type::Array(leak(Type::Int))));
         assert_eq!(
             root_type(&ast, &out, 4).map(|t| t.to_string()),
             Some("Record<n: Int m: Str>".to_string())

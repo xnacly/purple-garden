@@ -1512,7 +1512,7 @@ mod tests {
         instructions: Vec<Instr<'static>>,
         ret: Option<(Id, Type<'static>)>,
     ) -> Func<'static> {
-        let ret_ty = ret.as_ref().map(|(_, ty)| ty.clone());
+        let ret_ty = ret.as_ref().map(|(_, ty)| *ty);
         let ret_id = ret.map(|(id, _)| id);
         let mut fun = Func::new("entry", Id(0), Vec::new(), ret_ty);
         fun.blocks.push(Block {
@@ -1674,7 +1674,7 @@ mod tests {
         let ops = compile_one(entry_fun(
             vec![
                 Instr::Alloc {
-                    dst: type_id(0, Type::record(Vec::new())),
+                    dst: type_id(0, Type::Record(&[])),
                     layout: Layout::from_size_align(16, 8).unwrap(),
                     span: 0,
                 },
@@ -1725,7 +1725,7 @@ mod tests {
         let ops = compile_one(entry_fun(
             vec![
                 Instr::Alloc {
-                    dst: type_id(0, Type::record(Vec::new())),
+                    dst: type_id(0, Type::Record(&[])),
                     layout: Layout::from_size_align(16, 8).unwrap(),
                     span: 0,
                 },
@@ -1769,7 +1769,7 @@ mod tests {
         let ops = compile_one(entry_fun(
             vec![
                 Instr::Alloc {
-                    dst: type_id(0, Type::record(Vec::new())),
+                    dst: type_id(0, Type::Record(&[])),
                     layout: Layout::from_size_align(16, 8).unwrap(),
                     span: 0,
                 },

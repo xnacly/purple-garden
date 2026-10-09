@@ -232,7 +232,8 @@ fn synth_long_body() -> Vec<u8> {
 
 fn parse<'s>(name: &str, source: &'s [u8]) -> Ast<'s, 's> {
     let arena = Box::leak(Box::new(BumpAlloc::new()));
-    let parse = parser::Parser::new(lex::Lexer::new(source), arena, &BumpAlloc::new()).parse_collect();
+    let parse =
+        parser::Parser::new(lex::Lexer::new(source), arena, &BumpAlloc::new()).parse_collect();
     assert!(
         parse.diagnostics.is_empty(),
         "parse failed for {name}: {:?}",
@@ -246,7 +247,8 @@ fn parse<'s>(name: &str, source: &'s [u8]) -> Ast<'s, 's> {
 fn bench_program(c: &mut Criterion, name: &str, source: &[u8]) {
     let ast = parse(name, source);
 
-    let probe = Typechecker::new(&ast)
+    let (mut types, mut scratch) = (BumpAlloc::new(), BumpAlloc::new());
+    let probe = Typechecker::new(&ast, &types, &scratch)
         .with_stdlib(purple_garden_std::STD)
         .check();
     assert!(
@@ -255,11 +257,17 @@ fn bench_program(c: &mut Criterion, name: &str, source: &[u8]) {
         probe.diagnostics
     );
 
+    drop(probe);
+
     c.bench_function(&format!("{name}_typecheck"), |b| {
         b.iter(|| {
-            Typechecker::new(&ast)
+            types.reset();
+            scratch.reset();
+            Typechecker::new(&ast, &types, &scratch)
                 .with_stdlib(purple_garden_std::STD)
                 .check()
+                .diagnostics
+                .len()
         });
     });
 }

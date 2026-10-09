@@ -55,7 +55,6 @@ impl RecordCompletion {
 
         Some(Self {
             fields: fields
-                .as_slice()
                 .iter()
                 .map(|field| RecordFieldCompletion {
                     name: field.name.to_owned(),
@@ -500,8 +499,14 @@ mod tests {
     use super::*;
     use crate::lsp::analysis::PackageFunctionCompletion;
 
-    fn record<'a>(fields: Vec<(&'a str, Type<'a>)>) -> Type<'a> {
-        Type::record(fields)
+    fn record(fields: Vec<(&'static str, Type<'static>)>) -> Type<'static> {
+        Type::Record(
+            fields
+                .into_iter()
+                .map(|(name, ty)| purple_garden_runtime::Field { name, ty })
+                .collect::<Vec<_>>()
+                .leak(),
+        )
     }
 
     #[test]

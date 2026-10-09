@@ -15,7 +15,7 @@ use std::{
     marker::PhantomData,
 };
 
-use purple_garden_allocators::bump::BumpAlloc;
+use purple_garden_allocators::bump::{Arena, BumpAlloc};
 use purple_garden_bc::{self as bc, CcCallTarget};
 use purple_garden_frontend::{
     diagnostic::{Diagnostic, Span},
@@ -38,8 +38,7 @@ pub use purple_garden_macros::{GardenOpaque, GardenValue, pg_fn, pg_pkg};
 /// value conversion.
 pub mod embed {
     pub use purple_garden_runtime::{
-        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Slot, Type, Value, Vm,
-        VmConfig,
+        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, Slot, Type, Value, Vm, VmConfig,
     };
 
     #[doc(hidden)]
@@ -286,6 +285,8 @@ pub struct Program<'p> {
     /// Keeps the native functions referenced by `syscalls` mapped.
     jit: Option<CodeArena>,
     funcs: HashMap<&'p str, (CcCallTarget, FunctionType<'p>)>,
+    /// Owns the names and types in `funcs`, declared after it so it is dropped last.
+    signatures: BumpAlloc,
 }
 
 /// A typed handle to a purple garden function extracted from [`Program`] via
@@ -402,6 +403,7 @@ impl<'p> Program<'p> {
             syscalls,
             jit: None,
             funcs: HashMap::new(),
+            signatures: BumpAlloc::new(),
         }
     }
 
@@ -680,7 +682,8 @@ fn compile<'i, A: Allocator + Clone>(
 
     let stdlib = stdlib_packages(stdlib, unsafe_stdlib);
 
-    let typecheck = Typechecker::new_in(&ast, alloc, &scratch)
+    let types = BumpAlloc::new_in(alloc);
+    let typecheck = Typechecker::new(&ast, &types, &scratch)
         .with_libs(libs.to_vec())
         .with_stdlib(stdlib)
         .check();
@@ -705,19 +708,27 @@ fn compile<'i, A: Allocator + Clone>(
         cc.compact_nops();
     }
 
-    let funcs: HashMap<_, _> = cc
-        .functions
-        .values()
-        .filter_map(|f| {
-            let (name, ft) = typecheck.functions.get_key_value(f.name())?;
-            let ft = FunctionType {
-                args: ft.args.to_vec(),
-                ret: ft.ret.clone(),
-                with_slots: ft.with_slots,
-            };
-            Some((*name, (CcCallTarget::from(f), ft)))
-        })
-        .collect();
+    let signatures = BumpAlloc::new();
+    let funcs: HashMap<_, _> =
+        cc.functions
+            .values()
+            .filter_map(|f| {
+                let (name, ft) = typecheck.functions.get_key_value(f.name())?;
+                let name = copy_str(&signatures, name);
+                let ft =
+                    FunctionType {
+                        args: signatures.alloc_slice(ft.args.iter().map(|(arg, ty)| {
+                            (copy_str(&signatures, arg), ty.copy_in(&signatures))
+                        })),
+                        ret: ft.ret.copy_in(&signatures),
+                        with_slots: ft.with_slots,
+                    };
+                // SAFETY: everything `name` and `ft` borrow lives in the chunks of `signatures`, which
+                // the program owns and drops after `funcs`, moving the program does not move them.
+                let entry: (&'i str, FunctionType<'i>) = unsafe { std::mem::transmute((name, ft)) };
+                Some((entry.0, (CcCallTarget::from(f), entry.1)))
+            })
+            .collect();
 
     let (vm, syscalls, _debug, entry_native_idx) = cc.finalize(VmConfig {
         backtrace: config.backtrace,
@@ -727,8 +738,13 @@ fn compile<'i, A: Allocator + Clone>(
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let mut program = Program::from_vm(vm, syscalls).with_entry_native(entry_native);
     program.funcs = funcs;
+    program.signatures = signatures;
     program.jit = arena;
     Ok(program)
+}
+
+fn copy_str<'a>(arena: &'a BumpAlloc, s: &str) -> &'a str {
+    std::str::from_utf8(arena.alloc_slice(s.bytes())).expect("copied from a str")
 }
 
 fn stdlib_packages(enabled: bool, unsafe_enabled: bool) -> &'static [Pkg] {

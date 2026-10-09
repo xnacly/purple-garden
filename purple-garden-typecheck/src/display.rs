@@ -224,7 +224,7 @@ impl<'t, A: Allocator> TypecheckOutput<'t, A> {
     }
 }
 
-impl<A: Allocator> Display for FunctionType<'_, A> {
+impl Display for FunctionType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(")?;
         for (i, (name, t)) in self.args.iter().enumerate() {
