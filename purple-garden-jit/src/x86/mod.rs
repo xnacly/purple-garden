@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use crate::regalloc::Xralloc2;
 use encode::{
     Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBX, RCX, RDI, RDX, RSI, RSP, Reg,
-    patch_rel32,
+    SdOp, XMM0, XMM1, patch_rel32,
 };
 use purple_garden_ir::{self as ir, BinOp};
 use purple_garden_runtime::{BuiltinFn, Value, string};
@@ -506,17 +506,32 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 self.emit(Insn::MovAbs { dst, imm: value.0 });
             }
             ir::Instr::LoadConst { dst, value, .. } => {
-                let Some(imm) = (match value {
-                    ir::Const::False => Some(0),
-                    ir::Const::True => Some(1),
-                    ir::Const::Int(i) => i32::try_from(*i).ok(),
-                    _ => None,
-                }) else {
-                    bail!(self, "const is not a bool or i32");
-                    return;
+                let bits = match value {
+                    ir::Const::False => 0,
+                    ir::Const::True => 1,
+                    ir::Const::Int(i) => *i as u64,
+                    ir::Const::Double(bits) => *bits,
+                    _ => {
+                        bail!(self, "const is not a bool, int or double");
+                        return;
+                    }
                 };
                 let dst = self.def(dst.id, self.pos + 1);
-                self.emit(Insn::MovImm { dst, imm });
+                match i32::try_from(bits as i64) {
+                    Ok(imm) => self.emit(Insn::MovImm { dst, imm }),
+                    Err(_) => self.emit(Insn::MovAbs { dst, imm: bits }),
+                }
+            }
+            ir::Instr::Cast { dst, from, .. } => {
+                use ir::ptype::Type::{Double, Int};
+                if !matches!((&from.ty, &dst.ty), (Int, Double)) {
+                    bail!(self, "unsupported cast {} -> {}", from.ty, dst.ty);
+                    return;
+                }
+                let src = self.ensure_register(from.id);
+                let dst = self.def(dst.id, self.pos + 1);
+                self.emit(Insn::Cvtsi2sd { dst: XMM0, src });
+                self.emit(Insn::MovqFromXmm { dst, src: XMM0 });
             }
             ir::Instr::BinImm {
                 op, dst, lhs, imm, ..
@@ -596,6 +611,67 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                             // add and mul commute.
                             self.emit(arith(*op, dst, lhs));
                         }
+                    }
+                    // Doubles live in general purpose registers as their bits
+                    // and only pass through xmm0/xmm1 for the operation.
+                    BinOp::DAdd | BinOp::DSub | BinOp::DMul => {
+                        let dst = self.def(dst.id, self.pos + 1);
+                        let op = match op {
+                            BinOp::DAdd => SdOp::Add,
+                            BinOp::DSub => SdOp::Sub,
+                            _ => SdOp::Mul,
+                        };
+                        self.emit(Insn::MovqToXmm { dst: XMM0, src: lhs });
+                        self.emit(Insn::MovqToXmm { dst: XMM1, src: rhs });
+                        self.emit(Insn::ArithSd {
+                            op,
+                            dst: XMM0,
+                            src: XMM1,
+                        });
+                        self.emit(Insn::MovqFromXmm { dst, src: XMM0 });
+                    }
+                    BinOp::DDiv => {
+                        // ±0.0 is all zero bits once the sign is shifted out; a
+                        // NaN divisor doesn't trap, like in the interpreter.
+                        self.emit(Insn::Mov {
+                            dst: SCRATCH,
+                            src: rhs,
+                        });
+                        self.emit(Insn::Add {
+                            dst: SCRATCH,
+                            src: SCRATCH,
+                        });
+                        let nonzero = encode::jump(self.out, Cond::NotZero);
+                        self.trap_div_zero();
+                        let resume = self.out.len();
+                        patch_rel32(self.out, nonzero, nonzero + 4, resume)
+                            .expect("short forward jump");
+                        let dst = self.def(dst.id, self.pos + 1);
+                        self.emit(Insn::MovqToXmm { dst: XMM0, src: lhs });
+                        self.emit(Insn::MovqToXmm { dst: XMM1, src: rhs });
+                        self.emit(Insn::ArithSd {
+                            op: SdOp::Div,
+                            dst: XMM0,
+                            src: XMM1,
+                        });
+                        self.emit(Insn::MovqFromXmm { dst, src: XMM0 });
+                    }
+                    BinOp::DLt | BinOp::DGt => {
+                        let dst = self.def(dst.id, self.pos + 1);
+                        self.emit(Insn::MovqToXmm { dst: XMM0, src: lhs });
+                        self.emit(Insn::MovqToXmm { dst: XMM1, src: rhs });
+                        // seta is false for an unordered compare, so NaN compares
+                        // false both ways; lhs < rhs is rhs > lhs.
+                        let (above, below) = match op {
+                            BinOp::DGt => (XMM0, XMM1),
+                            _ => (XMM1, XMM0),
+                        };
+                        self.emit(Insn::Ucomisd {
+                            lhs: above,
+                            rhs: below,
+                        });
+                        self.emit(Insn::MovImm { dst, imm: 0 });
+                        self.emit(Insn::Seta { dst });
                     }
                     // Strings are interned: equal contents share one pointer.
                     BinOp::IEq | BinOp::SEq | BinOp::ILt | BinOp::IGt => {

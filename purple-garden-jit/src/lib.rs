@@ -616,21 +616,35 @@ mod tests_x86 {
 
     #[test]
     fn skips_unsupported_functions() {
+        // Double to Int saturates in Rust, cvttsd2si doesn't, so it stays bytecode.
         let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Int));
         func.blocks.push(Block {
             tombstone: false,
             id: Id(0),
-            instructions: vec![Instr::LoadConst {
-                dst: TypeId {
-                    id: Id(0),
-                    ty: Type::Double,
+            instructions: vec![
+                Instr::LoadConst {
+                    dst: TypeId {
+                        id: Id(0),
+                        ty: Type::Double,
+                    },
+                    value: Const::Double(1.0f64.to_bits()),
+                    span: 0,
                 },
-                value: Const::Double(1.0f64.to_bits()),
-                span: 0,
-            }],
+                Instr::Cast {
+                    dst: TypeId {
+                        id: Id(1),
+                        ty: Type::Int,
+                    },
+                    from: TypeId {
+                        id: Id(0),
+                        ty: Type::Double,
+                    },
+                    span: 0,
+                },
+            ],
             params: EMPTY_PARAMS,
             term: Some(Terminator::Return {
-                value: Some(Id(0)),
+                value: Some(Id(1)),
                 span: 0,
             }),
         });

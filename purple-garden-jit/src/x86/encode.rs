@@ -43,6 +43,28 @@ impl fmt::Display for Reg {
     }
 }
 
+/// An SSE register, `xmm0` to `xmm15`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Xmm(pub u8);
+
+pub const XMM0: Xmm = Xmm(0);
+pub const XMM1: Xmm = Xmm(1);
+
+impl fmt::Display for Xmm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "xmm{}", self.0)
+    }
+}
+
+/// Scalar double operation of [`Insn::ArithSd`], the value is its opcode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SdOp {
+    Add = 0x58,
+    Sub = 0x5c,
+    Mul = 0x59,
+    Div = 0x5e,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Cond {
     Always,
@@ -252,6 +274,36 @@ pub enum Insn {
     JmpReg {
         reg: Reg,
     },
+    /// `movq xmm{dst}, r{src}`; the bits of a double into an SSE register.
+    MovqToXmm {
+        dst: Xmm,
+        src: Reg,
+    },
+    /// `movq r{dst}, xmm{src}`
+    MovqFromXmm {
+        dst: Reg,
+        src: Xmm,
+    },
+    /// `addsd/subsd/mulsd/divsd xmm{dst}, xmm{src}`
+    ArithSd {
+        op: SdOp,
+        dst: Xmm,
+        src: Xmm,
+    },
+    /// `ucomisd xmm{lhs}, xmm{rhs}`; unordered (NaN) sets ZF, PF and CF.
+    Ucomisd {
+        lhs: Xmm,
+        rhs: Xmm,
+    },
+    /// `cvtsi2sd xmm{dst}, r{src}`; an Int to a Double, rounding to nearest.
+    Cvtsi2sd {
+        dst: Xmm,
+        src: Reg,
+    },
+    /// `seta r{dst}b`; unsigned above, false for an unordered compare.
+    Seta {
+        dst: Reg,
+    },
     /// `cqo`; sign-extend rax into rdx:rax (the idiv dividend).
     Cqo,
     /// `idiv r{divisor}`; rdx:rax / divisor, quotient to rax, remainder to rdx.
@@ -377,6 +429,24 @@ impl Insn {
                 }
                 code.extend_from_slice(&[0xff, modrm(4, reg.0)]);
             }
+            // The SSE forms put their mandatory 0x66/0xf2 prefix before REX.
+            // 0x66 REX.W 0x0f 0x6e /r = `movq xmm, r/m64`, ModRM.reg is the xmm.
+            Insn::MovqToXmm { dst, src } => {
+                code.extend_from_slice(&[0x66, rex(dst.0, src.0), 0x0f, 0x6e, modrm(dst.0, src.0)]);
+            }
+            // 0x66 REX.W 0x0f 0x7e /r = `movq r/m64, xmm`, ModRM.reg is the xmm.
+            Insn::MovqFromXmm { dst, src } => {
+                code.extend_from_slice(&[0x66, rex(src.0, dst.0), 0x0f, 0x7e, modrm(src.0, dst.0)]);
+            }
+            // 0xf2 0x0f op /r = `addsd/subsd/mulsd/divsd xmm, xmm/m64`.
+            Insn::ArithSd { op, dst, src } => sse(code, 0xf2, op as u8, dst.0, src.0),
+            // 0x66 0x0f 0x2e /r = `ucomisd xmm, xmm/m64`.
+            Insn::Ucomisd { lhs, rhs } => sse(code, 0x66, 0x2e, lhs.0, rhs.0),
+            // 0xf2 REX.W 0x0f 0x2a /r = `cvtsi2sd xmm, r/m64`.
+            Insn::Cvtsi2sd { dst, src } => {
+                code.extend_from_slice(&[0xf2, rex(dst.0, src.0), 0x0f, 0x2a, modrm(dst.0, src.0)]);
+            }
+            Insn::Seta { dst } => setcc(code, 0x97, dst),
             // REX.W 0x99 ; cqo.
             Insn::Cqo => code.extend_from_slice(&[0x48, 0x99]),
             // REX.W 0xf7 /7 = `idiv r/m64`.
@@ -437,6 +507,20 @@ impl fmt::Display for Insn {
                 write!(f, "mov {}, qword [{}+{}*8]", dst, base, index)
             }
             Insn::JmpReg { reg } => write!(f, "jmp {}", reg),
+            Insn::MovqToXmm { dst, src } => write!(f, "movq {}, {}", dst, src),
+            Insn::MovqFromXmm { dst, src } => write!(f, "movq {}, {}", dst, src),
+            Insn::ArithSd { op, dst, src } => {
+                let name = match op {
+                    SdOp::Add => "addsd",
+                    SdOp::Sub => "subsd",
+                    SdOp::Mul => "mulsd",
+                    SdOp::Div => "divsd",
+                };
+                write!(f, "{name} {}, {}", dst, src)
+            }
+            Insn::Ucomisd { lhs, rhs } => write!(f, "ucomisd {}, {}", lhs, rhs),
+            Insn::Cvtsi2sd { dst, src } => write!(f, "cvtsi2sd {}, {}", dst, src),
+            Insn::Seta { dst } => write!(f, "seta {}b", dst),
             Insn::Cqo => write!(f, "cqo"),
             Insn::Idiv { divisor } => write!(f, "idiv {}", divisor),
         }
@@ -562,6 +646,16 @@ fn scaled(code: &mut Vec<u8>, opcode: u8, scale: u8, dst: Reg, base: Reg, index:
     }
 }
 
+/// `prefix [REX] 0x0f opcode ModRM(reg, rm)` between two SSE registers, REX
+/// only to reach xmm8..xmm15.
+fn sse(code: &mut Vec<u8>, prefix: u8, opcode: u8, reg: u8, rm: u8) {
+    code.push(prefix);
+    if reg >= 8 || rm >= 8 {
+        code.push(0x40 | (u8::from(reg >= 8) << 2) | u8::from(rm >= 8));
+    }
+    code.extend_from_slice(&[0x0f, opcode, modrm(reg, rm)]);
+}
+
 fn setcc(code: &mut Vec<u8>, opcode: u8, dst: Reg) {
     code.push(0x40 | u8::from(dst.0 >= 8));
     code.extend_from_slice(&[0x0f, opcode, modrm(0, dst.0)]);
@@ -585,6 +679,77 @@ mod tests {
         let mut code = Vec::new();
         insn.encode(&mut code);
         code
+    }
+
+    #[test]
+    /// The SSE2 double forms, bytes checked against objdump.
+    fn double_encodings() {
+        use super::{R8, R9, RSI, SdOp, XMM0, XMM1};
+
+        assert_eq!(
+            enc(Insn::MovqToXmm {
+                dst: XMM0,
+                src: RSI
+            }),
+            [0x66, 0x48, 0x0f, 0x6e, 0xc6]
+        ); // movq xmm0,rsi
+        assert_eq!(
+            enc(Insn::MovqToXmm { dst: XMM1, src: R9 }),
+            [0x66, 0x49, 0x0f, 0x6e, 0xc9]
+        ); // movq xmm1,r9
+        assert_eq!(
+            enc(Insn::MovqFromXmm {
+                dst: RSI,
+                src: XMM0
+            }),
+            [0x66, 0x48, 0x0f, 0x7e, 0xc6]
+        ); // movq rsi,xmm0
+        assert_eq!(
+            enc(Insn::MovqFromXmm { dst: R9, src: XMM0 }),
+            [0x66, 0x49, 0x0f, 0x7e, 0xc1]
+        ); // movq r9,xmm0
+        for (op, opcode) in [
+            (SdOp::Add, 0x58),
+            (SdOp::Sub, 0x5c),
+            (SdOp::Mul, 0x59),
+            (SdOp::Div, 0x5e),
+        ] {
+            assert_eq!(
+                enc(Insn::ArithSd {
+                    op,
+                    dst: XMM0,
+                    src: XMM1
+                }),
+                [0xf2, 0x0f, opcode, 0xc1]
+            ); // addsd/subsd/mulsd/divsd xmm0,xmm1
+        }
+        assert_eq!(
+            enc(Insn::Ucomisd {
+                lhs: XMM0,
+                rhs: XMM1
+            }),
+            [0x66, 0x0f, 0x2e, 0xc1]
+        ); // ucomisd xmm0,xmm1
+        assert_eq!(
+            enc(Insn::Ucomisd {
+                lhs: XMM1,
+                rhs: XMM0
+            }),
+            [0x66, 0x0f, 0x2e, 0xc8]
+        ); // ucomisd xmm1,xmm0
+        assert_eq!(
+            enc(Insn::Cvtsi2sd {
+                dst: XMM0,
+                src: RSI
+            }),
+            [0xf2, 0x48, 0x0f, 0x2a, 0xc6]
+        ); // cvtsi2sd xmm0,rsi
+        assert_eq!(
+            enc(Insn::Cvtsi2sd { dst: XMM0, src: R8 }),
+            [0xf2, 0x49, 0x0f, 0x2a, 0xc0]
+        ); // cvtsi2sd xmm0,r8
+        assert_eq!(enc(Insn::Seta { dst: RSI }), [0x40, 0x0f, 0x97, 0xc6]); // seta sil
+        assert_eq!(enc(Insn::Seta { dst: R8 }), [0x41, 0x0f, 0x97, 0xc0]); // seta r8b
     }
 
     #[test]
