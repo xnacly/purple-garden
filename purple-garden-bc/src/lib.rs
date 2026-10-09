@@ -11,6 +11,7 @@ mod intern;
 mod regalloc;
 
 use crate::{intern::Interner, regalloc::Ralloc};
+use purple_garden_allocators::page::Pages;
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
 use purple_garden_runtime::{
     AllocType, BuiltinFn, DebugInfo, Value, Vm, VmConfig,
@@ -330,15 +331,17 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     }
 
     /// Compile a list of ir functions to bytecode instructions
-    pub fn compile(
+    /// Native code goes into pages from `code`.
+    pub fn compile<P: Pages>(
         &mut self,
         config: &Config,
         ir: &'cc [Func<'cc>],
-    ) -> Result<Option<purple_garden_jit::CodeArena>, String> {
+        code: P,
+    ) -> Result<Option<purple_garden_jit::CodeArena<P>>, String> {
         let mut arena = if config.no_jit {
             None
         } else {
-            Some(purple_garden_jit::CodeArena::new()?)
+            Some(purple_garden_jit::CodeArena::new_in(code)?)
         };
         self.native_code = (config.disassemble > 0).then(|| Vec::with_capacity(ir.len()));
         self.functions.reserve(ir.len());
@@ -421,7 +424,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     fn cc(
         &mut self,
         fun: &'cc Func<'cc>,
-        native: Option<&mut purple_garden_jit::CodeArena>,
+        native: Option<&mut purple_garden_jit::CodeArena<impl Pages>>,
     ) -> Result<(), String> {
         // Take the reusable scratch buffers out of self so we can hold an
         // immutable borrow of `live_set` across calls to `&mut self`
@@ -595,7 +598,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         &mut self,
         fun: &Func<'cc>,
         liveness: &[(u32, u32)],
-        arena: &mut purple_garden_jit::CodeArena,
+        arena: &mut purple_garden_jit::CodeArena<impl Pages>,
     ) -> bool {
         let Some(()) =
             self.jit
@@ -1509,6 +1512,7 @@ mod tests {
     use super::*;
     use ir::BinOp;
     use ir::{Block, EMPTY_PARAMS, Instr, Terminator, ptype::Type};
+    use purple_garden_allocators::page::PageAlloc;
     use std::alloc::Layout;
 
     #[test]
@@ -1554,7 +1558,7 @@ mod tests {
         let mut config = Config::default();
         config.no_jit = true;
         let funcs = [fun];
-        cc.compile(&config, &funcs).unwrap();
+        cc.compile(&config, &funcs, PageAlloc {}).unwrap();
         cc.buf.clone()
     }
 

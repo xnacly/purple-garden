@@ -1,50 +1,12 @@
-//! rwx page allocator for JIT'd code. Uses the syscall wrappers from
-//! [`purple_garden_allocators::page::mmap`].
+//! Executable memory for JIT'd code, its pages come from a [`Pages`] allocator.
 
-use purple_garden_allocators::page::mmap::{self, MmapFlags, MmapProt};
+use purple_garden_allocators::page::{
+    PageAlloc, Pages,
+    mmap::{self, MmapProt},
+};
 use purple_garden_runtime::BuiltinFn;
+use std::alloc::Layout;
 use std::ptr::NonNull;
-
-#[derive(Debug)]
-pub struct ExecPage {
-    ptr: NonNull<u8>,
-    len: usize,
-}
-
-impl ExecPage {
-    pub fn new(code: &[u8]) -> Result<Self, String> {
-        let len = code.len();
-
-        let ptr = mmap::mmap(
-            None,
-            len,
-            MmapProt::READ | MmapProt::WRITE,
-            MmapFlags::PRIVATE | MmapFlags::ANONYMOUS,
-            -1,
-            0,
-        )?;
-
-        unsafe { std::ptr::copy_nonoverlapping(code.as_ptr(), ptr.as_ptr(), len) };
-
-        if let Err(e) = mmap::mprotect(ptr, len, MmapProt::READ | MmapProt::EXEC) {
-            // give the kernel back the page before bailing
-            let _ = mmap::munmap(ptr, len);
-            return Err(e);
-        }
-
-        Ok(Self { ptr, len })
-    }
-
-    pub fn as_ptr(&self) -> *const u8 {
-        self.ptr.as_ptr()
-    }
-}
-
-impl Drop for ExecPage {
-    fn drop(&mut self) {
-        let _ = mmap::munmap(self.ptr, self.len);
-    }
-}
 
 /// Every native function of one compile, packed into a single mapping.
 ///
@@ -54,14 +16,21 @@ impl Drop for ExecPage {
 /// out by [`CodeArena::push`] point into the reservation, which never moves,
 /// and are only called after sealing.
 #[derive(Debug)]
-pub struct CodeArena {
+pub struct CodeArena<P: Pages = PageAlloc> {
     ptr: NonNull<u8>,
     cap: usize,
     len: usize,
     sealed: bool,
+    pages: P,
 }
 
 impl CodeArena {
+    pub fn new() -> Result<Self, String> {
+        Self::new_in(PageAlloc {})
+    }
+}
+
+impl<P: Pages> CodeArena<P> {
     /// Pages are only backed once touched, so the reservation costs address
     /// space, not memory, as long as no huge page backs it, see
     /// [`CodeArena::new`]. 16 MiB fits hundreds of thousands of functions.
@@ -70,15 +39,15 @@ impl CodeArena {
     /// first block.
     const ALIGN: usize = 16;
 
-    pub fn new() -> Result<Self, String> {
-        let ptr = mmap::mmap(
-            None,
-            Self::CAPACITY,
-            MmapProt::READ | MmapProt::WRITE,
-            MmapFlags::PRIVATE | MmapFlags::ANONYMOUS,
-            -1,
-            0,
-        )?;
+    fn layout() -> Layout {
+        Layout::from_size_align(Self::CAPACITY, mmap::page_size()).expect("code arena layout")
+    }
+
+    pub fn new_in(pages: P) -> Result<Self, String> {
+        let ptr = pages
+            .allocate(Self::layout())
+            .map_err(|_| "mapping the code arena failed".to_string())?
+            .cast::<u8>();
         // A few hundred bytes of code would otherwise take a whole 2 MiB huge
         // page. Without the advice, the arena still works.
         let _ = mmap::no_huge_pages(ptr, Self::CAPACITY);
@@ -87,6 +56,7 @@ impl CodeArena {
             cap: Self::CAPACITY,
             len: 0,
             sealed: false,
+            pages,
         })
     }
 
@@ -119,8 +89,8 @@ impl CodeArena {
     }
 }
 
-impl Drop for CodeArena {
+impl<P: Pages> Drop for CodeArena<P> {
     fn drop(&mut self) {
-        let _ = mmap::munmap(self.ptr, self.cap);
+        unsafe { self.pages.deallocate(self.ptr, Self::layout()) };
     }
 }

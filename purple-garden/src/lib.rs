@@ -700,7 +700,7 @@ fn compile<'i, A: Allocator + Clone>(
 
     let mut cc = bc::Cc::new_in(&scratch, alloc);
     let arena = cc
-        .compile(config, &ir)
+        .compile(config, &ir, PageAlloc {})
         .map_err(|msg| Diagnostic::new(msg, Span::new(0, 0)))?;
     if config.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);

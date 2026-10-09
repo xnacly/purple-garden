@@ -9,6 +9,8 @@ pub struct Phases<A> {
     pub lower: A,
     pub opt: A,
     pub cc: A,
+    /// Pages of the native code
+    pub jit: A,
     pub run: A,
 }
 
@@ -21,6 +23,7 @@ impl<A> Phases<A> {
             lower: &self.lower,
             opt: &self.opt,
             cc: &self.cc,
+            jit: &self.jit,
             run: &self.run,
         }
     }
@@ -35,7 +38,8 @@ impl<A> Phases<MetricAlloc<A>> {
             ("typecheck", self.typecheck.metrics()),
             ("lower ir", self.lower.metrics()),
             ("opt", self.opt.metrics()),
-            ("bytecode/jit", self.cc.metrics()),
+            ("bytecode", self.cc.metrics()),
+            ("jit", self.jit.metrics()),
             ("run", self.run.metrics()),
         ];
         let total = rows.iter().fold(Metrics::default(), |t, (_, m)| Metrics {

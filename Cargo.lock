@@ -575,6 +575,7 @@ version = "0.1.0"
 name = "purple-garden-bc"
 version = "0.1.0"
 dependencies = [
+ "purple-garden-allocators",
  "purple-garden-ir",
  "purple-garden-jit",
  "purple-garden-runtime",

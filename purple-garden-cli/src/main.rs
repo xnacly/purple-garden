@@ -1,6 +1,8 @@
-#![feature(allocator_api)]
-
-use purple_garden_allocators::{bump::BumpAlloc, metric::MetricAlloc, page::PageAlloc};
+use purple_garden_allocators::{
+    bump::BumpAlloc,
+    metric::MetricAlloc,
+    page::{PageAlloc, Pages},
+};
 use purple_garden_bc as bc;
 use purple_garden_frontend::{
     diagnostic::{Diagnostic, Help, Span},
@@ -11,7 +13,7 @@ use purple_garden_frontend::{
 use purple_garden_runtime::{Vm, VmConfig};
 use purple_garden_typecheck::Typechecker;
 
-use std::{alloc::Allocator, collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path};
 
 mod cli;
 mod doc;
@@ -146,7 +148,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn pipeline<A: Allocator + Clone>(
+fn pipeline<A: Pages + Clone>(
     cli: &Cli,
     input_source: &str,
     source: &[u8],
@@ -228,7 +230,7 @@ fn pipeline<A: Allocator + Clone>(
     }
 
     let mut cc = bc::Cc::new_in(&scratch, allocs.cc);
-    let native_pages = cc.compile(conf, &ir)?;
+    let native_pages = cc.compile(conf, &ir, allocs.jit)?;
 
     purple_garden_shared::trace!("[main] Lowered IR to bytecode");
 
