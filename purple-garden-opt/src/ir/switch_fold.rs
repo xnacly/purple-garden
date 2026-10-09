@@ -1,3 +1,5 @@
+use std::alloc::Allocator;
+
 use purple_garden_ir::{self as ir, BinOp, Case, Const, Id, Instr, ParamsId, Terminator};
 
 /// Chains shorter than this stay linear, a few compares beat a table lookup.
@@ -24,7 +26,7 @@ pub const MAX_SLOTS_PER_CASE: usize = 4;
 /// ```
 ///
 /// Integer chains (`br_imm IEq %v0, k, ...`) fold the same way
-pub fn switch_fold(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
+pub fn switch_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_, S>) {
     super::record_uses(fun, scratch);
     let preds = super::predecessor_counts(fun);
 

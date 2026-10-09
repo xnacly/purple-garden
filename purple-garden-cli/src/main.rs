@@ -221,7 +221,7 @@ fn pipeline<A: Allocator + Clone>(
     purple_garden_shared::trace!("[main] Lowered AST to IR");
 
     if conf.opt >= 1 {
-        purple_garden_opt::ir(&mut ir);
+        purple_garden_opt::ir(&mut ir, &scratch);
     }
 
     if cli.ir > 0 {

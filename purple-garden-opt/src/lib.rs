@@ -1,3 +1,6 @@
+#![feature(allocator_api)]
+use std::alloc::Allocator;
+
 use purple_garden_runtime::op::Op;
 
 /// ir based optimisations
@@ -6,8 +9,8 @@ mod ir;
 /// bytecode based optimisations, mainly peephole
 mod bc;
 
-pub fn ir(ir: &mut [purple_garden_ir::Func]) {
-    let mut scratch = ir::Scratch::default();
+pub fn ir<S: Allocator>(ir: &mut [purple_garden_ir::Func], scratch: &S) {
+    let mut scratch = ir::Scratch::new_in(scratch);
 
     for fun in ir {
         // so all other blocks.last() are valid

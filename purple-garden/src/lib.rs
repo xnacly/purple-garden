@@ -696,7 +696,7 @@ fn compile<'i, A: Allocator + Clone>(
         .with_stdlib(stdlib)
         .ir_from_types(&ast, typecheck.types)?;
     if config.opt >= 1 {
-        purple_garden_opt::ir(&mut ir);
+        purple_garden_opt::ir(&mut ir, &scratch);
     }
 
     let mut cc = bc::Cc::new();

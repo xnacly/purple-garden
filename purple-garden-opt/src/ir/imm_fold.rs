@@ -1,9 +1,11 @@
+use std::alloc::Allocator;
+
 use crate::ir::Scratch;
 use purple_garden_ir::{self as ir, BinOp, Id, Instr, TypeId, constant::Const};
 
 /// Fold single-use integer constants into integer binops while the IR
 /// still knows SSA use counts.
-pub fn imm_fold<'s>(fun: &mut ir::Func<'s>, scratch: &mut super::Scratch<'s>) {
+pub fn imm_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_, S>) {
     scratch.reset();
 
     for (bi, block) in fun.blocks.iter().enumerate() {
@@ -57,7 +59,7 @@ pub fn imm_fold<'s>(fun: &mut ir::Func<'s>, scratch: &mut super::Scratch<'s>) {
     }
 }
 
-fn bump_if_const(scratch: &mut Scratch<'_>, id: Id) {
+fn bump_if_const<S: Allocator>(scratch: &mut Scratch<'_, S>, id: Id) {
     // imm_fold only cares whether recorded LoadConst defs are single-use, so
     // avoid growing the scratch vectors for arbitrary non-constant ids.
     let idx = id.0 as usize;
@@ -66,9 +68,9 @@ fn bump_if_const(scratch: &mut Scratch<'_>, id: Id) {
     }
 }
 
-fn try_fold<'scratch>(
+fn try_fold<'scratch, S: Allocator>(
     instr: &Instr<'scratch>,
-    scratch: &Scratch<'_>,
+    scratch: &Scratch<'_, S>,
     fun: &ir::Func<'scratch>,
 ) -> Option<(BinOp, Id, u32, u32, i32, TypeId<'scratch>, u32)> {
     let Instr::Bin {

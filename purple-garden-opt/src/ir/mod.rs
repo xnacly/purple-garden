@@ -16,6 +16,8 @@ mod switch_fold;
 mod switch_lookup;
 mod tailcall;
 
+use std::alloc::{Allocator, Global};
+
 use purple_garden_ir::{self as ir, Id};
 
 /// Location of a recorded `LoadConst`.
@@ -34,14 +36,25 @@ pub struct ConstDef {
 /// consts.len()`; [`Scratch::ensure`] is the only place they grow,
 /// and they grow together so callers can index either side without
 /// bounds-checking the other.
-#[derive(Default)]
-pub struct Scratch<'scratch> {
-    uses: Vec<u32>,
-    consts: Vec<Option<ConstDef>>,
-    _marker: std::marker::PhantomData<&'scratch ()>,
+pub struct Scratch<'scratch, S: Allocator = Global> {
+    uses: Vec<u32, &'scratch S>,
+    consts: Vec<Option<ConstDef>, &'scratch S>,
 }
 
-impl<'scratch> Scratch<'scratch> {
+impl Default for Scratch<'_> {
+    fn default() -> Self {
+        Self::new_in(&Global)
+    }
+}
+
+impl<'scratch, S: Allocator> Scratch<'scratch, S> {
+    pub fn new_in(scratch: &'scratch S) -> Self {
+        Self {
+            uses: Vec::new_in(scratch),
+            consts: Vec::new_in(scratch),
+        }
+    }
+
     /// Clear all recorded analysis while retaining vector capacity.
     pub fn reset(&mut self) {
         self.uses.clear();
@@ -101,7 +114,7 @@ impl<'scratch> Scratch<'scratch> {
 ///
 /// This also calls [`Scratch::ensure`] for definitions with zero uses, so
 /// callers can distinguish "defined but dead" from "id never seen" when needed.
-pub(super) fn record_uses(fun: &ir::Func<'_>, scratch: &mut Scratch<'_>) {
+pub(super) fn record_uses<S: Allocator>(fun: &ir::Func<'_>, scratch: &mut Scratch<'_, S>) {
     scratch.reset();
 
     for block in &fun.blocks {

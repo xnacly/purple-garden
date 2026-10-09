@@ -1,7 +1,9 @@
+use std::alloc::Allocator;
+
 use purple_garden_ir::{self as ir, Id};
 
 /// Block-local rewrites for `AddrOf` producers and consumers.
-pub fn addrof_fold(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
+pub fn addrof_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_, S>) {
     for block_idx in 0..fun.blocks.len() {
         if fun.blocks[block_idx].tombstone {
             continue;
@@ -41,9 +43,9 @@ fn collect_addrof_def(instr: &ir::Instr<'_>, defs: &mut Vec<Option<(Id, u32)>>) 
     defs[dst.id.0 as usize] = Some((*base, *offset));
 }
 
-fn fold_block(
+fn fold_block<S: Allocator>(
     instructions: &mut [ir::Instr<'_>],
-    scratch: &super::Scratch<'_>,
+    scratch: &super::Scratch<'_, S>,
     defs: &[Option<(Id, u32)>],
 ) {
     for instr in instructions {
@@ -79,10 +81,10 @@ fn base_offset_mut<'instr>(
     }
 }
 
-fn resolve_addr(
+fn resolve_addr<S: Allocator>(
     mut base: Id,
     mut offset: u32,
-    scratch: &super::Scratch<'_>,
+    scratch: &super::Scratch<'_, S>,
     defs: &[Option<(Id, u32)>],
 ) -> Option<(Id, u32)> {
     let mut folded = false;
