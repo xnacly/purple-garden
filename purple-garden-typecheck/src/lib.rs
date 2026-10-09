@@ -1,5 +1,5 @@
 #![allow(clippy::result_large_err)]
-#![feature(allocator_api)]
+#![feature(allocator_ext)]
 
 mod display;
 mod err;

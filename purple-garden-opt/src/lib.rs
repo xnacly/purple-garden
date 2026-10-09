@@ -1,4 +1,3 @@
-#![feature(allocator_api)]
 use std::alloc::Allocator;
 
 use purple_garden_runtime::op::Op;

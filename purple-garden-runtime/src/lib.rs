@@ -1,4 +1,4 @@
-#![feature(likely_unlikely, allocator_api)]
+#![feature(likely_unlikely)]
 #![feature(adt_const_params, unsized_const_params)]
 // `&'static str` const params for `Slot<"T">`
 #![allow(incomplete_features)]

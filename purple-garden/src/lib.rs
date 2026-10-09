@@ -1,7 +1,6 @@
 // The public API returns diagnostics by value so callers can handle them
 // without an additional allocation at every compiler stage.
 #![allow(clippy::result_large_err)]
-#![feature(allocator_api)]
 
 #[cfg(not(all(
     any(target_os = "linux", target_os = "macos"),
@@ -107,7 +106,6 @@ impl<'pg, A: Allocator + Clone> Pg<'pg, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api)]
     /// use purple_garden::Pg;
     /// use std::alloc::System;
     ///

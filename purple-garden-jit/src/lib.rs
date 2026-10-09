@@ -25,7 +25,7 @@
 //! The architecture backend owns the supported IR subset. This crate should
 //! therefore be read as a conservative native lowering path, not as a second
 //! semantic implementation of the language.
-#![feature(allocator_api)]
+#![feature(allocator_ext)]
 
 #[cfg(not(all(
     any(target_os = "linux", target_os = "macos"),

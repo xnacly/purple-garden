@@ -1,4 +1,4 @@
-#![feature(portable_simd, allocator_api)]
+#![feature(portable_simd, allocator_ext)]
 
 pub mod ast;
 pub mod diagnostic;
