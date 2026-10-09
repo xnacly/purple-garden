@@ -40,6 +40,10 @@ pub struct Cli {
     #[arg(short = 'T', long, action = clap::ArgAction::Count)]
     pub types: u8,
 
+    /// Print allocations, frees, bytes and peak live memory per pipeline phase
+    #[arg(short = 'a', long)]
+    pub alloc_stats: bool,
+
     /// run a single string passed via this flag instead of a file
     #[arg(short)]
     pub run: Option<String>,

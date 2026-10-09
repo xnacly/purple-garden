@@ -1,3 +1,6 @@
+#![feature(allocator_api)]
+
+use purple_garden_allocators::metric::MetricAlloc;
 use purple_garden_bc as bc;
 use purple_garden_frontend::{
     diagnostic::{Diagnostic, Help, Span},
@@ -8,7 +11,11 @@ use purple_garden_frontend::{
 use purple_garden_runtime::{Vm, VmConfig};
 use purple_garden_typecheck::Typechecker;
 
-use std::{collections::HashMap, path::Path};
+use std::{
+    alloc::{Allocator, Global},
+    collections::HashMap,
+    path::Path,
+};
 
 mod cli;
 mod doc;
@@ -17,9 +24,11 @@ mod frontend;
 mod help;
 mod input;
 mod lsp;
+mod stats;
 
 use cli::{Cli, Command};
 use input::Input;
+use stats::Phases;
 
 pub const BUILD_INFO: &str = concat!(
     "version=",
@@ -68,7 +77,6 @@ macro_rules! err {
 /// ```
 fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let cli = <Cli as clap::Parser>::parse();
-    let conf = &cli.config;
 
     match cli.version {
         1 => {
@@ -133,6 +141,23 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     let source = input.as_bytes();
 
+    if !cli.alloc_stats {
+        return pipeline(&cli, input_source, source, Phases::<Global>::default());
+    }
+    let phases = Phases::<MetricAlloc>::default();
+    pipeline(&cli, input_source, source, phases.each_ref())?;
+    eprint!("{}", phases.table());
+    Ok(())
+}
+
+fn pipeline<A: Allocator + Clone>(
+    cli: &Cli,
+    input_source: &str,
+    source: &[u8],
+    _allocs: Phases<A>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let conf = &cli.config;
+
     let parse = Parser::new(Lexer::new(source)).parse_collect();
     let purple_garden_frontend::parser::ParseOutput {
         ast,
@@ -156,7 +181,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let libs = Vec::new();
     let typecheck = Typechecker::new(&ast)
         .with_libs(libs.clone())
-        .with_stdlib(stdlib_packages(&cli))
+        .with_stdlib(stdlib_packages(cli))
         .check();
     let has_type_errors = !typecheck.diagnostics.is_empty();
 
@@ -182,7 +207,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     let lower = Lower::new()
         .with_libs(libs)
-        .with_stdlib(stdlib_packages(&cli));
+        .with_stdlib(stdlib_packages(cli));
     let mut ir = match lower.ir_from_types(&ast, typecheck.types) {
         Ok(v) => v,
         Err(e) => {
