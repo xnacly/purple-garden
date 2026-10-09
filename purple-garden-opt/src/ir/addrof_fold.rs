@@ -3,7 +3,10 @@ use std::alloc::Allocator;
 use purple_garden_ir::{self as ir, Id};
 
 /// Block-local rewrites for `AddrOf` producers and consumers.
-pub fn addrof_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_, S>) {
+pub fn addrof_fold<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut super::Scratch<'_, S>,
+) {
     for block_idx in 0..fun.blocks.len() {
         if fun.blocks[block_idx].tombstone {
             continue;

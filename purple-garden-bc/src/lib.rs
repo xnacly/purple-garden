@@ -332,10 +332,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
     /// Compile a list of ir functions to bytecode instructions
     /// Native code goes into pages from `code`.
-    pub fn compile<P: Pages>(
+    pub fn compile<F: Allocator, P: Pages>(
         &mut self,
         config: &Config,
-        ir: &'cc [Func<'cc>],
+        ir: &'cc [Func<'cc, F>],
         code: P,
     ) -> Result<Option<purple_garden_jit::CodeArena<P>>, String> {
         let mut arena = if config.no_jit {
@@ -426,9 +426,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         Ok(arena)
     }
 
-    fn cc(
+    fn cc<F: Allocator>(
         &mut self,
-        fun: &'cc Func<'cc>,
+        fun: &'cc Func<'cc, F>,
         native: Option<&mut purple_garden_jit::CodeArena<impl Pages>>,
     ) -> Result<(), String> {
         // Take the reusable scratch buffers out of self so we can hold an
@@ -599,9 +599,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         Ok(())
     }
 
-    fn try_compile_native(
+    fn try_compile_native<F: Allocator>(
         &mut self,
-        fun: &Func<'cc>,
+        fun: &Func<'cc, F>,
         liveness: &[(u32, u32)],
         arena: &mut purple_garden_jit::CodeArena<impl Pages>,
     ) -> bool {
@@ -771,9 +771,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
     /// Edge shuffles around a fused compare-and-branch: `ne` jumps to `no`,
     /// `eq` to `yes`. Same fall-through fusion rule as `Branch`.
-    fn cmp_branch(
+    fn cmp_branch<F: Allocator>(
         &mut self,
-        fun: &Func<'cc>,
+        fun: &Func<'cc, F>,
         (yes, yes_params): (ir::Id, ir::ParamsId),
         (no, no_params): (ir::Id, ir::ParamsId),
         next_block: Option<ir::Id>,
@@ -815,9 +815,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         }
     }
 
-    fn term(
+    fn term<F: Allocator>(
         &mut self,
-        fun: &Func<'cc>,
+        fun: &Func<'cc, F>,
         t: Option<&ir::Terminator>,
         next_block: Option<ir::Id>,
         lo: u8,
@@ -1057,9 +1057,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     }
 
     /// `owner` is the function `i` belongs to, it holds the lists `i` refers to.
-    fn instr(
+    fn instr<F: Allocator>(
         &mut self,
-        owner: &'cc Func<'cc>,
+        owner: &'cc Func<'cc, F>,
         live_set: &[(u32, u32)],
         pos: u32,
         i: &'cc ir::Instr<'cc>,

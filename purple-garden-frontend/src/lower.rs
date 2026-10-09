@@ -41,9 +41,9 @@ fn align_up(value: usize, align: usize) -> usize {
     (value + align - 1) & !(align - 1)
 }
 
-struct LowerCtx<'lower, S: Allocator> {
+struct LowerCtx<'lower, S: Allocator, I: Allocator> {
     /// current function
-    func: Func<'lower>,
+    func: Func<'lower, I>,
     /// current block
     block: Id,
     id_store: IdStore,
@@ -51,10 +51,10 @@ struct LowerCtx<'lower, S: Allocator> {
     env: Map<&'lower str, Id, S>,
 }
 
-impl<S: Allocator> LowerCtx<'_, S> {
-    fn new_in(scratch: S) -> Self {
+impl<S: Allocator, I: Allocator + Clone> LowerCtx<'_, S, I> {
+    fn new_in(scratch: S, ir: I) -> Self {
         Self {
-            func: Func::default(),
+            func: Func::new_in("", Id(0), [], None, ir),
             block: Id::default(),
             id_store: IdStore::default(),
             env: Map::new_in(scratch),
@@ -65,10 +65,17 @@ impl<S: Allocator> LowerCtx<'_, S> {
 type Overloads<'lower, S> = Map<&'lower str, Vec<&'lower pstd::Fn<'static>, S>, S>;
 
 /// Builds the IR, its working state lives in the scratch allocator `S`.
-pub struct Lower<'lower, A: Allocator = Global, S: Allocator + Clone = Global> {
+pub struct Lower<
+    'lower,
+    A: Allocator = Global,
+    S: Allocator + Clone = Global,
+    I: Allocator + Clone = Global,
+> {
     scratch: S,
-    ctx: LowerCtx<'lower, S>,
-    functions: Vec<Func<'lower>>,
+    /// Every function and block of the IR is allocated in it.
+    ir: I,
+    ctx: LowerCtx<'lower, S, I>,
+    functions: Vec<Func<'lower, I>, I>,
     func_name_to_id: Map<&'lower str, (Id, Option<ptype::Type<'lower>>), S>,
     types: TypeMap<'lower, A>,
     packages: Map<&'lower str, (&'lower Pkg, Overloads<'lower, S>), S>,
@@ -94,8 +101,9 @@ impl<S: Allocator + Clone> Lower<'_, Global, S> {
     #[must_use]
     pub fn new_in(scratch: S) -> Self {
         Self {
-            ctx: LowerCtx::new_in(scratch.clone()),
+            ctx: LowerCtx::new_in(scratch.clone(), Global),
             functions: Vec::new(),
+            ir: Global,
             func_name_to_id: Map::new_in(scratch.clone()),
             types: TypeMap::default(),
             packages: Map::new_in(scratch.clone()),
@@ -107,7 +115,7 @@ impl<S: Allocator + Clone> Lower<'_, Global, S> {
     }
 }
 
-impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
+impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lower, A, S, I> {
     #[must_use]
     pub fn with_libs(mut self, libs: Vec<&'lower Pkg>) -> Self {
         self.libs = libs;
@@ -148,7 +156,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
             .push(i);
     }
 
-    fn cur(&self) -> &Block<'lower> {
+    fn cur(&self) -> &Block<'lower, I> {
         let Id(idx) = self.ctx.block;
         self.ctx.func.blocks.get(idx as usize).unwrap()
     }
@@ -158,14 +166,14 @@ impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
         self.ctx.func.blocks.push(Block {
             id,
             tombstone: false,
-            instructions: vec![],
+            instructions: Vec::new_in(self.ir.clone()),
             params: EMPTY_PARAMS,
             term: None,
         });
         id
     }
 
-    fn block_mut(&mut self, id: Id) -> &mut Block<'lower> {
+    fn block_mut(&mut self, id: Id) -> &mut Block<'lower, I> {
         &mut self.ctx.func.blocks[id.0 as usize]
     }
 
@@ -430,8 +438,10 @@ impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
                 body,
                 ..
             } => {
-                let old_ctx =
-                    std::mem::replace(&mut self.ctx, LowerCtx::new_in(self.scratch.clone()));
+                let old_ctx = std::mem::replace(
+                    &mut self.ctx,
+                    LowerCtx::new_in(self.scratch.clone(), self.ir.clone()),
+                );
 
                 let id = Id(self.functions.len() as u32 + 1);
                 let Type::Ident(ident_name) = name.t else {
@@ -448,18 +458,17 @@ impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
                 };
 
                 self.func_name_to_id.insert(ident_name, (id, ret));
-                let func_params: Vec<Id> = args
-                    .iter()
-                    .map(|(token, _)| {
-                        let id = self.ctx.id_store.new_value();
-                        let Type::Ident(ident) = token.t else {
-                            unreachable!();
-                        };
-                        self.ctx.env.insert(ident, id);
-                        id
-                    })
-                    .collect();
-                let func = Func::new(ident_name, id, func_params, ret).with_span(name.start as u32);
+                let mut func_params = Vec::with_capacity_in(args.len(), self.scratch.clone());
+                func_params.extend(args.iter().map(|(token, _)| {
+                    let id = self.ctx.id_store.new_value();
+                    let Type::Ident(ident) = token.t else {
+                        unreachable!();
+                    };
+                    self.ctx.env.insert(ident, id);
+                    id
+                }));
+                let func = Func::new_in(ident_name, id, func_params, ret, self.ir.clone())
+                    .with_span(name.start as u32);
 
                 // TODO:deal with b0
 
@@ -487,7 +496,9 @@ impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
                     });
                 }
 
-                self.functions.push(std::mem::take(&mut self.ctx.func));
+                let empty = Func::new_in("", Id(0), [], None, self.ir.clone());
+                self.functions
+                    .push(std::mem::replace(&mut self.ctx.func, empty));
                 self.ctx = old_ctx;
                 None
             }
@@ -865,15 +876,18 @@ impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
     /// Lower [ast] using a type map produced by the typechecker.
     ///
     /// The entry point is always `entry`.
-    pub fn ir_from_types<B: Allocator>(
+    /// The IR is allocated in `ir`.
+    pub fn ir_from_types<B: Allocator, J: Allocator + Clone>(
         self,
         ast: &'lower Ast<'lower, 'lower>,
         types: TypeMap<'lower, B>,
-    ) -> Result<Vec<Func<'lower>>, Diagnostic> {
+        ir: J,
+    ) -> Result<Vec<Func<'lower, J>, J>, Diagnostic> {
         Lower {
+            ctx: LowerCtx::new_in(self.scratch.clone(), ir.clone()),
+            functions: Vec::new_in(ir.clone()),
+            ir,
             scratch: self.scratch,
-            ctx: self.ctx,
-            functions: self.functions,
             func_name_to_id: self.func_name_to_id,
             types,
             packages: self.packages,
@@ -884,14 +898,17 @@ impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
         .lower(ast)
     }
 
-    fn lower(mut self, ast: &'lower Ast<'lower, 'lower>) -> Result<Vec<Func<'lower>>, Diagnostic> {
+    fn lower(
+        mut self,
+        ast: &'lower Ast<'lower, 'lower>,
+    ) -> Result<Vec<Func<'lower, I>, I>, Diagnostic> {
         // Most roots are declarations or expressions becoming functions later;
         // thus reserving this avoids repeated growth
         self.functions.reserve(ast.roots.len() + 1);
         self.func_name_to_id.reserve(ast.roots.len() + 1);
 
-        self.ctx.func =
-            Func::new("entry", Id(0), Vec::new(), None).with_span(ast.entry_span().unwrap_or(0));
+        self.ctx.func = Func::new_in("entry", Id(0), [], None, self.ir.clone())
+            .with_span(ast.entry_span().unwrap_or(0));
         let entry = self.new_block();
         self.switch_to_block(entry);
 

@@ -9,7 +9,7 @@ mod ir;
 /// bytecode based optimisations, mainly peephole
 mod bc;
 
-pub fn ir<S: Allocator>(ir: &mut [purple_garden_ir::Func], scratch: &S) {
+pub fn ir<F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'_, F>], scratch: &S) {
     let mut scratch = ir::Scratch::new_in(scratch);
 
     for fun in ir {

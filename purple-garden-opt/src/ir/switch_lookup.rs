@@ -16,7 +16,10 @@ use purple_garden_ir::{self as ir, Const, Id, Instr, Terminator, TypeId};
 ///     ret %v3
 /// ...
 /// ```
-pub fn switch_lookup<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_, S>) {
+pub fn switch_lookup<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut super::Scratch<'_, S>,
+) {
     let alloc = scratch.alloc();
     let preds = super::predecessor_counts(fun, alloc);
 
@@ -81,8 +84,8 @@ pub fn switch_lookup<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::
 
 /// `(dst, value)` of an arm only the switch leads to, that loads a constant and
 /// returns it.
-fn returned_const<'f>(
-    fun: &ir::Func<'f>,
+fn returned_const<'f, F: Allocator>(
+    fun: &ir::Func<'f, F>,
     arm: Id,
     preds: &[u32],
 ) -> Option<(TypeId<'f>, Const<'f>)> {

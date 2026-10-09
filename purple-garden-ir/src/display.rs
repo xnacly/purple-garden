@@ -188,7 +188,7 @@ struct Row {
     text: String,
 }
 
-impl Func<'_> {
+impl<A: std::alloc::Allocator> Func<'_, A> {
     fn rows(&self) -> Vec<Row> {
         let mut rows = Vec::new();
         let mut push = |pos, indent, text| rows.push(Row { pos, indent, text });
@@ -501,7 +501,7 @@ fn colorize(text: &str) -> String {
     out
 }
 
-impl Display for Func<'_> {
+impl<A: std::alloc::Allocator> Display for Func<'_, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for row in self.rows() {
             writeln!(f, "{}{}", "\t".repeat(row.indent), row.text)?;

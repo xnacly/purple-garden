@@ -1,7 +1,9 @@
+use std::alloc::Allocator;
+
 use purple_garden_ir as ir;
 
 /// Block-local rewrites for `Load` and `Store` instructions.
-pub fn load_store_fold(fun: &mut ir::Func<'_>) {
+pub fn load_store_fold<F: Allocator>(fun: &mut ir::Func<'_, F>) {
     for block in &mut fun.blocks {
         if block.tombstone {
             continue;

@@ -8,7 +8,10 @@ use purple_garden_ir::{self as ir, Instr, TypeId, constant::Const};
 /// This pass is intentionally scaffolded around the eligibility analysis first:
 /// `Instr::Sys` now carries the resolved function definition, so all data needed
 /// to decide whether a syscall *can* fold is local to the IR.
-pub fn const_fold_syscalls<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut Scratch<'_, S>) {
+pub fn const_fold_syscalls<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut Scratch<'_, S>,
+) {
     for bi in 0..fun.blocks.len() {
         if fun.blocks[bi].tombstone {
             continue;
@@ -61,9 +64,9 @@ struct SyscallFoldCandidate<'ir, A: Allocator> {
     span: u32,
 }
 
-fn syscall_fold_candidate<'ir, 's, S: Allocator>(
+fn syscall_fold_candidate<'ir, 's, P: Allocator, S: Allocator>(
     instr: &Instr<'ir>,
-    params: &ir::Pool<ir::Id>,
+    params: &ir::Pool<ir::Id, P>,
     scratch: &Scratch<'s, S>,
     previous: &[Instr<'ir>],
 ) -> Option<SyscallFoldCandidate<'ir, &'s S>> {

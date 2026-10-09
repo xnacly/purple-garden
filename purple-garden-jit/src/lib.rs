@@ -88,7 +88,7 @@ impl<S: Allocator + Clone> Jit<S> {
     }
 
     /// Lower and encode `func`, returning `None` when unsupported.
-    pub fn compile_func(&mut self, func: &ir::Func<'_>) -> Option<()> {
+    pub fn compile_func<F: Allocator>(&mut self, func: &ir::Func<'_, F>) -> Option<()> {
         self.liveness.clear();
         func.live_set_into(&mut self.liveness);
         let scratch = self.liveness.allocator().clone();
@@ -103,9 +103,9 @@ impl<S: Allocator + Clone> Jit<S> {
     /// `globals` maps constants to their `vm.globals` slot, `strings[slot]` is
     /// the final address of a string constant native code embeds. `natives`
     /// holds the entry points of the functions already compiled natively.
-    pub fn compile_func_with_liveness<'ir>(
+    pub fn compile_func_with_liveness<'ir, F: Allocator>(
         &mut self,
-        func: &ir::Func<'ir>,
+        func: &ir::Func<'ir, F>,
         liveness: &[(u32, u32)],
         globals: &HashMap<ir::Const<'ir>, u32>,
         strings: &[Value],

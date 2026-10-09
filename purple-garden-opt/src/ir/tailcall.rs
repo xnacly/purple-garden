@@ -1,3 +1,5 @@
+use std::alloc::Allocator;
+
 use purple_garden_ir::{self as ir, Instr};
 
 /// Converts a call in tailcall position into a tailcall. See
@@ -41,7 +43,7 @@ use purple_garden_ir::{self as ir, Instr};
 /// b4(%v7):
 ///         ret %v7
 /// ```
-pub fn tailcall(fun: &mut ir::Func) {
+pub fn tailcall<F: Allocator>(fun: &mut ir::Func<'_, F>) {
     let last_id = fun.blocks.len() - 1;
 
     // verify the return block is trivial: no instructions and a simple return

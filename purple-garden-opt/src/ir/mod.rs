@@ -119,7 +119,10 @@ impl<'scratch, S: Allocator> Scratch<'scratch, S> {
 ///
 /// This also calls [`Scratch::ensure`] for definitions with zero uses, so
 /// callers can distinguish "defined but dead" from "id never seen" when needed.
-pub(super) fn record_uses<S: Allocator>(fun: &ir::Func<'_>, scratch: &mut Scratch<'_, S>) {
+pub(super) fn record_uses<F: Allocator, S: Allocator>(
+    fun: &ir::Func<'_, F>,
+    scratch: &mut Scratch<'_, S>,
+) {
     scratch.reset();
 
     for block in &fun.blocks {
@@ -153,7 +156,10 @@ pub(super) fn try_collect_in<T, S: Allocator>(
 }
 
 /// Number of live edges into each block, indexed by block id.
-pub(super) fn predecessor_counts<S: Allocator>(fun: &ir::Func, scratch: S) -> Vec<u32, S> {
+pub(super) fn predecessor_counts<F: Allocator, S: Allocator>(
+    fun: &ir::Func<'_, F>,
+    scratch: S,
+) -> Vec<u32, S> {
     let mut counts = Vec::with_capacity_in(fun.blocks.len(), scratch);
     counts.resize(fun.blocks.len(), 0);
 

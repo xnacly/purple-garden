@@ -24,7 +24,7 @@ pub mod constant;
 mod display;
 pub mod ptype;
 
-use std::alloc::{Allocator, Layout};
+use std::alloc::{Allocator, Global, Layout};
 
 pub use crate::constant::Const;
 use crate::ptype::Type;
@@ -301,7 +301,7 @@ impl Terminator {
 }
 
 #[derive(Debug, Clone)]
-pub struct Block<'b> {
+pub struct Block<'b, A: Allocator = Global> {
     /// block is dead as a result of optimisation passes
     ///
     /// ```text
@@ -315,7 +315,7 @@ pub struct Block<'b> {
     /// It will not be revived :)
     pub tombstone: bool,
     pub id: Id,
-    pub instructions: Vec<Instr<'b>>,
+    pub instructions: Vec<Instr<'b>, A>,
     /// Index into the enclosing [`Func::params_pool`] holding this
     /// block's SSA params (the values defined on entry, used as
     /// phi-equivalents). 4-byte `Copy`. Dereference with
@@ -326,14 +326,15 @@ pub struct Block<'b> {
     pub term: Option<Terminator>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct Func<'f> {
+/// Every container of a function lives in `A`.
+#[derive(Debug, Clone)]
+pub struct Func<'f, A: Allocator = Global> {
     pub name: &'f str,
     pub id: Id,
     pub span: u32,
-    pub params: Vec<Id>,
+    pub params: Vec<Id, A>,
     pub ret: Option<Type<'f>>,
-    pub blocks: Vec<Block<'f>>,
+    pub blocks: Vec<Block<'f, A>, A>,
     /// Owning storage for every block-param / Branch-arg / Jump-arg
     /// `[Id]` list this function references. Together with [`ParamsId`]
     /// this is the static (no-Rc, no-Arc) equivalent of shared-by-handle
@@ -353,11 +354,11 @@ pub struct Func<'f> {
     /// This is the same discipline as `bc::Cc::block_map` and
     /// `Ralloc.map`: data hangs off a long-lived owner, handles are
     /// `Copy` `u32`
-    pub params_pool: Pool<Id>,
+    pub params_pool: Pool<Id, A>,
     /// Owning storage for [`Terminator::Switch`] cases, see [`CasesId`].
-    pub cases_pool: Pool<Case<'f>>,
+    pub cases_pool: Pool<Case<'f>, A>,
     /// Owning storage for [`Instr::Lookup`] entries, see [`EntriesId`].
-    pub entries_pool: Pool<(Const<'f>, Const<'f>)>,
+    pub entries_pool: Pool<(Const<'f>, Const<'f>), A>,
 }
 
 /// The lists of one kind of a function, back to back in one allocation and
@@ -365,22 +366,28 @@ pub struct Func<'f> {
 /// change, a rewrite interns a new one and the old stays until the function is
 /// dropped.
 #[derive(Debug, Clone)]
-pub struct Pool<T> {
-    items: Vec<T>,
+pub struct Pool<T, A: Allocator = Global> {
+    items: Vec<T, A>,
     /// `(start, len)` into `items` per interned list.
-    spans: Vec<(u32, u32)>,
+    spans: Vec<(u32, u32), A>,
 }
 
 impl<T> Default for Pool<T> {
     fn default() -> Self {
+        Self::new_in(Global)
+    }
+}
+
+impl<T, A: Allocator + Clone> Pool<T, A> {
+    pub fn new_in(alloc: A) -> Self {
         Self {
-            items: Vec::new(),
-            spans: Vec::new(),
+            items: Vec::new_in(alloc.clone()),
+            spans: Vec::new_in(alloc),
         }
     }
 }
 
-impl<T> Pool<T> {
+impl<T, A: Allocator> Pool<T, A> {
     pub fn intern(&mut self, list: impl IntoIterator<Item = T>) -> u32 {
         let start = self.items.len();
         self.items.extend(list);
@@ -397,29 +404,44 @@ impl<T> Pool<T> {
 }
 
 impl<'f> Func<'f> {
+    #[must_use]
+    pub fn new(name: &'f str, id: Id, params: Vec<Id>, ret: Option<Type<'f>>) -> Self {
+        Self::new_in(name, id, params, ret, Global)
+    }
+}
+
+impl<'f, A: Allocator + Clone> Func<'f, A> {
     /// Build a new `Func` with `params_pool[0]` already seeded with the
     /// empty slice (the [`EMPTY_PARAMS`] sentinel). Always go through
     /// this; a `Func` whose pool is empty would make `EMPTY_PARAMS` an
     /// out-of-bounds lookup.
     #[must_use]
-    pub fn new(name: &'f str, id: Id, params: Vec<Id>, ret: Option<Type<'f>>) -> Self {
+    pub fn new_in(
+        name: &'f str,
+        id: Id,
+        params: impl IntoIterator<Item = Id>,
+        ret: Option<Type<'f>>,
+        alloc: A,
+    ) -> Self {
+        let mut func_params = Vec::new_in(alloc.clone());
+        func_params.extend(params);
+        let mut params_pool = Pool::new_in(alloc.clone());
+        params_pool.intern([]);
         Self {
             name,
             id,
             span: 0,
-            params,
+            params: func_params,
             ret,
-            blocks: Vec::new(),
-            params_pool: {
-                let mut pool = Pool::default();
-                pool.intern([]);
-                pool
-            },
-            cases_pool: Pool::default(),
-            entries_pool: Pool::default(),
+            blocks: Vec::new_in(alloc.clone()),
+            params_pool,
+            cases_pool: Pool::new_in(alloc.clone()),
+            entries_pool: Pool::new_in(alloc),
         }
     }
+}
 
+impl<'f, A: Allocator> Func<'f, A> {
     #[must_use]
     pub fn with_span(mut self, span: u32) -> Self {
         self.span = span;
@@ -474,7 +496,9 @@ impl Func<'_> {
             Instr::Store { .. } | Instr::Noop => None,
         }
     }
+}
 
+impl<A: Allocator> Func<'_, A> {
     pub fn for_each_use_of_instr(&self, instr: &Instr<'_>, mut f: impl FnMut(Id)) {
         match instr {
             Instr::Bin { lhs, rhs, .. } => {
@@ -575,7 +599,7 @@ impl Func<'_> {
     ///
     /// Writes into `out`, clearing first. Lets the caller reuse a buffer across function compiles
     /// so we don't allocate fresh per `cc()`.
-    pub fn live_set_into<A: Allocator>(&self, out: &mut Vec<(u32, u32), A>) {
+    pub fn live_set_into<V: Allocator>(&self, out: &mut Vec<(u32, u32), V>) {
         const UNSET: (u32, u32) = (u32::MAX, 0);
 
         fn ensure<A: Allocator>(v: &mut Vec<(u32, u32), A>, id: u32) {
@@ -641,7 +665,7 @@ impl Func<'_> {
                     use_value(intervals, use_id, pos);
                 });
 
-                if let Some(def_id) = Self::def_of(instr) {
+                if let Some(def_id) = Func::def_of(instr) {
                     define(intervals, def_id, pos + 1);
                 }
                 pos += 2;
@@ -732,8 +756,8 @@ impl Func<'_> {
     /// Soft: the allocator honors the hint only if the preferred register
     /// is free when this interval is allocated. If multiple call sites
     /// hint the same SSA id to different registers, first hint wins.
-    pub fn arg_hints_into<A: Allocator>(&self, hints: &mut Vec<Option<u8>, A>) {
-        fn ensure<A: Allocator>(v: &mut Vec<Option<u8>, A>, id: u32) {
+    pub fn arg_hints_into<V: Allocator>(&self, hints: &mut Vec<Option<u8>, V>) {
+        fn ensure<V: Allocator>(v: &mut Vec<Option<u8>, V>, id: u32) {
             let idx = id as usize;
             if idx >= v.len() {
                 v.resize(idx + 1, None);
@@ -741,7 +765,7 @@ impl Func<'_> {
         }
 
         // First-hint-wins: skip if already set.
-        fn put<A: Allocator>(v: &mut Vec<Option<u8>, A>, id: Id, reg: u8) {
+        fn put<V: Allocator>(v: &mut Vec<Option<u8>, V>, id: Id, reg: u8) {
             ensure(v, id.0);
             let e = &mut v[id.0 as usize];
             if e.is_none() {
@@ -752,7 +776,7 @@ impl Func<'_> {
         // Overwrite unconditionally; used for entry-block params so they
         // beat any subsequent inner-call hint and stay pinned to the
         // calling convention's r0..r{N-1}.
-        fn put_force<A: Allocator>(v: &mut Vec<Option<u8>, A>, id: Id, reg: u8) {
+        fn put_force<V: Allocator>(v: &mut Vec<Option<u8>, V>, id: Id, reg: u8) {
             ensure(v, id.0);
             v[id.0 as usize] = Some(reg);
         }

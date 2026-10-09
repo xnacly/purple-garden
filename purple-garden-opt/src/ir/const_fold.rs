@@ -18,7 +18,10 @@ use purple_garden_ir::{self as ir, BinOp, Instr, TypeId, constant::Const, ptype:
 /// ```text
 /// %v2:Int = 37
 /// ```
-pub fn const_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut Scratch<'_, S>) {
+pub fn const_fold<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut Scratch<'_, S>,
+) {
     let mut changed = false;
 
     for i in 0..fun.blocks.len() {
@@ -49,7 +52,10 @@ pub fn const_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut Scratch<'_
     }
 }
 
-fn remove_dead_load_consts<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut Scratch<'_, S>) {
+fn remove_dead_load_consts<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut Scratch<'_, S>,
+) {
     scratch.reset();
 
     for block in &fun.blocks {

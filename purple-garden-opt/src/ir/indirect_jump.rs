@@ -1,3 +1,5 @@
+use std::alloc::Allocator;
+
 use purple_garden_ir as ir;
 
 /// merges a br to block A indirected by a single jmp in block B into a direct br to A:
@@ -20,7 +22,7 @@ use purple_garden_ir as ir;
 ///     b3:
 ///     b4:
 /// ```
-pub fn indirect_jump(fun: &mut ir::Func) {
+pub fn indirect_jump<F: Allocator>(fun: &mut ir::Func<'_, F>) {
     for i in 0..fun.blocks.len() {
         let Some((yes, yes_params, no, no_params)) = branch_edges(&fun.blocks[i].term) else {
             continue;

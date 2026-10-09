@@ -696,10 +696,11 @@ fn compile<'i, A: Allocator + Clone + 'i>(
         return Err(diagnostic);
     }
 
+    let ir_arena = BumpAlloc::new_in(alloc.clone());
     let mut ir = lower::Lower::new_in(&scratch)
         .with_libs(libs.to_vec())
         .with_stdlib(stdlib)
-        .ir_from_types(&ast, typecheck.types)?;
+        .ir_from_types(&ast, typecheck.types, &ir_arena)?;
     scratch.reset();
     if config.opt >= 1 {
         purple_garden_opt::ir(&mut ir, &scratch);

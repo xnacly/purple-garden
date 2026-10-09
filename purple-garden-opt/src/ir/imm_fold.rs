@@ -5,7 +5,10 @@ use purple_garden_ir::{self as ir, BinOp, Id, Instr, TypeId, constant::Const};
 
 /// Fold single-use integer constants into integer binops while the IR
 /// still knows SSA use counts.
-pub fn imm_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_, S>) {
+pub fn imm_fold<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut super::Scratch<'_, S>,
+) {
     scratch.reset();
 
     for (bi, block) in fun.blocks.iter().enumerate() {
@@ -68,10 +71,10 @@ fn bump_if_const<S: Allocator>(scratch: &mut Scratch<'_, S>, id: Id) {
     }
 }
 
-fn try_fold<'scratch, S: Allocator>(
+fn try_fold<'scratch, F: Allocator, S: Allocator>(
     instr: &Instr<'scratch>,
     scratch: &Scratch<'_, S>,
-    fun: &ir::Func<'scratch>,
+    fun: &ir::Func<'scratch, F>,
 ) -> Option<(BinOp, Id, u32, u32, i32, TypeId<'scratch>, u32)> {
     let Instr::Bin {
         op,
@@ -128,8 +131,8 @@ fn try_fold<'scratch, S: Allocator>(
     ))
 }
 
-fn const_value<'fun>(
-    fun: &'fun ir::Func<'_>,
+fn const_value<'fun, F: Allocator>(
+    fun: &'fun ir::Func<'_, F>,
     def: crate::ir::ConstDef,
 ) -> Option<&'fun Const<'fun>> {
     let Instr::LoadConst { value, .. } = fun

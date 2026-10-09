@@ -6,7 +6,10 @@ use purple_garden_ir as ir;
 /// predecessor. Tombstones the join when every predecessor is inlined.
 /// Lets each arm of an if/match get its own Return, so the regalloc can
 /// place the result in r0 instead of routing through a join-block param.
-pub fn ret_inline<S: Allocator>(fun: &mut ir::Func, scratch: &mut super::Scratch<'_, S>) {
+pub fn ret_inline<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut super::Scratch<'_, S>,
+) {
     let alloc = scratch.alloc();
     let mut rewrites: Vec<(usize, ir::Id, u32), _> = Vec::new_in(alloc);
     let mut pred_counts = super::predecessor_counts(fun, alloc);

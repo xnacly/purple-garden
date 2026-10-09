@@ -7,7 +7,7 @@ use purple_garden_ir::{self as ir};
 ///
 /// This runs to a fixed point because removing one dead producer can make
 /// earlier producers dead too.
-pub fn dce<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut Scratch<'_, S>) {
+pub fn dce<F: Allocator, S: Allocator>(fun: &mut ir::Func<'_, F>, scratch: &mut Scratch<'_, S>) {
     loop {
         let mut changed = false;
 

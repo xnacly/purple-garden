@@ -8,7 +8,10 @@ use purple_garden_ir::{self as ir, BinOp, Instr, Terminator};
 /// This removes the boolean-producing compare, so it only fires when the
 /// branch is the condition's sole use. Backends can then lower the terminator as
 /// a direct compare-and-branch instead of materializing `0` or `1` first.
-pub fn branch_cmp<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_, S>) {
+pub fn branch_cmp<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut super::Scratch<'_, S>,
+) {
     super::record_uses(fun, scratch);
 
     for block in &mut fun.blocks {

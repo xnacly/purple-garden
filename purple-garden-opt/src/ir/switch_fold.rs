@@ -26,7 +26,10 @@ pub const MAX_SLOTS_PER_CASE: usize = 4;
 /// ```
 ///
 /// Integer chains (`br_imm IEq %v0, k, ...`) fold the same way
-pub fn switch_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_, S>) {
+pub fn switch_fold<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut super::Scratch<'_, S>,
+) {
     super::record_uses(fun, scratch);
     let alloc = scratch.alloc();
     let preds = super::predecessor_counts(fun, alloc);
@@ -117,7 +120,10 @@ type Edge = (Id, ParamsId);
 /// is the `LoadConst` of a string key, integer keys are immediates. A switch
 /// moves nothing along its edges, so both must pass their target's params
 /// unchanged.
-fn compare<'f>(fun: &ir::Func<'f>, b: usize) -> Option<(Id, Const<'f>, Option<Id>, Edge, Edge)> {
+fn compare<'f, F: Allocator>(
+    fun: &ir::Func<'f, F>,
+    b: usize,
+) -> Option<(Id, Const<'f>, Option<Id>, Edge, Edge)> {
     let block = &fun.blocks[b];
     let (subject, key, key_load, yes, no) = match block.term {
         Some(Terminator::BranchCmp {

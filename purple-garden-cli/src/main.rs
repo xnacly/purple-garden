@@ -212,7 +212,8 @@ fn pipeline<A: Pages + Clone>(
     let lower = Lower::new_in(&scratch)
         .with_libs(libs)
         .with_stdlib(stdlib_packages(cli));
-    let mut ir = match lower.ir_from_types(&ast, typecheck.types) {
+    let ir_arena = BumpAlloc::new_in(allocs.lower);
+    let mut ir = match lower.ir_from_types(&ast, typecheck.types, &ir_arena) {
         Ok(v) => v,
         Err(e) => {
             return err!(e.render(input_source, source));

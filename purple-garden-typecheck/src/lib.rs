@@ -1187,7 +1187,9 @@ mod tests {
             "{:?}",
             typecheck.diagnostics
         );
-        let funcs = Lower::new().ir_from_types(&ast, typecheck.types).unwrap();
+        let funcs = Lower::new()
+            .ir_from_types(&ast, typecheck.types, std::alloc::Global)
+            .unwrap();
         let instructions = &funcs[0].blocks[0].instructions;
 
         let allocs = instructions
@@ -1221,7 +1223,9 @@ mod tests {
             "{:?}",
             typecheck.diagnostics
         );
-        let funcs = Lower::new().ir_from_types(&ast, typecheck.types).unwrap();
+        let funcs = Lower::new()
+            .ir_from_types(&ast, typecheck.types, std::alloc::Global)
+            .unwrap();
         let instructions = &funcs[0].blocks[0].instructions;
 
         let alloc = instructions
@@ -1278,7 +1282,9 @@ mod tests {
             "{:?}",
             typecheck.diagnostics
         );
-        let funcs = Lower::new().ir_from_types(&ast, typecheck.types).unwrap();
+        let funcs = Lower::new()
+            .ir_from_types(&ast, typecheck.types, std::alloc::Global)
+            .unwrap();
         let instructions = &funcs[0].blocks[0].instructions;
 
         let allocs = instructions

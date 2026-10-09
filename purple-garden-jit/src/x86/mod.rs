@@ -52,8 +52,8 @@ const CALL_STACK: i32 = 16;
 
 /// Compile one IR function into x86-64 machine code, returning `None` if unsupported constructs are
 /// included
-pub fn compile_func<'ir, S: Allocator + Clone, N: Allocator>(
-    func: &ir::Func<'ir>,
+pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
+    func: &ir::Func<'ir, F>,
     out: &mut Vec<u8, S>,
     liveness: &[(u32, u32)],
     globals: &HashMap<ir::Const<'ir>, u32>,
@@ -152,7 +152,7 @@ pub fn compile_func<'ir, S: Allocator + Clone, N: Allocator>(
     Some(())
 }
 
-fn is_result_slot_identity(func: &ir::Func<'_>, entry: ir::Id) -> bool {
+fn is_result_slot_identity<F: Allocator>(func: &ir::Func<'_, F>, entry: ir::Id) -> bool {
     let Some(&result_param) = func.params.first() else {
         return false;
     };
@@ -260,8 +260,8 @@ macro_rules! bail {
 /// Registers come from [`Xralloc2`] the first time a value is touched and stay
 /// fixed for the value's whole liveness interval, so every CFG edge agrees on
 /// where a value lives.
-struct Lowering<'a, 'ir, S: Allocator + Clone, N: Allocator> {
-    func: &'a ir::Func<'ir>,
+struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
+    func: &'a ir::Func<'ir, F>,
     liveness: &'a [(u32, u32)],
     /// `vm.globals` slot of each constant.
     globals: &'a HashMap<ir::Const<'ir>, u32>,
@@ -290,9 +290,9 @@ struct Lowering<'a, 'ir, S: Allocator + Clone, N: Allocator> {
     self_refs: &'a mut Vec<usize, S>,
 }
 
-impl<'a, 'ir, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, S, N> {
+impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, F, S, N> {
     fn new(
-        func: &'a ir::Func<'ir>,
+        func: &'a ir::Func<'ir, F>,
         liveness: &'a [(u32, u32)],
         globals: &'a HashMap<ir::Const<'ir>, u32>,
         strings: &'a [Value],
