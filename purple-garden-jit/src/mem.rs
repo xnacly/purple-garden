@@ -31,10 +31,9 @@ impl CodeArena {
 }
 
 impl<P: Pages> CodeArena<P> {
-    /// Pages are only backed once touched, so the reservation costs address
-    /// space, not memory, as long as no huge page backs it, see
-    /// [`CodeArena::new`]. 16 MiB fits hundreds of thousands of functions.
-    const CAPACITY: usize = 16 << 20;
+    /// Typical programs need under 1 KiB of native code, the largest example
+    /// 64 KiB. Functions past the end stay bytecode.
+    const CAPACITY: usize = 64 << 10;
     /// Function entries start on 16 bytes so the decoder fetches a whole
     /// first block.
     const ALIGN: usize = 16;
@@ -48,9 +47,6 @@ impl<P: Pages> CodeArena<P> {
             .allocate(Self::layout())
             .map_err(|_| "mapping the code arena failed".to_string())?
             .cast::<u8>();
-        // A few hundred bytes of code would otherwise take a whole 2 MiB huge
-        // page. Without the advice, the arena still works.
-        let _ = mmap::no_huge_pages(ptr, Self::CAPACITY);
         Ok(Self {
             ptr,
             cap: Self::CAPACITY,
