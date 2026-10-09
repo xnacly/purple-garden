@@ -9,11 +9,7 @@
 )))]
 compile_error!("purple-garden currently supports only Linux or macOS on x86_64 or aarch64");
 
-use std::{
-    alloc::Allocator,
-    collections::HashMap,
-    marker::PhantomData,
-};
+use std::{alloc::Allocator, collections::HashMap, marker::PhantomData};
 
 use purple_garden_allocators::{
     bump::{Arena, BumpAlloc},

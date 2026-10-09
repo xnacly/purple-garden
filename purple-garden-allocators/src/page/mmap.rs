@@ -32,8 +32,13 @@ unsafe extern "C" {
     /// Resizes a mapping, possibly moving it, see `mremap(2)`.
     #[cfg(target_os = "linux")]
     #[link_name = "mremap"]
-    fn sys_mremap(addr: *mut c_void, old_len: usize, new_len: usize, flags: i32, ...)
-    -> *mut c_void;
+    fn sys_mremap(
+        addr: *mut c_void,
+        old_len: usize,
+        new_len: usize,
+        flags: i32,
+        ...
+    ) -> *mut c_void;
 }
 
 #[cfg(target_os = "linux")]

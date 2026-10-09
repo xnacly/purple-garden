@@ -552,7 +552,14 @@ fn mem_disp<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, base: u8, 
 /// follows. The index register's high bit is REX.X, which [`rex`] doesn't set.
 /// A base with low bits 101 (rbp/r13) and mod=00 would mean "no base, disp32",
 /// so those take mod=01 with a zero disp8.
-fn scaled<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, scale: u8, dst: Reg, base: Reg, index: Reg) {
+fn scaled<A: Allocator>(
+    code: &mut Vec<u8, A>,
+    opcode: u8,
+    scale: u8,
+    dst: Reg,
+    base: Reg,
+    index: Reg,
+) {
     let rex = rex(dst.0, base.0) | (u8::from(index.0 >= 8) << 1);
     let mode = if base.0 & 7 == 0b101 { 0x40 } else { 0x00 };
     let sib = (scale << 6) | ((index.0 & 7) << 3) | (base.0 & 7);

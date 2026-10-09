@@ -11,11 +11,7 @@ use purple_garden_frontend::{
 use purple_garden_runtime::{Vm, VmConfig};
 use purple_garden_typecheck::Typechecker;
 
-use std::{
-    alloc::Allocator,
-    collections::HashMap,
-    path::Path,
-};
+use std::{alloc::Allocator, collections::HashMap, path::Path};
 
 mod cli;
 mod doc;

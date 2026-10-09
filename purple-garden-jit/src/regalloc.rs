@@ -102,7 +102,7 @@ impl<S: Allocator + Clone> Xralloc2<S> {
 #[cfg(test)]
 mod tests {
     use super::Xralloc2;
-use purple_garden_ir::Id;
+    use purple_garden_ir::Id;
 
     /// A value dying at `at` frees its register for the one defined there,
     /// which is what lets `d = l + r` reuse `l`'s register.

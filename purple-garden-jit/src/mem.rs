@@ -1,8 +1,8 @@
 //! rwx page allocator for JIT'd code. Uses the syscall wrappers from
 //! [`purple_garden_allocators::page::mmap`].
 
-use purple_garden_runtime::BuiltinFn;
 use purple_garden_allocators::page::mmap::{self, MmapFlags, MmapProt};
+use purple_garden_runtime::BuiltinFn;
 use std::ptr::NonNull;
 
 #[derive(Debug)]
