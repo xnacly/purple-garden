@@ -250,11 +250,14 @@ fn pipeline<A: Pages + Clone>(
     } else {
         None
     };
-    let (mut vm, syscalls, debug, entry_native_idx) = cc.finalize(VmConfig {
-        backtrace: conf.backtrace,
-        no_gc: conf.no_gc,
-        stack_size: conf.stack_size,
-    });
+    let (mut vm, syscalls, debug, entry_native_idx) = cc.finalize(
+        VmConfig {
+            backtrace: conf.backtrace,
+            no_gc: conf.no_gc,
+            stack_size: conf.stack_size,
+        },
+        allocs.run,
+    );
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let entry = vm.pc;
     // Keep executable JIT pages alive until execution has completed.

@@ -241,7 +241,10 @@ impl<'pg, A: Allocator + Clone> Pg<'pg, A> {
     /// assert_eq!(program.run_take::<i64>()?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn compile(&self, input: &'pg [u8]) -> Result<Program<'pg>, Diagnostic> {
+    pub fn compile(&self, input: &'pg [u8]) -> Result<Program<'pg>, Diagnostic>
+    where
+        A: 'pg,
+    {
         compile(
             &self.config,
             input,
@@ -277,7 +280,7 @@ impl Default for Pg<'_> {
 /// ```
 #[derive(Debug)]
 pub struct Program<'p> {
-    vm: Vm,
+    vm: Vm<'p>,
     entry: usize,
     entry_native: Option<BuiltinFn>,
     syscalls: Vec<BuiltinFn>,
@@ -393,7 +396,7 @@ where
 }
 
 impl<'p> Program<'p> {
-    fn from_vm(vm: Vm, syscalls: Vec<BuiltinFn>) -> Self {
+    fn from_vm(vm: Vm<'p>, syscalls: Vec<BuiltinFn>) -> Self {
         let entry = vm.pc;
         Self {
             vm,
@@ -661,7 +664,7 @@ impl<'p> Program<'p> {
     }
 }
 
-fn compile<'i, A: Allocator + Clone>(
+fn compile<'i, A: Allocator + Clone + 'i>(
     config: &config::Config,
     input: &'i [u8],
     libs: &[&'i Pkg],
@@ -698,7 +701,7 @@ fn compile<'i, A: Allocator + Clone>(
         purple_garden_opt::ir(&mut ir, &scratch);
     }
 
-    let mut cc = bc::Cc::new_in(&scratch, alloc);
+    let mut cc = bc::Cc::new_in(&scratch, alloc.clone());
     let arena = cc
         .compile(config, &ir, PageAlloc {})
         .map_err(|msg| Diagnostic::new(msg, Span::new(0, 0)))?;
@@ -729,11 +732,14 @@ fn compile<'i, A: Allocator + Clone>(
             })
             .collect();
 
-    let (vm, syscalls, _debug, entry_native_idx) = cc.finalize(VmConfig {
-        backtrace: config.backtrace,
-        no_gc: config.no_gc,
-        stack_size: config.stack_size,
-    });
+    let (vm, syscalls, _debug, entry_native_idx) = cc.finalize(
+        VmConfig {
+            backtrace: config.backtrace,
+            no_gc: config.no_gc,
+            stack_size: config.stack_size,
+        },
+        alloc,
+    );
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let mut program = Program::from_vm(vm, syscalls).with_entry_native(entry_native);
     program.funcs = funcs;

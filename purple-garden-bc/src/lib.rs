@@ -1427,7 +1427,12 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
     /// Returns the vm, a list of syscalls, debug info, and the entry point to the native page, if
     /// jitted
-    pub fn finalize(self, config: VmConfig) -> (Vm, Vec<BuiltinFn>, DebugInfo, Option<u16>) {
+    /// The VM's GC takes its pages from `alloc`.
+    pub fn finalize<'vm>(
+        self,
+        config: VmConfig,
+        alloc: impl Allocator + 'vm,
+    ) -> (Vm<'vm>, Vec<BuiltinFn>, DebugInfo, Option<u16>) {
         let Cc {
             mut buf,
             globals,
@@ -1446,7 +1451,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         buf.push(Op::Halt);
         pc_to_span.push(0);
 
-        let mut vm = Vm::new(config);
+        let mut vm = Vm::new_in(config, alloc);
         // A native entry runs directly from its native page; a bytecode entry
         // from its own first op.
         vm.pc = entry_native_idx

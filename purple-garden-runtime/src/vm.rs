@@ -4,8 +4,13 @@ use crate::{
     op::{LookupTable, Op, SwitchKind, SwitchTable},
     string,
 };
-use purple_garden_allocators::stack::StackAlloc;
-use std::{alloc::Layout, ffi::c_void, mem::MaybeUninit};
+use purple_garden_allocators::{page::PageAlloc, stack::StackAlloc};
+use std::{
+    alloc::{AllocError, Allocator, Layout},
+    ffi::c_void,
+    mem::MaybeUninit,
+    ptr::NonNull,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct VmConfig {
@@ -31,7 +36,7 @@ pub const fn frames_in(mib: usize) -> usize {
     mib.saturating_mul(MIB) / size_of::<CallFrame>()
 }
 
-type CollectFn = fn(&mut Vm);
+type CollectFn<'vm> = fn(&mut Vm<'vm>);
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct CallFrame {
@@ -81,7 +86,7 @@ pub const NATIVE_STACK_LIMIT_OFFSET: usize = std::mem::offset_of!(Vm, native_sta
 
 #[repr(C)]
 #[derive(Debug)]
-pub struct Vm {
+pub struct Vm<'vm> {
     r: [Value; REGISTER_COUNT],
     pub pc: usize,
 
@@ -94,7 +99,7 @@ pub struct Vm {
     pub switch_tables: Vec<Box<SwitchTable>>,
     /// Owns the tables [`Op::Lookup`] points into.
     pub lookup_tables: Vec<Box<LookupTable>>,
-    pub gc: Gc,
+    pub gc: Gc<VmAlloc<'vm>>,
 
     /// Backing storage for string constants emitted by the compiler.
     pub const_pool: Box<[u8]>,
@@ -115,7 +120,7 @@ pub struct Vm {
 
     pub config: VmConfig,
     /// Called when allocation wants to run a collection pass.
-    collect_fn: CollectFn,
+    collect_fn: CollectFn<'vm>,
 }
 
 /// trap in the vm; return Err(<anomaly>) if expr == true
@@ -128,9 +133,70 @@ macro_rules! trap_if {
     };
 }
 
-impl Vm {
+/// The allocator a [`Vm`] was built with. Builtins and native code receive the
+/// VM as a pointer and cast it to one `Vm` type, so its allocator can't be a
+/// type parameter and is erased here instead. Only the GC's page refills go
+/// through it, never the bump allocation inside a page.
+pub struct VmAlloc<'vm>(Box<dyn Allocator + 'vm>);
+
+impl std::fmt::Debug for VmAlloc<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("VmAlloc")
+    }
+}
+
+unsafe impl Allocator for VmAlloc<'_> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        self.0.allocate(layout)
+    }
+
+    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        self.0.allocate_zeroed(layout)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        unsafe { self.0.deallocate(ptr, layout) }
+    }
+
+    unsafe fn grow(
+        &self,
+        ptr: NonNull<u8>,
+        old: Layout,
+        new: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        unsafe { self.0.grow(ptr, old, new) }
+    }
+
+    unsafe fn grow_zeroed(
+        &self,
+        ptr: NonNull<u8>,
+        old: Layout,
+        new: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        unsafe { self.0.grow_zeroed(ptr, old, new) }
+    }
+
+    unsafe fn shrink(
+        &self,
+        ptr: NonNull<u8>,
+        old: Layout,
+        new: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        unsafe { self.0.shrink(ptr, old, new) }
+    }
+}
+
+impl Vm<'static> {
     #[must_use]
     pub fn new(config: VmConfig) -> Self {
+        Self::new_in(config, PageAlloc {})
+    }
+}
+
+impl<'vm> Vm<'vm> {
+    /// The GC takes its pages from `alloc`.
+    #[must_use]
+    pub fn new_in(config: VmConfig, alloc: impl Allocator + 'vm) -> Self {
         // Zeroed pages come untouched from the OS, so only the depth a program
         // reaches becomes resident. All zero is a valid, empty CallFrame.
         let mut frames = unsafe {
@@ -153,7 +219,7 @@ impl Vm {
             globals: Vec::new(),
             switch_tables: Vec::new(),
             lookup_tables: Vec::new(),
-            gc: Gc::new(),
+            gc: Gc::new_in(VmAlloc(Box::new(alloc))),
             const_pool: Box::new([]),
             strings: string::StrTable::default(),
             backtrace: Vec::new(),
@@ -711,7 +777,7 @@ mod ops {
         SIDE_EFFECTS.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn run(mut bytecode: Vec<Op>) -> Vm {
+    fn run(mut bytecode: Vec<Op>) -> Vm<'static> {
         bytecode.push(Op::Halt);
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;
