@@ -26,7 +26,8 @@ pub struct Parser<'src, 'ast, 's, A: Arena, S: Allocator> {
     id: usize,
     cur: Token<'src>,
     roots: Vec<NodeId, &'s S>,
-    nodes: Vec<Node<'src, 'ast>, &'s S>,
+    /// Built in place in the arena, so [`Parser::finish`] hands it over without a copy.
+    nodes: Vec<Node<'src, 'ast>, &'ast A>,
     types: Vec<TypeExpr<'src, 'ast>, &'s S>,
     diagnostics: Vec<Diagnostic>,
     pending_docs: Vec<Token<'src>, &'s S>,
@@ -43,6 +44,10 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
     pub fn new(mut lex: Lexer<'src>, arena: &'ast A, scratch: &'s S) -> Self {
         let cur = lex.one();
         let diagnostics = std::mem::take(&mut lex.diagnostics);
+        // The examples have at most one node per 4 source bytes. Reserving more only costs
+        // address space, an arena chunk this large is mapped on its own and pages nobody writes
+        // never become resident.
+        let nodes = Vec::with_capacity_in(lex.input.len() / 4, arena);
         Self {
             cur,
             lex,
@@ -50,7 +55,7 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
             scratch,
             id: 0,
             roots: Vec::new_in(scratch),
-            nodes: Vec::new_in(scratch),
+            nodes,
             types: Vec::new_in(scratch),
             diagnostics,
             pending_docs: Vec::new_in(scratch),
@@ -128,7 +133,7 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
     fn finish(self) -> Ast<'src, 'ast> {
         Ast {
             roots: self.arena.alloc_slice(self.roots),
-            nodes: self.arena.alloc_slice(self.nodes),
+            nodes: self.nodes.leak(),
             types: self.arena.alloc_slice(self.types),
             values: self.id,
         }
