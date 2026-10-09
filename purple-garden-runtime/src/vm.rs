@@ -129,8 +129,12 @@ macro_rules! trap_if {
 impl Vm {
     #[must_use]
     pub fn new(config: VmConfig) -> Self {
-        let mut frames = vec![CallFrame::default(); frames_in(config.stack_size).saturating_add(1)]
-            .into_boxed_slice();
+        // Zeroed pages come untouched from the OS, so only the depth a program
+        // reaches becomes resident. All zero is a valid, empty CallFrame.
+        let mut frames = unsafe {
+            Box::<[CallFrame]>::new_zeroed_slice(frames_in(config.stack_size).saturating_add(1))
+                .assume_init()
+        };
         frames[0] = Self::root_frame();
         let collect = if config.no_gc {
             Self::collect_noop
