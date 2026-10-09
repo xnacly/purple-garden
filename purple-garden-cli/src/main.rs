@@ -208,7 +208,7 @@ fn pipeline<A: Allocator + Clone>(
         std::process::exit(1);
     }
 
-    let lower = Lower::new()
+    let lower = Lower::new_in(&scratch)
         .with_libs(libs)
         .with_stdlib(stdlib_packages(cli));
     let mut ir = match lower.ir_from_types(&ast, typecheck.types) {

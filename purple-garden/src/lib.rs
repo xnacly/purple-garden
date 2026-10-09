@@ -691,7 +691,7 @@ fn compile<'i, A: Allocator + Clone>(
         return Err(diagnostic);
     }
 
-    let mut ir = lower::Lower::new()
+    let mut ir = lower::Lower::new_in(&scratch)
         .with_libs(libs.to_vec())
         .with_stdlib(stdlib)
         .ir_from_types(&ast, typecheck.types)?;

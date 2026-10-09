@@ -5,8 +5,11 @@
 use std::{
     alloc::{Allocator, Global, Layout},
     collections::HashMap,
+    hash::RandomState,
     num,
 };
+
+type Map<K, V, S> = HashMap<K, V, RandomState, S>;
 
 use crate::typemap::TypeMap;
 use crate::{
@@ -38,46 +41,45 @@ fn align_up(value: usize, align: usize) -> usize {
     (value + align - 1) & !(align - 1)
 }
 
-#[derive(Default)]
-struct LowerCtx<'lower> {
+struct LowerCtx<'lower, S: Allocator> {
     /// current function
     func: Func<'lower>,
     /// current block
     block: Id,
     id_store: IdStore,
     /// maps ast variable names to ssa values
-    env: HashMap<&'lower str, Id>,
+    env: Map<&'lower str, Id, S>,
 }
 
-pub struct Lower<'lower, A: Allocator = Global> {
-    ctx: LowerCtx<'lower>,
+impl<S: Allocator> LowerCtx<'_, S> {
+    fn new_in(scratch: S) -> Self {
+        Self {
+            func: Func::default(),
+            block: Id::default(),
+            id_store: IdStore::default(),
+            env: Map::new_in(scratch),
+        }
+    }
+}
+
+type Overloads<'lower, S> = Map<&'lower str, Vec<&'lower pstd::Fn<'static>, S>, S>;
+
+/// Builds the IR, its working state lives in the scratch allocator `S`.
+pub struct Lower<'lower, A: Allocator = Global, S: Allocator + Clone = Global> {
+    scratch: S,
+    ctx: LowerCtx<'lower, S>,
     functions: Vec<Func<'lower>>,
-    func_name_to_id: HashMap<&'lower str, (Id, Option<ptype::Type<'lower>>)>,
+    func_name_to_id: Map<&'lower str, (Id, Option<ptype::Type<'lower>>), S>,
     types: TypeMap<'lower, A>,
-    packages: HashMap<
-        &'lower str,
-        (
-            &'lower Pkg,
-            HashMap<&'lower str, Vec<&'lower pstd::Fn<'static>>>,
-        ),
-    >,
-    pkg_cache: HashMap<&'lower str, Option<&'lower Pkg>>,
+    packages: Map<&'lower str, (&'lower Pkg, Overloads<'lower, S>), S>,
+    pkg_cache: Map<&'lower str, Option<&'lower Pkg>, S>,
     libs: Vec<&'lower Pkg>,
     stdlib: &'lower [purple_garden_runtime::Pkg],
 }
 
 impl Default for Lower<'_> {
     fn default() -> Self {
-        Self {
-            ctx: LowerCtx::default(),
-            functions: Vec::new(),
-            func_name_to_id: HashMap::new(),
-            types: TypeMap::default(),
-            packages: HashMap::new(),
-            pkg_cache: HashMap::new(),
-            libs: Vec::new(),
-            stdlib: pstd::STD,
-        }
+        Self::new_in(Global)
     }
 }
 
@@ -88,7 +90,24 @@ impl Lower<'_> {
     }
 }
 
-impl<'lower, A: Allocator> Lower<'lower, A> {
+impl<S: Allocator + Clone> Lower<'_, Global, S> {
+    #[must_use]
+    pub fn new_in(scratch: S) -> Self {
+        Self {
+            ctx: LowerCtx::new_in(scratch.clone()),
+            functions: Vec::new(),
+            func_name_to_id: Map::new_in(scratch.clone()),
+            types: TypeMap::default(),
+            packages: Map::new_in(scratch.clone()),
+            pkg_cache: Map::new_in(scratch.clone()),
+            libs: Vec::new(),
+            stdlib: pstd::STD,
+            scratch,
+        }
+    }
+}
+
+impl<'lower, A: Allocator, S: Allocator + Clone> Lower<'lower, A, S> {
     #[must_use]
     pub fn with_libs(mut self, libs: Vec<&'lower Pkg>) -> Self {
         self.libs = libs;
@@ -411,7 +430,8 @@ impl<'lower, A: Allocator> Lower<'lower, A> {
                 body,
                 ..
             } => {
-                let old_ctx = std::mem::take(&mut self.ctx);
+                let old_ctx =
+                    std::mem::replace(&mut self.ctx, LowerCtx::new_in(self.scratch.clone()));
 
                 let id = Id(self.functions.len() as u32 + 1);
                 let Type::Ident(ident_name) = name.t else {
@@ -597,9 +617,11 @@ impl<'lower, A: Allocator> Lower<'lower, A> {
 
                     // group specialisations under their group name, mirroring
                     // the typechecker's registration.
-                    let mut fns: HashMap<&str, Vec<&pstd::Fn>> = HashMap::new();
+                    let mut fns: Overloads<'lower, S> = Map::new_in(self.scratch.clone());
                     for f in pkg.fns {
-                        fns.entry(f.group_name()).or_default().push(f);
+                        fns.entry(f.group_name())
+                            .or_insert_with(|| Vec::new_in(self.scratch.clone()))
+                            .push(f);
                     }
                     self.packages.insert(pkg.name, (pkg, fns));
                 }
@@ -638,8 +660,8 @@ impl<'lower, A: Allocator> Lower<'lower, A> {
                 Some(dst)
             }
             Node::Match { cases, default, .. } => {
-                let mut check_blocks = Vec::with_capacity(cases.len());
-                let mut body_blocks = Vec::with_capacity(cases.len());
+                let mut check_blocks = Vec::with_capacity_in(cases.len(), self.scratch.clone());
+                let mut body_blocks = Vec::with_capacity_in(cases.len(), self.scratch.clone());
 
                 // The first check is lowered into the current block, so the
                 // match needs no jump into it.
@@ -847,6 +869,7 @@ impl<'lower, A: Allocator> Lower<'lower, A> {
         types: TypeMap<'lower, B>,
     ) -> Result<Vec<Func<'lower>>, Diagnostic> {
         Lower {
+            scratch: self.scratch,
             ctx: self.ctx,
             functions: self.functions,
             func_name_to_id: self.func_name_to_id,
