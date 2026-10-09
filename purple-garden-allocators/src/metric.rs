@@ -16,7 +16,9 @@ pub struct Metrics {
     pub peak: usize,
 }
 
-/// Forwards to `inner` and counts every call.
+/// Forwards to `inner` and counts every call. Blocks are handed out at exactly
+/// the requested size, so callers can't pick up the slack `inner` rounds up to
+/// and later free a size that was never counted.
 #[derive(Debug, Default)]
 pub struct MetricAlloc<A = PageAlloc> {
     inner: A,
@@ -74,13 +76,13 @@ unsafe impl<A: Allocator> Allocator for MetricAlloc<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let block = self.inner.allocate(layout)?;
         self.allocated(layout.size());
-        Ok(block)
+        Ok(NonNull::slice_from_raw_parts(block.cast(), layout.size()))
     }
 
     fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let block = self.inner.allocate_zeroed(layout)?;
         self.allocated(layout.size());
-        Ok(block)
+        Ok(NonNull::slice_from_raw_parts(block.cast(), layout.size()))
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
@@ -99,7 +101,7 @@ unsafe impl<A: Allocator> Allocator for MetricAlloc<A> {
     ) -> Result<NonNull<[u8]>, AllocError> {
         let block = unsafe { self.inner.grow(ptr, old, new) }?;
         self.resized(old.size(), new.size());
-        Ok(block)
+        Ok(NonNull::slice_from_raw_parts(block.cast(), new.size()))
     }
 
     unsafe fn grow_zeroed(
@@ -110,7 +112,7 @@ unsafe impl<A: Allocator> Allocator for MetricAlloc<A> {
     ) -> Result<NonNull<[u8]>, AllocError> {
         let block = unsafe { self.inner.grow_zeroed(ptr, old, new) }?;
         self.resized(old.size(), new.size());
-        Ok(block)
+        Ok(NonNull::slice_from_raw_parts(block.cast(), new.size()))
     }
 
     unsafe fn shrink(
@@ -121,7 +123,7 @@ unsafe impl<A: Allocator> Allocator for MetricAlloc<A> {
     ) -> Result<NonNull<[u8]>, AllocError> {
         let block = unsafe { self.inner.shrink(ptr, old, new) }?;
         self.resized(old.size(), new.size());
-        Ok(block)
+        Ok(NonNull::slice_from_raw_parts(block.cast(), new.size()))
     }
 }
 
@@ -161,6 +163,20 @@ mod tests {
         assert_eq!((m.live, m.peak), (50, 150));
         drop(b);
         assert_eq!(alloc.metrics().live, 0);
+    }
+
+    #[test]
+    fn rounded_up_blocks_still_balance() {
+        use std::collections::HashMap;
+        let alloc = MetricAlloc::new(PageAlloc {});
+        let mut map = HashMap::new_in(&alloc);
+        for i in 0..10_000u32 {
+            map.insert(i, i);
+        }
+        drop(map);
+        let m = alloc.metrics();
+        assert_eq!(m.live, 0);
+        assert!(m.peak < 1 << 20, "peak {} past what the map holds", m.peak);
     }
 
     #[test]
