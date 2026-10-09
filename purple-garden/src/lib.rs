@@ -699,7 +699,7 @@ fn compile<'i, A: Allocator + Clone>(
         purple_garden_opt::ir(&mut ir, &scratch);
     }
 
-    let mut cc = bc::Cc::new();
+    let mut cc = bc::Cc::new_in(&scratch);
     let arena = cc
         .compile(config, &ir)
         .map_err(|msg| Diagnostic::new(msg, Span::new(0, 0)))?;

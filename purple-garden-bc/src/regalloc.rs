@@ -1,4 +1,6 @@
 pub use purple_garden_ir::Location;
+use std::alloc::{Allocator, Global};
+
 use purple_garden_runtime as vm;
 
 #[derive(Clone, Debug)]
@@ -23,12 +25,12 @@ struct Interval {
 /// 3. For each interval:
 ///     - Remove active.end lt current.start
 ///     - Try allocating a register; if avail, otherwise spilled
-#[derive(Clone, Debug, Default)]
-pub struct Ralloc {
-    intervals: Vec<Interval>,
+#[derive(Clone, Debug)]
+pub struct Ralloc<S: Allocator = Global> {
+    intervals: Vec<Interval, S>,
     /// Per-SSA location, indexed by id. Entries for ids without a live
     /// interval stay [`Location::Unassigned`].
-    pub map: Vec<Location>,
+    pub map: Vec<Location, S>,
     /// Running active-set scratch buffer for [`Ralloc::allocate`]. Hoisted
     /// onto the struct so consecutive function compiles reuse the same
     /// allocation.
@@ -37,10 +39,24 @@ pub struct Ralloc {
     /// reads. Cuts per-allocation clones from 24 bytes (full `Interval`)
     /// to 5 bytes and skips the `interval.clone()` previously needed on
     /// every successful allocation.
-    active: Vec<(u32, u8)>,
+    active: Vec<(u32, u8), S>,
 }
 
-impl Ralloc {
+impl Default for Ralloc {
+    fn default() -> Self {
+        Self::new_in(Global)
+    }
+}
+
+impl<S: Allocator + Clone> Ralloc<S> {
+    pub fn new_in(scratch: S) -> Self {
+        Self {
+            intervals: Vec::new_in(scratch.clone()),
+            map: Vec::new_in(scratch.clone()),
+            active: Vec::new_in(scratch),
+        }
+    }
+
     /// Refill `intervals`/`map` for a new function and run the linear scan.
     /// Reuses the existing Vec capacities; no allocation when the new
     /// function fits within the previous high-water mark.

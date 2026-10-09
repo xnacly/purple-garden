@@ -1,4 +1,9 @@
-use std::{collections::HashMap, ptr::NonNull};
+#![feature(allocator_api)]
+use std::{
+    alloc::{Allocator, Global},
+    collections::HashMap,
+    ptr::NonNull,
+};
 
 pub mod dis;
 mod intern;
@@ -58,8 +63,10 @@ impl From<&CcFunc<'_>> for CcCallTarget {
     }
 }
 
+/// Per-function working state lives in the scratch allocator `S`, everything handed to the
+/// [`vm::Vm`] by [`Cc::finalize`] does not.
 #[derive(Debug, Clone)]
-pub struct Cc<'cc> {
+pub struct Cc<'cc, S: Allocator + Clone = Global> {
     pub buf: Vec<Op>,
     pub globals: Interner<Const<'cc>>,
     pub std_fns: Interner<BuiltinFn>,
@@ -85,7 +92,7 @@ pub struct Cc<'cc> {
     /// after lowering. `u16::MAX` marks blocks that weren't emitted (e.g.,
     /// tombstoned blocks). Block ids are dense per-function so a Vec
     /// indexed by id beats a `HashMap` on both alloc cost and lookup speed.
-    block_map: Vec<u16>,
+    block_map: Vec<u16, S>,
     /// Tables of the emitted [`Op::Switch`]es. Targets are block ids until the
     /// end of [`Cc::cc`] maps them to pcs, like jump targets.
     pub switch_tables: Vec<Box<SwitchTable>>,
@@ -93,7 +100,7 @@ pub struct Cc<'cc> {
     pub lookup_tables: Vec<Box<LookupTable>>,
     /// Entry points of the functions compiled natively, for native callers.
     native_fns: HashMap<ir::Id, BuiltinFn>,
-    regalloc: Ralloc,
+    regalloc: Ralloc<S>,
     /// Set once per IR Instr / Terminator before lowering, consumed by
     /// every `emit` call within that lowering. Saves threading a span
     /// argument through every `self.buf.push(op)` call site.
@@ -103,25 +110,25 @@ pub struct Cc<'cc> {
     /// duration of one compile, then put back with their grown capacity;
     /// so after the first few functions warm the buffers, subsequent
     /// `cc()` calls never re-allocate.
-    live_set: Vec<(u32, u32)>,
-    arg_hints: Vec<Option<u8>>,
+    live_set: Vec<(u32, u32), S>,
+    arg_hints: Vec<Option<u8>, S>,
     /// General-purpose `u8` scratch used by prologue/epilogue and call-site
     /// spills. Callers fill it, then immediately consume it via the
     /// `pack_push`/`pack_pop` free functions; it is never live across a
     /// call to another `Cc` method.
-    scratch: Vec<u8>,
+    scratch: Vec<u8, S>,
     /// Reusable `(src, dst)` buffer for the parallel-move resolver in
     /// [`Cc::emit_arg_shuffle`]. Replaces the per-call `todo: Vec<(u8,u8)>`
     /// allocation; taken out of `self` for the duration of each shuffle
     /// and restored on exit so the capacity survives across calls.
-    scratch_pairs: Vec<(u8, u8)>,
+    scratch_pairs: Vec<(u8, u8), S>,
     /// Registers at or above the arg zone holding values live across the
     /// call being lowered. The callee-saved convention leaves them in place
     /// (no push), so [`Cc::emit_arg_shuffle`] must never borrow one as its
     /// cycle-breaking scratch. Filled by the `Call`/`Sys` lowering alongside
     /// the spill list in `scratch`; a `Tail` passes an empty slice since
     /// nothing outlives it.
-    scratch_live: Vec<u8>,
+    scratch_live: Vec<u8, S>,
     /// Callee-saved range for the function currently being compiled.
     /// Set at the top of [`Cc::cc`] and read by [`Cc::emit_arg_shuffle`]
     /// to find a free scratch register for cycle breaking.
@@ -131,12 +138,17 @@ pub struct Cc<'cc> {
     /// `live_next` and `live_active` this keeps the set of values live
     /// across a call up to date as calls are lowered in increasing `pos`,
     /// see [`Cc::advance_live_across`].
-    live_order: Vec<u32>,
+    live_order: Vec<u32, S>,
     live_next: usize,
-    live_active: Vec<u32>,
+    live_active: Vec<u32, S>,
     /// Reusable native-code buffer for the JIT, refilled per function. Empty
     /// and untouched when `--no-jit` is set.
-    jit: purple_garden_jit::Jit,
+    jit: purple_garden_jit::Jit<S>,
+}
+
+fn take<T, S: Allocator + Clone>(v: &mut Vec<T, S>) -> Vec<T, S> {
+    let scratch = v.allocator().clone();
+    std::mem::replace(v, Vec::new_in(scratch))
 }
 
 /// Emit batched Push ops for `regs` in order, packing into Push3/Push2/Push.
@@ -252,9 +264,16 @@ fn pack_pop_pairs_rev(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs:
     }
 }
 
-impl<'cc> Cc<'cc> {
+impl Cc<'_> {
     #[must_use]
     pub fn new() -> Self {
+        Self::new_in(Global)
+    }
+}
+
+impl<'cc, S: Allocator + Clone> Cc<'cc, S> {
+    #[must_use]
+    pub fn new_in(scratch: S) -> Self {
         Self {
             buf: Vec::with_capacity(64),
             pc_to_span: Vec::with_capacity(64),
@@ -265,23 +284,23 @@ impl<'cc> Cc<'cc> {
             entry_native_idx: None,
             const_pool: Box::new([]),
             str_values: Vec::new(),
-            block_map: Vec::new(),
+            block_map: Vec::new_in(scratch.clone()),
             switch_tables: Vec::new(),
             lookup_tables: Vec::new(),
             native_fns: HashMap::new(),
-            regalloc: Ralloc::default(),
+            regalloc: Ralloc::new_in(scratch.clone()),
             cur_span: 0,
-            live_set: Vec::new(),
-            arg_hints: Vec::new(),
-            scratch: Vec::new(),
-            scratch_pairs: Vec::new(),
-            scratch_live: Vec::new(),
+            live_set: Vec::new_in(scratch.clone()),
+            arg_hints: Vec::new_in(scratch.clone()),
+            scratch: Vec::new_in(scratch.clone()),
+            scratch_pairs: Vec::new_in(scratch.clone()),
+            scratch_live: Vec::new_in(scratch.clone()),
             cur_lo: 0,
             cur_max_reg: 0,
-            live_order: Vec::new(),
+            live_order: Vec::new_in(scratch.clone()),
             live_next: 0,
-            live_active: Vec::new(),
-            jit: purple_garden_jit::Jit::new(),
+            live_active: Vec::new_in(scratch.clone()),
+            jit: purple_garden_jit::Jit::new_in(scratch),
         }
     }
 
@@ -326,7 +345,7 @@ impl<'cc> Cc<'cc> {
         // Native code embeds string constants by address, so the pool is laid
         // out before any function is compiled, entries padded so each header
         // stays aligned.
-        let mut strs: Vec<(u32, &'cc str)> = Vec::new();
+        let mut strs: Vec<(u32, &'cc str), S> = Vec::new_in(self.live_set.allocator().clone());
         for func in ir {
             for block in func.blocks.iter().filter(|b| !b.tombstone) {
                 for instr in &block.instructions {
@@ -409,8 +428,8 @@ impl<'cc> Cc<'cc> {
         //
         // Put them back before returning so the next cc() reuses the same
         // capacity; after a few warm functions, this path is alloc-free.
-        let mut live_set = std::mem::take(&mut self.live_set);
-        let mut arg_hints = std::mem::take(&mut self.arg_hints);
+        let mut live_set = take(&mut self.live_set);
+        let mut arg_hints = take(&mut self.arg_hints);
         fun.live_set_into(&mut live_set);
 
         // Native functions are injected as syscalls. The entry function can
@@ -626,7 +645,7 @@ impl<'cc> Cc<'cc> {
     /// live across this call. They are not pushed (the callee preserves them),
     /// so they are never eligible as the cycle-breaking scratch.
     fn emit_arg_shuffle(&mut self, args: &[Id], live_above: &[u8]) {
-        let mut todo = std::mem::take(&mut self.scratch_pairs);
+        let mut todo = take(&mut self.scratch_pairs);
         todo.clear();
         todo.extend(
             args.iter()
@@ -1201,7 +1220,7 @@ impl<'cc> Cc<'cc> {
                     &self.scratch,
                 );
 
-                let live_above = std::mem::take(&mut self.scratch_live);
+                let live_above = take(&mut self.scratch_live);
                 self.emit_arg_shuffle(args, &live_above);
                 self.scratch_live = live_above;
 
@@ -1252,7 +1271,7 @@ impl<'cc> Cc<'cc> {
                     &self.scratch,
                 );
 
-                let live_above = std::mem::take(&mut self.scratch_live);
+                let live_above = take(&mut self.scratch_live);
                 self.emit_arg_shuffle(args, &live_above);
                 self.scratch_live = live_above;
 
@@ -1350,7 +1369,8 @@ impl<'cc> Cc<'cc> {
 
         // bc.len() fits in u16 since Jmp.target is u16; halve the remap
         // table's cache footprint vs Vec<u32>.
-        let mut old_to_new = vec![0u16; bc.len() + 1];
+        let mut old_to_new = Vec::with_capacity_in(bc.len() + 1, self.live_set.allocator().clone());
+        old_to_new.resize(bc.len() + 1, 0u16);
         let mut new_pc: u16 = 0;
         for (i, op) in bc.iter().enumerate() {
             old_to_new[i] = new_pc;
