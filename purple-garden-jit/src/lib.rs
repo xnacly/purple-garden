@@ -25,6 +25,7 @@
 //! The architecture backend owns the supported IR subset. This crate should
 //! therefore be read as a conservative native lowering path, not as a second
 //! semantic implementation of the language.
+#![feature(allocator_api)]
 
 #[cfg(not(all(
     any(target_os = "linux", target_os = "macos"),
@@ -44,15 +45,24 @@ mod regalloc;
 pub use mem::CodeArena;
 use purple_garden_ir as ir;
 use purple_garden_runtime::{BuiltinFn, Value};
-use std::collections::HashMap;
+use std::{
+    alloc::{Allocator, Global},
+    collections::HashMap,
+};
 
-/// Reusable JIT codegen state.
-#[derive(Debug, Default, Clone)]
-pub struct Jit {
-    code: Vec<u8>,
-    liveness: Vec<(u32, u32)>,
-    regalloc: regalloc::Xralloc2,
-    scratch: arch::Scratch,
+/// Reusable JIT codegen state, every buffer lives in the scratch allocator `S`.
+#[derive(Debug, Clone)]
+pub struct Jit<S: Allocator + Clone = Global> {
+    code: Vec<u8, S>,
+    liveness: Vec<(u32, u32), S>,
+    regalloc: regalloc::Xralloc2<S>,
+    scratch: arch::Scratch<S>,
+}
+
+impl Default for Jit {
+    fn default() -> Self {
+        Self::new_in(Global)
+    }
 }
 
 impl Jit {
@@ -60,12 +70,25 @@ impl Jit {
     pub fn new() -> Self {
         Self::default()
     }
+}
+
+impl<S: Allocator + Clone> Jit<S> {
+    #[must_use]
+    pub fn new_in(scratch: S) -> Self {
+        Self {
+            code: Vec::new_in(scratch.clone()),
+            liveness: Vec::new_in(scratch.clone()),
+            regalloc: regalloc::Xralloc2::new_in(scratch.clone()),
+            scratch: arch::Scratch::new_in(scratch),
+        }
+    }
 
     /// Lower and encode `func`, returning `None` when unsupported.
     pub fn compile_func(&mut self, func: &ir::Func<'_>) -> Option<()> {
         self.liveness.clear();
         func.live_set_into(&mut self.liveness);
-        let liveness = std::mem::take(&mut self.liveness);
+        let scratch = self.liveness.allocator().clone();
+        let liveness = std::mem::replace(&mut self.liveness, Vec::new_in(scratch));
         let result =
             self.compile_func_with_liveness(func, &liveness, &HashMap::new(), &[], &HashMap::new());
         self.liveness = liveness;

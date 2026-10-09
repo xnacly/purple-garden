@@ -24,7 +24,7 @@ pub mod constant;
 mod display;
 pub mod ptype;
 
-use std::alloc::Layout;
+use std::alloc::{Allocator, Layout};
 
 pub use crate::constant::Const;
 use crate::ptype::Type;
@@ -519,17 +519,17 @@ impl Func<'_> {
     ///
     /// Writes into `out`, clearing first. Lets the caller reuse a buffer across function compiles
     /// so we don't allocate fresh per `cc()`.
-    pub fn live_set_into(&self, out: &mut Vec<(u32, u32)>) {
+    pub fn live_set_into<A: Allocator>(&self, out: &mut Vec<(u32, u32), A>) {
         const UNSET: (u32, u32) = (u32::MAX, 0);
 
-        fn ensure(v: &mut Vec<(u32, u32)>, id: u32) {
+        fn ensure<A: Allocator>(v: &mut Vec<(u32, u32), A>, id: u32) {
             let idx = id as usize;
             if idx >= v.len() {
                 v.resize(idx + 1, UNSET);
             }
         }
 
-        fn define(intervals: &mut Vec<(u32, u32)>, id: Id, pos: u32) {
+        fn define<A: Allocator>(intervals: &mut Vec<(u32, u32), A>, id: Id, pos: u32) {
             ensure(intervals, id.0);
             let e = &mut intervals[id.0 as usize];
             if e.0 == u32::MAX {
@@ -540,7 +540,7 @@ impl Func<'_> {
             }
         }
 
-        fn use_value(intervals: &mut Vec<(u32, u32)>, id: Id, pos: u32) {
+        fn use_value<A: Allocator>(intervals: &mut Vec<(u32, u32), A>, id: Id, pos: u32) {
             ensure(intervals, id.0);
             let e = &mut intervals[id.0 as usize];
             if e.0 == u32::MAX {
@@ -676,8 +676,8 @@ impl Func<'_> {
     /// Soft: the allocator honors the hint only if the preferred register
     /// is free when this interval is allocated. If multiple call sites
     /// hint the same SSA id to different registers, first hint wins.
-    pub fn arg_hints_into(&self, hints: &mut Vec<Option<u8>>) {
-        fn ensure(v: &mut Vec<Option<u8>>, id: u32) {
+    pub fn arg_hints_into<A: Allocator>(&self, hints: &mut Vec<Option<u8>, A>) {
+        fn ensure<A: Allocator>(v: &mut Vec<Option<u8>, A>, id: u32) {
             let idx = id as usize;
             if idx >= v.len() {
                 v.resize(idx + 1, None);
@@ -685,7 +685,7 @@ impl Func<'_> {
         }
 
         // First-hint-wins: skip if already set.
-        fn put(v: &mut Vec<Option<u8>>, id: Id, reg: u8) {
+        fn put<A: Allocator>(v: &mut Vec<Option<u8>, A>, id: Id, reg: u8) {
             ensure(v, id.0);
             let e = &mut v[id.0 as usize];
             if e.is_none() {
@@ -696,7 +696,7 @@ impl Func<'_> {
         // Overwrite unconditionally; used for entry-block params so they
         // beat any subsequent inner-call hint and stay pinned to the
         // calling convention's r0..r{N-1}.
-        fn put_force(v: &mut Vec<Option<u8>>, id: Id, reg: u8) {
+        fn put_force<A: Allocator>(v: &mut Vec<Option<u8>, A>, id: Id, reg: u8) {
             ensure(v, id.0);
             v[id.0 as usize] = Some(reg);
         }

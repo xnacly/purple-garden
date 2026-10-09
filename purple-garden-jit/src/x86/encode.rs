@@ -11,7 +11,7 @@
 //! prefix (`REX.R` for the ModRM `reg` field, `REX.B` for the ModRM `r/m`
 //! field, or opcode low bits for `movabs`).
 
-use std::fmt;
+use std::{alloc::Allocator, fmt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Reg(pub u8);
@@ -69,7 +69,7 @@ impl Cond {
 
 /// Emit a near jump with a zero rel32, returning the displacement's offset
 /// for [`patch_rel32`].
-pub fn jump(code: &mut Vec<u8>, cond: Cond) -> usize {
+pub fn jump<A: Allocator>(code: &mut Vec<u8, A>, cond: Cond) -> usize {
     match cond {
         Cond::Always => code.push(0xe9),
         Cond::Zero => code.extend_from_slice(&[0x0f, 0x84]),
@@ -262,7 +262,7 @@ pub enum Insn {
 
 impl Insn {
     /// Append this instruction's x86-64 machine-code bytes to `code`.
-    pub fn encode(self, code: &mut Vec<u8>) {
+    pub fn encode<A: Allocator>(self, code: &mut Vec<u8, A>) {
         match self {
             Insn::Ret => code.push(0xc3),
             Insn::LoadSlot { dst, slot } => mov_slot(code, 0x8b, dst.0, slot),
@@ -484,7 +484,7 @@ fn modrm(reg: u8, rm: u8) -> u8 {
 /// - `mov/add/sub r/m64, r64`: `rm` is dst, `reg` is src.
 /// - `imul r64, r/m64`: `reg` is dst, `rm` is src.
 /// - `test r/m64, r64`: both are sources.
-fn reg_reg(code: &mut Vec<u8>, opcode: u8, reg: u8, rm: u8) {
+fn reg_reg<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, rm: u8) {
     code.extend_from_slice(&[rex(reg, rm), opcode, modrm(reg, rm)]);
 }
 
@@ -493,7 +493,7 @@ fn reg_reg(code: &mut Vec<u8>, opcode: u8, reg: u8, rm: u8) {
 /// The `/digit` is encoded in ModRM.reg and selects the operation:
 /// `/0 add`, `/4 and`, `/5 sub`, `/7 cmp`. The actual destination register is
 /// ModRM.r/m.
-fn reg_imm(code: &mut Vec<u8>, digit: u8, rm: u8, imm: i32) {
+fn reg_imm<A: Allocator>(code: &mut Vec<u8, A>, digit: u8, rm: u8, imm: i32) {
     code.push(rex(0, rm));
     code.push(0x81);
     code.push(modrm(digit, rm));
@@ -513,7 +513,7 @@ fn reg_imm(code: &mut Vec<u8>, digit: u8, rm: u8, imm: i32) {
 ///
 /// This is why the lowering rejects more than 32 params: `slot*8`
 /// must fit in a signed 8-bit displacement for this compact addressing form.
-fn mov_slot(code: &mut Vec<u8>, opcode: u8, reg: u8, slot: u8) {
+fn mov_slot<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, slot: u8) {
     // ModRM mod=01 (disp8), reg field = GPR, rm = rdi.
     let m = 0x40 | ((reg & 7) << 3) | RDI.0;
     code.extend_from_slice(&[rex(reg, RDI.0), opcode, m, slot * 8]);
@@ -527,7 +527,7 @@ fn mov_slot(code: &mut Vec<u8>, opcode: u8, reg: u8, slot: u8) {
 /// This helper is intended for record payload access. IR offsets are already
 /// byte offsets, unlike VM register slots, so callers pass the offset through
 /// unchanged.
-fn mem_disp(code: &mut Vec<u8>, opcode: u8, reg: u8, base: u8, offset: u32) {
+fn mem_disp<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, base: u8, offset: u32) {
     let disp8 = u8::try_from(offset)
         .ok()
         .filter(|offset| *offset <= i8::MAX as u8);
@@ -552,7 +552,7 @@ fn mem_disp(code: &mut Vec<u8>, opcode: u8, reg: u8, base: u8, offset: u32) {
 /// follows. The index register's high bit is REX.X, which [`rex`] doesn't set.
 /// A base with low bits 101 (rbp/r13) and mod=00 would mean "no base, disp32",
 /// so those take mod=01 with a zero disp8.
-fn scaled(code: &mut Vec<u8>, opcode: u8, scale: u8, dst: Reg, base: Reg, index: Reg) {
+fn scaled<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, scale: u8, dst: Reg, base: Reg, index: Reg) {
     let rex = rex(dst.0, base.0) | (u8::from(index.0 >= 8) << 1);
     let mode = if base.0 & 7 == 0b101 { 0x40 } else { 0x00 };
     let sib = (scale << 6) | ((index.0 & 7) << 3) | (base.0 & 7);
@@ -562,7 +562,7 @@ fn scaled(code: &mut Vec<u8>, opcode: u8, scale: u8, dst: Reg, base: Reg, index:
     }
 }
 
-fn setcc(code: &mut Vec<u8>, opcode: u8, dst: Reg) {
+fn setcc<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, dst: Reg) {
     code.push(0x40 | u8::from(dst.0 >= 8));
     code.extend_from_slice(&[0x0f, opcode, modrm(0, dst.0)]);
 }

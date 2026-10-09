@@ -9,7 +9,7 @@
 
 mod encode;
 
-use std::collections::HashMap;
+use std::{alloc::Allocator, collections::HashMap};
 
 use crate::regalloc::Xralloc2;
 use encode::{
@@ -52,15 +52,15 @@ const CALL_STACK: i32 = 16;
 
 /// Compile one IR function into x86-64 machine code, returning `None` if unsupported constructs are
 /// included
-pub fn compile_func<'ir>(
+pub fn compile_func<'ir, S: Allocator + Clone>(
     func: &ir::Func<'ir>,
-    out: &mut Vec<u8>,
+    out: &mut Vec<u8, S>,
     liveness: &[(u32, u32)],
     globals: &HashMap<ir::Const<'ir>, u32>,
     strings: &[Value],
     natives: &HashMap<ir::Id, BuiltinFn>,
-    ra: &mut Xralloc2,
-    buffers: &mut Scratch,
+    ra: &mut Xralloc2<S>,
+    buffers: &mut Scratch<S>,
 ) -> Option<()> {
     if func.params.len() > 32 {
         skip!(
@@ -185,16 +185,29 @@ struct Patch {
 }
 
 /// Reusable lowering allocation storage
-#[derive(Debug, Default, Clone)]
-pub struct Scratch {
-    body: Vec<u8>,
-    block_offsets: Vec<usize>,
-    patches: Vec<Patch>,
-    move_pairs: Vec<(Reg, Reg)>,
+#[derive(Debug, Clone)]
+pub struct Scratch<S: Allocator> {
+    body: Vec<u8, S>,
+    block_offsets: Vec<usize, S>,
+    patches: Vec<Patch, S>,
+    move_pairs: Vec<(Reg, Reg), S>,
     /// `(reg, copy)` pairs preserved across a clobbering instruction.
-    saves: Vec<(Reg, Reg)>,
+    saves: Vec<(Reg, Reg), S>,
     /// Body offsets of the rel32s that address the function's own start.
-    self_refs: Vec<usize>,
+    self_refs: Vec<usize, S>,
+}
+
+impl<S: Allocator + Clone> Scratch<S> {
+    pub fn new_in(scratch: S) -> Self {
+        Self {
+            body: Vec::new_in(scratch.clone()),
+            block_offsets: Vec::new_in(scratch.clone()),
+            patches: Vec::new_in(scratch.clone()),
+            move_pairs: Vec::new_in(scratch.clone()),
+            saves: Vec::new_in(scratch.clone()),
+            self_refs: Vec::new_in(scratch),
+        }
+    }
 }
 
 /// Target of a native call.
@@ -247,7 +260,7 @@ macro_rules! bail {
 /// Registers come from [`Xralloc2`] the first time a value is touched and stay
 /// fixed for the value's whole liveness interval, so every CFG edge agrees on
 /// where a value lives.
-struct Lowering<'a, 'ir> {
+struct Lowering<'a, 'ir, S: Allocator + Clone> {
     func: &'a ir::Func<'ir>,
     liveness: &'a [(u32, u32)],
     /// `vm.globals` slot of each constant.
@@ -256,8 +269,8 @@ struct Lowering<'a, 'ir> {
     strings: &'a [Value],
     /// Entry points of the functions already compiled natively.
     natives: &'a HashMap<ir::Id, BuiltinFn>,
-    ra: &'a mut Xralloc2,
-    out: &'a mut Vec<u8>,
+    ra: &'a mut Xralloc2<S>,
+    out: &'a mut Vec<u8, S>,
     entry: ir::Id,
     /// Walks in lockstep with [`ir::Func::live_set_into`]: two units per block
     /// header, instruction and terminator, uses on `pos`, defs on `pos + 1`.
@@ -267,25 +280,25 @@ struct Lowering<'a, 'ir> {
     unsupported: bool,
     /// `block_offsets[block_id]` is the body offset of the block's first byte,
     /// `usize::MAX` for blocks not emitted.
-    block_offsets: &'a mut Vec<usize>,
-    patches: &'a mut Vec<Patch>,
+    block_offsets: &'a mut Vec<usize, S>,
+    patches: &'a mut Vec<Patch, S>,
     /// Reusable `(src, dst)` buffer for the parallel-move resolver in
     /// [`Lowering::edge_moves`].
-    move_pairs: &'a mut Vec<(Reg, Reg)>,
+    move_pairs: &'a mut Vec<(Reg, Reg), S>,
     /// Reusable `(reg, copy)` buffer of [`Lowering::save_clobbered`].
-    saves: &'a mut Vec<(Reg, Reg)>,
-    self_refs: &'a mut Vec<usize>,
+    saves: &'a mut Vec<(Reg, Reg), S>,
+    self_refs: &'a mut Vec<usize, S>,
 }
 
-impl<'a, 'ir> Lowering<'a, 'ir> {
+impl<'a, 'ir, S: Allocator + Clone> Lowering<'a, 'ir, S> {
     fn new(
         func: &'a ir::Func<'ir>,
         liveness: &'a [(u32, u32)],
         globals: &'a HashMap<ir::Const<'ir>, u32>,
         strings: &'a [Value],
         natives: &'a HashMap<ir::Id, BuiltinFn>,
-        ra: &'a mut Xralloc2,
-        buffers: &'a mut Scratch,
+        ra: &'a mut Xralloc2<S>,
+        buffers: &'a mut Scratch<S>,
         entry: ir::Id,
     ) -> Self {
         let Scratch {
@@ -319,6 +332,10 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
             saves,
             self_refs,
         }
+    }
+
+    fn scratch(&self) -> S {
+        self.out.allocator().clone()
     }
 
     /// Emit the body, ending where the epilogue is appended. Returns whether
@@ -633,7 +650,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                     ir::Const::Str(_) => string::ALIGN as i64,
                     _ => 1,
                 };
-                let mut values = Vec::with_capacity(entries.len() * 2 + 1);
+                let mut values = Vec::with_capacity_in(entries.len() * 2 + 1, self.scratch());
                 for c in entries.iter().flat_map(|(k, v)| [k, v]).chain([default]) {
                     let value = match c {
                         ir::Const::Str(_) => {
@@ -652,10 +669,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                     values.push(value.0);
                 }
                 let default = values.pop().unwrap();
-                let pairs: Vec<(i64, u64)> = values
-                    .chunks(2)
-                    .map(|kv| (kv[0] as i64, kv[1]))
-                    .collect();
+                let mut pairs = Vec::with_capacity_in(values.len() / 2, self.scratch());
+                pairs.extend(values.chunks(2).map(|kv| (kv[0] as i64, kv[1])));
                 let first = pairs.iter().map(|&(key, _)| key).min().unwrap();
                 let slot = |key: i64| ((key - first) / step) as usize;
                 let len = pairs.iter().map(|&(key, _)| slot(key)).max().unwrap() + 1;
@@ -704,7 +719,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 }
                 let table = self.out.len();
                 patch_rel32(self.out, lea, lea + 4, table).expect("table follows the lea");
-                let mut slots = vec![default; len];
+                let mut slots = Vec::with_capacity_in(len, self.scratch());
+                slots.resize(len, default);
                 for &(key, value) in &pairs {
                     slots[slot(key)] = value;
                 }
@@ -928,7 +944,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
                 }
                 let table = self.out.len();
                 patch_rel32(self.out, lea, lea + 4, table).expect("table follows the lea");
-                let mut targets = vec![default.0; len];
+                let mut targets = Vec::with_capacity_in(len, self.scratch());
+                targets.resize(len, default.0);
                 for &(key, target) in &keys {
                     targets[slot(key)] = target;
                 }
@@ -982,7 +999,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     /// c->a), park one head in the scratch register and walk the cycle.
     fn edge_moves(&mut self, src: &[ir::Id], dst: &[ir::Id], at: u32) {
         debug_assert_eq!(src.len(), dst.len(), "edge arity matches target params");
-        let mut todo = std::mem::take(self.move_pairs);
+        let mut todo = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
         todo.clear();
         for (&s, &d) in src.iter().zip(dst) {
             let s = self.ensure_register(s);
@@ -1029,8 +1046,8 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
     /// registers; [`Lowering::restore`] copies them back. Runs before the
     /// instruction's dst is assigned, so neither a copy nor dst can take an
     /// operand register the instruction still reads.
-    fn save_clobbered(&mut self, clobbers: &[Reg]) -> Vec<(Reg, Reg)> {
-        let mut saves = std::mem::take(self.saves);
+    fn save_clobbered(&mut self, clobbers: &[Reg]) -> Vec<(Reg, Reg), S> {
+        let mut saves = std::mem::replace(self.saves, Vec::new_in(self.scratch()));
         saves.clear();
         saves.extend(
             self.ra
@@ -1058,7 +1075,7 @@ impl<'a, 'ir> Lowering<'a, 'ir> {
         saves
     }
 
-    fn restore(&mut self, saves: Vec<(Reg, Reg)>) {
+    fn restore(&mut self, saves: Vec<(Reg, Reg), S>) {
         for &(reg, copy) in &saves {
             self.emit(Insn::Mov {
                 dst: reg,
