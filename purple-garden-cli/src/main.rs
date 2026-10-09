@@ -157,8 +157,10 @@ fn pipeline<A: Pages + Clone>(
     let conf = &cli.config;
 
     let arena = BumpAlloc::new_in(allocs.parse.clone());
-    let scratch = BumpAlloc::new_in(allocs.scratch);
+    // Reset after every phase, so the next one reuses its already touched pages.
+    let mut scratch = BumpAlloc::new_in(allocs.scratch);
     let parse = Parser::new(Lexer::new(source), &arena, &scratch).parse_collect();
+    scratch.reset();
     let purple_garden_frontend::parser::ParseOutput {
         ast,
         diagnostics: parse_diagnostics,
@@ -184,6 +186,7 @@ fn pipeline<A: Pages + Clone>(
         .with_libs(libs.clone())
         .with_stdlib(stdlib_packages(cli))
         .check();
+    scratch.reset();
     let has_type_errors = !typecheck.diagnostics.is_empty();
 
     if cli.types > 0 {
@@ -216,10 +219,12 @@ fn pipeline<A: Pages + Clone>(
         }
     };
 
+    scratch.reset();
     purple_garden_shared::trace!("[main] Lowered AST to IR");
 
     if conf.opt >= 1 {
         purple_garden_opt::ir(&mut ir, &scratch);
+        scratch.reset();
     }
 
     if cli.ir > 0 {

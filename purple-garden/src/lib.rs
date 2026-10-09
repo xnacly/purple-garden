@@ -673,8 +673,10 @@ fn compile<'i, A: Allocator + Clone + 'i>(
     alloc: A,
 ) -> Result<Program<'i>, Diagnostic> {
     let arena = BumpAlloc::new_in(alloc.clone());
-    let scratch = BumpAlloc::new_in(alloc.clone());
+    // Reset after every phase, so the next one reuses its already touched pages.
+    let mut scratch = BumpAlloc::new_in(alloc.clone());
     let parse = parser::Parser::new(lex::Lexer::new(input), &arena, &scratch).parse_collect();
+    scratch.reset();
     if let Some(diagnostic) = parse.diagnostics.into_iter().next() {
         return Err(diagnostic);
     }
@@ -689,6 +691,7 @@ fn compile<'i, A: Allocator + Clone + 'i>(
         .with_libs(libs.to_vec())
         .with_stdlib(stdlib)
         .check();
+    scratch.reset();
     if let Some(diagnostic) = typecheck.diagnostics.into_iter().next() {
         return Err(diagnostic);
     }
@@ -697,8 +700,10 @@ fn compile<'i, A: Allocator + Clone + 'i>(
         .with_libs(libs.to_vec())
         .with_stdlib(stdlib)
         .ir_from_types(&ast, typecheck.types)?;
+    scratch.reset();
     if config.opt >= 1 {
         purple_garden_opt::ir(&mut ir, &scratch);
+        scratch.reset();
     }
 
     let mut cc = bc::Cc::new_in(&scratch, alloc.clone());
