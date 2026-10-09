@@ -1,13 +1,17 @@
+use std::alloc::Allocator;
+
 use purple_garden_ir as ir;
 
 /// Rewrite `jmp b_join(v); b_join(p): ret p` as a direct `ret v` in the
 /// predecessor. Tombstones the join when every predecessor is inlined.
 /// Lets each arm of an if/match get its own Return, so the regalloc can
 /// place the result in r0 instead of routing through a join-block param.
-pub fn ret_inline(fun: &mut ir::Func) {
-    let mut rewrites: Vec<(usize, ir::Id, u32)> = Vec::new();
-    let mut pred_counts = super::predecessor_counts(fun);
-    let mut touched_targets = vec![false; fun.blocks.len()];
+pub fn ret_inline<S: Allocator>(fun: &mut ir::Func, scratch: &mut super::Scratch<'_, S>) {
+    let alloc = scratch.alloc();
+    let mut rewrites: Vec<(usize, ir::Id, u32), _> = Vec::new_in(alloc);
+    let mut pred_counts = super::predecessor_counts(fun, alloc);
+    let mut touched_targets = Vec::with_capacity_in(fun.blocks.len(), alloc);
+    touched_targets.resize(fun.blocks.len(), false);
 
     for i in 0..fun.blocks.len() {
         if fun.blocks[i].tombstone {
@@ -108,7 +112,7 @@ mod tests {
             },
         ];
 
-        ret_inline(&mut fun);
+        ret_inline(&mut fun, &mut super::super::Scratch::default());
 
         assert!(
             matches!(
@@ -197,7 +201,7 @@ mod tests {
             },
         ];
 
-        ret_inline(&mut fun);
+        ret_inline(&mut fun, &mut super::super::Scratch::default());
 
         assert!(
             matches!(&fun.blocks[1].term, Some(Terminator::Return { value: Some(v), .. }) if v.0 == 1)
@@ -245,7 +249,7 @@ mod tests {
             },
         ];
 
-        ret_inline(&mut fun);
+        ret_inline(&mut fun, &mut super::super::Scratch::default());
 
         assert!(
             matches!(
@@ -295,7 +299,7 @@ mod tests {
             },
         ];
 
-        ret_inline(&mut fun);
+        ret_inline(&mut fun, &mut super::super::Scratch::default());
 
         assert!(matches!(&fun.blocks[0].term, Some(Terminator::Jump { .. })));
         assert!(!fun.blocks[1].tombstone);

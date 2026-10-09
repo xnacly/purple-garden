@@ -28,7 +28,8 @@ pub const MAX_SLOTS_PER_CASE: usize = 4;
 /// Integer chains (`br_imm IEq %v0, k, ...`) fold the same way
 pub fn switch_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_, S>) {
     super::record_uses(fun, scratch);
-    let preds = super::predecessor_counts(fun);
+    let alloc = scratch.alloc();
+    let preds = super::predecessor_counts(fun, alloc);
 
     for head in 0..fun.blocks.len() {
         if fun.blocks[head].tombstone {
@@ -39,7 +40,7 @@ pub fn switch_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Sc
         };
 
         let mut cases = vec![Case { key, target: yes }];
-        let mut chain = Vec::new();
+        let mut chain = Vec::new_in(alloc);
         loop {
             let b = default.0.0 as usize;
             // The block is dropped whole, so only the previous chain block may lead here.
@@ -70,13 +71,11 @@ pub fn switch_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Sc
         if cases.len() < MIN_CASES {
             continue;
         }
-        let ints: Vec<i64> = cases
-            .iter()
-            .filter_map(|case| match case.key {
-                Const::Int(v) => Some(v),
-                _ => None,
-            })
-            .collect();
+        let mut ints = Vec::new_in(alloc);
+        ints.extend(cases.iter().filter_map(|case| match case.key {
+            Const::Int(v) => Some(v),
+            _ => None,
+        }));
         if let (Some(min), Some(max)) = (ints.iter().min(), ints.iter().max())
             && (max - min) as usize >= MAX_SLOTS_PER_CASE * cases.len()
         {

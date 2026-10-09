@@ -10,7 +10,7 @@ pub fn addrof_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Sc
         }
 
         scratch.reset();
-        let mut defs = Vec::new();
+        let mut defs = Vec::new_in(scratch.alloc());
 
         let block = &fun.blocks[block_idx];
         for instr in &block.instructions {
@@ -28,7 +28,7 @@ pub fn addrof_fold<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Sc
     }
 }
 
-fn collect_addrof_def(instr: &ir::Instr<'_>, defs: &mut Vec<Option<(Id, u32)>>) {
+fn collect_addrof_def<S: Allocator>(instr: &ir::Instr<'_>, defs: &mut Vec<Option<(Id, u32)>, S>) {
     let ir::Instr::AddrOf {
         dst, base, offset, ..
     } = instr

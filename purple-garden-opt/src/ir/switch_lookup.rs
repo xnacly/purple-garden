@@ -1,3 +1,5 @@
+use std::alloc::Allocator;
+
 use purple_garden_ir::{self as ir, Const, Id, Instr, Terminator, TypeId};
 
 /// Turn a switch whose arms, the default included, only return a constant into
@@ -14,8 +16,9 @@ use purple_garden_ir::{self as ir, Const, Id, Instr, Terminator, TypeId};
 ///     ret %v3
 /// ...
 /// ```
-pub fn switch_lookup(fun: &mut ir::Func<'_>) {
-    let preds = super::predecessor_counts(fun);
+pub fn switch_lookup<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_, S>) {
+    let alloc = scratch.alloc();
+    let preds = super::predecessor_counts(fun, alloc);
 
     for head in 0..fun.blocks.len() {
         if fun.blocks[head].tombstone {
@@ -31,17 +34,17 @@ pub fn switch_lookup(fun: &mut ir::Func<'_>) {
             continue;
         };
 
-        let arms: Vec<Id> = fun
-            .cases(cases)
-            .iter()
-            .map(|case| case.target.0)
-            .chain([default.0])
-            .collect();
-        let Some(mut returns) = arms
-            .iter()
-            .map(|&arm| returned_const(fun, arm, &preds))
-            .collect::<Option<Vec<_>>>()
-        else {
+        let mut arms = Vec::new_in(alloc);
+        arms.extend(
+            fun.cases(cases)
+                .iter()
+                .map(|case| case.target.0)
+                .chain([default.0]),
+        );
+        let Some(mut returns) = super::try_collect_in(
+            arms.iter().map(|&arm| returned_const(fun, arm, &preds)),
+            alloc,
+        ) else {
             continue;
         };
 
@@ -163,7 +166,7 @@ mod tests {
     #[test]
     fn looks_up_arms_returning_constants() {
         let mut fun = switch(&[3, 7, 9]);
-        switch_lookup(&mut fun);
+        switch_lookup(&mut fun, &mut super::super::Scratch::default());
 
         let Some(Instr::Lookup {
             dst,
@@ -199,7 +202,7 @@ mod tests {
     fn leaves_an_arm_doing_more_than_returning_a_constant() {
         let mut fun = switch(&[3, 7, 9]);
         fun.blocks[2].instructions.insert(0, load(200, 42));
-        switch_lookup(&mut fun);
+        switch_lookup(&mut fun, &mut super::super::Scratch::default());
 
         assert!(matches!(
             fun.blocks[0].term,

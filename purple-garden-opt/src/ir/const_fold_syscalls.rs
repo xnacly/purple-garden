@@ -54,18 +54,18 @@ pub fn const_fold_syscalls<S: Allocator>(fun: &mut ir::Func<'_>, scratch: &mut S
 }
 
 #[derive(Debug)]
-struct SyscallFoldCandidate<'ir> {
+struct SyscallFoldCandidate<'ir, A: Allocator> {
     dst: TypeId<'ir>,
     eval: ir::ConstEvalFn,
-    args: Vec<Const<'ir>>,
+    args: Vec<Const<'ir>, A>,
     span: u32,
 }
 
-fn syscall_fold_candidate<'ir, S: Allocator>(
+fn syscall_fold_candidate<'ir, 's, S: Allocator>(
     instr: &Instr<'ir>,
-    scratch: &Scratch<'_, S>,
+    scratch: &Scratch<'s, S>,
     previous: &[Instr<'ir>],
-) -> Option<SyscallFoldCandidate<'ir>> {
+) -> Option<SyscallFoldCandidate<'ir, &'s S>> {
     let Instr::Sys {
         dst,
         fun,
@@ -83,14 +83,14 @@ fn syscall_fold_candidate<'ir, S: Allocator>(
 
     let eval = fun.eval?;
 
-    let args = args
-        .iter()
-        .map(|arg| {
+    let args = super::try_collect_in(
+        args.iter().map(|arg| {
             scratch
                 .const_def(*arg)
                 .and_then(|def| const_value(previous, def).cloned())
-        })
-        .collect::<Option<Vec<_>>>()?;
+        }),
+        scratch.alloc(),
+    )?;
 
     Some(SyscallFoldCandidate {
         dst: dst.clone(),

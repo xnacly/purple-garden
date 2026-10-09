@@ -55,6 +55,11 @@ impl<'scratch, S: Allocator> Scratch<'scratch, S> {
         }
     }
 
+    /// The allocator behind the analysis, for a pass's own temporaries.
+    pub fn alloc(&self) -> &'scratch S {
+        self.uses.allocator()
+    }
+
     /// Clear all recorded analysis while retaining vector capacity.
     pub fn reset(&mut self) {
         self.uses.clear();
@@ -135,9 +140,22 @@ pub(super) fn record_uses<S: Allocator>(fun: &ir::Func<'_>, scratch: &mut Scratc
     }
 }
 
+/// Collects `items` into `scratch`, `None` as soon as one item is `None`.
+pub(super) fn try_collect_in<T, S: Allocator>(
+    items: impl IntoIterator<Item = Option<T>>,
+    scratch: S,
+) -> Option<Vec<T, S>> {
+    let mut out = Vec::new_in(scratch);
+    for item in items {
+        out.push(item?);
+    }
+    Some(out)
+}
+
 /// Number of live edges into each block, indexed by block id.
-pub(super) fn predecessor_counts(fun: &ir::Func) -> Vec<u32> {
-    let mut counts = vec![0; fun.blocks.len()];
+pub(super) fn predecessor_counts<S: Allocator>(fun: &ir::Func, scratch: S) -> Vec<u32, S> {
+    let mut counts = Vec::with_capacity_in(fun.blocks.len(), scratch);
+    counts.resize(fun.blocks.len(), 0);
 
     for block in &fun.blocks {
         if block.tombstone {
