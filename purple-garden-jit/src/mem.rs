@@ -63,7 +63,8 @@ pub struct CodeArena {
 
 impl CodeArena {
     /// Pages are only backed once touched, so the reservation costs address
-    /// space, not memory. 16 MiB fits hundreds of thousands of functions.
+    /// space, not memory, as long as no huge page backs it, see
+    /// [`CodeArena::new`]. 16 MiB fits hundreds of thousands of functions.
     const CAPACITY: usize = 16 << 20;
     /// Function entries start on 16 bytes so the decoder fetches a whole
     /// first block.
@@ -78,6 +79,9 @@ impl CodeArena {
             -1,
             0,
         )?;
+        // A few hundred bytes of code would otherwise take a whole 2 MiB huge
+        // page. Without the advice, the arena still works.
+        let _ = mmap::no_huge_pages(ptr, Self::CAPACITY);
         Ok(Self {
             ptr,
             cap: Self::CAPACITY,

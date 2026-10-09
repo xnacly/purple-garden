@@ -22,7 +22,14 @@ unsafe extern "C" {
     /// Releases a mapping created by `mmap(2)` using the platform C ABI.
     #[link_name = "munmap"]
     fn sys_munmap(addr: *mut c_void, len: usize) -> i32;
+    /// Advises the kernel how a mapping will be used, see `madvise(2)`.
+    #[cfg(target_os = "linux")]
+    #[link_name = "madvise"]
+    fn sys_madvise(addr: *mut c_void, len: usize, advice: i32) -> i32;
 }
+
+#[cfg(target_os = "linux")]
+const MADV_NOHUGEPAGE: i32 = 15;
 
 #[cfg(target_os = "linux")]
 const MAP_PRIVATE: i32 = 0x0002;
@@ -133,6 +140,18 @@ pub fn mprotect(ptr: NonNull<u8>, length: usize, prot: MmapProt) -> Result<(), S
         return Err(os_error("mprotect"));
     }
 
+    Ok(())
+}
+
+/// Keeps transparent huge pages out of a mapping, so touching it backs single
+/// pages instead of whole 2 MiB ones. macOS has no transparent huge pages.
+pub fn no_huge_pages(ptr: NonNull<u8>, length: usize) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if unsafe { sys_madvise(ptr.as_ptr().cast(), length, MADV_NOHUGEPAGE) } == -1 {
+        return Err(os_error("madvise"));
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (ptr, length);
     Ok(())
 }
 
