@@ -1,6 +1,6 @@
 use std::{alloc::Layout, ptr::NonNull};
 
-use purple_garden_shared::mmap::{self, MmapFlags, MmapProt};
+use purple_garden_allocators::page::mmap::{self, MmapFlags, MmapProt};
 
 unsafe extern "C" {
     fn getpagesize() -> i32;

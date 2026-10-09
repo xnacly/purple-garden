@@ -10,7 +10,6 @@ compile_error!("purple-garden-shared currently supports only Linux or macOS on x
 
 pub mod ansi;
 pub mod config;
-pub mod mmap;
 pub mod stack;
 
 /// Signature for native VM syscalls and JIT entry points.

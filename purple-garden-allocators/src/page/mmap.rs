@@ -22,6 +22,9 @@ unsafe extern "C" {
     /// Releases a mapping created by `mmap(2)` using the platform C ABI.
     #[link_name = "munmap"]
     fn sys_munmap(addr: *mut c_void, len: usize) -> i32;
+    /// Size of a page in bytes, see `getpagesize(3)`.
+    #[link_name = "getpagesize"]
+    fn sys_getpagesize() -> i32;
     /// Advises the kernel how a mapping will be used, see `madvise(2)`.
     #[cfg(target_os = "linux")]
     #[link_name = "madvise"]
@@ -153,6 +156,12 @@ pub fn no_huge_pages(ptr: NonNull<u8>, length: usize) -> Result<(), String> {
     #[cfg(not(target_os = "linux"))]
     let _ = (ptr, length);
     Ok(())
+}
+
+/// Size of a page in bytes, mappings are made of whole pages.
+#[must_use]
+pub fn page_size() -> usize {
+    unsafe { sys_getpagesize() as usize }
 }
 
 #[inline(always)]
