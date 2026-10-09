@@ -16,10 +16,10 @@ use crate::page::PageAlloc;
 /// Memory that is never deallocated must stay valid until the arena is reset
 /// through `&mut` or dropped, and dropping must reclaim it.
 pub unsafe trait Arena: Allocator {
-    /// Copies `items` into the arena.
-    fn copy_slice<T: Copy>(&self, items: &[T]) -> &mut [T] {
-        let mut v = Vec::with_capacity_in(items.len(), self);
-        v.extend_from_slice(items);
+    /// Moves `items` into the arena, they are never dropped.
+    fn alloc_slice<T>(&self, items: impl IntoIterator<Item = T>) -> &mut [T] {
+        let mut v = Vec::new_in(self);
+        v.extend(items);
         v.leak()
     }
 }
@@ -293,7 +293,7 @@ mod tests {
         let parent = MetricAlloc::new(PageAlloc {});
         let mut bump = BumpAlloc::new_in(&parent);
         for _ in 0..1000 {
-            bump.copy_slice(&[0u8; 1024]);
+            bump.alloc_slice([0u8; 1024]);
         }
         let grown = parent.metrics();
         assert!(grown.allocs > 1);
@@ -309,17 +309,17 @@ mod tests {
     fn reset_reuses_the_newest_chunk() {
         let parent = MetricAlloc::new(PageAlloc {});
         let mut bump = BumpAlloc::new_in(&parent);
-        let first = bump.copy_slice(&[1u32; 8]).as_ptr().cast::<u8>();
+        let first = bump.alloc_slice([1u32; 8]).as_ptr().cast::<u8>();
         bump.reset();
-        let again = bump.copy_slice(&[2u32; 8]).as_ptr().cast::<u8>();
+        let again = bump.alloc_slice([2u32; 8]).as_ptr().cast::<u8>();
         assert_eq!(first, again);
         assert_eq!(parent.metrics().allocs, 1);
     }
 
     #[test]
-    fn copied_slices_live_as_long_as_the_arena() {
+    fn slices_live_as_long_as_the_arena() {
         let bump = BumpAlloc::new();
-        let ids: Vec<&[usize]> = (0..100).map(|n| &*bump.copy_slice(&[n; 3])).collect();
+        let ids: Vec<&[usize]> = (0..100).map(|n| &*bump.alloc_slice([n; 3])).collect();
         assert!(ids.iter().enumerate().all(|(n, s)| s == &[n; 3]));
     }
 }
