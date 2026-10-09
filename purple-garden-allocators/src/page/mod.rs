@@ -59,6 +59,75 @@ unsafe impl Allocator for PageAlloc {
             mmap::munmap(ptr, mapped_len(layout)).expect("unmapping pages of a live allocation");
         }
     }
+
+    /// Remaps instead of copying: pages already touched stay resident, only the new ones fault.
+    unsafe fn grow(
+        &self,
+        ptr: NonNull<u8>,
+        old: Layout,
+        new: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        if old.size() == 0 {
+            return self.allocate(new);
+        }
+        let (old_len, new_len) = (mapped_len(old), mapped_len(new));
+        if new_len == old_len && ptr.addr().get().is_multiple_of(new.align()) {
+            return Ok(NonNull::slice_from_raw_parts(ptr, old_len));
+        }
+        #[cfg(target_os = "linux")]
+        if new.align() <= mmap::page_size() {
+            let moved = mmap::mremap(ptr, old_len, new_len).map_err(|_| AllocError)?;
+            return Ok(NonNull::slice_from_raw_parts(moved, new_len));
+        }
+        let block = self.allocate(new)?;
+        unsafe {
+            ptr.copy_to_nonoverlapping(block.cast(), old.size());
+            self.deallocate(ptr, old);
+        }
+        Ok(block)
+    }
+
+    /// Only the bytes the old allocation may have written are zeroed, remapped pages are fresh.
+    unsafe fn grow_zeroed(
+        &self,
+        ptr: NonNull<u8>,
+        old: Layout,
+        new: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        if old.size() != 0 {
+            unsafe {
+                ptr.add(old.size())
+                    .write_bytes(0, mapped_len(old).min(new.size()) - old.size());
+            }
+        }
+        unsafe { self.grow(ptr, old, new) }
+    }
+
+    /// Unmaps the pages past the new end.
+    unsafe fn shrink(
+        &self,
+        ptr: NonNull<u8>,
+        old: Layout,
+        new: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        if !ptr.addr().get().is_multiple_of(new.align()) {
+            let block = self.allocate(new)?;
+            unsafe {
+                ptr.copy_to_nonoverlapping(block.cast(), new.size());
+                self.deallocate(ptr, old);
+            }
+            return Ok(block);
+        }
+        if new.size() == 0 {
+            unsafe { self.deallocate(ptr, old) };
+            return Ok(NonNull::slice_from_raw_parts(new.dangling_ptr(), 0));
+        }
+        let (old_len, new_len) = (mapped_len(old), mapped_len(new));
+        if new_len < old_len {
+            mmap::munmap(unsafe { ptr.add(new_len) }, old_len - new_len).map_err(|_| AllocError)?;
+        }
+        Ok(NonNull::slice_from_raw_parts(ptr, new_len))
+    }
 }
 
 #[cfg(test)]
@@ -124,6 +193,35 @@ mod tests {
         assert_eq!(block.len(), 0);
         assert_eq!(block.cast::<u8>().as_ptr() as usize % 64, 0);
         unsafe { PageAlloc {}.deallocate(block.cast(), layout) };
+    }
+
+    #[test]
+    fn grows_and_shrinks_keeping_contents() {
+        let page = mmap::page_size();
+        let mut values: Vec<u64, _> = Vec::with_capacity_in(16, PageAlloc {});
+        for i in 0..(64 * page as u64) {
+            values.push(i);
+        }
+        assert!(values.iter().copied().eq(0..(64 * page as u64)));
+        values.truncate(10);
+        values.shrink_to_fit();
+        assert!(values.iter().copied().eq(0..10));
+    }
+
+    #[test]
+    fn grown_zeroed_memory_is_zero_after_writes() {
+        let page = mmap::page_size();
+        let (old, new) = (
+            Layout::from_size_align(10, 8).unwrap(),
+            Layout::from_size_align(3 * page, 8).unwrap(),
+        );
+        let block = PageAlloc {}.allocate(old).unwrap();
+        unsafe { block.cast::<u8>().write_bytes(0xff, block.len()) };
+        let grown = unsafe { PageAlloc {}.grow_zeroed(block.cast(), old, new) }.unwrap();
+        let bytes = unsafe { grown.as_ref() };
+        assert!(bytes[..10].iter().all(|&b| b == 0xff));
+        assert!(bytes[10..].iter().all(|&b| b == 0));
+        unsafe { PageAlloc {}.deallocate(grown.cast(), new) };
     }
 
     #[test]

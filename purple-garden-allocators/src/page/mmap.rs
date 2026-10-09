@@ -29,7 +29,15 @@ unsafe extern "C" {
     #[cfg(target_os = "linux")]
     #[link_name = "madvise"]
     fn sys_madvise(addr: *mut c_void, len: usize, advice: i32) -> i32;
+    /// Resizes a mapping, possibly moving it, see `mremap(2)`.
+    #[cfg(target_os = "linux")]
+    #[link_name = "mremap"]
+    fn sys_mremap(addr: *mut c_void, old_len: usize, new_len: usize, flags: i32, ...)
+    -> *mut c_void;
 }
+
+#[cfg(target_os = "linux")]
+const MREMAP_MAYMOVE: i32 = 1;
 
 #[cfg(target_os = "linux")]
 const MADV_NOHUGEPAGE: i32 = 15;
@@ -162,6 +170,17 @@ pub fn no_huge_pages(ptr: NonNull<u8>, length: usize) -> Result<(), String> {
 #[must_use]
 pub fn page_size() -> usize {
     unsafe { sys_getpagesize() as usize }
+}
+
+/// Grows or shrinks the mapping at `ptr` to `new_len` bytes, moving it if it can't be resized in
+/// place. Pages keep their contents and stay resident, new ones are zeroed.
+#[cfg(target_os = "linux")]
+pub fn mremap(ptr: NonNull<u8>, old_len: usize, new_len: usize) -> Result<NonNull<u8>, String> {
+    let ptr = unsafe { sys_mremap(ptr.as_ptr().cast(), old_len, new_len, MREMAP_MAYMOVE) };
+    if ptr == MAP_FAILED {
+        return Err(os_error("mremap"));
+    }
+    NonNull::new(ptr.cast()).ok_or_else(|| "mremap returned null".to_string())
 }
 
 #[inline(always)]
