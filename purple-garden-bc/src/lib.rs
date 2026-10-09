@@ -2,6 +2,7 @@
 use std::{
     alloc::{Allocator, Global},
     collections::HashMap,
+    hash::RandomState,
     ptr::NonNull,
 };
 
@@ -63,14 +64,14 @@ impl From<&CcFunc<'_>> for CcCallTarget {
     }
 }
 
-/// Per-function working state lives in the scratch allocator `S`, everything handed to the
-/// [`vm::Vm`] by [`Cc::finalize`] does not.
+/// Per-function working state lives in the scratch allocator `S`, the function tables only needed
+/// while compiling in `A`, everything handed to the [`vm::Vm`] by [`Cc::finalize`] in neither.
 #[derive(Debug, Clone)]
-pub struct Cc<'cc, S: Allocator + Clone = Global> {
+pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global> {
     pub buf: Vec<Op>,
     pub globals: Interner<Const<'cc>>,
     pub std_fns: Interner<BuiltinFn>,
-    pub functions: HashMap<Id, CcFunc<'cc>>,
+    pub functions: HashMap<Id, CcFunc<'cc>, RandomState, A>,
     /// Native code retained only for diagnostic dumps.
     pub native_code: Option<Vec<(&'cc str, Vec<u8>)>>,
     /// Syscall slot of the native entry function (`Id(0)`), if it compiled to
@@ -99,7 +100,7 @@ pub struct Cc<'cc, S: Allocator + Clone = Global> {
     /// Tables of the emitted [`Op::Lookup`]s.
     pub lookup_tables: Vec<Box<LookupTable>>,
     /// Entry points of the functions compiled natively, for native callers.
-    native_fns: HashMap<ir::Id, BuiltinFn>,
+    native_fns: purple_garden_jit::Natives<A>,
     regalloc: Ralloc<S>,
     /// Set once per IR Instr / Terminator before lowering, consumed by
     /// every `emit` call within that lowering. Saves threading a span
@@ -267,19 +268,19 @@ fn pack_pop_pairs_rev(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs:
 impl Cc<'_> {
     #[must_use]
     pub fn new() -> Self {
-        Self::new_in(Global)
+        Self::new_in(Global, Global)
     }
 }
 
-impl<'cc, S: Allocator + Clone> Cc<'cc, S> {
+impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     #[must_use]
-    pub fn new_in(scratch: S) -> Self {
+    pub fn new_in(scratch: S, alloc: A) -> Self {
         Self {
             buf: Vec::with_capacity(64),
             pc_to_span: Vec::with_capacity(64),
             globals: Interner::new(),
             std_fns: Interner::new(),
-            functions: HashMap::new(),
+            functions: HashMap::new_in(alloc.clone()),
             native_code: None,
             entry_native_idx: None,
             const_pool: Box::new([]),
@@ -287,7 +288,7 @@ impl<'cc, S: Allocator + Clone> Cc<'cc, S> {
             block_map: Vec::new_in(scratch.clone()),
             switch_tables: Vec::new(),
             lookup_tables: Vec::new(),
-            native_fns: HashMap::new(),
+            native_fns: HashMap::new_in(alloc),
             regalloc: Ralloc::new_in(scratch.clone()),
             cur_span: 0,
             live_set: Vec::new_in(scratch.clone()),

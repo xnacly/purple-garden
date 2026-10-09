@@ -681,7 +681,7 @@ fn compile<'i, A: Allocator + Clone>(
 
     let stdlib = stdlib_packages(stdlib, unsafe_stdlib);
 
-    let types = BumpAlloc::new_in(alloc);
+    let types = BumpAlloc::new_in(alloc.clone());
     let typecheck = Typechecker::new(&ast, &types, &scratch)
         .with_libs(libs.to_vec())
         .with_stdlib(stdlib)
@@ -698,7 +698,7 @@ fn compile<'i, A: Allocator + Clone>(
         purple_garden_opt::ir(&mut ir, &scratch);
     }
 
-    let mut cc = bc::Cc::new_in(&scratch);
+    let mut cc = bc::Cc::new_in(&scratch, alloc);
     let arena = cc
         .compile(config, &ir)
         .map_err(|msg| Diagnostic::new(msg, Span::new(0, 0)))?;

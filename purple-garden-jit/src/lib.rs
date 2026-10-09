@@ -48,7 +48,11 @@ use purple_garden_runtime::{BuiltinFn, Value};
 use std::{
     alloc::{Allocator, Global},
     collections::HashMap,
+    hash::RandomState,
 };
+
+/// Entry points of the functions already compiled natively, in any allocator.
+pub type Natives<A> = HashMap<ir::Id, BuiltinFn, RandomState, A>;
 
 /// Reusable JIT codegen state, every buffer lives in the scratch allocator `S`.
 #[derive(Debug, Clone)]
@@ -105,7 +109,7 @@ impl<S: Allocator + Clone> Jit<S> {
         liveness: &[(u32, u32)],
         globals: &HashMap<ir::Const<'ir>, u32>,
         strings: &[Value],
-        natives: &HashMap<ir::Id, BuiltinFn>,
+        natives: &Natives<impl Allocator>,
     ) -> Option<()> {
         self.code.clear();
         let result = arch::compile_func(

@@ -11,13 +11,13 @@ impl<S> Scratch<S> {
     }
 }
 
-pub fn compile_func<S: std::alloc::Allocator>(
+pub fn compile_func<S: std::alloc::Allocator, N: std::alloc::Allocator>(
     _func: &ir::Func<'_>,
     _: &mut Vec<u8, S>,
     _: &[(u32, u32)],
     _: &std::collections::HashMap<ir::Const<'_>, u32>,
     _: &[purple_garden_runtime::Value],
-    _: &std::collections::HashMap<ir::Id, purple_garden_runtime::BuiltinFn>,
+    _: &crate::Natives<N>,
     _: &mut crate::regalloc::Xralloc2<S>,
     _: &mut Scratch<S>,
 ) -> Option<()> {

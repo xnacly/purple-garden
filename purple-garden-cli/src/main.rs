@@ -227,7 +227,7 @@ fn pipeline<A: Allocator + Clone>(
         }
     }
 
-    let mut cc = bc::Cc::new_in(&scratch);
+    let mut cc = bc::Cc::new_in(&scratch, allocs.cc);
     let native_pages = cc.compile(conf, &ir)?;
 
     purple_garden_shared::trace!("[main] Lowered IR to bytecode");

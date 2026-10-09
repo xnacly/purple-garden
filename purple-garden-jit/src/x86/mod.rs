@@ -52,13 +52,13 @@ const CALL_STACK: i32 = 16;
 
 /// Compile one IR function into x86-64 machine code, returning `None` if unsupported constructs are
 /// included
-pub fn compile_func<'ir, S: Allocator + Clone>(
+pub fn compile_func<'ir, S: Allocator + Clone, N: Allocator>(
     func: &ir::Func<'ir>,
     out: &mut Vec<u8, S>,
     liveness: &[(u32, u32)],
     globals: &HashMap<ir::Const<'ir>, u32>,
     strings: &[Value],
-    natives: &HashMap<ir::Id, BuiltinFn>,
+    natives: &crate::Natives<N>,
     ra: &mut Xralloc2<S>,
     buffers: &mut Scratch<S>,
 ) -> Option<()> {
@@ -260,7 +260,7 @@ macro_rules! bail {
 /// Registers come from [`Xralloc2`] the first time a value is touched and stay
 /// fixed for the value's whole liveness interval, so every CFG edge agrees on
 /// where a value lives.
-struct Lowering<'a, 'ir, S: Allocator + Clone> {
+struct Lowering<'a, 'ir, S: Allocator + Clone, N: Allocator> {
     func: &'a ir::Func<'ir>,
     liveness: &'a [(u32, u32)],
     /// `vm.globals` slot of each constant.
@@ -268,7 +268,7 @@ struct Lowering<'a, 'ir, S: Allocator + Clone> {
     /// `strings[slot]` is the final address of the string constant in `slot`.
     strings: &'a [Value],
     /// Entry points of the functions already compiled natively.
-    natives: &'a HashMap<ir::Id, BuiltinFn>,
+    natives: &'a crate::Natives<N>,
     ra: &'a mut Xralloc2<S>,
     out: &'a mut Vec<u8, S>,
     entry: ir::Id,
@@ -290,13 +290,13 @@ struct Lowering<'a, 'ir, S: Allocator + Clone> {
     self_refs: &'a mut Vec<usize, S>,
 }
 
-impl<'a, 'ir, S: Allocator + Clone> Lowering<'a, 'ir, S> {
+impl<'a, 'ir, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, S, N> {
     fn new(
         func: &'a ir::Func<'ir>,
         liveness: &'a [(u32, u32)],
         globals: &'a HashMap<ir::Const<'ir>, u32>,
         strings: &'a [Value],
-        natives: &'a HashMap<ir::Id, BuiltinFn>,
+        natives: &'a crate::Natives<N>,
         ra: &'a mut Xralloc2<S>,
         buffers: &'a mut Scratch<S>,
         entry: ir::Id,
