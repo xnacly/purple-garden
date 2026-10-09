@@ -17,11 +17,11 @@ pub(super) struct DefinitionCollector<'src> {
 }
 
 impl<'src> DefinitionCollector<'src> {
-    pub(super) fn collect(ast: &Ast<'src>) -> Vec<DefinitionEntry> {
+    pub(super) fn collect(ast: &Ast<'src, '_>) -> Vec<DefinitionEntry> {
         let mut collector = Self::default();
         collector.scopes.push(HashMap::new());
 
-        for &root in &ast.roots {
+        for &root in ast.roots {
             match ast.node(root) {
                 Node::Fn { name, .. } => {
                     collector
@@ -29,7 +29,7 @@ impl<'src> DefinitionCollector<'src> {
                         .insert(name.t.as_str(), token_span(name));
                 }
                 Node::Import { pkgs, .. } => {
-                    for pkg in pkgs {
+                    for pkg in *pkgs {
                         collector.imports.insert(pkg.t.as_str(), token_span(pkg));
                     }
                 }
@@ -40,16 +40,16 @@ impl<'src> DefinitionCollector<'src> {
             }
         }
 
-        for &root in &ast.roots {
+        for &root in ast.roots {
             collector.node(ast, root);
         }
         collector.entries
     }
 
-    fn node(&mut self, ast: &Ast<'src>, node_id: NodeId) {
+    fn node(&mut self, ast: &Ast<'src, '_>, node_id: NodeId) {
         match ast.node(node_id) {
             Node::Record { fields, .. } => {
-                for &(_, value) in fields {
+                for &(_, value) in *fields {
                     self.node(ast, value);
                 }
             }
@@ -61,7 +61,7 @@ impl<'src> DefinitionCollector<'src> {
             }
             Node::Unary { rhs, .. } => self.node(ast, *rhs),
             Node::Array { members, .. } => {
-                for &member in members {
+                for &member in *members {
                     self.node(ast, member);
                 }
             }
@@ -74,16 +74,16 @@ impl<'src> DefinitionCollector<'src> {
             } => {
                 self.add_definition(name, token_span(name));
                 self.scopes.push(HashMap::new());
-                for (arg, _) in args {
+                for (arg, _) in *args {
                     self.insert_local(arg);
                 }
-                for &node in body {
+                for &node in *body {
                     self.node(ast, node);
                 }
                 self.scopes.pop();
             }
             Node::Match { cases, default, .. } => {
-                for &((_, condition), ref body) in cases {
+                for &((_, condition), body) in *cases {
                     self.node(ast, condition);
                     self.scopes.push(HashMap::new());
                     for &node in body {
@@ -92,21 +92,21 @@ impl<'src> DefinitionCollector<'src> {
                     self.scopes.pop();
                 }
                 self.scopes.push(HashMap::new());
-                for &node in &default.1 {
+                for &node in default.1 {
                     self.node(ast, node);
                 }
                 self.scopes.pop();
             }
             Node::Call { target, args, .. } => {
                 self.node(ast, *target);
-                for &arg in args {
+                for &arg in *args {
                     self.node(ast, arg);
                 }
             }
             Node::Field { target, .. } => self.node(ast, *target),
             Node::Cast { lhs, .. } => self.node(ast, *lhs),
             Node::Import { pkgs, .. } => {
-                for pkg in pkgs {
+                for pkg in *pkgs {
                     self.add_definition(pkg, token_span(pkg));
                 }
             }

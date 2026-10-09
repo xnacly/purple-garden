@@ -1,3 +1,5 @@
+use std::alloc::Allocator;
+
 use purple_garden_ir::{self as ir, Const, Id, Instr, Terminator, TypeId};
 
 /// Turn a switch whose arms, the default included, only return a constant into
@@ -14,8 +16,12 @@ use purple_garden_ir::{self as ir, Const, Id, Instr, Terminator, TypeId};
 ///     ret %v3
 /// ...
 /// ```
-pub fn switch_lookup(fun: &mut ir::Func<'_>) {
-    let preds = super::predecessor_counts(fun);
+pub fn switch_lookup<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut super::Scratch<'_, S>,
+) {
+    let alloc = scratch.alloc();
+    let preds = super::predecessor_counts(fun, alloc);
 
     for head in 0..fun.blocks.len() {
         if fun.blocks[head].tombstone {
@@ -31,28 +37,30 @@ pub fn switch_lookup(fun: &mut ir::Func<'_>) {
             continue;
         };
 
-        let arms: Vec<Id> = fun
-            .cases(cases)
-            .iter()
-            .map(|case| case.target.0)
-            .chain([default.0])
-            .collect();
-        let Some(mut returns) = arms
-            .iter()
-            .map(|&arm| returned_const(fun, arm, &preds))
-            .collect::<Option<Vec<_>>>()
-        else {
+        let mut arms = Vec::new_in(alloc);
+        arms.extend(
+            fun.cases(cases)
+                .iter()
+                .map(|case| case.target.0)
+                .chain([default.0]),
+        );
+        let Some(mut returns) = super::try_collect_in(
+            arms.iter().map(|&arm| returned_const(fun, arm, &preds)),
+            alloc,
+        ) else {
             continue;
         };
 
         // The default arm is dropped, its value id now names the lookup.
         let (dst, default) = returns.pop().unwrap();
-        let entries = fun
-            .cases(cases)
-            .iter()
-            .zip(returns)
-            .map(|(case, (_, value))| (case.key.clone(), value))
-            .collect();
+        let mut keyed = Vec::with_capacity_in(returns.len(), alloc);
+        keyed.extend(
+            fun.cases(cases)
+                .iter()
+                .zip(returns)
+                .map(|(case, (_, value))| (case.key.clone(), value)),
+        );
+        let entries = fun.intern_entries(keyed);
 
         purple_garden_shared::trace!("[opt::ir::switch_lookup] b{head} looks up its result");
 
@@ -76,8 +84,8 @@ pub fn switch_lookup(fun: &mut ir::Func<'_>) {
 
 /// `(dst, value)` of an arm only the switch leads to, that loads a constant and
 /// returns it.
-fn returned_const<'f>(
-    fun: &ir::Func<'f>,
+fn returned_const<'f, F: Allocator>(
+    fun: &ir::Func<'f, F>,
     arm: Id,
     preds: &[u32],
 ) -> Option<(TypeId<'f>, Const<'f>)> {
@@ -129,7 +137,7 @@ mod tests {
                 key: Const::Int(key),
                 target: (Id(arm), params),
             })
-            .collect();
+            .collect::<Vec<_>>();
         let cases = fun.intern_cases(cases);
         let default = keys.len() as u32 + 1;
         fun.blocks.push(Block {
@@ -163,7 +171,7 @@ mod tests {
     #[test]
     fn looks_up_arms_returning_constants() {
         let mut fun = switch(&[3, 7, 9]);
-        switch_lookup(&mut fun);
+        switch_lookup(&mut fun, &mut super::super::Scratch::default());
 
         let Some(Instr::Lookup {
             dst,
@@ -178,7 +186,7 @@ mod tests {
         // The default arm's value id now names the lookup.
         assert_eq!(dst.id, Id(104));
         assert_eq!(
-            &**entries,
+            fun.entries(*entries),
             [
                 (Const::Int(3), Const::Int(1)),
                 (Const::Int(7), Const::Int(2)),
@@ -199,7 +207,7 @@ mod tests {
     fn leaves_an_arm_doing_more_than_returning_a_constant() {
         let mut fun = switch(&[3, 7, 9]);
         fun.blocks[2].instructions.insert(0, load(200, 42));
-        switch_lookup(&mut fun);
+        switch_lookup(&mut fun, &mut super::super::Scratch::default());
 
         assert!(matches!(
             fun.blocks[0].term,

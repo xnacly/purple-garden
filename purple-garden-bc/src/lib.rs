@@ -1,10 +1,17 @@
-use std::{collections::HashMap, ptr::NonNull};
+#![feature(allocator_ext)]
+use std::{
+    alloc::{Allocator, Global},
+    collections::HashMap,
+    hash::RandomState,
+    ptr::NonNull,
+};
 
 pub mod dis;
 mod intern;
 mod regalloc;
 
 use crate::{intern::Interner, regalloc::Ralloc};
+use purple_garden_allocators::page::Pages;
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
 use purple_garden_runtime::{
     AllocType, BuiltinFn, DebugInfo, Value, Vm, VmConfig,
@@ -58,12 +65,14 @@ impl From<&CcFunc<'_>> for CcCallTarget {
     }
 }
 
+/// Per-function working state lives in the scratch allocator `S`, the function tables only needed
+/// while compiling in `A`, everything handed to the [`vm::Vm`] by [`Cc::finalize`] in neither.
 #[derive(Debug, Clone)]
-pub struct Cc<'cc> {
+pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global> {
     pub buf: Vec<Op>,
     pub globals: Interner<Const<'cc>>,
     pub std_fns: Interner<BuiltinFn>,
-    pub functions: HashMap<Id, CcFunc<'cc>>,
+    pub functions: HashMap<Id, CcFunc<'cc>, RandomState, A>,
     /// Native code retained only for diagnostic dumps.
     pub native_code: Option<Vec<(&'cc str, Vec<u8>)>>,
     /// Syscall slot of the native entry function (`Id(0)`), if it compiled to
@@ -85,15 +94,15 @@ pub struct Cc<'cc> {
     /// after lowering. `u16::MAX` marks blocks that weren't emitted (e.g.,
     /// tombstoned blocks). Block ids are dense per-function so a Vec
     /// indexed by id beats a `HashMap` on both alloc cost and lookup speed.
-    block_map: Vec<u16>,
+    block_map: Vec<u16, S>,
     /// Tables of the emitted [`Op::Switch`]es. Targets are block ids until the
     /// end of [`Cc::cc`] maps them to pcs, like jump targets.
     pub switch_tables: Vec<Box<SwitchTable>>,
     /// Tables of the emitted [`Op::Lookup`]s.
     pub lookup_tables: Vec<Box<LookupTable>>,
     /// Entry points of the functions compiled natively, for native callers.
-    native_fns: HashMap<ir::Id, BuiltinFn>,
-    regalloc: Ralloc,
+    native_fns: purple_garden_jit::Natives<A>,
+    regalloc: Ralloc<S>,
     /// Set once per IR Instr / Terminator before lowering, consumed by
     /// every `emit` call within that lowering. Saves threading a span
     /// argument through every `self.buf.push(op)` call site.
@@ -103,25 +112,25 @@ pub struct Cc<'cc> {
     /// duration of one compile, then put back with their grown capacity;
     /// so after the first few functions warm the buffers, subsequent
     /// `cc()` calls never re-allocate.
-    live_set: Vec<(u32, u32)>,
-    arg_hints: Vec<Option<u8>>,
+    live_set: Vec<(u32, u32), S>,
+    arg_hints: Vec<Option<u8>, S>,
     /// General-purpose `u8` scratch used by prologue/epilogue and call-site
     /// spills. Callers fill it, then immediately consume it via the
     /// `pack_push`/`pack_pop` free functions; it is never live across a
     /// call to another `Cc` method.
-    scratch: Vec<u8>,
+    scratch: Vec<u8, S>,
     /// Reusable `(src, dst)` buffer for the parallel-move resolver in
     /// [`Cc::emit_arg_shuffle`]. Replaces the per-call `todo: Vec<(u8,u8)>`
     /// allocation; taken out of `self` for the duration of each shuffle
     /// and restored on exit so the capacity survives across calls.
-    scratch_pairs: Vec<(u8, u8)>,
+    scratch_pairs: Vec<(u8, u8), S>,
     /// Registers at or above the arg zone holding values live across the
     /// call being lowered. The callee-saved convention leaves them in place
     /// (no push), so [`Cc::emit_arg_shuffle`] must never borrow one as its
     /// cycle-breaking scratch. Filled by the `Call`/`Sys` lowering alongside
     /// the spill list in `scratch`; a `Tail` passes an empty slice since
     /// nothing outlives it.
-    scratch_live: Vec<u8>,
+    scratch_live: Vec<u8, S>,
     /// Callee-saved range for the function currently being compiled.
     /// Set at the top of [`Cc::cc`] and read by [`Cc::emit_arg_shuffle`]
     /// to find a free scratch register for cycle breaking.
@@ -131,12 +140,17 @@ pub struct Cc<'cc> {
     /// `live_next` and `live_active` this keeps the set of values live
     /// across a call up to date as calls are lowered in increasing `pos`,
     /// see [`Cc::advance_live_across`].
-    live_order: Vec<u32>,
+    live_order: Vec<u32, S>,
     live_next: usize,
-    live_active: Vec<u32>,
+    live_active: Vec<u32, S>,
     /// Reusable native-code buffer for the JIT, refilled per function. Empty
     /// and untouched when `--no-jit` is set.
-    jit: purple_garden_jit::Jit,
+    jit: purple_garden_jit::Jit<S>,
+}
+
+fn take<T, S: Allocator + Clone>(v: &mut Vec<T, S>) -> Vec<T, S> {
+    let scratch = v.allocator().clone();
+    std::mem::replace(v, Vec::new_in(scratch))
 }
 
 /// Emit batched Push ops for `regs` in order, packing into Push3/Push2/Push.
@@ -252,36 +266,43 @@ fn pack_pop_pairs_rev(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs:
     }
 }
 
-impl<'cc> Cc<'cc> {
+impl Cc<'_> {
     #[must_use]
     pub fn new() -> Self {
+        Self::new_in(Global, Global)
+    }
+}
+
+impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
+    #[must_use]
+    pub fn new_in(scratch: S, alloc: A) -> Self {
         Self {
             buf: Vec::with_capacity(64),
             pc_to_span: Vec::with_capacity(64),
             globals: Interner::new(),
             std_fns: Interner::new(),
-            functions: HashMap::new(),
+            functions: HashMap::new_in(alloc.clone()),
             native_code: None,
             entry_native_idx: None,
             const_pool: Box::new([]),
             str_values: Vec::new(),
-            block_map: Vec::new(),
+            block_map: Vec::new_in(scratch.clone()),
             switch_tables: Vec::new(),
             lookup_tables: Vec::new(),
-            native_fns: HashMap::new(),
-            regalloc: Ralloc::default(),
+            native_fns: HashMap::new_in(alloc),
+            regalloc: Ralloc::new_in(scratch.clone()),
             cur_span: 0,
-            live_set: Vec::new(),
-            arg_hints: Vec::new(),
-            scratch: Vec::new(),
-            scratch_pairs: Vec::new(),
-            scratch_live: Vec::new(),
+            live_set: Vec::new_in(scratch.clone()),
+            arg_hints: Vec::new_in(scratch.clone()),
+            scratch: Vec::new_in(scratch.clone()),
+            scratch_pairs: Vec::new_in(scratch.clone()),
+            scratch_live: Vec::new_in(scratch.clone()),
             cur_lo: 0,
             cur_max_reg: 0,
-            live_order: Vec::new(),
+            live_order: Vec::new_in(scratch.clone()),
             live_next: 0,
-            live_active: Vec::new(),
-            jit: purple_garden_jit::Jit::new(),
+            live_active: Vec::new_in(scratch.clone()),
+            jit: purple_garden_jit::Jit::new_in(scratch),
         }
     }
 
@@ -310,15 +331,17 @@ impl<'cc> Cc<'cc> {
     }
 
     /// Compile a list of ir functions to bytecode instructions
-    pub fn compile(
+    /// Native code goes into pages from `code`.
+    pub fn compile<F: Allocator, P: Pages>(
         &mut self,
         config: &Config,
-        ir: &'cc [Func<'cc>],
-    ) -> Result<Option<purple_garden_jit::CodeArena>, String> {
+        ir: &'cc [Func<'cc, F>],
+        code: P,
+    ) -> Result<Option<purple_garden_jit::CodeArena<P>>, String> {
         let mut arena = if config.no_jit {
             None
         } else {
-            Some(purple_garden_jit::CodeArena::new()?)
+            Some(purple_garden_jit::CodeArena::new_in(code)?)
         };
         self.native_code = (config.disassemble > 0).then(|| Vec::with_capacity(ir.len()));
         self.functions.reserve(ir.len());
@@ -326,7 +349,7 @@ impl<'cc> Cc<'cc> {
         // Native code embeds string constants by address, so the pool is laid
         // out before any function is compiled, entries padded so each header
         // stays aligned.
-        let mut strs: Vec<(u32, &'cc str)> = Vec::new();
+        let mut strs: Vec<(u32, &'cc str), S> = Vec::new_in(self.live_set.allocator().clone());
         for func in ir {
             for block in func.blocks.iter().filter(|b| !b.tombstone) {
                 for instr in &block.instructions {
@@ -342,7 +365,12 @@ impl<'cc> Cc<'cc> {
                         entries, default, ..
                     } = instr
                     {
-                        for value in entries.iter().flat_map(|(k, v)| [k, v]).chain([default]) {
+                        for value in func
+                            .entries(*entries)
+                            .iter()
+                            .flat_map(|(k, v)| [k, v])
+                            .chain([default])
+                        {
                             if let Const::Str(s) = value
                                 && !self.globals.map.contains_key(value)
                             {
@@ -398,10 +426,10 @@ impl<'cc> Cc<'cc> {
         Ok(arena)
     }
 
-    fn cc(
+    fn cc<F: Allocator>(
         &mut self,
-        fun: &'cc Func<'cc>,
-        native: Option<&mut purple_garden_jit::CodeArena>,
+        fun: &'cc Func<'cc, F>,
+        native: Option<&mut purple_garden_jit::CodeArena<impl Pages>>,
     ) -> Result<(), String> {
         // Take the reusable scratch buffers out of self so we can hold an
         // immutable borrow of `live_set` across calls to `&mut self`
@@ -409,8 +437,8 @@ impl<'cc> Cc<'cc> {
         //
         // Put them back before returning so the next cc() reuses the same
         // capacity; after a few warm functions, this path is alloc-free.
-        let mut live_set = std::mem::take(&mut self.live_set);
-        let mut arg_hints = std::mem::take(&mut self.arg_hints);
+        let mut live_set = take(&mut self.live_set);
+        let mut arg_hints = take(&mut self.arg_hints);
         fun.live_set_into(&mut live_set);
 
         // Native functions are injected as syscalls. The entry function can
@@ -489,7 +517,7 @@ impl<'cc> Cc<'cc> {
             pos += 2; // block params row
             for instruction in &block.instructions {
                 self.cur_span = instruction.span();
-                self.instr(&live_set, pos, instruction);
+                self.instr(fun, &live_set, pos, instruction);
                 pos += 2;
             }
 
@@ -571,11 +599,11 @@ impl<'cc> Cc<'cc> {
         Ok(())
     }
 
-    fn try_compile_native(
+    fn try_compile_native<F: Allocator>(
         &mut self,
-        fun: &Func<'cc>,
+        fun: &Func<'cc, F>,
         liveness: &[(u32, u32)],
-        arena: &mut purple_garden_jit::CodeArena,
+        arena: &mut purple_garden_jit::CodeArena<impl Pages>,
     ) -> bool {
         let Some(()) =
             self.jit
@@ -626,7 +654,7 @@ impl<'cc> Cc<'cc> {
     /// live across this call. They are not pushed (the callee preserves them),
     /// so they are never eligible as the cycle-breaking scratch.
     fn emit_arg_shuffle(&mut self, args: &[Id], live_above: &[u8]) {
-        let mut todo = std::mem::take(&mut self.scratch_pairs);
+        let mut todo = take(&mut self.scratch_pairs);
         todo.clear();
         todo.extend(
             args.iter()
@@ -743,9 +771,9 @@ impl<'cc> Cc<'cc> {
 
     /// Edge shuffles around a fused compare-and-branch: `ne` jumps to `no`,
     /// `eq` to `yes`. Same fall-through fusion rule as `Branch`.
-    fn cmp_branch(
+    fn cmp_branch<F: Allocator>(
         &mut self,
-        fun: &Func<'cc>,
+        fun: &Func<'cc, F>,
         (yes, yes_params): (ir::Id, ir::ParamsId),
         (no, no_params): (ir::Id, ir::ParamsId),
         next_block: Option<ir::Id>,
@@ -787,9 +815,9 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn term(
+    fn term<F: Allocator>(
         &mut self,
-        fun: &Func<'cc>,
+        fun: &Func<'cc, F>,
         t: Option<&ir::Terminator>,
         next_block: Option<ir::Id>,
         lo: u8,
@@ -991,6 +1019,7 @@ impl<'cc> Cc<'cc> {
                     unreachable!();
                 };
 
+                let args = fun.params(*args);
                 // If the tail target needs a wider argument zone than this the shuffle would write
                 // into registers that this function still owes back to its caller. Fall back to a
                 // normal call so the epilogue can restore them after the callee returns.
@@ -1027,7 +1056,14 @@ impl<'cc> Cc<'cc> {
         }
     }
 
-    fn instr(&mut self, live_set: &[(u32, u32)], pos: u32, i: &'cc ir::Instr<'cc>) {
+    /// `owner` is the function `i` belongs to, it holds the lists `i` refers to.
+    fn instr<F: Allocator>(
+        &mut self,
+        owner: &'cc Func<'cc, F>,
+        live_set: &[(u32, u32)],
+        pos: u32,
+        i: &'cc ir::Instr<'cc>,
+    ) {
         match i {
             ir::Instr::Store {
                 src, base, offset, ..
@@ -1108,6 +1144,7 @@ impl<'cc> Cc<'cc> {
                 default,
                 ..
             } => {
+                let entries = owner.entries(*entries);
                 // Slots as for Op::Switch, holding values instead of pcs.
                 let (kind, step) = match entries[0].0 {
                     Const::Str(_) => (SwitchKind::Str, string::ALIGN as i64),
@@ -1164,6 +1201,7 @@ impl<'cc> Cc<'cc> {
             ir::Instr::Call {
                 dst, func, args, ..
             } => {
+                let args = owner.params(*args);
                 let Some(target) = self.functions.get(func).map(CcCallTarget::from) else {
                     unreachable!();
                 };
@@ -1201,7 +1239,7 @@ impl<'cc> Cc<'cc> {
                     &self.scratch,
                 );
 
-                let live_above = std::mem::take(&mut self.scratch_live);
+                let live_above = take(&mut self.scratch_live);
                 self.emit_arg_shuffle(args, &live_above);
                 self.scratch_live = live_above;
 
@@ -1223,6 +1261,7 @@ impl<'cc> Cc<'cc> {
                 );
             }
             ir::Instr::Sys { dst, fun, args, .. } => {
+                let args = owner.params(*args);
                 let idx = self.std_fns.intern(fun.ptr);
 
                 // Syscall convention: shuffle writes r0..r{argcount-1}, syscall
@@ -1252,7 +1291,7 @@ impl<'cc> Cc<'cc> {
                     &self.scratch,
                 );
 
-                let live_above = std::mem::take(&mut self.scratch_live);
+                let live_above = take(&mut self.scratch_live);
                 self.emit_arg_shuffle(args, &live_above);
                 self.scratch_live = live_above;
 
@@ -1350,7 +1389,8 @@ impl<'cc> Cc<'cc> {
 
         // bc.len() fits in u16 since Jmp.target is u16; halve the remap
         // table's cache footprint vs Vec<u32>.
-        let mut old_to_new = vec![0u16; bc.len() + 1];
+        let mut old_to_new = Vec::with_capacity_in(bc.len() + 1, self.live_set.allocator().clone());
+        old_to_new.resize(bc.len() + 1, 0u16);
         let mut new_pc: u16 = 0;
         for (i, op) in bc.iter().enumerate() {
             old_to_new[i] = new_pc;
@@ -1403,7 +1443,12 @@ impl<'cc> Cc<'cc> {
 
     /// Returns the vm, a list of syscalls, debug info, and the entry point to the native page, if
     /// jitted
-    pub fn finalize(self, config: VmConfig) -> (Vm, Vec<BuiltinFn>, DebugInfo, Option<u16>) {
+    /// The VM's GC takes its pages from `alloc`.
+    pub fn finalize<'vm>(
+        self,
+        config: VmConfig,
+        alloc: impl Allocator + 'vm,
+    ) -> (Vm<'vm>, Vec<BuiltinFn>, DebugInfo, Option<u16>) {
         let Cc {
             mut buf,
             globals,
@@ -1422,7 +1467,7 @@ impl<'cc> Cc<'cc> {
         buf.push(Op::Halt);
         pc_to_span.push(0);
 
-        let mut vm = Vm::new(config);
+        let mut vm = Vm::new_in(config, alloc);
         // A native entry runs directly from its native page; a bytecode entry
         // from its own first op.
         vm.pc = entry_native_idx
@@ -1488,6 +1533,7 @@ mod tests {
     use super::*;
     use ir::BinOp;
     use ir::{Block, EMPTY_PARAMS, Instr, Terminator, ptype::Type};
+    use purple_garden_allocators::page::PageAlloc;
     use std::alloc::Layout;
 
     #[test]
@@ -1512,7 +1558,7 @@ mod tests {
         instructions: Vec<Instr<'static>>,
         ret: Option<(Id, Type<'static>)>,
     ) -> Func<'static> {
-        let ret_ty = ret.as_ref().map(|(_, ty)| ty.clone());
+        let ret_ty = ret.as_ref().map(|(_, ty)| *ty);
         let ret_id = ret.map(|(id, _)| id);
         let mut fun = Func::new("entry", Id(0), Vec::new(), ret_ty);
         fun.blocks.push(Block {
@@ -1533,7 +1579,7 @@ mod tests {
         let mut config = Config::default();
         config.no_jit = true;
         let funcs = [fun];
-        cc.compile(&config, &funcs).unwrap();
+        cc.compile(&config, &funcs, PageAlloc {}).unwrap();
         cc.buf.clone()
     }
 
@@ -1674,7 +1720,7 @@ mod tests {
         let ops = compile_one(entry_fun(
             vec![
                 Instr::Alloc {
-                    dst: type_id(0, Type::record(Vec::new())),
+                    dst: type_id(0, Type::Record(&[])),
                     layout: Layout::from_size_align(16, 8).unwrap(),
                     span: 0,
                 },
@@ -1725,7 +1771,7 @@ mod tests {
         let ops = compile_one(entry_fun(
             vec![
                 Instr::Alloc {
-                    dst: type_id(0, Type::record(Vec::new())),
+                    dst: type_id(0, Type::Record(&[])),
                     layout: Layout::from_size_align(16, 8).unwrap(),
                     span: 0,
                 },
@@ -1769,7 +1815,7 @@ mod tests {
         let ops = compile_one(entry_fun(
             vec![
                 Instr::Alloc {
-                    dst: type_id(0, Type::record(Vec::new())),
+                    dst: type_id(0, Type::Record(&[])),
                     layout: Layout::from_size_align(16, 8).unwrap(),
                     span: 0,
                 },

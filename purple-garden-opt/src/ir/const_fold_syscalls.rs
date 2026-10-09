@@ -1,3 +1,5 @@
+use std::alloc::Allocator;
+
 use crate::ir::Scratch;
 use purple_garden_ir::{self as ir, Instr, TypeId, constant::Const};
 
@@ -6,9 +8,9 @@ use purple_garden_ir::{self as ir, Instr, TypeId, constant::Const};
 /// This pass is intentionally scaffolded around the eligibility analysis first:
 /// `Instr::Sys` now carries the resolved function definition, so all data needed
 /// to decide whether a syscall *can* fold is local to the IR.
-pub fn const_fold_syscalls<'fold, 's>(
-    fun: &'fold mut ir::Func<'s>,
-    scratch: &'fold mut Scratch<'s>,
+pub fn const_fold_syscalls<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut Scratch<'_, S>,
 ) {
     for bi in 0..fun.blocks.len() {
         if fun.blocks[bi].tombstone {
@@ -29,7 +31,7 @@ pub fn const_fold_syscalls<'fold, 's>(
                 scratch.record_const(*id, bi as u32, ii as u32);
             }
 
-            let candidate = syscall_fold_candidate(instr, scratch, previous);
+            let candidate = syscall_fold_candidate(instr, &fun.params_pool, scratch, previous);
             let Some(candidate) = candidate else {
                 continue;
             };
@@ -55,18 +57,19 @@ pub fn const_fold_syscalls<'fold, 's>(
 }
 
 #[derive(Debug)]
-struct SyscallFoldCandidate<'ir> {
+struct SyscallFoldCandidate<'ir, A: Allocator> {
     dst: TypeId<'ir>,
     eval: ir::ConstEvalFn,
-    args: Vec<Const<'ir>>,
+    args: Vec<Const<'ir>, A>,
     span: u32,
 }
 
-fn syscall_fold_candidate<'ir>(
+fn syscall_fold_candidate<'ir, 's, P: Allocator, S: Allocator>(
     instr: &Instr<'ir>,
-    scratch: &Scratch<'ir>,
+    params: &ir::Pool<ir::Id, P>,
+    scratch: &Scratch<'s, S>,
     previous: &[Instr<'ir>],
-) -> Option<SyscallFoldCandidate<'ir>> {
+) -> Option<SyscallFoldCandidate<'ir, &'s S>> {
     let Instr::Sys {
         dst,
         fun,
@@ -84,14 +87,14 @@ fn syscall_fold_candidate<'ir>(
 
     let eval = fun.eval?;
 
-    let args = args
-        .iter()
-        .map(|arg| {
+    let args = super::try_collect_in(
+        params.get(args.0).iter().map(|arg| {
             scratch
                 .const_def(*arg)
                 .and_then(|def| const_value(previous, def).cloned())
-        })
-        .collect::<Option<Vec<_>>>()?;
+        }),
+        scratch.alloc(),
+    )?;
 
     Some(SyscallFoldCandidate {
         dst: dst.clone(),
@@ -159,6 +162,8 @@ mod tests {
 
     #[test]
     fn candidate_requires_pure_syscall_with_const_args() {
+        let mut params = purple_garden_ir::Pool::default();
+        let args = purple_garden_ir::ParamsId(params.intern([Id(0)]));
         let mut scratch = Scratch::default();
         scratch.record_const(Id(0), 0, 0);
         let previous = vec![Instr::LoadConst {
@@ -177,12 +182,12 @@ mod tests {
             },
             path: "testing",
             fun: &PURE_FN,
-            args: vec![Id(0)],
+            args,
             span: 12,
         };
 
         let candidate =
-            syscall_fold_candidate(&instr, &scratch, &previous).expect("fold candidate");
+            syscall_fold_candidate(&instr, &params, &scratch, &previous).expect("fold candidate");
         assert_eq!(candidate.args, vec![Const::Int(7)]);
         assert_eq!(candidate.dst.id, Id(1));
         assert_eq!((candidate.eval)(&candidate.args), Some(Const::Int(14)));
@@ -191,6 +196,9 @@ mod tests {
 
     #[test]
     fn candidate_rejects_impure_or_non_const_args() {
+        let mut params = purple_garden_ir::Pool::default();
+        let no_args = purple_garden_ir::ParamsId(params.intern([]));
+        let one_arg = purple_garden_ir::ParamsId(params.intern([Id(0)]));
         let scratch = Scratch::default();
 
         let impure = Instr::Sys {
@@ -200,10 +208,10 @@ mod tests {
             },
             path: "testing",
             fun: &IMPURE_FN,
-            args: vec![],
+            args: no_args,
             span: 0,
         };
-        assert!(syscall_fold_candidate(&impure, &scratch, &[]).is_none());
+        assert!(syscall_fold_candidate(&impure, &params, &scratch, &[]).is_none());
 
         let non_const = Instr::Sys {
             dst: TypeId {
@@ -212,15 +220,16 @@ mod tests {
             },
             path: "testing",
             fun: &PURE_FN,
-            args: vec![Id(0)],
+            args: one_arg,
             span: 0,
         };
-        assert!(syscall_fold_candidate(&non_const, &scratch, &[]).is_none());
+        assert!(syscall_fold_candidate(&non_const, &params, &scratch, &[]).is_none());
     }
 
     #[test]
     fn impure_syscalls_stay_in_place() {
         let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Int));
+        let args0 = fun.intern_params([Id(0)]);
         let block = Id(0);
         fun.blocks.push(Block {
             tombstone: false,
@@ -246,7 +255,7 @@ mod tests {
             },
             path: "testing",
             fun: &IMPURE_FN,
-            args: vec![Id(0)],
+            args: args0,
             span: 0,
         });
 
@@ -261,6 +270,7 @@ mod tests {
     #[test]
     fn folds_pure_syscalls_with_const_args() {
         let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Int));
+        let args0 = fun.intern_params([Id(0)]);
         let block = Id(0);
         fun.blocks.push(Block {
             tombstone: false,
@@ -288,7 +298,7 @@ mod tests {
             },
             path: "testing",
             fun: &PURE_FN,
-            args: vec![Id(0)],
+            args: args0,
             span: 0,
         });
         fun.blocks[block.0 as usize].term = Some(purple_garden_ir::Terminator::Return {
@@ -330,6 +340,7 @@ mod tests {
         };
 
         let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Int));
+        let args0 = fun.intern_params([Id(0)]);
         let block = Id(0);
         fun.blocks.push(Block {
             tombstone: false,
@@ -356,7 +367,7 @@ mod tests {
             },
             path: "testing",
             fun: &LEN_FN,
-            args: vec![Id(0)],
+            args: args0,
             span: 0,
         });
         fun.blocks[block.0 as usize].term = Some(purple_garden_ir::Terminator::Return {
@@ -404,6 +415,8 @@ mod tests {
         };
 
         let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Str));
+        let args0 = fun.intern_params([Id(0), Id(1)]);
+        let args1 = fun.intern_params([Id(3), Id(2)]);
         let block = Id(0);
         fun.blocks.push(Block {
             tombstone: false,
@@ -450,7 +463,7 @@ mod tests {
             },
             path: "testing",
             fun: &REPEAT_FN,
-            args: vec![Id(0), Id(1)],
+            args: args0,
             span: 0,
         });
         fun.blocks[block.0 as usize].instructions.push(Instr::Sys {
@@ -460,7 +473,7 @@ mod tests {
             },
             path: "testing",
             fun: &REPEAT_FN,
-            args: vec![Id(3), Id(2)],
+            args: args1,
             span: 0,
         });
         fun.blocks[block.0 as usize].term = Some(purple_garden_ir::Terminator::Return {

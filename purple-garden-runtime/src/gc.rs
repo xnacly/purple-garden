@@ -1,10 +1,9 @@
-use std::{alloc::Layout, ptr::NonNull};
+use std::{
+    alloc::{Allocator, Layout},
+    ptr::NonNull,
+};
 
-use purple_garden_shared::mmap::{self, MmapFlags, MmapProt};
-
-unsafe extern "C" {
-    fn getpagesize() -> i32;
-}
+use purple_garden_allocators::page::{PageAlloc, mmap};
 
 const METADATA_SIZE: usize = std::mem::size_of::<Metadata>();
 const METADATA_ALIGN: usize = std::mem::align_of::<Metadata>();
@@ -128,41 +127,25 @@ struct Page {
     len: usize,
 }
 
-impl Page {
-    fn new(cap: usize) -> Result<Self, String> {
-        let ptr = mmap::mmap(
-            None,
-            cap,
-            MmapProt::READ | MmapProt::WRITE,
-            MmapFlags::PRIVATE | MmapFlags::ANONYMOUS,
-            -1,
-            0,
-        )?;
-
-        Ok(Self { ptr, cap, len: 0 })
-    }
-}
-
-impl Drop for Page {
-    fn drop(&mut self) {
-        mmap::munmap(self.ptr, self.cap).expect("GC page munmap");
-    }
-}
-
-#[derive(Debug)]
-pub struct Gc {
+/// Heap of the VM, its pages come from `A` and go back to it on drop.
+pub struct Gc<A: Allocator = PageAlloc> {
     pages: Vec<Page>,
     page_size: usize,
+    alloc: A,
+}
+
+impl<A: Allocator> std::fmt::Debug for Gc<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Gc")
+            .field("pages", &self.pages)
+            .field("page_size", &self.page_size)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for Gc {
     fn default() -> Self {
-        let page_size = unsafe { getpagesize() };
-        assert!(page_size > 0, "getpagesize returned {page_size}");
-        Self {
-            pages: vec![Page::new(page_size as usize).expect("anonymous GC page mmap")],
-            page_size: page_size as usize,
-        }
+        Self::new_in(PageAlloc {})
     }
 }
 
@@ -170,6 +153,40 @@ impl Gc {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+}
+
+impl<A: Allocator> Drop for Gc<A> {
+    fn drop(&mut self) {
+        for page in &self.pages {
+            unsafe { self.alloc.deallocate(page.ptr, self.layout(page.cap)) };
+        }
+    }
+}
+
+impl<A: Allocator> Gc<A> {
+    pub fn new_in(alloc: A) -> Self {
+        let mut gc = Self {
+            pages: Vec::new(),
+            page_size: mmap::page_size(),
+            alloc,
+        };
+        gc.push_page(gc.page_size).expect("first GC page");
+        gc
+    }
+
+    fn layout(&self, cap: usize) -> Layout {
+        Layout::from_size_align(cap, self.page_size).expect("GC page layout")
+    }
+
+    fn push_page(&mut self, cap: usize) -> Result<(), String> {
+        let ptr = self
+            .alloc
+            .allocate_zeroed(self.layout(cap))
+            .map_err(|_| format!("allocating a {cap} byte GC page failed"))?
+            .cast();
+        self.pages.push(Page { ptr, cap, len: 0 });
+        Ok(())
     }
 
     pub fn collect(&mut self) {
@@ -226,8 +243,7 @@ impl Gc {
     pub fn grow(&mut self, layout: Layout) -> Result<(), String> {
         let required = METADATA_SIZE + PAYLOAD_ALIGN + layout.size();
         let page_size = align_up(required.max(self.page_size), self.page_size);
-        self.pages.push(Page::new(page_size)?);
-        Ok(())
+        self.push_page(page_size)
     }
 }
 

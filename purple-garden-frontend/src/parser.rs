@@ -2,6 +2,10 @@
 // allocation-free error path; boxing them would make the internal API noisier.
 #![allow(clippy::result_large_err)]
 
+use std::alloc::Allocator;
+
+use purple_garden_allocators::bump::Arena;
+
 use crate::{
     ast::{Ast, ExternFn, Node, NodeId, TypeExpr, TypeExprId},
     diagnostic::Diagnostic,
@@ -10,34 +14,56 @@ use crate::{
 
 /// Parsing the token stream one token at a time into the abstract syntax tree, see
 /// [ast.rs](./ast.rs) for documentation regarding each node and the way those should be parsed.
-pub struct Parser<'p> {
-    lex: Lexer<'p>,
+///
+/// The [`Ast`] ends up in `arena`, everything built along the way lives in
+/// `scratch`. Lists under construction nest like calls, a nested list is
+/// moved into the arena and dropped before its parent grows again, so the
+/// list being built is always the top of `scratch` and grows in place there.
+pub struct Parser<'src, 'ast, 's, A: Arena, S: Allocator> {
+    lex: Lexer<'src>,
+    arena: &'ast A,
+    scratch: &'s S,
     id: usize,
-    cur: Token<'p>,
-    ast: Ast<'p>,
+    cur: Token<'src>,
+    roots: Vec<NodeId, &'s S>,
+    /// Built in place in the arena, so [`Parser::finish`] hands it over without a copy.
+    nodes: Vec<Node<'src, 'ast>, &'ast A>,
+    types: Vec<TypeExpr<'src, 'ast>, &'s S>,
     diagnostics: Vec<Diagnostic>,
-    pending_docs: Vec<Token<'p>>,
+    pending_docs: Vec<Token<'src>, &'s S>,
 }
 
 #[derive(Debug)]
-pub struct ParseOutput<'p> {
-    pub ast: Option<Ast<'p>>,
+pub struct ParseOutput<'src, 'ast> {
+    pub ast: Option<Ast<'src, 'ast>>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
-impl<'p> Parser<'p> {
+impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
     #[must_use]
-    pub fn new(mut lex: Lexer<'p>) -> Self {
+    pub fn new(mut lex: Lexer<'src>, arena: &'ast A, scratch: &'s S) -> Self {
         let cur = lex.one();
         let diagnostics = std::mem::take(&mut lex.diagnostics);
+        // The examples have at most one node per 4 source bytes. Reserving more only costs
+        // address space, an arena chunk this large is mapped on its own and pages nobody writes
+        // never become resident.
+        let nodes = Vec::with_capacity_in(lex.input.len() / 4, arena);
         Self {
             cur,
             lex,
+            arena,
+            scratch,
             id: 0,
-            ast: Ast::new(),
+            roots: Vec::new_in(scratch),
+            nodes,
+            types: Vec::new_in(scratch),
             diagnostics,
-            pending_docs: Vec::new(),
+            pending_docs: Vec::new_in(scratch),
         }
+    }
+
+    fn list<T>(&self) -> Vec<T, &'s S> {
+        Vec::new_in(self.scratch)
     }
 
     fn next_id(&mut self) -> usize {
@@ -46,7 +72,7 @@ impl<'p> Parser<'p> {
         id
     }
 
-    fn cur(&self) -> &Token<'p> {
+    fn cur(&self) -> &Token<'src> {
         &self.cur
     }
 
@@ -72,7 +98,7 @@ impl<'p> Parser<'p> {
         Ok(())
     }
 
-    fn expect_ident(&mut self) -> Result<Token<'p>, Diagnostic> {
+    fn expect_ident(&mut self) -> Result<Token<'src>, Diagnostic> {
         if let Type::Ident(_) = self.cur.t {
             let matched = self.cur.clone();
             self.advance()?;
@@ -92,25 +118,37 @@ impl<'p> Parser<'p> {
         Ok(())
     }
 
-    fn push_node(&mut self, node: Node<'p>) -> NodeId {
-        self.ast.push_node(node)
+    fn push_node(&mut self, node: Node<'src, 'ast>) -> NodeId {
+        let id = NodeId(self.nodes.len());
+        self.nodes.push(node);
+        id
     }
 
-    fn push_type(&mut self, ty: TypeExpr<'p>) -> TypeExprId {
-        self.ast.push_type(ty)
+    fn push_type(&mut self, ty: TypeExpr<'src, 'ast>) -> TypeExprId {
+        let id = TypeExprId(self.types.len());
+        self.types.push(ty);
+        id
+    }
+
+    fn finish(self) -> Ast<'src, 'ast> {
+        Ast {
+            roots: self.arena.alloc_slice(self.roots),
+            nodes: self.nodes.leak(),
+            types: self.arena.alloc_slice(self.types),
+            values: self.id,
+        }
     }
 
     /// program = prefix*
-    pub fn parse(mut self) -> Result<Ast<'p>, Diagnostic> {
+    pub fn parse(mut self) -> Result<Ast<'src, 'ast>, Diagnostic> {
         self.parse_roots()?;
-        self.ast.values = self.id;
-        Ok(self.ast)
+        Ok(self.finish())
     }
 
     fn parse_roots(&mut self) -> Result<(), Diagnostic> {
         while !self.at_end() {
             let node = self.parse_prefix()?;
-            self.ast.roots.push(node);
+            self.roots.push(node);
         }
         Ok(())
     }
@@ -118,7 +156,7 @@ impl<'p> Parser<'p> {
     fn parse_roots_collect(&mut self) {
         while !self.at_end() {
             match self.parse_prefix() {
-                Ok(node) => self.ast.roots.push(node),
+                Ok(node) => self.roots.push(node),
                 Err(diagnostic) => {
                     self.diagnostics.push(diagnostic);
                     self.synchronize_root();
@@ -153,13 +191,13 @@ impl<'p> Parser<'p> {
     /// Parse while collecting diagnostics. Recovery is intentionally shallow
     /// for now: a malformed root is dropped, then parsing resumes at the next
     /// obvious root boundary.
-    pub fn parse_collect(mut self) -> ParseOutput<'p> {
+    pub fn parse_collect(mut self) -> ParseOutput<'src, 'ast> {
         self.parse_roots_collect();
-        self.diagnostics.extend(self.lex.into_diagnostics());
-        self.ast.values = self.id;
+        let mut diagnostics = std::mem::take(&mut self.diagnostics);
+        diagnostics.append(&mut self.lex.diagnostics);
         ParseOutput {
-            ast: Some(self.ast),
-            diagnostics: self.diagnostics,
+            ast: Some(self.finish()),
+            diagnostics,
         }
     }
 
@@ -188,8 +226,19 @@ impl<'p> Parser<'p> {
         }
     }
 
-    fn take_docs(&mut self) -> Vec<Token<'p>> {
-        std::mem::take(&mut self.pending_docs)
+    fn take_docs(&mut self) -> &'ast [Token<'src>] {
+        self.arena.alloc_slice(self.pending_docs.drain(..))
+    }
+
+    /// body = "{" prefix* "}"
+    fn parse_body(&mut self) -> Result<&'ast [NodeId], Diagnostic> {
+        let mut body = self.list();
+        self.expect(Type::CurlyLeft)?;
+        while !self.at_end() && self.cur().t != Type::CurlyRight {
+            body.push(self.parse_prefix()?);
+        }
+        self.expect(Type::CurlyRight)?;
+        Ok(self.arena.alloc_slice(body))
     }
 
     /// import = "import" string | "import" "(" string* ")"
@@ -201,7 +250,7 @@ impl<'p> Parser<'p> {
         // single package import:
         // import "io"
         if let Type::S(_) = self.cur().t {
-            let pkgs = vec![self.cur().clone()];
+            let pkgs = self.arena.alloc_slice([self.cur().clone()]);
             // skip pkg name
             self.advance()?;
 
@@ -214,7 +263,7 @@ impl<'p> Parser<'p> {
 
         self.expect(Type::BraceLeft)?;
 
-        let mut pkgs = Vec::new();
+        let mut pkgs = self.list();
 
         while !self.at_end() && self.cur().t != Type::BraceRight {
             let &Token { t: Type::S(_), .. } = self.cur() else {
@@ -228,6 +277,7 @@ impl<'p> Parser<'p> {
         }
 
         self.expect(Type::BraceRight)?;
+        let pkgs = self.arena.alloc_slice(pkgs);
         let id = self.next_id();
         Ok(self.push_node(Node::Import { src, id, pkgs }))
     }
@@ -266,12 +316,7 @@ impl<'p> Parser<'p> {
             self.parse_type()?
         };
 
-        let mut body = vec![];
-        self.expect(Type::CurlyLeft)?;
-        while !self.at_end() && self.cur().t != Type::CurlyRight {
-            body.push(self.parse_prefix()?);
-        }
-        self.expect(Type::CurlyRight)?;
+        let body = self.parse_body()?;
 
         let id = self.next_id();
         Ok(self.push_node(Node::Fn {
@@ -284,9 +329,9 @@ impl<'p> Parser<'p> {
         }))
     }
 
-    fn parse_args(&mut self) -> Result<Vec<(Token<'p>, TypeExprId)>, Diagnostic> {
+    fn parse_args(&mut self) -> Result<&'ast [(Token<'src>, TypeExprId)], Diagnostic> {
         self.expect(Type::BraceLeft)?;
-        let mut args = vec![];
+        let mut args = self.list();
         while !self.at_end() && self.cur().t != Type::BraceRight {
             let arg_name = self.expect_ident()?;
             self.expect(Type::Colon)?;
@@ -294,7 +339,7 @@ impl<'p> Parser<'p> {
             args.push((arg_name, arg_type));
         }
         self.expect(Type::BraceRight)?;
-        Ok(args)
+        Ok(self.arena.alloc_slice(args))
     }
 
     /// extern = "extern" string "{" (doc* "fn" ident args type?)* "}"
@@ -315,7 +360,7 @@ impl<'p> Parser<'p> {
         };
 
         self.expect(Type::CurlyLeft)?;
-        let mut fns = Vec::new();
+        let mut fns = self.list();
         while !self.at_end() && self.cur().t != Type::CurlyRight {
             while matches!(self.cur().t, Type::Doc(_)) {
                 self.pending_docs.push(self.cur().clone());
@@ -349,6 +394,7 @@ impl<'p> Parser<'p> {
             });
         }
         self.expect(Type::CurlyRight)?;
+        let fns = self.arena.alloc_slice(fns);
 
         let id = self.next_id();
         Ok(self.push_node(Node::Extern {
@@ -363,7 +409,7 @@ impl<'p> Parser<'p> {
     /// match = "match" "{" (expr "{" prefix* "}")* "{" prefix* "}" "}"
     fn parse_match(&mut self) -> Result<NodeId, Diagnostic> {
         self.advance()?;
-        let mut cases = vec![];
+        let mut cases = self.list();
         let mut default = None;
         let tok = self.cur().clone();
 
@@ -372,26 +418,16 @@ impl<'p> Parser<'p> {
             // default case
             if self.cur().t == Type::CurlyLeft {
                 let default_token = self.cur().clone();
-                self.expect(Type::CurlyLeft)?;
-                let mut default_body = vec![];
-                while !self.at_end() && self.cur().t != Type::CurlyRight {
-                    default_body.push(self.parse_prefix()?);
-                }
-                self.expect(Type::CurlyRight)?;
-                default = Some((default_token, default_body));
+                default = Some((default_token, self.parse_body()?));
             } else {
                 let condition_token = self.cur().clone();
                 let condition = self.parse_expr(0)?;
-                self.expect(Type::CurlyLeft)?;
-                let mut body = vec![];
-                while !self.at_end() && self.cur().t != Type::CurlyRight {
-                    body.push(self.parse_prefix()?);
-                }
-                self.expect(Type::CurlyRight)?;
+                let body = self.parse_body()?;
                 cases.push(((condition_token, condition), body));
             }
         }
         self.expect(Type::CurlyRight)?;
+        let cases = self.arena.alloc_slice(cases);
 
         let Some(default) = default else {
             return Err(Diagnostic::at_token(
@@ -420,7 +456,7 @@ impl<'p> Parser<'p> {
                 // skip Type::CurlyLeft
                 self.advance()?;
 
-                let mut fields = vec![];
+                let mut fields = self.list();
 
                 // <key>: <value>
                 while !self.at_end() && self.cur().t != Type::CurlyRight {
@@ -431,6 +467,7 @@ impl<'p> Parser<'p> {
                 }
 
                 self.expect(Type::CurlyRight)?;
+                let fields = self.arena.alloc_slice(fields);
                 let id = self.next_id();
                 self.push_node(Node::Record { src, id, fields })
             }
@@ -439,13 +476,14 @@ impl<'p> Parser<'p> {
                 // skip Type::BraketLeft
                 self.advance()?;
 
-                let mut members = vec![];
+                let mut members = self.list();
                 while !self.at_end() && self.cur().t != Type::BraketRight {
                     let member = self.parse_expr(0)?;
                     members.push(member);
                 }
 
                 self.expect(Type::BraketRight)?;
+                let members = self.arena.alloc_slice(members);
 
                 let id = self.next_id();
                 self.push_node(Node::Array { id, src, members })
@@ -471,7 +509,7 @@ impl<'p> Parser<'p> {
             }
             Type::Plus | Type::Minus => {
                 let op = self.cur().clone();
-                let rbp = Parser::prefix_binding_power(&self.cur().t);
+                let rbp = Self::prefix_binding_power(&self.cur().t);
                 self.advance()?;
                 let rhs = self.parse_expr(rbp)?;
                 let id = self.next_id();
@@ -501,18 +539,19 @@ impl<'p> Parser<'p> {
                 }
 
                 Type::BraceLeft => {
-                    if !Self::is_callable_target(self.ast.node(lhs)) {
+                    if !Self::is_callable_target(&self.nodes[lhs.0]) {
                         break;
                     }
 
                     self.advance()?;
-                    let mut args = vec![];
+                    let mut args = self.list();
 
                     while !self.at_end() && self.cur().t != Type::BraceRight {
                         args.push(self.parse_prefix()?);
                     }
 
                     self.expect(Type::BraceRight)?;
+                    let args = self.arena.alloc_slice(args);
                     let id = self.next_id();
                     lhs = self.push_node(Node::Call {
                         id,
@@ -554,7 +593,7 @@ impl<'p> Parser<'p> {
                 continue;
             }
 
-            if let Some((lbp, rbp)) = Parser::infix_binding_power(&op.t) {
+            if let Some((lbp, rbp)) = Self::infix_binding_power(&op.t) {
                 if lbp < min_bp {
                     break;
                 }
@@ -570,7 +609,7 @@ impl<'p> Parser<'p> {
         Ok(lhs)
     }
 
-    fn is_callable_target(node: &Node<'p>) -> bool {
+    fn is_callable_target(node: &Node<'src, 'ast>) -> bool {
         matches!(node, Node::Ident { .. } | Node::Field { .. })
     }
 
@@ -645,7 +684,7 @@ impl<'p> Parser<'p> {
                 let src = self.cur().clone();
                 self.advance()?;
                 self.expect(Type::LessThan)?;
-                let mut fields = vec![];
+                let mut fields = self.list();
                 while !self.at_end() && self.cur().t != Type::GreaterThan {
                     let field_name = self.expect_ident()?;
                     self.expect(Type::Colon)?;
@@ -653,6 +692,7 @@ impl<'p> Parser<'p> {
                     fields.push((field_name, field_type));
                 }
                 self.expect(Type::GreaterThan)?;
+                let fields = self.arena.alloc_slice(fields);
                 self.push_type(TypeExpr::Record { src, fields })
             }
             _ => {
@@ -668,6 +708,8 @@ impl<'p> Parser<'p> {
 #[cfg(test)]
 mod tests {
     use crate::{ast::Node, lex::Lexer, parser::Parser};
+    use purple_garden_allocators::bump::BumpAlloc;
+    use std::alloc::Global;
 
     macro_rules! table_parse_types {
         ($group:ident,$(($name:ident,$input:literal,$expected:literal))*) => {
@@ -677,10 +719,11 @@ mod tests {
                 $(
                     #[test]
                     fn $name() {
+                        let arena = BumpAlloc::new();
                         let l = Lexer::new($input.as_bytes());
-                        let mut p = Parser::new(l);
+                        let mut p = Parser::new(l, &arena, &Global);
                         let tt = p.parse_type().unwrap();
-                        assert_eq!(p.ast.type_display(tt).to_string(), $expected);
+                        assert_eq!(p.finish().type_display(tt).to_string(), $expected);
                     }
                 )*
             }
@@ -731,24 +774,27 @@ mod tests {
 
     #[test]
     fn empty_foreign_has_specific_error() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(b"Foreign<>");
-        let mut p = Parser::new(l);
+        let mut p = Parser::new(l, &arena, &Global);
         let err = p.parse_type().unwrap_err();
         assert_eq!(err.message, "Expected a foreign type name after `Foreign<`");
     }
 
     #[test]
     fn empty_option_has_specific_error() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(b"Option<>");
-        let mut p = Parser::new(l);
+        let mut p = Parser::new(l, &arena, &Global);
         let err = p.parse_type().unwrap_err();
         assert_eq!(err.message, "Expected a type after `Option<`");
     }
 
     #[test]
     fn empty_array_has_specific_error() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(b"Array<>");
-        let mut p = Parser::new(l);
+        let mut p = Parser::new(l, &arena, &Global);
         let err = p.parse_type().unwrap_err();
         assert_eq!(err.message, "Expected a type after `Array<`");
     }
@@ -761,8 +807,9 @@ mod tests {
                 $(
                     #[test]
                     fn $name() {
+                        let arena = BumpAlloc::new();
                         let l = Lexer::new($input.as_bytes());
-                        let p = Parser::new(l);
+                        let p = Parser::new(l, &arena, &Global);
                         let ast = p.parse().unwrap();
                         assert_eq!(ast.roots.len(), $root_count);
                         assert!(!ast.nodes.is_empty());
@@ -784,8 +831,9 @@ mod tests {
 
     #[test]
     fn parses_empty_record_literal() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(b"{}");
-        let p = Parser::new(l);
+        let p = Parser::new(l, &arena, &Global);
         let ast = p.parse().unwrap();
 
         assert_eq!(ast.roots.len(), 1);
@@ -797,8 +845,9 @@ mod tests {
 
     #[test]
     fn parses_record_literal_fields() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(br#"{ name: "teo" age: 23 }"#);
-        let p = Parser::new(l);
+        let p = Parser::new(l, &arena, &Global);
         let ast = p.parse().unwrap();
 
         assert_eq!(ast.roots.len(), 1);
@@ -815,8 +864,9 @@ mod tests {
 
     #[test]
     fn parses_nested_record_literal() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(br#"{ name: "teo" job: { title: "dev" since: 2024 } }"#);
-        let p = Parser::new(l);
+        let p = Parser::new(l, &arena, &Global);
         let ast = p.parse().unwrap();
 
         let Node::Record { fields, .. } = ast.node(ast.roots[0]) else {
@@ -839,8 +889,9 @@ mod tests {
 
     #[test]
     fn parses_empty_array_literal() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(b"[]");
-        let p = Parser::new(l);
+        let p = Parser::new(l, &arena, &Global);
         let ast = p.parse().unwrap();
 
         assert_eq!(ast.roots.len(), 1);
@@ -853,8 +904,9 @@ mod tests {
 
     #[test]
     fn parses_array_literal_members() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(br#"[1 "two" true]"#);
-        let p = Parser::new(l);
+        let p = Parser::new(l, &arena, &Global);
         let ast = p.parse().unwrap();
 
         assert_eq!(ast.roots.len(), 1);
@@ -870,8 +922,9 @@ mod tests {
 
     #[test]
     fn parses_nested_array_literal() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(b"[1 [2 3] 4]");
-        let p = Parser::new(l);
+        let p = Parser::new(l, &arena, &Global);
         let ast = p.parse().unwrap();
 
         let Node::Array { members, .. } = ast.node(ast.roots[0]) else {
@@ -893,8 +946,9 @@ mod tests {
 
     #[test]
     fn parses_record_field_access() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(br#"{ name: "teo" age: 23 }.name"#);
-        let p = Parser::new(l);
+        let p = Parser::new(l, &arena, &Global);
         let ast = p.parse().unwrap();
 
         let Node::Field { target, name, .. } = ast.node(ast.roots[0]) else {
@@ -909,8 +963,9 @@ mod tests {
 
     #[test]
     fn adjacent_parenthesized_arg_after_atom_is_not_postfix_call() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(b"f(0.0 (1.0 + 2.0))");
-        let p = Parser::new(l);
+        let p = Parser::new(l, &arena, &Global);
         let ast = p.parse().unwrap();
         let root = ast.roots[0];
 
@@ -925,16 +980,18 @@ mod tests {
 
     #[test]
     fn equal_in_expression_terminates() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(b"(5 = 6)");
-        let p = Parser::new(l);
+        let p = Parser::new(l, &arena, &Global);
         let result = p.parse();
         assert!(result.is_err(), "expected parse error, got: {result:?}");
     }
 
     #[test]
     fn parse_collect_keeps_valid_roots_after_lexer_error() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(b"import 1.2.3\nlet b = 1");
-        let out = Parser::new(l).parse_collect();
+        let out = Parser::new(l, &arena, &Global).parse_collect();
         let ast = out.ast.expect("parse_collect should keep recovered ast");
 
         assert_eq!(out.diagnostics.len(), 2);
@@ -952,8 +1009,9 @@ mod tests {
 
     #[test]
     fn parse_collect_keeps_valid_roots_after_parser_error() {
+        let arena = BumpAlloc::new();
         let l = Lexer::new(b"let a = 1 +\nlet b = 2");
-        let out = Parser::new(l).parse_collect();
+        let out = Parser::new(l, &arena, &Global).parse_collect();
         let ast = out.ast.expect("parse_collect should keep recovered ast");
 
         assert_eq!(out.diagnostics.len(), 1);
@@ -965,8 +1023,11 @@ mod tests {
         assert_eq!(name.t, crate::lex::Type::Ident("b"));
     }
 
-    fn roots(source: &[u8]) -> crate::ast::Ast<'_> {
-        Parser::new(Lexer::new(source)).parse().unwrap()
+    fn roots(source: &[u8]) -> crate::ast::Ast<'_, '_> {
+        let arena = Box::leak(Box::new(BumpAlloc::new()));
+        Parser::new(Lexer::new(source), arena, &Global)
+            .parse()
+            .unwrap()
     }
 
     #[test]

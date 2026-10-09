@@ -25,6 +25,7 @@
 //! The architecture backend owns the supported IR subset. This crate should
 //! therefore be read as a conservative native lowering path, not as a second
 //! semantic implementation of the language.
+#![feature(allocator_ext)]
 
 #[cfg(not(all(
     any(target_os = "linux", target_os = "macos"),
@@ -44,15 +45,28 @@ mod regalloc;
 pub use mem::CodeArena;
 use purple_garden_ir as ir;
 use purple_garden_runtime::{BuiltinFn, Value};
-use std::collections::HashMap;
+use std::{
+    alloc::{Allocator, Global},
+    collections::HashMap,
+    hash::RandomState,
+};
 
-/// Reusable JIT codegen state.
-#[derive(Debug, Default, Clone)]
-pub struct Jit {
-    code: Vec<u8>,
-    liveness: Vec<(u32, u32)>,
-    regalloc: regalloc::Xralloc2,
-    scratch: arch::Scratch,
+/// Entry points of the functions already compiled natively, in any allocator.
+pub type Natives<A> = HashMap<ir::Id, BuiltinFn, RandomState, A>;
+
+/// Reusable JIT codegen state, every buffer lives in the scratch allocator `S`.
+#[derive(Debug, Clone)]
+pub struct Jit<S: Allocator + Clone = Global> {
+    code: Vec<u8, S>,
+    liveness: Vec<(u32, u32), S>,
+    regalloc: regalloc::Xralloc2<S>,
+    scratch: arch::Scratch<S>,
+}
+
+impl Default for Jit {
+    fn default() -> Self {
+        Self::new_in(Global)
+    }
 }
 
 impl Jit {
@@ -60,12 +74,25 @@ impl Jit {
     pub fn new() -> Self {
         Self::default()
     }
+}
+
+impl<S: Allocator + Clone> Jit<S> {
+    #[must_use]
+    pub fn new_in(scratch: S) -> Self {
+        Self {
+            code: Vec::new_in(scratch.clone()),
+            liveness: Vec::new_in(scratch.clone()),
+            regalloc: regalloc::Xralloc2::new_in(scratch.clone()),
+            scratch: arch::Scratch::new_in(scratch),
+        }
+    }
 
     /// Lower and encode `func`, returning `None` when unsupported.
-    pub fn compile_func(&mut self, func: &ir::Func<'_>) -> Option<()> {
+    pub fn compile_func<F: Allocator>(&mut self, func: &ir::Func<'_, F>) -> Option<()> {
         self.liveness.clear();
         func.live_set_into(&mut self.liveness);
-        let liveness = std::mem::take(&mut self.liveness);
+        let scratch = self.liveness.allocator().clone();
+        let liveness = std::mem::replace(&mut self.liveness, Vec::new_in(scratch));
         let result =
             self.compile_func_with_liveness(func, &liveness, &HashMap::new(), &[], &HashMap::new());
         self.liveness = liveness;
@@ -76,13 +103,13 @@ impl Jit {
     /// `globals` maps constants to their `vm.globals` slot, `strings[slot]` is
     /// the final address of a string constant native code embeds. `natives`
     /// holds the entry points of the functions already compiled natively.
-    pub fn compile_func_with_liveness<'ir>(
+    pub fn compile_func_with_liveness<'ir, F: Allocator>(
         &mut self,
-        func: &ir::Func<'ir>,
+        func: &ir::Func<'ir, F>,
         liveness: &[(u32, u32)],
         globals: &HashMap<ir::Const<'ir>, u32>,
         strings: &[Value],
-        natives: &HashMap<ir::Id, BuiltinFn>,
+        natives: &Natives<impl Allocator>,
     ) -> Option<()> {
         self.code.clear();
         let result = arch::compile_func(
@@ -115,16 +142,37 @@ impl Jit {
 ))]
 mod tests_x86 {
     use super::Jit;
-    use super::mem::ExecPage;
+    use super::mem::CodeArena;
     use purple_garden_ir::{
-        BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype::Type,
+        BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId,
+        ptype::{Field, Type},
     };
+
+    fn record(fields: Vec<(&'static str, Type<'static>)>) -> Type<'static> {
+        Type::Record(
+            fields
+                .into_iter()
+                .map(|(name, ty)| Field { name, ty })
+                .collect::<Vec<_>>()
+                .leak(),
+        )
+    }
+
+    /// `code` made executable, the arena has to outlive every call.
+    fn exec(code: &[u8]) -> (CodeArena, unsafe extern "C" fn(*mut u64)) {
+        let mut arena = CodeArena::new().expect("code arena");
+        let entry = arena.push(code).expect("code fits the arena");
+        arena.seal().expect("seal the code arena");
+        let f = unsafe {
+            std::mem::transmute::<super::BuiltinFn, unsafe extern "C" fn(*mut u64)>(entry)
+        };
+        (arena, f)
+    }
 
     /// Run native code that takes `*mut u64` (the VM register file) and return
     /// the resulting register slots.
     fn run(code: &[u8], mut regs: [u64; 3]) -> [u64; 3] {
-        let page = ExecPage::new(code).expect("mmap");
-        let f: unsafe extern "C" fn(*mut u64) = unsafe { std::mem::transmute(page.as_ptr()) };
+        let (_arena, f) = exec(code);
         unsafe { f(regs.as_mut_ptr()) };
         regs
     }
@@ -217,7 +265,7 @@ mod tests_x86 {
         use purple_garden_runtime::{Vm, VmConfig};
         use std::alloc::Layout;
 
-        let record_ty = Type::record(vec![
+        let record_ty = record(vec![
             ("r", Type::Int),
             ("g", Type::Int),
             ("b", Type::Int),
@@ -227,7 +275,7 @@ mod tests_x86 {
             "alloc_live",
             Id(0),
             vec![Id(0), Id(1), Id(2)],
-            Some(record_ty.clone()),
+            Some(record_ty),
         );
         let params = func.intern_params(vec![Id(0), Id(1), Id(2)]);
         let alloc_id = Id(3);
@@ -239,7 +287,7 @@ mod tests_x86 {
                 Instr::Alloc {
                     dst: TypeId {
                         id: alloc_id,
-                        ty: record_ty.clone(),
+                        ty: record_ty,
                     },
                     layout: Layout::from_size_align(32, 8).unwrap(),
                     span: 0,
@@ -291,8 +339,7 @@ mod tests_x86 {
         });
         let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
         slots[0..3].copy_from_slice(&[1, 2, 3]);
-        let page = ExecPage::new(jit.code()).expect("executable JIT page");
-        let f: unsafe extern "C" fn(*mut u64) = unsafe { std::mem::transmute(page.as_ptr()) };
+        let (_arena, f) = exec(jit.code());
         unsafe { f(&mut vm as *mut Vm as *mut u64) };
         let payload = unsafe { std::slice::from_raw_parts(slots[0] as *const u64, 4) };
         assert_eq!(payload, &[1, 2, 3, 255]);
@@ -301,6 +348,7 @@ mod tests_x86 {
     #[test]
     fn compiles_tail_recursive_factorial_loop() {
         let mut func = Func::new("factorial", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let args0 = func.intern_params([Id(5), Id(6)]);
         let params = func.intern_params(vec![Id(0), Id(1)]);
         let ret_args = func.intern_params(vec![Id(1)]);
         let ret_params = func.intern_params(vec![Id(7)]);
@@ -368,7 +416,7 @@ mod tests_x86 {
                 params,
                 term: Some(Terminator::Tail {
                     func: Id(0),
-                    args: vec![Id(5), Id(6)],
+                    args: args0,
                     span: 0,
                 }),
             },
@@ -462,13 +510,15 @@ mod tests_x86 {
     #[test]
     fn reg_divisor_imod_and_idiv() {
         let mut jit = Jit::new();
-        jit.compile_func(&reg_div_func(BinOp::IMod)).expect("jit imod");
+        jit.compile_func(&reg_div_func(BinOp::IMod))
+            .expect("jit imod");
         assert_eq!(run(jit.code(), [20, 7, 0])[0], 6);
         assert_eq!(run(jit.code(), [7, 20, 0])[0], 7);
         assert_eq!(run(jit.code(), [-20i64 as u64, 7, 0])[0] as i64, -6);
 
         let mut jit = Jit::new();
-        jit.compile_func(&reg_div_func(BinOp::IDiv)).expect("jit idiv");
+        jit.compile_func(&reg_div_func(BinOp::IDiv))
+            .expect("jit idiv");
         assert_eq!(run(jit.code(), [20, 7, 0])[0], 2);
         assert_eq!(run(jit.code(), [-20i64 as u64, 7, 0])[0] as i64, -2);
     }
@@ -523,13 +573,13 @@ mod tests_x86 {
         use purple_garden_runtime::{Anomaly, Vm, VmConfig};
 
         let mut jit = Jit::new();
-        jit.compile_func(&reg_div_func(BinOp::IMod)).expect("jit imod");
+        jit.compile_func(&reg_div_func(BinOp::IMod))
+            .expect("jit imod");
 
         let mut vm = Vm::new(VmConfig::default());
         let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
         slots[0..2].copy_from_slice(&[20, 0]);
-        let page = ExecPage::new(jit.code()).expect("executable JIT page");
-        let f: unsafe extern "C" fn(*mut u64) = unsafe { std::mem::transmute(page.as_ptr()) };
+        let (_arena, f) = exec(jit.code());
         unsafe { f(&mut vm as *mut Vm as *mut u64) };
 
         assert!(matches!(
@@ -540,7 +590,7 @@ mod tests_x86 {
 
     #[test]
     fn loads_record_field_from_pointer_arg() {
-        let record_ty = Type::record(vec![("first", Type::Int), ("second", Type::Int)]);
+        let record_ty = record(vec![("first", Type::Int), ("second", Type::Int)]);
         let mut func = Func::new("field", Id(0), vec![Id(0)], Some(Type::Int));
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
@@ -566,14 +616,14 @@ mod tests_x86 {
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
         assert_eq!(run(jit.code(), [record.as_mut_ptr() as u64, 0, 0])[0], 42);
-        drop(record_ty);
+        let _ = record_ty;
     }
 
     #[test]
     fn takes_nested_record_address_and_loads_field() {
-        let record_ty = Type::record(vec![(
+        let record_ty = record(vec![(
             "nested",
-            Type::record(vec![("first", Type::Int), ("second", Type::Int)]),
+            record(vec![("first", Type::Int), ("second", Type::Int)]),
         )]);
         let mut func = Func::new("nested_field", Id(0), vec![Id(0)], Some(Type::Int));
         let params = func.intern_params(vec![Id(0)]);
@@ -585,7 +635,7 @@ mod tests_x86 {
                 Instr::AddrOf {
                     dst: TypeId {
                         id: Id(1),
-                        ty: Type::record(vec![("first", Type::Int), ("second", Type::Int)]),
+                        ty: record(vec![("first", Type::Int), ("second", Type::Int)]),
                     },
                     base: Id(0),
                     offset: 8,
@@ -611,7 +661,7 @@ mod tests_x86 {
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
         assert_eq!(run(jit.code(), [record.as_mut_ptr() as u64, 0, 0])[0], 42);
-        drop(record_ty);
+        let _ = record_ty;
     }
 
     #[test]
@@ -655,7 +705,11 @@ mod tests_x86 {
 
         let syscalls = vec![entry];
         let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = vec![Op::LoadI { dst: 0, value: 187 }, Op::Sys { idx: 0, argc: 1 }, Op::Halt];
+        vm.bytecode = vec![
+            Op::LoadI { dst: 0, value: 187 },
+            Op::Sys { idx: 0, argc: 1 },
+            Op::Halt,
+        ];
         vm.run::<false>(&syscalls).expect("vm run");
         assert_eq!(vm.r(0).as_int(), 187);
     }

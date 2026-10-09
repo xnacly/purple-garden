@@ -65,15 +65,21 @@ fn colorize_instr(on: bool, s: &str) -> String {
     out
 }
 
-pub struct Disassembler<'dis> {
+pub struct Disassembler<
+    'dis,
+    S: std::alloc::Allocator + Clone = std::alloc::Global,
+    A: std::alloc::Allocator + Clone = std::alloc::Global,
+> {
     bc: &'dis [Op],
-    cc: crate::Cc<'dis>,
+    cc: crate::Cc<'dis, S, A>,
     source: Option<&'dis [u8]>,
 }
 
-impl<'dis> Disassembler<'dis> {
+impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
+    Disassembler<'dis, S, A>
+{
     #[must_use]
-    pub fn new(bc: &'dis [Op], cc: crate::Cc<'dis>) -> Self {
+    pub fn new(bc: &'dis [Op], cc: crate::Cc<'dis, S, A>) -> Self {
         Self {
             bc,
             cc,

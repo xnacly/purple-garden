@@ -1,3 +1,5 @@
+use std::alloc::Allocator;
+
 use purple_garden_runtime::op::Op;
 
 /// ir based optimisations
@@ -6,8 +8,8 @@ mod ir;
 /// bytecode based optimisations, mainly peephole
 mod bc;
 
-pub fn ir(ir: &mut [purple_garden_ir::Func]) {
-    let mut scratch = ir::Scratch::default();
+pub fn ir<F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'_, F>], scratch: &S) {
+    let mut scratch = ir::Scratch::new_in(scratch);
 
     for fun in ir {
         // so all other blocks.last() are valid
@@ -30,9 +32,9 @@ pub fn ir(ir: &mut [purple_garden_ir::Func]) {
         // ret-only join into the branch and leave the join alive. Before
         // tailcall, so a Call-then-Jump-to-Ret-join pattern becomes a direct
         // Return that tailcall then picks up as Pattern A.
-        ir::ret_inline(fun);
+        ir::ret_inline(fun, &mut scratch);
         // Order: after ret_inline, which turns the arms' jumps to the join into returns.
-        ir::switch_lookup(fun);
+        ir::switch_lookup(fun, &mut scratch);
         ir::indirect_jump(fun);
         ir::tailcall(fun);
         ir::addrof_fold(fun, &mut scratch);

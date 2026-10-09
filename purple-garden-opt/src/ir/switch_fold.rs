@@ -1,3 +1,5 @@
+use std::alloc::Allocator;
+
 use purple_garden_ir::{self as ir, BinOp, Case, Const, Id, Instr, ParamsId, Terminator};
 
 /// Chains shorter than this stay linear, a few compares beat a table lookup.
@@ -24,9 +26,13 @@ pub const MAX_SLOTS_PER_CASE: usize = 4;
 /// ```
 ///
 /// Integer chains (`br_imm IEq %v0, k, ...`) fold the same way
-pub fn switch_fold(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
+pub fn switch_fold<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut super::Scratch<'_, S>,
+) {
     super::record_uses(fun, scratch);
-    let preds = super::predecessor_counts(fun);
+    let alloc = scratch.alloc();
+    let preds = super::predecessor_counts(fun, alloc);
 
     for head in 0..fun.blocks.len() {
         if fun.blocks[head].tombstone {
@@ -37,7 +43,7 @@ pub fn switch_fold(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
         };
 
         let mut cases = vec![Case { key, target: yes }];
-        let mut chain = Vec::new();
+        let mut chain = Vec::new_in(alloc);
         loop {
             let b = default.0.0 as usize;
             // The block is dropped whole, so only the previous chain block may lead here.
@@ -68,13 +74,11 @@ pub fn switch_fold(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
         if cases.len() < MIN_CASES {
             continue;
         }
-        let ints: Vec<i64> = cases
-            .iter()
-            .filter_map(|case| match case.key {
-                Const::Int(v) => Some(v),
-                _ => None,
-            })
-            .collect();
+        let mut ints = Vec::new_in(alloc);
+        ints.extend(cases.iter().filter_map(|case| match case.key {
+            Const::Int(v) => Some(v),
+            _ => None,
+        }));
         if let (Some(min), Some(max)) = (ints.iter().min(), ints.iter().max())
             && (max - min) as usize >= MAX_SLOTS_PER_CASE * cases.len()
         {
@@ -116,7 +120,10 @@ type Edge = (Id, ParamsId);
 /// is the `LoadConst` of a string key, integer keys are immediates. A switch
 /// moves nothing along its edges, so both must pass their target's params
 /// unchanged.
-fn compare<'f>(fun: &ir::Func<'f>, b: usize) -> Option<(Id, Const<'f>, Option<Id>, Edge, Edge)> {
+fn compare<'f, F: Allocator>(
+    fun: &ir::Func<'f, F>,
+    b: usize,
+) -> Option<(Id, Const<'f>, Option<Id>, Edge, Edge)> {
     let block = &fun.blocks[b];
     let (subject, key, key_load, yes, no) = match block.term {
         Some(Terminator::BranchCmp {

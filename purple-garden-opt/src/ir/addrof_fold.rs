@@ -1,21 +1,26 @@
+use std::alloc::Allocator;
+
 use purple_garden_ir::{self as ir, Id};
 
 /// Block-local rewrites for `AddrOf` producers and consumers.
-pub fn addrof_fold(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
+pub fn addrof_fold<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut super::Scratch<'_, S>,
+) {
     for block_idx in 0..fun.blocks.len() {
         if fun.blocks[block_idx].tombstone {
             continue;
         }
 
         scratch.reset();
-        let mut defs = Vec::new();
+        let mut defs = Vec::new_in(scratch.alloc());
 
         let block = &fun.blocks[block_idx];
         for instr in &block.instructions {
             if let Some(id) = ir::Func::def_of(instr) {
                 scratch.ensure(id);
             }
-            ir::Func::for_each_use_of_instr(instr, |id| scratch.bump(id));
+            fun.for_each_use_of_instr(instr, |id| scratch.bump(id));
             collect_addrof_def(instr, &mut defs);
         }
         if let Some(term) = &block.term {
@@ -26,7 +31,7 @@ pub fn addrof_fold(fun: &mut ir::Func<'_>, scratch: &mut super::Scratch<'_>) {
     }
 }
 
-fn collect_addrof_def(instr: &ir::Instr<'_>, defs: &mut Vec<Option<(Id, u32)>>) {
+fn collect_addrof_def<S: Allocator>(instr: &ir::Instr<'_>, defs: &mut Vec<Option<(Id, u32)>, S>) {
     let ir::Instr::AddrOf {
         dst, base, offset, ..
     } = instr
@@ -41,9 +46,9 @@ fn collect_addrof_def(instr: &ir::Instr<'_>, defs: &mut Vec<Option<(Id, u32)>>) 
     defs[dst.id.0 as usize] = Some((*base, *offset));
 }
 
-fn fold_block(
+fn fold_block<S: Allocator>(
     instructions: &mut [ir::Instr<'_>],
-    scratch: &super::Scratch<'_>,
+    scratch: &super::Scratch<'_, S>,
     defs: &[Option<(Id, u32)>],
 ) {
     for instr in instructions {
@@ -79,10 +84,10 @@ fn base_offset_mut<'instr>(
     }
 }
 
-fn resolve_addr(
+fn resolve_addr<S: Allocator>(
     mut base: Id,
     mut offset: u32,
-    scratch: &super::Scratch<'_>,
+    scratch: &super::Scratch<'_, S>,
     defs: &[Option<(Id, u32)>],
 ) -> Option<(Id, u32)> {
     let mut folded = false;
@@ -159,7 +164,7 @@ mod tests {
     fn folds_load_through_single_use_addrof() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::record(Vec::new())),
+                dst: type_id(1, Type::Record(&[])),
                 base: Id(0),
                 offset: 8,
                 span: 0,
@@ -188,7 +193,7 @@ mod tests {
     fn folds_store_through_single_use_addrof() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::record(Vec::new())),
+                dst: type_id(1, Type::Record(&[])),
                 base: Id(0),
                 offset: 8,
                 span: 0,
@@ -217,13 +222,13 @@ mod tests {
     fn folds_nested_single_use_addrof_chain() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::record(Vec::new())),
+                dst: type_id(1, Type::Record(&[])),
                 base: Id(0),
                 offset: 8,
                 span: 0,
             },
             Instr::AddrOf {
-                dst: type_id(2, Type::record(Vec::new())),
+                dst: type_id(2, Type::Record(&[])),
                 base: Id(1),
                 offset: 4,
                 span: 0,
@@ -260,7 +265,7 @@ mod tests {
     fn leaves_multi_use_addrof_base_alone() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::record(Vec::new())),
+                dst: type_id(1, Type::Record(&[])),
                 base: Id(0),
                 offset: 8,
                 span: 0,
@@ -295,7 +300,7 @@ mod tests {
     fn leaves_addrof_used_by_terminator_alone() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::record(Vec::new())),
+                dst: type_id(1, Type::Record(&[])),
                 base: Id(0),
                 offset: 8,
                 span: 0,
@@ -328,7 +333,7 @@ mod tests {
     fn leaves_overflowing_offset_alone() {
         let mut fun = func_with_instructions(vec![
             Instr::AddrOf {
-                dst: type_id(1, Type::record(Vec::new())),
+                dst: type_id(1, Type::Record(&[])),
                 base: Id(0),
                 offset: u32::MAX,
                 span: 0,
@@ -363,7 +368,7 @@ mod tests {
             id: Id(0),
             params: entry_params,
             instructions: vec![Instr::AddrOf {
-                dst: type_id(1, Type::record(Vec::new())),
+                dst: type_id(1, Type::Record(&[])),
                 base: Id(0),
                 offset: 8,
                 span: 0,

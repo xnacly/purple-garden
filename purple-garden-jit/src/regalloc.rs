@@ -10,19 +10,36 @@
 //!
 //! xralloc2 is target-independent by allowing a pool of registers to be defined
 
+use std::alloc::{Allocator, Global};
+
 use purple_garden_ir::Id;
 
-#[derive(Debug, Default, Clone)]
-pub struct Xralloc2 {
-    map: Vec<Option<u8>>,
+#[derive(Debug, Clone)]
+pub struct Xralloc2<S: Allocator = Global> {
+    map: Vec<Option<u8>, S>,
     /// `(last_use, reg)` of every value currently holding a register.
-    active: Vec<(u32, u8)>,
-    free: Vec<u8>,
+    active: Vec<(u32, u8), S>,
+    free: Vec<u8, S>,
     /// Bitmask of every register handed out since [`Xralloc2::reset`].
     used: u32,
 }
 
-impl Xralloc2 {
+impl Default for Xralloc2 {
+    fn default() -> Self {
+        Self::new_in(Global)
+    }
+}
+
+impl<S: Allocator + Clone> Xralloc2<S> {
+    pub fn new_in(scratch: S) -> Self {
+        Self {
+            map: Vec::new_in(scratch.clone()),
+            active: Vec::new_in(scratch.clone()),
+            free: Vec::new_in(scratch),
+            used: 0,
+        }
+    }
+
     /// `pool` is popped from the back, so the preferred registers go last.
     pub fn reset(&mut self, ids: usize, pool: &[u8]) {
         self.map.clear();

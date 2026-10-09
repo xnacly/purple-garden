@@ -81,36 +81,14 @@ impl Display for Instr<'_> {
             Instr::Noop => (),
             Instr::Call {
                 dst, func, args, ..
-            } => {
-                write!(f, "%v{dst} = ")?;
-                write!(f, "Call f{}(", func.0)?;
-                for (i, arg) in args.iter().enumerate() {
-                    if i + 1 == args.len() {
-                        write!(f, "%v{}", arg.0)?;
-                    } else {
-                        write!(f, "%v{}, ", arg.0)?;
-                    }
-                }
-                write!(f, ")")?;
-            }
+            } => write!(f, "%v{dst} = Call f{}(params#{})", func.0, args.0)?,
             Instr::Sys {
                 dst,
                 path,
                 fun,
                 args,
                 ..
-            } => {
-                write!(f, "%v{dst} = ")?;
-                write!(f, "Sys {path}.{}(", fun.name)?;
-                for (i, arg) in args.iter().enumerate() {
-                    if i + 1 == args.len() {
-                        write!(f, "%v{}", arg.0)?;
-                    } else {
-                        write!(f, "%v{}, ", arg.0)?;
-                    }
-                }
-                write!(f, ")")?;
-            }
+            } => write!(f, "%v{dst} = Sys {path}.{}(params#{})", fun.name, args.0)?,
             Instr::Cast {
                 dst: value, from, ..
             } => write!(
@@ -125,14 +103,11 @@ impl Display for Instr<'_> {
                 default,
                 ..
             } => {
-                write!(f, "%v{dst} = Lookup %v{} [", subject.0)?;
-                for (i, (key, value)) in entries.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{key} -> {value}")?;
-                }
-                write!(f, "], {default}")?;
+                write!(
+                    f,
+                    "%v{dst} = Lookup %v{}, entries#{}, {default}",
+                    subject.0, entries.0
+                )?;
             }
         }
         Ok(())
@@ -190,14 +165,7 @@ impl Display for Terminator {
                 subject.0, cases.0, default.0.0, default.1.0,
             )?,
             Terminator::Tail { func, args, .. } => {
-                write!(f, "tail f{}(", func.0)?;
-                for (i, arg) in args.iter().enumerate() {
-                    if i + 1 == args.len() {
-                        write!(f, "%v{}", arg.0)?;
-                    } else {
-                        write!(f, "%v{}, ", arg.0)?;
-                    }
-                }
+                write!(f, "tail f{}(params#{}", func.0, args.0)?;
                 write!(f, ")")?;
             }
         }
@@ -220,7 +188,7 @@ struct Row {
     text: String,
 }
 
-impl Func<'_> {
+impl<A: std::alloc::Allocator> Func<'_, A> {
     fn rows(&self) -> Vec<Row> {
         let mut rows = Vec::new();
         let mut push = |pos, indent, text| rows.push(Row { pos, indent, text });
@@ -256,7 +224,7 @@ impl Func<'_> {
 
             for ins in &block.instructions {
                 if !matches!(ins, Instr::Noop) {
-                    push(Some(pos), 2, ins.to_string());
+                    push(Some(pos), 2, self.instr_display(ins));
                 }
                 pos += 2;
             }
@@ -296,6 +264,45 @@ impl Func<'_> {
 
     fn target_display(&self, (target, params): (Id, crate::ParamsId)) -> String {
         format!("b{}({})", target.0, format_ids(self.params(params)))
+    }
+
+    fn instr_display(&self, ins: &Instr<'_>) -> String {
+        match ins {
+            Instr::Call {
+                dst, func, args, ..
+            } => format!(
+                "%v{dst} = Call f{}({})",
+                func.0,
+                format_ids(self.params(*args))
+            ),
+            Instr::Sys {
+                dst,
+                path,
+                fun,
+                args,
+                ..
+            } => format!(
+                "%v{dst} = Sys {path}.{}({})",
+                fun.name,
+                format_ids(self.params(*args))
+            ),
+            Instr::Lookup {
+                dst,
+                subject,
+                entries,
+                default,
+                ..
+            } => {
+                let entries = self
+                    .entries(*entries)
+                    .iter()
+                    .map(|(key, value)| format!("{key} -> {value}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("%v{dst} = Lookup %v{} [{entries}], {default}", subject.0)
+            }
+            _ => ins.to_string(),
+        }
     }
 
     fn term_display(&self, term: &Terminator) -> String {
@@ -345,6 +352,9 @@ impl Func<'_> {
                 no.0,
                 format_ids(self.params(no.1)),
             ),
+            Terminator::Tail { func, args, .. } => {
+                format!("tail f{}({})", func.0, format_ids(self.params(*args)))
+            }
             _ => term.to_string(),
         }
     }
@@ -491,7 +501,7 @@ fn colorize(text: &str) -> String {
     out
 }
 
-impl Display for Func<'_> {
+impl<A: std::alloc::Allocator> Display for Func<'_, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for row in self.rows() {
             writeln!(f, "{}{}", "\t".repeat(row.indent), row.text)?;

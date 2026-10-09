@@ -19,6 +19,7 @@ trace = [
 trace_gc = ["purple-garden-runtime/trace_gc"]
 
 [dependencies]
+purple-garden-allocators = { path = "../purple-garden-allocators" }
 purple-garden-ir = { path = "../purple-garden-ir" }
 purple-garden-jit = { path = "../purple-garden-jit" }
 purple-garden-runtime = { path = "../purple-garden-runtime" }

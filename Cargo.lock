@@ -553,6 +553,7 @@ name = "purple-garden"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "purple-garden-allocators",
  "purple-garden-bc",
  "purple-garden-frontend",
  "purple-garden-ir",
@@ -567,9 +568,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "purple-garden-allocators"
+version = "0.1.0"
+
+[[package]]
 name = "purple-garden-bc"
 version = "0.1.0"
 dependencies = [
+ "purple-garden-allocators",
  "purple-garden-ir",
  "purple-garden-jit",
  "purple-garden-runtime",
@@ -595,6 +601,7 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "purple-garden",
+ "purple-garden-allocators",
  "purple-garden-bc",
  "purple-garden-frontend",
  "purple-garden-ir",
@@ -612,6 +619,7 @@ dependencies = [
 name = "purple-garden-frontend"
 version = "0.1.0"
 dependencies = [
+ "purple-garden-allocators",
  "purple-garden-bc",
  "purple-garden-ir",
  "purple-garden-runtime",
@@ -623,6 +631,7 @@ dependencies = [
 name = "purple-garden-ir"
 version = "0.1.0"
 dependencies = [
+ "purple-garden-allocators",
  "purple-garden-shared",
 ]
 
@@ -630,6 +639,7 @@ dependencies = [
 name = "purple-garden-jit"
 version = "0.1.0"
 dependencies = [
+ "purple-garden-allocators",
  "purple-garden-ir",
  "purple-garden-runtime",
  "purple-garden-shared",
@@ -657,6 +667,7 @@ dependencies = [
 name = "purple-garden-runtime"
 version = "0.1.0"
 dependencies = [
+ "purple-garden-allocators",
  "purple-garden-ir",
  "purple-garden-shared",
 ]
@@ -681,6 +692,7 @@ dependencies = [
 name = "purple-garden-typecheck"
 version = "0.1.0"
 dependencies = [
+ "purple-garden-allocators",
  "purple-garden-frontend",
  "purple-garden-ir",
  "purple-garden-runtime",

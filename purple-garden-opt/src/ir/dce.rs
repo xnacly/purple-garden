@@ -1,3 +1,5 @@
+use std::alloc::Allocator;
+
 use crate::ir::Scratch;
 use purple_garden_ir::{self as ir};
 
@@ -5,7 +7,7 @@ use purple_garden_ir::{self as ir};
 ///
 /// This runs to a fixed point because removing one dead producer can make
 /// earlier producers dead too.
-pub fn dce(fun: &mut ir::Func<'_>, scratch: &mut Scratch<'_>) {
+pub fn dce<F: Allocator, S: Allocator>(fun: &mut ir::Func<'_, F>, scratch: &mut Scratch<'_, S>) {
     loop {
         let mut changed = false;
 

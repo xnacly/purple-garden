@@ -1,9 +1,6 @@
 use std::fmt::Debug;
 
-use purple_garden_ir::{
-    constant::Const,
-    ptype::{BoxedType, Type},
-};
+use purple_garden_ir::{constant::Const, ptype::Type};
 
 use crate::{AllocType, string, vm::Vm};
 
@@ -171,7 +168,6 @@ pub fn record_field_ty<'a>(record_ty: &'a Type<'static>, name: &str) -> &'a Type
         panic!("field lookup requires record type, got {record_ty}");
     };
     &fields
-        .as_slice()
         .iter()
         .find(|field| field.name == name)
         .unwrap_or_else(|| panic!("record type {record_ty} has no field `{name}`"))
@@ -295,7 +291,7 @@ impl PgType for () {
 }
 
 impl<T: PgType> PgType for Option<T> {
-    const TYPE: Type<'static> = Type::Option(BoxedType::Static(&T::TYPE));
+    const TYPE: Type<'static> = Type::Option(&T::TYPE);
 }
 
 /// Generic slot `NAME` of a `#[pg_fn(with_slots)]` function, `Slot<"T">` is `Type::Slot("T")`

@@ -8,8 +8,12 @@
 )))]
 compile_error!("purple-garden currently supports only Linux or macOS on x86_64 or aarch64");
 
-use std::{collections::HashMap, marker::PhantomData};
+use std::{alloc::Allocator, collections::HashMap, marker::PhantomData};
 
+use purple_garden_allocators::{
+    bump::{Arena, BumpAlloc},
+    page::PageAlloc,
+};
 use purple_garden_bc::{self as bc, CcCallTarget};
 use purple_garden_frontend::{
     diagnostic::{Diagnostic, Span},
@@ -32,8 +36,7 @@ pub use purple_garden_macros::{GardenOpaque, GardenValue, pg_fn, pg_pkg};
 /// value conversion.
 pub mod embed {
     pub use purple_garden_runtime::{
-        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, RecordFields, Slot, Type, Value, Vm,
-        VmConfig,
+        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, Slot, Type, Value, Vm, VmConfig,
     };
 
     #[doc(hidden)]
@@ -62,11 +65,12 @@ type CodeArena = purple_garden_jit::CodeArena;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug)]
-pub struct Pg<'pg> {
+pub struct Pg<'pg, A: Allocator + Clone = PageAlloc> {
     config: config::Config,
     libs: Vec<&'pg Pkg>,
     stdlib: bool,
     unsafe_stdlib: bool,
+    alloc: A,
 }
 
 impl<'pg> Pg<'pg> {
@@ -90,6 +94,33 @@ impl<'pg> Pg<'pg> {
             libs: Vec::new(),
             stdlib: false,
             unsafe_stdlib: false,
+            alloc: PageAlloc {},
+        }
+    }
+}
+
+impl<'pg, A: Allocator + Clone> Pg<'pg, A> {
+    /// Allocates every compiler stage and the resulting program with
+    /// `alloc` instead of [`PageAlloc`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use purple_garden::Pg;
+    /// use std::alloc::System;
+    ///
+    /// let mut program = Pg::new().with_alloc(System).compile(br#"40 + 2"#)?;
+    /// assert_eq!(program.run_take::<i64>()?, 42);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn with_alloc<B: Allocator + Clone>(self, alloc: B) -> Pg<'pg, B> {
+        Pg {
+            config: self.config,
+            libs: self.libs,
+            stdlib: self.stdlib,
+            unsafe_stdlib: self.unsafe_stdlib,
+            alloc,
         }
     }
 
@@ -208,13 +239,17 @@ impl<'pg> Pg<'pg> {
     /// assert_eq!(program.run_take::<i64>()?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn compile(&self, input: &'pg [u8]) -> Result<Program<'pg>, Diagnostic> {
+    pub fn compile(&self, input: &'pg [u8]) -> Result<Program<'pg>, Diagnostic>
+    where
+        A: 'pg,
+    {
         compile(
             &self.config,
             input,
             &self.libs,
             self.stdlib,
             self.unsafe_stdlib,
+            self.alloc.clone(),
         )
     }
 }
@@ -243,13 +278,15 @@ impl Default for Pg<'_> {
 /// ```
 #[derive(Debug)]
 pub struct Program<'p> {
-    vm: Vm,
+    vm: Vm<'p>,
     entry: usize,
     entry_native: Option<BuiltinFn>,
     syscalls: Vec<BuiltinFn>,
     /// Keeps the native functions referenced by `syscalls` mapped.
     jit: Option<CodeArena>,
     funcs: HashMap<&'p str, (CcCallTarget, FunctionType<'p>)>,
+    /// Owns the names and types in `funcs`, declared after it so it is dropped last.
+    signatures: BumpAlloc,
 }
 
 /// A typed handle to a purple garden function extracted from [`Program`] via
@@ -357,7 +394,7 @@ where
 }
 
 impl<'p> Program<'p> {
-    fn from_vm(vm: Vm, syscalls: Vec<BuiltinFn>) -> Self {
+    fn from_vm(vm: Vm<'p>, syscalls: Vec<BuiltinFn>) -> Self {
         let entry = vm.pc;
         Self {
             vm,
@@ -366,6 +403,7 @@ impl<'p> Program<'p> {
             syscalls,
             jit: None,
             funcs: HashMap::new(),
+            signatures: BumpAlloc::new(),
         }
     }
 
@@ -624,14 +662,19 @@ impl<'p> Program<'p> {
     }
 }
 
-fn compile<'i>(
+fn compile<'i, A: Allocator + Clone + 'i>(
     config: &config::Config,
     input: &'i [u8],
     libs: &[&'i Pkg],
     stdlib: bool,
     unsafe_stdlib: bool,
+    alloc: A,
 ) -> Result<Program<'i>, Diagnostic> {
-    let parse = parser::Parser::new(lex::Lexer::new(input)).parse_collect();
+    let arena = BumpAlloc::new_in(alloc.clone());
+    // Reset after every phase, so the next one reuses its already touched pages.
+    let mut scratch = BumpAlloc::new_in(alloc.clone());
+    let parse = parser::Parser::new(lex::Lexer::new(input), &arena, &scratch).parse_collect();
+    scratch.reset();
     if let Some(diagnostic) = parse.diagnostics.into_iter().next() {
         return Err(diagnostic);
     }
@@ -641,50 +684,76 @@ fn compile<'i>(
 
     let stdlib = stdlib_packages(stdlib, unsafe_stdlib);
 
-    let typecheck = Typechecker::new(&ast)
+    let types = BumpAlloc::new_in(alloc.clone());
+    let typecheck = Typechecker::new(&ast, &types, &scratch)
         .with_libs(libs.to_vec())
         .with_stdlib(stdlib)
         .check();
+    scratch.reset();
     if let Some(diagnostic) = typecheck.diagnostics.into_iter().next() {
         return Err(diagnostic);
     }
 
-    let mut ir = lower::Lower::new()
+    let ir_arena = BumpAlloc::new_in(alloc.clone());
+    let mut ir = lower::Lower::new_in(&scratch)
         .with_libs(libs.to_vec())
         .with_stdlib(stdlib)
-        .ir_from_types(&ast, typecheck.types)?;
+        .ir_from_types(&ast, typecheck.types, &ir_arena)?;
+    scratch.reset();
     if config.opt >= 1 {
-        purple_garden_opt::ir(&mut ir);
+        purple_garden_opt::ir(&mut ir, &scratch);
+        scratch.reset();
     }
 
-    let mut cc = bc::Cc::new();
+    let mut cc = bc::Cc::new_in(&scratch, alloc.clone());
     let arena = cc
-        .compile(config, &ir)
+        .compile(config, &ir, PageAlloc {})
         .map_err(|msg| Diagnostic::new(msg, Span::new(0, 0)))?;
     if config.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);
         cc.compact_nops();
     }
 
-    let funcs: HashMap<_, _> = cc
-        .functions
-        .values()
-        .filter_map(|f| {
-            let (name, ft) = typecheck.functions.get_key_value(f.name())?;
-            Some((*name, (CcCallTarget::from(f), ft.clone())))
-        })
-        .collect();
+    let signatures = BumpAlloc::new();
+    let funcs: HashMap<_, _> =
+        cc.functions
+            .values()
+            .filter_map(|f| {
+                let (name, ft) = typecheck.functions.get_key_value(f.name())?;
+                let name = copy_str(&signatures, name);
+                let ft =
+                    FunctionType {
+                        args: signatures.alloc_slice(ft.args.iter().map(|(arg, ty)| {
+                            (copy_str(&signatures, arg), ty.copy_in(&signatures))
+                        })),
+                        ret: ft.ret.copy_in(&signatures),
+                        with_slots: ft.with_slots,
+                    };
+                // SAFETY: everything `name` and `ft` borrow lives in the chunks of `signatures`, which
+                // the program owns and drops after `funcs`, moving the program does not move them.
+                let entry: (&'i str, FunctionType<'i>) = unsafe { std::mem::transmute((name, ft)) };
+                Some((entry.0, (CcCallTarget::from(f), entry.1)))
+            })
+            .collect();
 
-    let (vm, syscalls, _debug, entry_native_idx) = cc.finalize(VmConfig {
-        backtrace: config.backtrace,
-        no_gc: config.no_gc,
-        stack_size: config.stack_size,
-    });
+    let (vm, syscalls, _debug, entry_native_idx) = cc.finalize(
+        VmConfig {
+            backtrace: config.backtrace,
+            no_gc: config.no_gc,
+            stack_size: config.stack_size,
+        },
+        alloc,
+    );
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let mut program = Program::from_vm(vm, syscalls).with_entry_native(entry_native);
     program.funcs = funcs;
+    program.signatures = signatures;
     program.jit = arena;
     Ok(program)
+}
+
+fn copy_str<'a>(arena: &'a BumpAlloc, s: &str) -> &'a str {
+    std::str::from_utf8(arena.alloc_slice(s.bytes())).expect("copied from a str")
 }
 
 fn stdlib_packages(enabled: bool, unsafe_enabled: bool) -> &'static [Pkg] {

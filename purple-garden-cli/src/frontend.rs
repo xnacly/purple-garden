@@ -1,3 +1,4 @@
+use purple_garden_allocators::bump::BumpAlloc;
 use purple_garden_frontend::{ast::Ast, diagnostic::Diagnostic, lex::Lexer, parser::Parser};
 use purple_garden_runtime::Pkg;
 use purple_garden_typecheck::{TypecheckOutput, Typechecker};
@@ -5,8 +6,8 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct FrontendAnalysis<'a, 'src> {
-    pub(crate) ast: Option<&'a Ast<'src>>,
-    pub(crate) typecheck: Option<&'a TypecheckOutput<'src>>,
+    pub(crate) ast: Option<&'a Ast<'src, 'a>>,
+    pub(crate) typecheck: Option<&'a TypecheckOutput<'a, &'a BumpAlloc>>,
     pub(crate) diagnostics: &'a [Diagnostic],
     pub(crate) source: &'src [u8],
 }
@@ -17,7 +18,9 @@ pub(crate) fn analyze<'src, R>(
     stdlib: &'src [Pkg],
     f: impl for<'a> FnOnce(FrontendAnalysis<'a, '_>) -> R,
 ) -> R {
-    let parse = Parser::new(Lexer::new(source)).parse_collect();
+    let arena = BumpAlloc::new();
+    let scratch = BumpAlloc::new();
+    let parse = Parser::new(Lexer::new(source), &arena, &scratch).parse_collect();
     let purple_garden_frontend::parser::ParseOutput {
         ast,
         mut diagnostics,
@@ -32,7 +35,7 @@ pub(crate) fn analyze<'src, R>(
         });
     };
 
-    let typecheck = Typechecker::new(&ast)
+    let typecheck = Typechecker::new(&ast, &arena, &scratch)
         .with_libs(libs)
         .with_stdlib(stdlib)
         .check();

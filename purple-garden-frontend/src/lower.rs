@@ -2,14 +2,20 @@
 // allocation-free error path; boxing them would make the internal API noisier.
 #![allow(clippy::result_large_err)]
 
-use std::{alloc::Layout, collections::HashMap, num};
+use std::{
+    alloc::{Allocator, Global, Layout},
+    collections::HashMap,
+    hash::RandomState,
+    num,
+};
+
+type Map<K, V, S> = HashMap<K, V, RandomState, S>;
 
 use crate::typemap::TypeMap;
 use crate::{
     ast::{Ast, Node, NodeId, TypeExpr},
     diagnostic::Diagnostic,
     lex::{self, Token, Type},
-    type_from_type_expr,
 };
 use purple_garden_ir::{
     BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype,
@@ -35,55 +41,85 @@ fn align_up(value: usize, align: usize) -> usize {
     (value + align - 1) & !(align - 1)
 }
 
-#[derive(Default)]
-struct LowerCtx<'lower> {
+struct LowerCtx<'lower, S: Allocator, I: Allocator> {
     /// current function
-    func: Func<'lower>,
+    func: Func<'lower, I>,
     /// current block
     block: Id,
     id_store: IdStore,
     /// maps ast variable names to ssa values
-    env: HashMap<&'lower str, Id>,
+    env: Map<&'lower str, Id, S>,
 }
 
-pub struct Lower<'lower> {
-    ctx: LowerCtx<'lower>,
-    functions: Vec<Func<'lower>>,
-    func_name_to_id: HashMap<&'lower str, (Id, Option<ptype::Type<'lower>>)>,
-    types: TypeMap<'lower>,
-    packages: HashMap<
-        &'lower str,
-        (
-            &'lower Pkg,
-            HashMap<&'lower str, Vec<&'lower pstd::Fn<'static>>>,
-        ),
-    >,
-    pkg_cache: HashMap<&'lower str, Option<&'lower Pkg>>,
+impl<S: Allocator, I: Allocator + Clone> LowerCtx<'_, S, I> {
+    fn new_in(scratch: S, ir: I) -> Self {
+        Self {
+            func: Func::new_in("", Id(0), [], None, ir),
+            block: Id::default(),
+            id_store: IdStore::default(),
+            env: Map::new_in(scratch),
+        }
+    }
+}
+
+type Overloads<'lower, S> = Map<&'lower str, Vec<&'lower pstd::Fn<'static>, S>, S>;
+
+/// Builds the IR, its working state lives in the scratch allocator `S`.
+pub struct Lower<
+    'lower,
+    A: Allocator = Global,
+    S: Allocator + Clone = Global,
+    I: Allocator + Clone = Global,
+> {
+    scratch: S,
+    /// Every function and block of the IR is allocated in it.
+    ir: I,
+    ctx: LowerCtx<'lower, S, I>,
+    /// AST nodes of the root being lowered. The parser numbers nodes in
+    /// post-order, so a root's subtree is the id range since the previous root.
+    root_nodes: usize,
+    functions: Vec<Func<'lower, I>, I>,
+    func_name_to_id: Map<&'lower str, (Id, Option<ptype::Type<'lower>>), S>,
+    types: TypeMap<'lower, A>,
+    packages: Map<&'lower str, (&'lower Pkg, Overloads<'lower, S>), S>,
+    pkg_cache: Map<&'lower str, Option<&'lower Pkg>, S>,
     libs: Vec<&'lower Pkg>,
     stdlib: &'lower [purple_garden_runtime::Pkg],
 }
 
 impl Default for Lower<'_> {
     fn default() -> Self {
-        Self {
-            ctx: LowerCtx::default(),
-            functions: Vec::new(),
-            func_name_to_id: HashMap::new(),
-            types: TypeMap::default(),
-            packages: HashMap::new(),
-            pkg_cache: HashMap::new(),
-            libs: Vec::new(),
-            stdlib: pstd::STD,
-        }
+        Self::new_in(Global)
     }
 }
 
-impl<'lower> Lower<'lower> {
+impl Lower<'_> {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
+}
 
+impl<S: Allocator + Clone> Lower<'_, Global, S> {
+    #[must_use]
+    pub fn new_in(scratch: S) -> Self {
+        Self {
+            ctx: LowerCtx::new_in(scratch.clone(), Global),
+            functions: Vec::new(),
+            root_nodes: 0,
+            ir: Global,
+            func_name_to_id: Map::new_in(scratch.clone()),
+            types: TypeMap::default(),
+            packages: Map::new_in(scratch.clone()),
+            pkg_cache: Map::new_in(scratch.clone()),
+            libs: Vec::new(),
+            stdlib: pstd::STD,
+            scratch,
+        }
+    }
+}
+
+impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lower, A, S, I> {
     #[must_use]
     pub fn with_libs(mut self, libs: Vec<&'lower Pkg>) -> Self {
         self.libs = libs;
@@ -124,24 +160,29 @@ impl<'lower> Lower<'lower> {
             .push(i);
     }
 
-    fn cur(&self) -> &Block<'lower> {
+    fn cur(&self) -> &Block<'lower, I> {
         let Id(idx) = self.ctx.block;
         self.ctx.func.blocks.get(idx as usize).unwrap()
     }
 
+    /// Branch and match arms mostly hold one or two instructions.
     fn new_block(&mut self) -> Id {
+        self.new_block_with(2)
+    }
+
+    fn new_block_with(&mut self, instructions: usize) -> Id {
         let id = Id(self.ctx.func.blocks.len() as u32);
         self.ctx.func.blocks.push(Block {
             id,
             tombstone: false,
-            instructions: vec![],
+            instructions: Vec::with_capacity_in(instructions, self.ir.clone()),
             params: EMPTY_PARAMS,
             term: None,
         });
         id
     }
 
-    fn block_mut(&mut self, id: Id) -> &mut Block<'lower> {
+    fn block_mut(&mut self, id: Id) -> &mut Block<'lower, I> {
         &mut self.ctx.func.blocks[id.0 as usize]
     }
 
@@ -151,7 +192,7 @@ impl<'lower> Lower<'lower> {
 
     fn lower_node_into(
         &mut self,
-        ast: &'lower Ast<'lower>,
+        ast: &'lower Ast<'lower, 'lower>,
         node_id: NodeId,
         ty: &ptype::Type<'lower>,
         base: Id,
@@ -163,7 +204,7 @@ impl<'lower> Lower<'lower> {
                 unreachable!("record literal was typechecked as non-record")
             };
 
-            for (tok, value) in fields {
+            for (tok, value) in *fields {
                 let lex::Type::Ident(name) = tok.t else {
                     unreachable!();
                 };
@@ -192,7 +233,7 @@ impl<'lower> Lower<'lower> {
 
     fn lower_node(
         &mut self,
-        ast: &'lower Ast<'lower>,
+        ast: &'lower Ast<'lower, 'lower>,
         node_id: NodeId,
     ) -> Result<Option<Id>, Diagnostic> {
         let node = ast.node(node_id);
@@ -363,7 +404,7 @@ impl<'lower> Lower<'lower> {
                         self.emit(Instr::LoadConst {
                             dst: TypeId {
                                 id: zero_id,
-                                ty: inner_ty.clone(),
+                                ty: inner_ty,
                             },
                             value: zero_const,
                             span,
@@ -406,7 +447,10 @@ impl<'lower> Lower<'lower> {
                 body,
                 ..
             } => {
-                let old_ctx = std::mem::take(&mut self.ctx);
+                let old_ctx = std::mem::replace(
+                    &mut self.ctx,
+                    LowerCtx::new_in(self.scratch.clone(), self.ir.clone()),
+                );
 
                 let id = Id(self.functions.len() as u32 + 1);
                 let Type::Ident(ident_name) = name.t else {
@@ -419,32 +463,38 @@ impl<'lower> Lower<'lower> {
                 } else if let TypeExpr::Atom(Token { t, .. }) = ast.ty(*return_type) {
                     Some(crate::type_from_lex_type(*t))
                 } else {
-                    Some(crate::type_from_type_expr(ast, *return_type))
+                    self.types.get(ast.value_id(node_id)).copied()
                 };
 
-                self.func_name_to_id.insert(ident_name, (id, ret.clone()));
-                let func_params: Vec<Id> = args
-                    .iter()
-                    .map(|(token, _)| {
-                        let id = self.ctx.id_store.new_value();
-                        let Type::Ident(ident) = token.t else {
-                            unreachable!();
-                        };
-                        self.ctx.env.insert(ident, id);
-                        id
-                    })
-                    .collect();
-                let func = Func::new(ident_name, id, func_params, ret).with_span(name.start as u32);
+                self.func_name_to_id.insert(ident_name, (id, ret));
+                let mut func_params = Vec::with_capacity_in(args.len(), self.scratch.clone());
+                func_params.extend(args.iter().map(|(token, _)| {
+                    let id = self.ctx.id_store.new_value();
+                    let Type::Ident(ident) = token.t else {
+                        unreachable!();
+                    };
+                    self.ctx.env.insert(ident, id);
+                    id
+                }));
+                let mut func = Func::new_in(ident_name, id, func_params, ret, self.ir.clone())
+                    .with_span(name.start as u32);
+                // At most one block per two nodes. Small functions have one or two blocks, the
+                // estimate would only overshoot for them.
+                if self.root_nodes > 16 {
+                    func.blocks.reserve(self.root_nodes / 2 + 1);
+                }
 
                 // TODO:deal with b0
 
                 self.ctx.func = func;
-                let entry = self.new_block();
-                let entry_params = self.ctx.func.intern_params(self.ctx.func.params.clone());
+                // At most three instructions per four nodes, the arms of matches
+                // and branches take theirs into blocks of their own.
+                let entry = self.new_block_with((self.root_nodes * 3 / 4).max(2));
+                let entry_params = self.ctx.func.intern_own_params();
                 self.block_mut(entry).params = entry_params;
 
                 let mut last = None;
-                for &node in body {
+                for &node in *body {
                     self.switch_to_block(entry);
                     last = self.lower_node(ast, node)?;
                 }
@@ -462,13 +512,15 @@ impl<'lower> Lower<'lower> {
                     });
                 }
 
-                self.functions.push(std::mem::take(&mut self.ctx.func));
+                let empty = Func::new_in("", Id(0), [], None, self.ir.clone());
+                self.functions
+                    .push(std::mem::replace(&mut self.ctx.func, empty));
                 self.ctx = old_ctx;
                 None
             }
             Node::Call { target, args, id } => {
-                let mut a = vec![];
-                for &arg in args {
+                let mut a = Vec::new_in(self.scratch.clone());
+                for &arg in *args {
                     let Some(id) = self.lower_node(ast, arg)? else {
                         unreachable!();
                     };
@@ -533,11 +585,12 @@ impl<'lower> Lower<'lower> {
                             .get(*id)
                             .cloned()
                             .expect("typechecker should have typed the call");
+                        let args = self.ctx.func.intern_params(a);
                         self.emit(Instr::Sys {
                             dst,
                             path: pkg_name,
                             fun,
-                            args: a,
+                            args,
                             span: name.start as u32,
                         });
                     }
@@ -560,10 +613,11 @@ impl<'lower> Lower<'lower> {
                         };
 
                         dst.ty = ret.unwrap_or(ptype::Type::Void);
+                        let args = self.ctx.func.intern_params(a);
                         self.emit(Instr::Call {
                             dst,
                             func: target_id,
-                            args: a,
+                            args,
                             span: name.start as u32,
                         });
                     }
@@ -573,7 +627,7 @@ impl<'lower> Lower<'lower> {
                 Some(dst_id)
             }
             Node::Import { pkgs, .. } => {
-                for pkg_tok in pkgs {
+                for pkg_tok in *pkgs {
                     let Token {
                         t: Type::S(as_str), ..
                     } = pkg_tok
@@ -592,16 +646,18 @@ impl<'lower> Lower<'lower> {
 
                     // group specialisations under their group name, mirroring
                     // the typechecker's registration.
-                    let mut fns: HashMap<&str, Vec<&pstd::Fn>> = HashMap::new();
+                    let mut fns: Overloads<'lower, S> = Map::new_in(self.scratch.clone());
                     for f in pkg.fns {
-                        fns.entry(f.group_name()).or_default().push(f);
+                        fns.entry(f.group_name())
+                            .or_insert_with(|| Vec::new_in(self.scratch.clone()))
+                            .push(f);
                     }
                     self.packages.insert(pkg.name, (pkg, fns));
                 }
                 None
             }
             Node::Extern { .. } => None,
-            Node::Cast { lhs, rhs, src, .. } => {
+            Node::Cast { id, lhs, src, .. } => {
                 let src_ty = self
                     .types
                     .get(ast.value_id(*lhs))
@@ -615,7 +671,11 @@ impl<'lower> Lower<'lower> {
                 let dst = self.ctx.id_store.new_value();
                 let value = TypeId {
                     id: dst,
-                    ty: type_from_type_expr(ast, *rhs),
+                    ty: self
+                        .types
+                        .get(*id)
+                        .copied()
+                        .expect("typechecker should have typed the cast"),
                 };
 
                 self.emit(Instr::Cast {
@@ -629,8 +689,8 @@ impl<'lower> Lower<'lower> {
                 Some(dst)
             }
             Node::Match { cases, default, .. } => {
-                let mut check_blocks = Vec::with_capacity(cases.len());
-                let mut body_blocks = Vec::with_capacity(cases.len());
+                let mut check_blocks = Vec::with_capacity_in(cases.len(), self.scratch.clone());
+                let mut body_blocks = Vec::with_capacity_in(cases.len(), self.scratch.clone());
 
                 // The first check is lowered into the current block, so the
                 // match needs no jump into it.
@@ -697,7 +757,7 @@ impl<'lower> Lower<'lower> {
                     // env is a flat map, so snapshot it and restore afterwards.
                     let saved_env = self.ctx.env.clone();
                     let mut last = None;
-                    for &node in body {
+                    for &node in *body {
                         last = self.lower_node(ast, node)?;
                     }
                     let value = last.expect("match body must produce value");
@@ -719,7 +779,7 @@ impl<'lower> Lower<'lower> {
                 // `let` bindings stay local to it.
                 let saved_env = self.ctx.env.clone();
                 let mut last = None;
-                for &node in body {
+                for &node in *body {
                     last = self.lower_node(ast, node)?;
                 }
 
@@ -746,11 +806,11 @@ impl<'lower> Lower<'lower> {
 
                 // we need the inner type T of Array<T> to compute its size and its alignment and
                 // multiply it up with the size of the array, since all arrays in pg are immutable
-                let ptype::Type::Array(ref inner) = ty else {
+                let ptype::Type::Array(inner) = ty else {
                     unreachable!();
                 };
 
-                let inner = inner.as_ref().clone();
+                let inner = *inner;
                 let word_size = std::mem::size_of::<purple_garden_runtime::Value>();
                 let header_size = align_up(word_size, inner.align());
                 let member_size = align_up(inner.size(), inner.align());
@@ -806,16 +866,13 @@ impl<'lower> Lower<'lower> {
                 let layout = record_ty.layout();
                 let id = self.ctx.id_store.new_value();
                 self.emit(Instr::Alloc {
-                    dst: TypeId {
-                        id,
-                        ty: record_ty.clone(),
-                    },
+                    dst: TypeId { id, ty: record_ty },
                     layout,
                     span: src.start as u32,
                 });
 
                 let base = id;
-                for (tok, value) in fields {
+                for (tok, value) in *fields {
                     let lex::Type::Ident(name) = tok.t else {
                         unreachable!();
                     };
@@ -835,25 +892,49 @@ impl<'lower> Lower<'lower> {
     /// Lower [ast] using a type map produced by the typechecker.
     ///
     /// The entry point is always `entry`.
-    pub fn ir_from_types(
+    /// The IR is allocated in `ir`.
+    pub fn ir_from_types<B: Allocator, J: Allocator + Clone>(
+        self,
+        ast: &'lower Ast<'lower, 'lower>,
+        types: TypeMap<'lower, B>,
+        ir: J,
+    ) -> Result<Vec<Func<'lower, J>, J>, Diagnostic> {
+        Lower {
+            ctx: LowerCtx::new_in(self.scratch.clone(), ir.clone()),
+            functions: Vec::new_in(ir.clone()),
+            root_nodes: 0,
+            ir,
+            scratch: self.scratch,
+            func_name_to_id: self.func_name_to_id,
+            types,
+            packages: self.packages,
+            pkg_cache: self.pkg_cache,
+            libs: self.libs,
+            stdlib: self.stdlib,
+        }
+        .lower(ast)
+    }
+
+    fn lower(
         mut self,
-        ast: &'lower Ast<'lower>,
-        types: TypeMap<'lower>,
-    ) -> Result<Vec<Func<'lower>>, Diagnostic> {
-        self.types = types;
+        ast: &'lower Ast<'lower, 'lower>,
+    ) -> Result<Vec<Func<'lower, I>, I>, Diagnostic> {
         // Most roots are declarations or expressions becoming functions later;
         // thus reserving this avoids repeated growth
         self.functions.reserve(ast.roots.len() + 1);
         self.func_name_to_id.reserve(ast.roots.len() + 1);
 
-        self.ctx.func =
-            Func::new("entry", Id(0), Vec::new(), None).with_span(ast.entry_span().unwrap_or(0));
+        self.ctx.func = Func::new_in("entry", Id(0), [], None, self.ir.clone())
+            .with_span(ast.entry_span().unwrap_or(0));
         let entry = self.new_block();
         self.switch_to_block(entry);
 
         let mut last = None;
         let last_span = ast.entry_span().unwrap_or(0);
-        for &node in &ast.roots {
+        let mut prev = None;
+        for &node in ast.roots {
+            self.root_nodes = prev.map_or(node.0 + 1, |prev: NodeId| node.0 - prev.0);
+            prev = Some(node);
             last = self.lower_node(ast, node)?;
             // reset to the main entry point block to keep emitting nodes into the correct conext
             self.switch_to_block(entry);

@@ -5,9 +5,13 @@ use purple_garden_frontend::{
 };
 use purple_garden_ir::ptype::{BindError, Type};
 
+use std::alloc::Allocator;
+
+use purple_garden_allocators::bump::Arena;
+
 use crate::{FunctionType, Typechecker, typedefs::CallName};
 
-impl<'a, 't> Typechecker<'a, 't> {
+impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
     pub(crate) fn report(&mut self, diagnostic: Diagnostic) {
         self.diagnostics.push(diagnostic);
     }
@@ -135,7 +139,7 @@ impl<'a, 't> Typechecker<'a, 't> {
     }
 
     pub(crate) fn common_return(candidates: &[FunctionType<'t>]) -> Option<Type<'t>> {
-        let first = candidates.first()?.ret.clone();
+        let first = candidates.first()?.ret;
         candidates.iter().all(|c| c.ret == first).then_some(first)
     }
 }

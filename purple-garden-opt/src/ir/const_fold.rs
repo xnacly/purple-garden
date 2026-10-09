@@ -1,3 +1,5 @@
+use std::alloc::Allocator;
+
 use crate::ir::Scratch;
 use purple_garden_ir::{self as ir, BinOp, Instr, TypeId, constant::Const, ptype::Type};
 
@@ -16,7 +18,10 @@ use purple_garden_ir::{self as ir, BinOp, Instr, TypeId, constant::Const, ptype:
 /// ```text
 /// %v2:Int = 37
 /// ```
-pub fn const_fold<'fold, 's>(fun: &'fold mut ir::Func<'s>, scratch: &'fold mut Scratch<'s>) {
+pub fn const_fold<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut Scratch<'_, S>,
+) {
     let mut changed = false;
 
     for i in 0..fun.blocks.len() {
@@ -47,7 +52,10 @@ pub fn const_fold<'fold, 's>(fun: &'fold mut ir::Func<'s>, scratch: &'fold mut S
     }
 }
 
-fn remove_dead_load_consts<'s>(fun: &mut ir::Func<'s>, scratch: &mut Scratch<'s>) {
+fn remove_dead_load_consts<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut Scratch<'_, S>,
+) {
     scratch.reset();
 
     for block in &fun.blocks {
@@ -59,7 +67,7 @@ fn remove_dead_load_consts<'s>(fun: &mut ir::Func<'s>, scratch: &mut Scratch<'s>
             if let Some(id) = ir::Func::def_of(instr) {
                 scratch.ensure(id);
             }
-            ir::Func::for_each_use_of_instr(instr, |id| scratch.bump(id));
+            fun.for_each_use_of_instr(instr, |id| scratch.bump(id));
         }
 
         if let Some(term) = &block.term {
@@ -88,7 +96,11 @@ fn remove_dead_load_consts<'s>(fun: &mut ir::Func<'s>, scratch: &mut Scratch<'s>
     }
 }
 
-fn try_const_fold(instr: &mut Instr<'_>, scratch: &Scratch, previous: &[Instr<'_>]) -> bool {
+fn try_const_fold<S: Allocator>(
+    instr: &mut Instr<'_>,
+    scratch: &Scratch<'_, S>,
+    previous: &[Instr<'_>],
+) -> bool {
     match instr {
         Instr::Cast { dst, from, span } => {
             let Some(def) = scratch.const_def(from.id) else {

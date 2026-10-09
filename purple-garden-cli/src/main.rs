@@ -1,3 +1,8 @@
+use purple_garden_allocators::{
+    bump::BumpAlloc,
+    metric::MetricAlloc,
+    page::{PageAlloc, Pages},
+};
 use purple_garden_bc as bc;
 use purple_garden_frontend::{
     diagnostic::{Diagnostic, Help, Span},
@@ -17,9 +22,11 @@ mod frontend;
 mod help;
 mod input;
 mod lsp;
+mod stats;
 
 use cli::{Cli, Command};
 use input::Input;
+use stats::Phases;
 
 pub const BUILD_INFO: &str = concat!(
     "version=",
@@ -68,7 +75,6 @@ macro_rules! err {
 /// ```
 fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let cli = <Cli as clap::Parser>::parse();
-    let conf = &cli.config;
 
     match cli.version {
         1 => {
@@ -133,7 +139,28 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
 
     let source = input.as_bytes();
 
-    let parse = Parser::new(Lexer::new(source)).parse_collect();
+    if !cli.alloc_stats {
+        return pipeline(&cli, input_source, source, Phases::<PageAlloc>::default());
+    }
+    let phases = Phases::<MetricAlloc<PageAlloc>>::default();
+    pipeline(&cli, input_source, source, phases.each_ref())?;
+    eprint!("{}", phases.table());
+    Ok(())
+}
+
+fn pipeline<A: Pages + Clone>(
+    cli: &Cli,
+    input_source: &str,
+    source: &[u8],
+    allocs: Phases<A>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let conf = &cli.config;
+
+    let arena = BumpAlloc::new_in(allocs.parse.clone());
+    // Reset after every phase, so the next one reuses its already touched pages.
+    let mut scratch = BumpAlloc::new_in(allocs.scratch);
+    let parse = Parser::new(Lexer::new(source), &arena, &scratch).parse_collect();
+    scratch.reset();
     let purple_garden_frontend::parser::ParseOutput {
         ast,
         diagnostics: parse_diagnostics,
@@ -154,10 +181,12 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let libs = Vec::new();
-    let typecheck = Typechecker::new(&ast)
+    let types = BumpAlloc::new_in(allocs.typecheck);
+    let typecheck = Typechecker::new(&ast, &types, &scratch)
         .with_libs(libs.clone())
-        .with_stdlib(stdlib_packages(&cli))
+        .with_stdlib(stdlib_packages(cli))
         .check();
+    scratch.reset();
     let has_type_errors = !typecheck.diagnostics.is_empty();
 
     if cli.types > 0 {
@@ -180,20 +209,23 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
-    let lower = Lower::new()
+    let lower = Lower::new_in(&scratch)
         .with_libs(libs)
-        .with_stdlib(stdlib_packages(&cli));
-    let mut ir = match lower.ir_from_types(&ast, typecheck.types) {
+        .with_stdlib(stdlib_packages(cli));
+    let ir_arena = BumpAlloc::new_in(allocs.lower);
+    let mut ir = match lower.ir_from_types(&ast, typecheck.types, &ir_arena) {
         Ok(v) => v,
         Err(e) => {
             return err!(e.render(input_source, source));
         }
     };
 
+    scratch.reset();
     purple_garden_shared::trace!("[main] Lowered AST to IR");
 
     if conf.opt >= 1 {
-        purple_garden_opt::ir(&mut ir);
+        purple_garden_opt::ir(&mut ir, &scratch);
+        scratch.reset();
     }
 
     if cli.ir > 0 {
@@ -203,8 +235,8 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut cc = bc::Cc::new();
-    let native_pages = cc.compile(conf, &ir)?;
+    let mut cc = bc::Cc::new_in(&scratch, allocs.cc);
+    let native_pages = cc.compile(conf, &ir, allocs.jit)?;
 
     purple_garden_shared::trace!("[main] Lowered IR to bytecode");
 
@@ -224,11 +256,14 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    let (mut vm, syscalls, debug, entry_native_idx) = cc.finalize(VmConfig {
-        backtrace: conf.backtrace,
-        no_gc: conf.no_gc,
-        stack_size: conf.stack_size,
-    });
+    let (mut vm, syscalls, debug, entry_native_idx) = cc.finalize(
+        VmConfig {
+            backtrace: conf.backtrace,
+            no_gc: conf.no_gc,
+            stack_size: conf.stack_size,
+        },
+        allocs.run,
+    );
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let entry = vm.pc;
     // Keep executable JIT pages alive until execution has completed.

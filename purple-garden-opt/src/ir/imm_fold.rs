@@ -1,9 +1,14 @@
+use std::alloc::Allocator;
+
 use crate::ir::Scratch;
 use purple_garden_ir::{self as ir, BinOp, Id, Instr, TypeId, constant::Const};
 
 /// Fold single-use integer constants into integer binops while the IR
 /// still knows SSA use counts.
-pub fn imm_fold<'s>(fun: &mut ir::Func<'s>, scratch: &mut super::Scratch<'s>) {
+pub fn imm_fold<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &mut super::Scratch<'_, S>,
+) {
     scratch.reset();
 
     for (bi, block) in fun.blocks.iter().enumerate() {
@@ -22,7 +27,7 @@ pub fn imm_fold<'s>(fun: &mut ir::Func<'s>, scratch: &mut super::Scratch<'s>) {
             continue;
         }
         for instr in &block.instructions {
-            ir::Func::for_each_use_of_instr(instr, |id| bump_if_const(scratch, id));
+            fun.for_each_use_of_instr(instr, |id| bump_if_const(scratch, id));
         }
         if let Some(term) = &block.term {
             fun.for_each_use_of_term(term, |id| bump_if_const(scratch, id));
@@ -57,7 +62,7 @@ pub fn imm_fold<'s>(fun: &mut ir::Func<'s>, scratch: &mut super::Scratch<'s>) {
     }
 }
 
-fn bump_if_const(scratch: &mut Scratch<'_>, id: Id) {
+fn bump_if_const<S: Allocator>(scratch: &mut Scratch<'_, S>, id: Id) {
     // imm_fold only cares whether recorded LoadConst defs are single-use, so
     // avoid growing the scratch vectors for arbitrary non-constant ids.
     let idx = id.0 as usize;
@@ -66,10 +71,10 @@ fn bump_if_const(scratch: &mut Scratch<'_>, id: Id) {
     }
 }
 
-fn try_fold<'scratch>(
+fn try_fold<'scratch, F: Allocator, S: Allocator>(
     instr: &Instr<'scratch>,
-    scratch: &Scratch<'_>,
-    fun: &ir::Func<'scratch>,
+    scratch: &Scratch<'_, S>,
+    fun: &ir::Func<'scratch, F>,
 ) -> Option<(BinOp, Id, u32, u32, i32, TypeId<'scratch>, u32)> {
     let Instr::Bin {
         op,
@@ -126,8 +131,8 @@ fn try_fold<'scratch>(
     ))
 }
 
-fn const_value<'fun>(
-    fun: &'fun ir::Func<'_>,
+fn const_value<'fun, F: Allocator>(
+    fun: &'fun ir::Func<'_, F>,
     def: crate::ir::ConstDef,
 ) -> Option<&'fun Const<'fun>> {
     let Instr::LoadConst { value, .. } = fun

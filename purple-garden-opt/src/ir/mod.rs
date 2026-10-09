@@ -16,6 +16,8 @@ mod switch_fold;
 mod switch_lookup;
 mod tailcall;
 
+use std::alloc::{Allocator, Global};
+
 use purple_garden_ir::{self as ir, Id};
 
 /// Location of a recorded `LoadConst`.
@@ -34,14 +36,30 @@ pub struct ConstDef {
 /// consts.len()`; [`Scratch::ensure`] is the only place they grow,
 /// and they grow together so callers can index either side without
 /// bounds-checking the other.
-#[derive(Default)]
-pub struct Scratch<'scratch> {
-    uses: Vec<u32>,
-    consts: Vec<Option<ConstDef>>,
-    _marker: std::marker::PhantomData<&'scratch ()>,
+pub struct Scratch<'scratch, S: Allocator = Global> {
+    uses: Vec<u32, &'scratch S>,
+    consts: Vec<Option<ConstDef>, &'scratch S>,
 }
 
-impl<'scratch> Scratch<'scratch> {
+impl Default for Scratch<'_> {
+    fn default() -> Self {
+        Self::new_in(&Global)
+    }
+}
+
+impl<'scratch, S: Allocator> Scratch<'scratch, S> {
+    pub fn new_in(scratch: &'scratch S) -> Self {
+        Self {
+            uses: Vec::new_in(scratch),
+            consts: Vec::new_in(scratch),
+        }
+    }
+
+    /// The allocator behind the analysis, for a pass's own temporaries.
+    pub fn alloc(&self) -> &'scratch S {
+        self.uses.allocator()
+    }
+
     /// Clear all recorded analysis while retaining vector capacity.
     pub fn reset(&mut self) {
         self.uses.clear();
@@ -101,7 +119,10 @@ impl<'scratch> Scratch<'scratch> {
 ///
 /// This also calls [`Scratch::ensure`] for definitions with zero uses, so
 /// callers can distinguish "defined but dead" from "id never seen" when needed.
-pub(super) fn record_uses(fun: &ir::Func<'_>, scratch: &mut Scratch<'_>) {
+pub(super) fn record_uses<F: Allocator, S: Allocator>(
+    fun: &ir::Func<'_, F>,
+    scratch: &mut Scratch<'_, S>,
+) {
     scratch.reset();
 
     for block in &fun.blocks {
@@ -113,7 +134,7 @@ pub(super) fn record_uses(fun: &ir::Func<'_>, scratch: &mut Scratch<'_>) {
             if let Some(id) = ir::Func::def_of(instr) {
                 scratch.ensure(id);
             }
-            ir::Func::for_each_use_of_instr(instr, |id| scratch.bump(id));
+            fun.for_each_use_of_instr(instr, |id| scratch.bump(id));
         }
 
         if let Some(term) = &block.term {
@@ -122,9 +143,25 @@ pub(super) fn record_uses(fun: &ir::Func<'_>, scratch: &mut Scratch<'_>) {
     }
 }
 
+/// Collects `items` into `scratch`, `None` as soon as one item is `None`.
+pub(super) fn try_collect_in<T, S: Allocator>(
+    items: impl IntoIterator<Item = Option<T>>,
+    scratch: S,
+) -> Option<Vec<T, S>> {
+    let mut out = Vec::new_in(scratch);
+    for item in items {
+        out.push(item?);
+    }
+    Some(out)
+}
+
 /// Number of live edges into each block, indexed by block id.
-pub(super) fn predecessor_counts(fun: &ir::Func) -> Vec<u32> {
-    let mut counts = vec![0; fun.blocks.len()];
+pub(super) fn predecessor_counts<F: Allocator, S: Allocator>(
+    fun: &ir::Func<'_, F>,
+    scratch: S,
+) -> Vec<u32, S> {
+    let mut counts = Vec::with_capacity_in(fun.blocks.len(), scratch);
+    counts.resize(fun.blocks.len(), 0);
 
     for block in &fun.blocks {
         if block.tombstone {

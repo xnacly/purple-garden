@@ -7,4 +7,5 @@ edition = "2024"
 trace = ["purple-garden-shared/trace"]
 
 [dependencies]
+purple-garden-allocators = { path = "../purple-garden-allocators" }
 purple-garden-shared = { path = "../purple-garden-shared" }

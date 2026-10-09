@@ -1,5 +1,12 @@
 //! Purple garden type system
-use std::{alloc::Layout, borrow::Cow, collections::HashMap, fmt::Display, hash::Hash};
+use std::{
+    alloc::{Allocator, Layout},
+    collections::HashMap,
+    fmt::Display,
+    hash::BuildHasher,
+};
+
+use purple_garden_allocators::bump::Arena;
 
 use crate::Const;
 
@@ -7,8 +14,8 @@ use crate::Const;
 const WORD_SIZE: usize = 8;
 const WORD_ALIGN: usize = 8;
 
-/// Compile time type system,
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+/// Compile time type system, compound types point into an [`Arena`] or are `'static`
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum Type<'t> {
     Void,
     Bool,
@@ -31,7 +38,7 @@ pub enum Type<'t> {
     /// - optimise to use nullptr for None and ptr for some, thus just being 8 byte
     /// - optimise to use NaN values for Option(Double)
     /// - optimise to use non 0..1 values for Option(Bool)
-    Option(BoxedType<'t>),
+    Option(&'t Type<'t>),
     /// Arrays are pointer-sized values. The heap payload behind an `Array<T>`
     /// is contiguous and starts with a length word:
     ///
@@ -43,7 +50,7 @@ pub enum Type<'t> {
     ///       | len    | [0].x  | [0].y  | [1].x  | [1].y  |
     ///       +--------+--------+--------+--------+--------+
     /// ```
-    Array(BoxedType<'t>),
+    Array(&'t Type<'t>),
     /// Records are stored inline:
     ///
     /// ```text
@@ -54,7 +61,7 @@ pub enum Type<'t> {
     ///       | a      | b.c    | b.d    | e      |
     ///       +--------+--------+--------+--------+
     /// ```
-    Record(RecordFields<'t>),
+    Record(&'t [Field<'t>]),
     /// Foreign type for handling opaque rust data feed into the vm runtime
     ///
     /// which is useful for something like Foreign<counter> vs
@@ -67,64 +74,7 @@ pub enum Type<'t> {
     Slot(&'t str),
 }
 
-/// Cow-style wrapper around the inner type of `Type::Option` / `Type::Array`.
-///
-/// `Static` lets these variants be constructed in `const` contexts (where
-/// `Box::new` is not available), while `Owned` remains available for runtime
-/// construction where the inner type is computed dynamically.
-#[derive(Debug, Clone)]
-pub enum BoxedType<'t> {
-    Static(&'t Type<'t>),
-    Owned(Box<Type<'t>>),
-}
-
-impl<'t> BoxedType<'t> {
-    #[must_use]
-    pub const fn static_type(ty: &'t Type<'t>) -> Self {
-        Self::Static(ty)
-    }
-
-    #[must_use]
-    pub fn owned(ty: Type<'t>) -> Self {
-        Self::Owned(Box::new(ty))
-    }
-
-    #[must_use]
-    pub fn as_ref(&self) -> &Type<'t> {
-        match self {
-            Self::Static(ty) => ty,
-            Self::Owned(ty) => ty,
-        }
-    }
-}
-
-impl PartialEq for BoxedType<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_ref() == other.as_ref()
-    }
-}
-
-impl Eq for BoxedType<'_> {}
-
-impl Hash for BoxedType<'_> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.as_ref().hash(state);
-    }
-}
-
-impl<'t> From<Box<Type<'t>>> for BoxedType<'t> {
-    fn from(value: Box<Type<'t>>) -> Self {
-        Self::Owned(value)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum RecordFields<'t> {
-    Static(&'t [Field<'t>]),
-    Owned(Vec<Field<'t>>),
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub struct Field<'t> {
     pub name: &'t str,
     pub ty: Type<'t>,
@@ -143,57 +93,7 @@ pub enum BindError<'t> {
     Void { slot: &'t str },
 }
 
-impl<'t> RecordFields<'t> {
-    #[must_use]
-    pub const fn static_fields(fields: &'t [Field<'t>]) -> Self {
-        Self::Static(fields)
-    }
-
-    #[must_use]
-    pub fn owned(fields: Vec<Field<'t>>) -> Self {
-        Self::Owned(fields)
-    }
-
-    #[must_use]
-    pub fn as_slice(&self) -> &[Field<'t>] {
-        match self {
-            Self::Static(fields) => fields,
-            Self::Owned(fields) => fields,
-        }
-    }
-}
-
-impl PartialEq for RecordFields<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_slice() == other.as_slice()
-    }
-}
-
-impl Eq for RecordFields<'_> {}
-
-impl Hash for RecordFields<'_> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.as_slice().hash(state);
-    }
-}
-
-impl<'t> From<Vec<Field<'t>>> for RecordFields<'t> {
-    fn from(value: Vec<Field<'t>>) -> Self {
-        Self::Owned(value)
-    }
-}
-
 impl<'t> Type<'t> {
-    #[must_use]
-    pub fn record(fields: Vec<(&'t str, Type<'t>)>) -> Self {
-        Self::Record(RecordFields::owned(
-            fields
-                .into_iter()
-                .map(|(name, ty)| Field { name, ty })
-                .collect(),
-        ))
-    }
-
     /// Recursively binds parameter slots to the matching argument type
     ///
     /// For example:
@@ -213,22 +113,21 @@ impl<'t> Type<'t> {
     ///
     /// If `possible_filler` contains a slot: argument types are always concrete, a slot on that
     /// side means a generic return type escaped without substitution.
-    pub fn bind_slots(
+    pub fn bind_slots<S: BuildHasher, A: Allocator>(
         &self,
         possible_filler: &Self,
-        bindings: &mut HashMap<&'t str, Self>,
+        bindings: &mut HashMap<&'t str, Self, S, A>,
     ) -> Result<(), BindError<'t>> {
         match (self, possible_filler) {
             (_, Self::Slot(_)) => {
                 unreachable!("argument type {possible_filler} contains an unsubstituted slot")
             }
             (Self::Option(lhs), Self::Option(rhs)) | (Self::Array(lhs), Self::Array(rhs)) => {
-                lhs.as_ref().bind_slots(rhs.as_ref(), bindings)
+                lhs.bind_slots(rhs, bindings)
             }
             (Self::Record(lhs), Self::Record(rhs)) => lhs
-                .as_slice()
                 .iter()
-                .zip(rhs.as_slice())
+                .zip(rhs.iter())
                 .try_for_each(|(l, r)| l.ty.bind_slots(&r.ty, bindings)),
             (Self::Slot(slot), Self::Void) => Err(BindError::Void { slot }),
             // T | a => T := a
@@ -238,72 +137,87 @@ impl<'t> Type<'t> {
                         !a.contains_slot(),
                         "argument type {a} contains an unsubstituted slot"
                     );
-                    bindings.insert(slot, a.clone());
+                    bindings.insert(slot, *a);
                     Ok(())
                 }
                 Some(existing) if existing == a => Ok(()),
                 Some(existing) => Err(BindError::Conflict {
                     slot,
-                    existing: existing.clone(),
-                    new: a.clone(),
+                    existing: *existing,
+                    new: *a,
                 }),
             },
             _ => Ok(()),
         }
     }
 
+    fn has_bound_slot<S: BuildHasher, A: Allocator>(
+        &self,
+        bindings: &HashMap<&'t str, Self, S, A>,
+    ) -> bool {
+        match self {
+            Self::Slot(slot) => bindings.contains_key(slot),
+            Self::Option(inner) | Self::Array(inner) => inner.has_bound_slot(bindings),
+            Self::Record(fields) => fields.iter().any(|f| f.ty.has_bound_slot(bindings)),
+            _ => false,
+        }
+    }
+
     fn contains_slot(&self) -> bool {
         match self {
             Self::Slot(_) => true,
-            Self::Option(inner) | Self::Array(inner) => inner.as_ref().contains_slot(),
-            Self::Record(fields) => fields.as_slice().iter().any(|f| f.ty.contains_slot()),
+            Self::Option(inner) | Self::Array(inner) => inner.contains_slot(),
+            Self::Record(fields) => fields.iter().any(|f| f.ty.contains_slot()),
             _ => false,
         }
     }
 
     /// Recursively replaces every slot with its binding from `bindings`, the inverse of
-    /// [`Type::bind_slots`]. Slots without a binding are left in place.
-    ///
-    /// Returns `Cow::Borrowed` when nothing was substituted so concrete types are never cloned.
+    /// [`Type::bind_slots`]. Slots without a binding are left in place, types without slots are
+    /// returned as is, so only substituted compound types allocate in `arena`.
     #[must_use]
-    pub fn apply_slot_binding<'s>(&'s self, bindings: &HashMap<&'t str, Self>) -> Cow<'s, Self> {
+    pub fn apply_slot_binding<S: BuildHasher, A: Allocator>(
+        &self,
+        bindings: &HashMap<&'t str, Self, S, A>,
+        arena: &'t impl Arena,
+    ) -> Self {
+        if !self.has_bound_slot(bindings) {
+            return *self;
+        }
         match self {
-            Self::Slot(slot) => bindings
-                .get(slot)
-                .map_or(Cow::Borrowed(self), |ty| Cow::Owned(ty.clone())),
-            Self::Option(inner) | Self::Array(inner) => {
-                match inner.as_ref().apply_slot_binding(bindings) {
-                    Cow::Borrowed(_) => Cow::Borrowed(self),
-                    Cow::Owned(inner) => {
-                        let inner = BoxedType::owned(inner);
-                        Cow::Owned(match self {
-                            Self::Option(_) => Self::Option(inner),
-                            _ => Self::Array(inner),
-                        })
-                    }
-                }
+            Self::Slot(slot) => bindings.get(slot).copied().unwrap_or(*self),
+            Self::Option(inner) => {
+                Self::Option(arena.alloc(inner.apply_slot_binding(bindings, arena)))
+            }
+            Self::Array(inner) => {
+                Self::Array(arena.alloc(inner.apply_slot_binding(bindings, arena)))
             }
             Self::Record(fields) => {
-                let fields = fields.as_slice();
-                let substituted: Vec<_> = fields
-                    .iter()
-                    .map(|field| field.ty.apply_slot_binding(bindings))
-                    .collect();
-                if substituted.iter().all(|ty| matches!(ty, Cow::Borrowed(_))) {
-                    return Cow::Borrowed(self);
-                }
-                Cow::Owned(Self::Record(RecordFields::owned(
-                    fields
-                        .iter()
-                        .zip(substituted)
-                        .map(|(field, ty)| Field {
-                            name: field.name,
-                            ty: ty.into_owned(),
-                        })
-                        .collect(),
-                )))
+                Self::Record(arena.alloc_slice(fields.iter().map(|field| Field {
+                    name: field.name,
+                    ty: field.ty.apply_slot_binding(bindings, arena),
+                })))
             }
-            _ => Cow::Borrowed(self),
+            _ => *self,
+        }
+    }
+
+    /// Copies `self` and every type it points to into `arena`.
+    #[must_use]
+    pub fn copy_in<'b>(&self, arena: &'b impl Arena) -> Type<'b>
+    where
+        't: 'b,
+    {
+        match *self {
+            Self::Option(inner) => Type::Option(arena.alloc(inner.copy_in(arena))),
+            Self::Array(inner) => Type::Array(arena.alloc(inner.copy_in(arena))),
+            Self::Record(fields) => {
+                Type::Record(arena.alloc_slice(fields.iter().map(|field| Field {
+                    name: field.name,
+                    ty: field.ty.copy_in(arena),
+                })))
+            }
+            other => other,
         }
     }
 
@@ -318,8 +232,8 @@ impl<'t> Type<'t> {
             Type::Slot(_) => {
                 unreachable!("slots size asked, this is not supposed to happen")
             }
-            Type::Record(fields) => record_size(fields.as_slice()),
-            Type::Option(inner) => WORD_SIZE + inner.as_ref().size(),
+            Type::Record(fields) => record_size(fields),
+            Type::Option(inner) => WORD_SIZE + inner.size(),
             Type::Bool
             | Type::Int
             | Type::Double
@@ -333,7 +247,6 @@ impl<'t> Type<'t> {
         match self {
             Type::Void => 1,
             Type::Record(fields) => fields
-                .as_slice()
                 .iter()
                 .map(|field| field.ty.align())
                 .max()
@@ -347,7 +260,7 @@ impl<'t> Type<'t> {
             return None;
         };
 
-        field_offset(fields.as_slice(), name)
+        field_offset(fields, name)
     }
 }
 
@@ -385,13 +298,13 @@ impl Display for Type<'_> {
             Type::Double => write!(f, "Double"),
             Type::Str => write!(f, "Str"),
             Type::Foreign(id) => write!(f, "Foreign<{id}>"),
-            Type::Option(inner) => write!(f, "Option<{}>", inner.as_ref()),
-            Type::Array(inner) => write!(f, "Array<{}>", inner.as_ref()),
+            Type::Option(inner) => write!(f, "Option<{inner}>"),
+            Type::Array(inner) => write!(f, "Array<{inner}>"),
             Type::Record(fields) => {
                 write!(f, "Record<")?;
-                for (i, field) in fields.as_slice().iter().enumerate() {
+                for (i, field) in fields.iter().enumerate() {
                     write!(f, "{}: {}", field.name, field.ty)?;
-                    if i + 1 != fields.as_slice().len() {
+                    if i + 1 != fields.len() {
                         write!(f, " ")?;
                     }
                 }
@@ -415,9 +328,11 @@ impl<'a> From<Const<'a>> for Type<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, collections::HashMap};
+    use std::collections::HashMap;
 
-    use super::{BindError, BoxedType, Field, RecordFields, Type};
+    use purple_garden_allocators::{bump::BumpAlloc, metric::MetricAlloc};
+
+    use super::{BindError, Field, Type};
 
     #[test]
     fn scalars_are_one_vm_word() {
@@ -436,12 +351,9 @@ mod tests {
         //       | a      | nested | nested | d      |
         //       |        | .b     | .c     |        |
         //       +--------+--------+--------+--------+
-        let ty = Type::record(vec![
+        let ty = record(vec![
             ("a", Type::Bool),
-            (
-                "nested",
-                Type::record(vec![("b", Type::Str), ("c", Type::Int)]),
-            ),
+            ("nested", record(vec![("b", Type::Str), ("c", Type::Int)])),
             ("d", Type::Double),
         ]);
 
@@ -455,7 +367,7 @@ mod tests {
 
     #[test]
     fn array_values_are_pointers_to_payloads() {
-        let ty = Type::Array(BoxedType::owned(Type::Int));
+        let ty = Type::Array(&Type::Int);
 
         assert_eq!(ty.size(), 8);
         assert_eq!(ty.align(), 8);
@@ -474,18 +386,28 @@ mod tests {
             },
         ];
 
-        let static_record = Type::Record(RecordFields::static_fields(FIELDS));
-        let owned_record = Type::Record(RecordFields::owned(FIELDS.to_vec()));
+        let static_record = Type::Record(FIELDS);
+        let owned_record = Type::Record(FIELDS.to_vec().leak());
 
         assert_eq!(static_record, owned_record);
     }
 
     fn opt(ty: Type<'static>) -> Type<'static> {
-        Type::Option(BoxedType::owned(ty))
+        Type::Option(Box::leak(Box::new(ty)))
     }
 
     fn arr(ty: Type<'static>) -> Type<'static> {
-        Type::Array(BoxedType::owned(ty))
+        Type::Array(Box::leak(Box::new(ty)))
+    }
+
+    fn record(fields: Vec<(&'static str, Type<'static>)>) -> Type<'static> {
+        Type::Record(
+            fields
+                .into_iter()
+                .map(|(name, ty)| Field { name, ty })
+                .collect::<Vec<_>>()
+                .leak(),
+        )
     }
 
     fn bind(param: &Type<'static>, arg: &Type<'static>) -> HashMap<&'static str, Type<'static>> {
@@ -526,16 +448,16 @@ mod tests {
 
     #[test]
     fn bind_slots_binds_record_fields() {
-        let param = Type::record(vec![("t", Type::Slot("T"))]);
-        let arg = Type::record(vec![("t", Type::Str)]);
+        let param = record(vec![("t", Type::Slot("T"))]);
+        let arg = record(vec![("t", Type::Str)]);
         assert_eq!(bind(&param, &arg), HashMap::from([("T", Type::Str)]));
 
-        let param = Type::record(vec![
+        let param = record(vec![
             ("a", Type::Slot("T")),
             ("b", Type::Int),
             ("c", opt(Type::Slot("U"))),
         ]);
-        let arg = Type::record(vec![
+        let arg = record(vec![
             ("a", Type::Double),
             ("b", Type::Int),
             ("c", opt(Type::Bool)),
@@ -552,8 +474,8 @@ mod tests {
             name: "t",
             ty: Type::Slot("T"),
         }];
-        let param = Type::Record(RecordFields::static_fields(PARAM));
-        let arg = Type::record(vec![("t", Type::Int)]);
+        let param = Type::Record(PARAM);
+        let arg = record(vec![("t", Type::Int)]);
         assert_eq!(bind(&param, &arg), HashMap::from([("T", Type::Int)]));
     }
 
@@ -563,8 +485,8 @@ mod tests {
         assert!(bind(&opt(Type::Int), &opt(Type::Str)).is_empty());
         assert!(
             bind(
-                &Type::record(vec![("a", Type::Int)]),
-                &Type::record(vec![("a", Type::Int)])
+                &record(vec![("a", Type::Int)]),
+                &record(vec![("a", Type::Int)])
             )
             .is_empty()
         );
@@ -598,15 +520,15 @@ mod tests {
 
     #[test]
     fn bind_slots_accepts_same_type_twice() {
-        let param = Type::record(vec![("a", Type::Slot("T")), ("b", Type::Slot("T"))]);
-        let arg = Type::record(vec![("a", Type::Int), ("b", Type::Int)]);
+        let param = record(vec![("a", Type::Slot("T")), ("b", Type::Slot("T"))]);
+        let arg = record(vec![("a", Type::Int), ("b", Type::Int)]);
         assert_eq!(bind(&param, &arg), HashMap::from([("T", Type::Int)]));
     }
 
     #[test]
     fn bind_slots_rejects_conflicting_binding() {
-        let param = Type::record(vec![("a", Type::Slot("T")), ("b", opt(Type::Slot("T")))]);
-        let arg = Type::record(vec![("a", Type::Int), ("b", opt(Type::Str))]);
+        let param = record(vec![("a", Type::Slot("T")), ("b", opt(Type::Slot("T")))]);
+        let arg = record(vec![("a", Type::Int), ("b", opt(Type::Str))]);
         let mut bindings = HashMap::new();
         assert_eq!(
             param.bind_slots(&arg, &mut bindings),
@@ -657,21 +579,25 @@ mod tests {
 
     #[test]
     fn apply_slot_binding_substitutes_bare_and_nested_slots() {
+        let arena = BumpAlloc::new();
         let b = HashMap::from([("T", Type::Int), ("U", opt(Type::Str))]);
-        assert_eq!(*Type::Slot("T").apply_slot_binding(&b), Type::Int);
-        assert_eq!(*opt(Type::Slot("T")).apply_slot_binding(&b), opt(Type::Int));
+        assert_eq!(Type::Slot("T").apply_slot_binding(&b, &arena), Type::Int);
         assert_eq!(
-            *arr(opt(Type::Slot("U"))).apply_slot_binding(&b),
+            opt(Type::Slot("T")).apply_slot_binding(&b, &arena),
+            opt(Type::Int)
+        );
+        assert_eq!(
+            arr(opt(Type::Slot("U"))).apply_slot_binding(&b, &arena),
             arr(opt(opt(Type::Str)))
         );
         assert_eq!(
-            *Type::record(vec![
+            record(vec![
                 ("a", Type::Slot("T")),
                 ("b", Type::Bool),
                 ("c", Type::Slot("U"))
             ])
-            .apply_slot_binding(&b),
-            Type::record(vec![
+            .apply_slot_binding(&b, &arena),
+            record(vec![
                 ("a", Type::Int),
                 ("b", Type::Bool),
                 ("c", opt(Type::Str))
@@ -685,30 +611,31 @@ mod tests {
             name: "t",
             ty: Type::Slot("T"),
         }];
+        let arena = BumpAlloc::new();
         let b = HashMap::from([("T", Type::Int)]);
         assert_eq!(
-            *Type::Record(RecordFields::static_fields(FIELDS)).apply_slot_binding(&b),
-            Type::record(vec![("t", Type::Int)])
+            Type::Record(FIELDS).apply_slot_binding(&b, &arena),
+            record(vec![("t", Type::Int)])
         );
     }
 
     #[test]
-    fn apply_slot_binding_leaves_unbound_slots_and_borrows_when_unchanged() {
+    fn apply_slot_binding_leaves_unbound_slots_and_allocates_only_substitutions() {
+        let arena = MetricAlloc::new(BumpAlloc::new());
         let b = HashMap::from([("T", Type::Int)]);
         for ty in [
             Type::Int,
             opt(Type::Str),
             Type::Slot("U"),
             arr(Type::Slot("U")),
-            Type::record(vec![("a", Type::Bool), ("u", Type::Slot("U"))]),
+            record(vec![("a", Type::Bool), ("u", Type::Slot("U"))]),
         ] {
-            let out = ty.apply_slot_binding(&b);
-            assert!(matches!(out, Cow::Borrowed(_)), "{ty} should not be cloned");
-            assert_eq!(*out, ty);
+            assert_eq!(ty.apply_slot_binding(&b, &arena), ty);
         }
-        assert!(matches!(
-            Type::Slot("T").apply_slot_binding(&HashMap::new()),
-            Cow::Borrowed(Type::Slot("T"))
-        ));
+        assert_eq!(
+            Type::Slot("T").apply_slot_binding(&HashMap::new(), &arena),
+            Type::Slot("T")
+        );
+        assert_eq!(arena.metrics().allocs, 0);
     }
 }

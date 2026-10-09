@@ -1,4 +1,6 @@
 //! Node value id -> type storage shared by the typechecker and lowering
+use std::alloc::{Allocator, Global};
+
 use purple_garden_ir::ptype::Type;
 
 /// Handle into the [`TypeMap`] arena, several slots may point at the same one
@@ -7,22 +9,32 @@ pub struct TypeRef(u32);
 
 /// Types keyed by node value id. Each `Type` lives once in an arena and slots point at it, so a
 /// binding, its reads and the expression that produced it share one allocation
-#[derive(Debug, Clone, Default)]
-pub struct TypeMap<'t> {
-    slots: Vec<Option<TypeRef>>,
-    arena: Vec<Type<'t>>,
+#[derive(Debug, Clone)]
+pub struct TypeMap<'t, A: Allocator = Global> {
+    slots: Vec<Option<TypeRef>, A>,
+    arena: Vec<Type<'t>, A>,
 }
 
-impl<'t> TypeMap<'t> {
+impl Default for TypeMap<'_> {
+    fn default() -> Self {
+        Self::with_slots_in(0, Global)
+    }
+}
+
+impl<'t, A: Allocator + Clone> TypeMap<'t, A> {
     /// Nearly every slot stores one fresh type, so the arena is sized to the slots up front
     #[must_use]
-    pub fn with_slots(slots: usize) -> Self {
+    pub fn with_slots_in(slots: usize, alloc: A) -> Self {
+        let mut slot_vec = Vec::with_capacity_in(slots, alloc.clone());
+        slot_vec.resize(slots, None);
         Self {
-            slots: vec![None; slots],
-            arena: Vec::with_capacity(slots),
+            slots: slot_vec,
+            arena: Vec::with_capacity_in(slots, alloc),
         }
     }
+}
 
+impl<'t, A: Allocator> TypeMap<'t, A> {
     #[must_use]
     pub fn slots(&self) -> usize {
         self.slots.len()

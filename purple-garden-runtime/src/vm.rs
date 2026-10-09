@@ -4,7 +4,13 @@ use crate::{
     op::{LookupTable, Op, SwitchKind, SwitchTable},
     string,
 };
-use std::{alloc::Layout, ffi::c_void};
+use purple_garden_allocators::{page::PageAlloc, stack::StackAlloc};
+use std::{
+    alloc::{AllocError, Allocator, Layout},
+    ffi::c_void,
+    mem::MaybeUninit,
+    ptr::NonNull,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct VmConfig {
@@ -30,7 +36,7 @@ pub const fn frames_in(mib: usize) -> usize {
     mib.saturating_mul(MIB) / size_of::<CallFrame>()
 }
 
-type CollectFn = fn(&mut Vm);
+type CollectFn<'vm> = fn(&mut Vm<'vm>);
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct CallFrame {
@@ -72,19 +78,20 @@ pub unsafe extern "C" fn syscall_unimplemented(vm: *mut c_void) {
     vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
 }
 
+/// Bytes of spill stack [`Vm::run`] keeps on its own stack frame.
+pub const SPILL_STACK: usize = 256 << 10;
+
 /// Where JIT code reads [`Vm::native_stack_limit`] from the vm pointer.
 pub const NATIVE_STACK_LIMIT_OFFSET: usize = std::mem::offset_of!(Vm, native_stack_limit);
 
 #[repr(C)]
 #[derive(Debug)]
-pub struct Vm {
+pub struct Vm<'vm> {
     r: [Value; REGISTER_COUNT],
     pub pc: usize,
 
     frames: Box<[CallFrame]>,
     frame_depth: usize,
-    /// a stack to keep values alive across recursive function invocations
-    spilled: Vec<Value>,
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
@@ -92,7 +99,7 @@ pub struct Vm {
     pub switch_tables: Vec<Box<SwitchTable>>,
     /// Owns the tables [`Op::Lookup`] points into.
     pub lookup_tables: Vec<Box<LookupTable>>,
-    pub gc: Gc,
+    pub gc: Gc<VmAlloc<'vm>>,
 
     /// Backing storage for string constants emitted by the compiler.
     pub const_pool: Box<[u8]>,
@@ -113,7 +120,7 @@ pub struct Vm {
 
     pub config: VmConfig,
     /// Called when allocation wants to run a collection pass.
-    collect_fn: CollectFn,
+    collect_fn: CollectFn<'vm>,
 }
 
 /// trap in the vm; return Err(<anomaly>) if expr == true
@@ -126,9 +133,69 @@ macro_rules! trap_if {
     };
 }
 
-impl Vm {
+/// The allocator a [`Vm`] was built with. Builtins and native code receive the
+/// VM as a pointer and cast it to one `Vm` type, so its allocator can't be a
+/// type parameter and is erased here instead
+pub struct VmAlloc<'vm>(Box<dyn Allocator + 'vm>);
+
+impl std::fmt::Debug for VmAlloc<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("VmAlloc")
+    }
+}
+
+unsafe impl Allocator for VmAlloc<'_> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        self.0.allocate(layout)
+    }
+
+    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        self.0.allocate_zeroed(layout)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        unsafe { self.0.deallocate(ptr, layout) }
+    }
+
+    unsafe fn grow(
+        &self,
+        ptr: NonNull<u8>,
+        old: Layout,
+        new: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        unsafe { self.0.grow(ptr, old, new) }
+    }
+
+    unsafe fn grow_zeroed(
+        &self,
+        ptr: NonNull<u8>,
+        old: Layout,
+        new: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        unsafe { self.0.grow_zeroed(ptr, old, new) }
+    }
+
+    unsafe fn shrink(
+        &self,
+        ptr: NonNull<u8>,
+        old: Layout,
+        new: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        unsafe { self.0.shrink(ptr, old, new) }
+    }
+}
+
+impl Vm<'static> {
     #[must_use]
     pub fn new(config: VmConfig) -> Self {
+        Self::new_in(config, PageAlloc {})
+    }
+}
+
+impl<'vm> Vm<'vm> {
+    /// The GC takes its pages from `alloc`.
+    #[must_use]
+    pub fn new_in(config: VmConfig, alloc: impl Allocator + 'vm) -> Self {
         // Zeroed pages come untouched from the OS, so only the depth a program
         // reaches becomes resident. All zero is a valid, empty CallFrame.
         let mut frames = unsafe {
@@ -151,11 +218,10 @@ impl Vm {
             globals: Vec::new(),
             switch_tables: Vec::new(),
             lookup_tables: Vec::new(),
-            gc: Gc::new(),
+            gc: Gc::new_in(VmAlloc(Box::new(alloc))),
             const_pool: Box::new([]),
             strings: string::StrTable::default(),
             backtrace: Vec::new(),
-            spilled: Vec::with_capacity(4096),
             pending_trap: None,
             native_stack_limit: 0,
             config,
@@ -187,7 +253,6 @@ impl Vm {
         self.pc = usize::MAX;
         self.frames[0] = Self::root_frame();
         self.frame_depth = 1;
-        self.spilled.clear();
         self.backtrace.clear();
         self.pending_trap = None;
         // Room for builtins and the trap path once native code hits the limit.
@@ -264,6 +329,10 @@ impl Vm {
         let halt = self.bytecode.len() - 1;
         // wrapping_sub covers bytecode that is only a Halt.
         self.frames[0].return_to = halt.wrapping_sub(1);
+
+        // Spills only live while this loop runs, so they live on its stack.
+        let mut spill_stack = [MaybeUninit::<u8>::uninit(); SPILL_STACK];
+        let spilled = StackAlloc::new(&mut spill_stack);
 
         let mut pc = self.pc;
         if pc > halt {
@@ -513,7 +582,7 @@ impl Vm {
                         *self.frames.get_unchecked_mut(depth) = CallFrame {
                             return_to: pc,
                             #[cfg(debug_assertions)]
-                            spilled_depth: self.spilled.len(),
+                            spilled_depth: spilled.depth(),
                         };
                     }
                     self.frame_depth = depth + 1;
@@ -565,82 +634,48 @@ impl Vm {
                     #[cfg(debug_assertions)]
                     debug_assert_eq!(
                         frame.spilled_depth,
-                        self.spilled.len(),
-                        "function returning to pc={} left vm.spilled unbalanced (entered at depth {}, exiting at depth {})",
+                        spilled.depth(),
+                        "function returning to pc={} left the spill stack unbalanced (entered at depth {}, exiting at depth {})",
                         frame.return_to,
                         frame.spilled_depth,
-                        self.spilled.len(),
+                        spilled.depth(),
                     );
                     if std::hint::unlikely(self.pending_trap.is_some()) {
                         return Err(self.pending_trap.take().unwrap());
                     }
                     pc = frame.return_to;
                 }
-                Op::Push { src } => {
-                    let len = self.spilled.len();
-
-                    if std::hint::unlikely(len + 1 > self.spilled.capacity()) {
-                        self.spilled.reserve(1);
+                Op::Push { src } => unsafe {
+                    if std::hint::unlikely(!spilled.push(*r!(src))) {
+                        return Err(Anomaly::StackOverflow { pc });
                     }
-
-                    unsafe {
-                        let dst = self.spilled.as_mut_ptr().add(len);
-                        dst.write(*r!(src));
-                        self.spilled.set_len(len + 1);
+                },
+                Op::Push2 { a, b } => unsafe {
+                    if std::hint::unlikely(!spilled.push_all([*r!(a), *r!(b)])) {
+                        return Err(Anomaly::StackOverflow { pc });
                     }
-                }
-                Op::Push2 { a, b } => {
-                    let len = self.spilled.len();
-
-                    if std::hint::unlikely(len + 2 > self.spilled.capacity()) {
-                        self.spilled.reserve(2);
+                },
+                Op::Push3 { a, b, c } => unsafe {
+                    if std::hint::unlikely(!spilled.push_all([*r!(a), *r!(b), *r!(c)])) {
+                        return Err(Anomaly::StackOverflow { pc });
                     }
-
-                    unsafe {
-                        let dst = self.spilled.as_mut_ptr().add(len);
-                        dst.write(*r!(a));
-                        dst.add(1).write(*r!(b));
-                        self.spilled.set_len(len + 2);
-                    }
-                }
-                Op::Push3 { a, b, c } => {
-                    let len = self.spilled.len();
-
-                    if std::hint::unlikely(len + 3 > self.spilled.capacity()) {
-                        self.spilled.reserve(3);
-                    }
-
-                    unsafe {
-                        let dst = self.spilled.as_mut_ptr().add(len);
-                        dst.write(*r!(a));
-                        dst.add(1).write(*r!(b));
-                        dst.add(2).write(*r!(c));
-                        self.spilled.set_len(len + 3);
-                    }
-                }
+                },
                 Op::Pop { dst } => unsafe {
-                    let len = self.spilled.len();
-                    let ptr = self.spilled.as_ptr();
-                    debug_assert!(len >= 1);
-                    r_mut!(dst) = ptr.add(len - 1).read();
-                    self.spilled.set_len(len - 1);
+                    debug_assert!(spilled.depth() >= size_of::<Value>());
+                    r_mut!(dst) = spilled.pop::<Value>();
                 },
                 Op::Pop2 { a, b } => unsafe {
-                    let len = self.spilled.len();
-                    let ptr = self.spilled.as_ptr();
-                    debug_assert!(len >= 2);
-                    r_mut!(a) = ptr.add(len - 1).read();
-                    r_mut!(b) = ptr.add(len - 2).read();
-                    self.spilled.set_len(len - 2);
+                    debug_assert!(spilled.depth() >= 2 * size_of::<Value>());
+                    let [below, top] = spilled.pop_all::<Value, 2>();
+                    r_mut!(a) = top;
+                    r_mut!(b) = below;
                 },
                 Op::Pop3 { a, b, c } => unsafe {
-                    let len = self.spilled.len();
-                    let ptr = self.spilled.as_ptr();
-                    debug_assert!(len >= 3);
-                    r_mut!(a) = ptr.add(len - 1).read();
-                    r_mut!(b) = ptr.add(len - 2).read();
-                    r_mut!(c) = ptr.add(len - 3).read();
-                    self.spilled.set_len(len - 3);
+                    debug_assert!(spilled.depth() >= 3 * size_of::<Value>());
+                    let [bottom, below, top] = spilled.pop_all::<Value, 3>();
+                    r_mut!(a) = top;
+                    r_mut!(b) = below;
+                    r_mut!(c) = bottom;
                 },
                 Op::CastToDouble { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_f64();
@@ -741,7 +776,7 @@ mod ops {
         SIDE_EFFECTS.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn run(mut bytecode: Vec<Op>) -> Vm {
+    fn run(mut bytecode: Vec<Op>) -> Vm<'static> {
         bytecode.push(Op::Halt);
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = bytecode;

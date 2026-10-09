@@ -1,4 +1,4 @@
-use purple_garden_shared::mmap;
+use purple_garden_allocators::page::mmap;
 use std::fs::File;
 use std::os::fd::AsRawFd;
 

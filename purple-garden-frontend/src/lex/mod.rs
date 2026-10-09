@@ -50,7 +50,7 @@ fn class_of(b: u8) -> u8 {
 
 #[derive(Debug)]
 pub struct Lexer<'l> {
-    input: &'l [u8],
+    pub(crate) input: &'l [u8],
     pos: usize,
     pub(crate) diagnostics: Vec<Diagnostic>,
 }

@@ -2,18 +2,24 @@
 
 use purple_garden_ir as ir;
 
-#[derive(Debug, Default, Clone)]
-pub struct Scratch;
+#[derive(Debug, Clone)]
+pub struct Scratch<S>(std::marker::PhantomData<S>);
 
-pub fn compile_func(
-    _func: &ir::Func<'_>,
-    _: &mut Vec<u8>,
+impl<S> Scratch<S> {
+    pub fn new_in(_: S) -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+pub fn compile_func<F: Allocator, S: std::alloc::Allocator, N: std::alloc::Allocator>(
+    _func: &ir::Func<'_, F>,
+    _: &mut Vec<u8, S>,
     _: &[(u32, u32)],
     _: &std::collections::HashMap<ir::Const<'_>, u32>,
     _: &[purple_garden_runtime::Value],
-    _: &std::collections::HashMap<ir::Id, purple_garden_runtime::BuiltinFn>,
-    _: &mut crate::regalloc::Xralloc2,
-    _: &mut Scratch,
+    _: &crate::Natives<N>,
+    _: &mut crate::regalloc::Xralloc2<S>,
+    _: &mut Scratch<S>,
 ) -> Option<()> {
     purple_garden_shared::trace!("[jit::aarch64] skipped: backend scaffold only");
     None
