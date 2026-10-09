@@ -1,8 +1,10 @@
 //! Counting allocator actions does, see [`MetricAlloc`].
 
-use std::alloc::{AllocError, Allocator, Global, Layout};
+use std::alloc::{AllocError, Allocator, Layout};
 use std::cell::Cell;
 use std::ptr::NonNull;
+
+use crate::page::PageAlloc;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Metrics {
@@ -16,7 +18,7 @@ pub struct Metrics {
 
 /// Forwards to `inner` and counts every call.
 #[derive(Debug, Default)]
-pub struct MetricAlloc<A = Global> {
+pub struct MetricAlloc<A = PageAlloc> {
     inner: A,
     metrics: Cell<Metrics>,
 }

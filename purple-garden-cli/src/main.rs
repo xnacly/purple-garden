@@ -1,6 +1,6 @@
 #![feature(allocator_api)]
 
-use purple_garden_allocators::{bump::BumpAlloc, metric::MetricAlloc};
+use purple_garden_allocators::{bump::BumpAlloc, metric::MetricAlloc, page::PageAlloc};
 use purple_garden_bc as bc;
 use purple_garden_frontend::{
     diagnostic::{Diagnostic, Help, Span},
@@ -12,7 +12,7 @@ use purple_garden_runtime::{Vm, VmConfig};
 use purple_garden_typecheck::Typechecker;
 
 use std::{
-    alloc::{Allocator, Global},
+    alloc::Allocator,
     collections::HashMap,
     path::Path,
 };
@@ -142,9 +142,9 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let source = input.as_bytes();
 
     if !cli.alloc_stats {
-        return pipeline(&cli, input_source, source, Phases::<Global>::default());
+        return pipeline(&cli, input_source, source, Phases::<PageAlloc>::default());
     }
-    let phases = Phases::<MetricAlloc>::default();
+    let phases = Phases::<MetricAlloc<PageAlloc>>::default();
     pipeline(&cli, input_source, source, phases.each_ref())?;
     eprint!("{}", phases.table());
     Ok(())

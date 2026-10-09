@@ -10,12 +10,15 @@
 compile_error!("purple-garden currently supports only Linux or macOS on x86_64 or aarch64");
 
 use std::{
-    alloc::{Allocator, Global},
+    alloc::Allocator,
     collections::HashMap,
     marker::PhantomData,
 };
 
-use purple_garden_allocators::bump::{Arena, BumpAlloc};
+use purple_garden_allocators::{
+    bump::{Arena, BumpAlloc},
+    page::PageAlloc,
+};
 use purple_garden_bc::{self as bc, CcCallTarget};
 use purple_garden_frontend::{
     diagnostic::{Diagnostic, Span},
@@ -67,7 +70,7 @@ type CodeArena = purple_garden_jit::CodeArena;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug)]
-pub struct Pg<'pg, A: Allocator + Clone = Global> {
+pub struct Pg<'pg, A: Allocator + Clone = PageAlloc> {
     config: config::Config,
     libs: Vec<&'pg Pkg>,
     stdlib: bool,
@@ -96,14 +99,14 @@ impl<'pg> Pg<'pg> {
             libs: Vec::new(),
             stdlib: false,
             unsafe_stdlib: false,
-            alloc: Global,
+            alloc: PageAlloc {},
         }
     }
 }
 
 impl<'pg, A: Allocator + Clone> Pg<'pg, A> {
     /// Allocates every compiler stage and the resulting program with
-    /// `alloc` instead of the global allocator.
+    /// `alloc` instead of [`PageAlloc`].
     ///
     /// # Examples
     ///
