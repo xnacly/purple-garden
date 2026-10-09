@@ -1,6 +1,7 @@
 // The public API returns diagnostics by value so callers can handle them
 // without an additional allocation at every compiler stage.
 #![allow(clippy::result_large_err)]
+#![feature(allocator_api)]
 
 #[cfg(not(all(
     any(target_os = "linux", target_os = "macos"),
@@ -8,7 +9,11 @@
 )))]
 compile_error!("purple-garden currently supports only Linux or macOS on x86_64 or aarch64");
 
-use std::{collections::HashMap, marker::PhantomData};
+use std::{
+    alloc::{Allocator, Global},
+    collections::HashMap,
+    marker::PhantomData,
+};
 
 use purple_garden_bc::{self as bc, CcCallTarget};
 use purple_garden_frontend::{
@@ -62,11 +67,12 @@ type CodeArena = purple_garden_jit::CodeArena;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug)]
-pub struct Pg<'pg> {
+pub struct Pg<'pg, A: Allocator + Clone = Global> {
     config: config::Config,
     libs: Vec<&'pg Pkg>,
     stdlib: bool,
     unsafe_stdlib: bool,
+    alloc: A,
 }
 
 impl<'pg> Pg<'pg> {
@@ -90,6 +96,34 @@ impl<'pg> Pg<'pg> {
             libs: Vec::new(),
             stdlib: false,
             unsafe_stdlib: false,
+            alloc: Global,
+        }
+    }
+}
+
+impl<'pg, A: Allocator + Clone> Pg<'pg, A> {
+    /// Allocates every compiler stage and the resulting program with
+    /// `alloc` instead of the global allocator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    /// use purple_garden::Pg;
+    /// use std::alloc::System;
+    ///
+    /// let mut program = Pg::new().with_alloc(System).compile(br#"40 + 2"#)?;
+    /// assert_eq!(program.run_take::<i64>()?, 42);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn with_alloc<B: Allocator + Clone>(self, alloc: B) -> Pg<'pg, B> {
+        Pg {
+            config: self.config,
+            libs: self.libs,
+            stdlib: self.stdlib,
+            unsafe_stdlib: self.unsafe_stdlib,
+            alloc,
         }
     }
 
@@ -215,6 +249,7 @@ impl<'pg> Pg<'pg> {
             &self.libs,
             self.stdlib,
             self.unsafe_stdlib,
+            self.alloc.clone(),
         )
     }
 }
@@ -624,12 +659,13 @@ impl<'p> Program<'p> {
     }
 }
 
-fn compile<'i>(
+fn compile<'i, A: Allocator + Clone>(
     config: &config::Config,
     input: &'i [u8],
     libs: &[&'i Pkg],
     stdlib: bool,
     unsafe_stdlib: bool,
+    _alloc: A,
 ) -> Result<Program<'i>, Diagnostic> {
     let parse = parser::Parser::new(lex::Lexer::new(input)).parse_collect();
     if let Some(diagnostic) = parse.diagnostics.into_iter().next() {
