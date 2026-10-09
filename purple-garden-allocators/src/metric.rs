@@ -4,7 +4,7 @@ use std::alloc::{AllocError, Allocator, Layout};
 use std::cell::Cell;
 use std::ptr::NonNull;
 
-use crate::page::PageAlloc;
+use crate::page::{PageAlloc, Pages};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Metrics {
@@ -71,6 +71,8 @@ impl<A> MetricAlloc<A> {
         });
     }
 }
+
+unsafe impl<P: Pages> Pages for MetricAlloc<P> {}
 
 unsafe impl<A: Allocator> Allocator for MetricAlloc<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {

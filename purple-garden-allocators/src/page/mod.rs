@@ -14,6 +14,18 @@ use mmap::{MmapFlags, MmapProt};
 pub struct PageAlloc {}
 
 /// The bytes a mapping for `layout` spans; `deallocate` unmaps the same run.
+/// Allocators whose every allocation is its own run of whole pages, so its
+/// protection can be changed with [`mmap::mprotect`] without touching anything
+/// else, e.g. to make JIT'd code executable.
+///
+/// # Safety
+///
+/// Every non-empty allocation must start on a page and own all pages it spans.
+pub unsafe trait Pages: Allocator {}
+
+unsafe impl Pages for PageAlloc {}
+unsafe impl<P: Pages> Pages for &P {}
+
 fn mapped_len(layout: Layout) -> usize {
     layout.size().next_multiple_of(mmap::page_size())
 }
