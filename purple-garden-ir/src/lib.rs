@@ -452,6 +452,11 @@ impl<'f, A: Allocator> Func<'f, A> {
         ParamsId(self.params_pool.intern(params))
     }
 
+    /// Interns the function's own parameters, e.g. as its entry block's params.
+    pub fn intern_own_params(&mut self) -> ParamsId {
+        ParamsId(self.params_pool.intern(self.params.iter().copied()))
+    }
+
     #[must_use]
     pub fn params(&self, id: ParamsId) -> &[Id] {
         self.params_pool.get(id.0)

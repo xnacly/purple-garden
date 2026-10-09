@@ -75,6 +75,9 @@ pub struct Lower<
     /// Every function and block of the IR is allocated in it.
     ir: I,
     ctx: LowerCtx<'lower, S, I>,
+    /// AST nodes of the root being lowered. The parser numbers nodes in
+    /// post-order, so a root's subtree is the id range since the previous root.
+    root_nodes: usize,
     functions: Vec<Func<'lower, I>, I>,
     func_name_to_id: Map<&'lower str, (Id, Option<ptype::Type<'lower>>), S>,
     types: TypeMap<'lower, A>,
@@ -103,6 +106,7 @@ impl<S: Allocator + Clone> Lower<'_, Global, S> {
         Self {
             ctx: LowerCtx::new_in(scratch.clone(), Global),
             functions: Vec::new(),
+            root_nodes: 0,
             ir: Global,
             func_name_to_id: Map::new_in(scratch.clone()),
             types: TypeMap::default(),
@@ -161,12 +165,17 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
         self.ctx.func.blocks.get(idx as usize).unwrap()
     }
 
+    /// Branch and match arms mostly hold one or two instructions.
     fn new_block(&mut self) -> Id {
+        self.new_block_with(2)
+    }
+
+    fn new_block_with(&mut self, instructions: usize) -> Id {
         let id = Id(self.ctx.func.blocks.len() as u32);
         self.ctx.func.blocks.push(Block {
             id,
             tombstone: false,
-            instructions: Vec::new_in(self.ir.clone()),
+            instructions: Vec::with_capacity_in(instructions, self.ir.clone()),
             params: EMPTY_PARAMS,
             term: None,
         });
@@ -467,14 +476,21 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                     self.ctx.env.insert(ident, id);
                     id
                 }));
-                let func = Func::new_in(ident_name, id, func_params, ret, self.ir.clone())
+                let mut func = Func::new_in(ident_name, id, func_params, ret, self.ir.clone())
                     .with_span(name.start as u32);
+                // At most one block per two nodes. Small functions have one or two blocks, the
+                // estimate would only overshoot for them.
+                if self.root_nodes > 16 {
+                    func.blocks.reserve(self.root_nodes / 2 + 1);
+                }
 
                 // TODO:deal with b0
 
                 self.ctx.func = func;
-                let entry = self.new_block();
-                let entry_params = self.ctx.func.intern_params(self.ctx.func.params.clone());
+                // At most three instructions per four nodes, the arms of matches
+                // and branches take theirs into blocks of their own.
+                let entry = self.new_block_with((self.root_nodes * 3 / 4).max(2));
+                let entry_params = self.ctx.func.intern_own_params();
                 self.block_mut(entry).params = entry_params;
 
                 let mut last = None;
@@ -886,6 +902,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
         Lower {
             ctx: LowerCtx::new_in(self.scratch.clone(), ir.clone()),
             functions: Vec::new_in(ir.clone()),
+            root_nodes: 0,
             ir,
             scratch: self.scratch,
             func_name_to_id: self.func_name_to_id,
@@ -914,7 +931,10 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
 
         let mut last = None;
         let last_span = ast.entry_span().unwrap_or(0);
+        let mut prev = None;
         for &node in ast.roots {
+            self.root_nodes = prev.map_or(node.0 + 1, |prev: NodeId| node.0 - prev.0);
+            prev = Some(node);
             last = self.lower_node(ast, node)?;
             // reset to the main entry point block to keep emitting nodes into the correct conext
             self.switch_to_block(entry);
