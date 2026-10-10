@@ -6,6 +6,10 @@
 //! register file. Arguments arrive in `vm.r[0..n]`; return register is `vm.r[0]`. All
 //! computation happen in GPRs. The jit moves arguments from `vm.r[0..n]` to GPRs in a jitted
 //! functions prologue.
+//!
+//! On return `rax` holds the trap flag: zero, or nonzero once a trap is pending
+//! and every native frame must unwind to the interpreter. The interpreter
+//! calls natives as a [`BuiltinFn`] and ignores `rax`.
 
 mod encode;
 
@@ -78,7 +82,8 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
         // Native calls receive arg0 in vm.r[0] and must return through vm.r[0]
         //
         // When a function returns that parameter unchanged, the VM register file already holds the
-        // required boundary state, nothing to do here other than return
+        // required boundary state, nothing to do here other than return without a trap
+        Insn::Zero { reg: SCRATCH }.encode(out);
         Insn::Ret.encode(out);
         purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
         return Some(());
@@ -776,6 +781,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     let src = self.ensure_register(*value);
                     self.emit(Insn::StoreSlot { src, slot: 0 });
                 }
+                self.emit(Insn::Zero { reg: SCRATCH });
                 self.jump(Cond::Always, Target::Epilogue);
             }
             ir::Terminator::Jump { id, params, .. } => {
@@ -1165,10 +1171,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.emit(Insn::LoadSlot { dst, slot: 0 });
     }
 
-    /// Raise the trap and leave: nothing live needs to survive the call.
+    /// Raise the trap and leave with the flag the helper returns in `rax`:
+    /// nothing live needs to survive the call.
     fn trap_div_zero(&mut self) {
-        let helper: purple_garden_runtime::BuiltinFn = purple_garden_runtime::jit_trap_div_zero;
-        self.call(helper as usize as u64, &[AbiArg::Reg(VM)], None);
+        self.call(
+            purple_garden_runtime::jit_trap_div_zero as *const () as u64,
+            &[AbiArg::Reg(VM)],
+            None,
+        );
         self.jump(Cond::Always, Target::Epilogue);
     }
 

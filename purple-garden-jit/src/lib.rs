@@ -195,7 +195,7 @@ mod tests_x86 {
 
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
-        assert_eq!(jit.code(), [0xc3]);
+        assert_eq!(jit.code(), [0x31, 0xc0, 0xc3]); // xor eax,eax; ret
         assert_eq!(run(jit.code(), [42, 0xdead, 0xaffe]), [42, 0xdead, 0xaffe]);
     }
 
@@ -223,6 +223,7 @@ mod tests_x86 {
                 0x48, 0x8b, 0x77, 0x00, // mov rsi,[rdi+0]
                 0x48, 0x8b, 0x77, 0x08, // mov rsi,[rdi+8]
                 0x48, 0x89, 0x77, 0x00, // mov [rdi+0],rsi
+                0x31, 0xc0, // xor eax,eax: no trap
                 0xc3,
             ]
         );

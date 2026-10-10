@@ -5,7 +5,8 @@ use crate::{
     gc::{AllocType, MAX_ALLOC_SIZE},
 };
 
-/// Raise a divide-by-zero trap from JIT code.
+/// Raise a divide-by-zero trap from JIT code. Returns the trap flag native
+/// functions hand back in `rax`, so the caller can leave right away.
 ///
 /// The JIT cannot write [`Anomaly`] directly because Rust enum layout is not a
 /// stable ABI. Callers pass the erased [`Vm`] pointer they received at entry.
@@ -15,24 +16,28 @@ use crate::{
 /// # Safety
 ///
 /// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
-pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) {
+pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) -> u64 {
     let vm = unsafe { &mut *vm.cast::<Vm>() };
     vm.trap(Anomaly::DivisionByZero { pc: vm.pc });
+    1
 }
 
 /// Raise a stack overflow from JIT code that reached
-/// [`Vm::native_stack_limit`].
+/// [`Vm::native_stack_limit`]. Returns the trap flag like
+/// [`jit_trap_div_zero`].
 ///
 /// # Safety
 ///
 /// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
-pub unsafe extern "C" fn jit_trap_stack_overflow(vm: *mut c_void) {
+pub unsafe extern "C" fn jit_trap_stack_overflow(vm: *mut c_void) -> u64 {
     let vm = unsafe { &mut *vm.cast::<Vm>() };
     vm.trap(Anomaly::StackOverflow { pc: vm.pc });
+    1
 }
 
 /// Call the builtin `f` from JIT code, reporting whether it trapped: the
-/// native code then returns, so the interpreter surfaces the trap.
+/// native code then returns, so the interpreter surfaces the trap. Natively
+/// compiled functions report the flag themselves and are called directly.
 ///
 /// # Safety
 ///
