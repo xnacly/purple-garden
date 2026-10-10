@@ -217,6 +217,10 @@ pub enum Insn {
     CallReg {
         reg: Reg,
     },
+    /// `call rel32`, `disp` relative to the end of the instruction.
+    CallRel { disp: i32 },
+    /// `xor r32, r32`: zero the whole 64-bit register.
+    Zero { reg: Reg },
     /// `push r{reg}` / `pop r{reg}` (callee-save frame management).
     Push {
         reg: Reg,
@@ -342,6 +346,19 @@ impl Insn {
                 }
                 code.extend_from_slice(&[0xff, modrm(2, reg.0)]);
             }
+            // 0xe8 rel32 = `call rel32`, relative to the end of the instruction.
+            Insn::CallRel { disp } => {
+                code.push(0xe8);
+                code.extend_from_slice(&disp.to_le_bytes());
+            }
+            // 0x31 /r = `xor r/m32, r32`: the 32-bit form zero-extends, so it
+            // clears the whole register in two or three bytes.
+            Insn::Zero { reg } => {
+                if reg.0 >= 8 {
+                    code.push(0x45);
+                }
+                code.extend_from_slice(&[0x31, modrm(reg.0, reg.0)]);
+            }
             Insn::Push { reg } => {
                 if reg.0 >= 8 {
                     code.push(0x41);
@@ -426,6 +443,8 @@ impl fmt::Display for Insn {
             Insn::ImulImm { dst, src, imm } => write!(f, "imul {}, {}, {imm}", dst, src),
             Insn::MovAbs { dst, imm } => write!(f, "movabs {}, {imm:#x}", dst),
             Insn::CallReg { reg } => write!(f, "call {}", reg),
+            Insn::CallRel { disp } => write!(f, "call rip+{disp:#x}"),
+            Insn::Zero { reg } => write!(f, "xor {}, {}", reg, reg),
             Insn::Push { reg } => write!(f, "push {}", reg),
             Insn::Pop { reg } => write!(f, "pop {}", reg),
             Insn::ShrImm { dst, imm } => write!(f, "shr {}, {imm}", dst),
@@ -834,5 +853,11 @@ mod tests {
             [0x48, 0x85, 0xc0]
         ); // test rax,rax
         assert_eq!(enc(Insn::Ret), [0xc3]);
+        assert_eq!(enc(Insn::Zero { reg: Reg(0) }), [0x31, 0xc0]); // xor eax,eax
+        assert_eq!(enc(Insn::Zero { reg: Reg(9) }), [0x45, 0x31, 0xc9]); // xor r9d,r9d
+        assert_eq!(
+            enc(Insn::CallRel { disp: -0x40 }),
+            [0xe8, 0xc0, 0xff, 0xff, 0xff]
+        );
     }
 }
