@@ -8,8 +8,10 @@
 //! functions prologue.
 //!
 //! On return `rax` holds the trap flag: zero, or nonzero once a trap is pending
-//! and every native frame must unwind to the interpreter. The interpreter
-//! calls natives as a [`BuiltinFn`] and ignores `rax`.
+//! and every native frame must unwind to the interpreter. Native functions
+//! preserve `rdi` and clobber only the SysV caller-saved registers, so native
+//! to native calls are plain `call`s: no trampoline, no spill of the VM base.
+//! The interpreter calls natives as a [`BuiltinFn`] and ignores `rax`.
 
 mod encode;
 
@@ -198,7 +200,7 @@ pub struct Scratch<S: Allocator> {
     move_pairs: Vec<(Reg, Reg), S>,
     /// `(reg, copy)` pairs preserved across a clobbering instruction.
     saves: Vec<(Reg, Reg), S>,
-    /// Body offsets of the rel32s that address the function's own start.
+    /// Body offsets of the rel32s (self calls) that address the function's own start.
     self_refs: Vec<usize, S>,
 }
 
@@ -215,10 +217,13 @@ impl<S: Allocator + Clone> Scratch<S> {
     }
 }
 
-/// Target of a native call.
+/// Target of a call that passes its arguments through `vm.r`.
 #[derive(Clone, Copy)]
 enum Callee {
-    Fn(BuiltinFn),
+    /// A builtin: called through `jit_sys`, which reports whether it trapped.
+    Sys(BuiltinFn),
+    /// A natively compiled function: called directly, returns the trap flag.
+    Native(BuiltinFn),
     /// The function being compiled, whose address isn't known yet.
     This,
 }
@@ -280,7 +285,7 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     /// Walks in lockstep with [`ir::Func::live_set_into`]: two units per block
     /// header, instruction and terminator, uses on `pos`, defs on `pos + 1`.
     pos: u32,
-    /// Set once a helper is called; the prologue then aligns the stack.
+    /// Set once a helper or native function is called; the prologue then aligns the stack.
     calls: bool,
     unsupported: bool,
     /// `block_offsets[block_id]` is the body offset of the block's first byte,
@@ -745,7 +750,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             }
             ir::Instr::Sys { dst, fun, args, .. } => {
                 let func = self.func;
-                self.call_builtin(Callee::Fn(fun.ptr), func.params(*args), dst.id);
+                self.call_builtin(Callee::Sys(fun.ptr), func.params(*args), dst.id);
             }
             ir::Instr::Call {
                 dst,
@@ -756,7 +761,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let callee = if *callee == self.func.id {
                     Callee::This
                 } else if let Some(&f) = self.natives.get(callee) {
-                    Callee::Fn(f)
+                    Callee::Native(f)
                 } else {
                     bail!(self, "f{} is not compiled natively", callee.0);
                     return;
@@ -1128,12 +1133,17 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.restore(saves);
     }
 
-    /// Call `f` the way the interpreter calls a builtin: arguments in
+    /// Call `callee` the way the interpreter calls a builtin: arguments in
     /// `vm.r[0..]`, the result in `vm.r[0]`, a trap leaves this function so
-    /// the interpreter surfaces it. `f` may write its argument registers, but
-    /// this function's caller only spilled those up to this function's own
-    /// arity; only `entry`, which nothing calls with live registers, may pass
-    /// more.
+    /// the interpreter surfaces it. The callee may write its argument
+    /// registers, but this function's caller only spilled those up to this
+    /// function's own arity; only `entry`, which nothing calls with live
+    /// registers, may pass more.
+    ///
+    /// Builtins go through `jit_sys` for the trap flag. Native functions return
+    /// it themselves and keep `rdi`, so they are called directly: a trampoline
+    /// in between doubles the `call`/`ret` pairs per frame, and deep recursion
+    /// then mispredicts most returns once the return stack buffer wraps.
     fn call_builtin(&mut self, callee: Callee, args: &[ir::Id], dst: ir::Id) {
         if args.len() > self.func.params.len().max(1) && self.func.id != ir::Id(0) {
             bail!(self, "{} args would clobber registers the caller kept", args.len());
@@ -1151,19 +1161,26 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             });
         }
         let saves = self.save_clobbered(CALLER_SAVED);
-        let f = match callee {
-            Callee::Fn(f) => AbiArg::Imm(f as usize as u64),
-            Callee::This => {
-                self.emit(Insn::LeaRip { dst: RSI, disp: 0 });
-                self.self_refs.push(self.out.len() - 4);
-                AbiArg::Reg(RSI)
+        match callee {
+            Callee::Sys(f) => self.call(
+                purple_garden_runtime::jit_sys as *const () as u64,
+                &[AbiArg::Reg(VM), AbiArg::Imm(f as usize as u64)],
+                None,
+            ),
+            Callee::Native(f) => {
+                self.calls = true;
+                self.emit(Insn::MovAbs {
+                    dst: SCRATCH,
+                    imm: f as usize as u64,
+                });
+                self.emit(Insn::CallReg { reg: SCRATCH });
             }
-        };
-        self.call(
-            purple_garden_runtime::jit_sys as *const () as u64,
-            &[AbiArg::Reg(VM), f],
-            None,
-        );
+            Callee::This => {
+                self.calls = true;
+                self.emit(Insn::CallRel { disp: 0 });
+                self.self_refs.push(self.out.len() - 4);
+            }
+        }
         self.emit(Insn::Test { lhs: RAX, rhs: RAX });
         self.jump(Cond::NotZero, Target::Epilogue);
         self.restore(saves);
@@ -1182,8 +1199,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.jump(Cond::Always, Target::Epilogue);
     }
 
-    /// SysV call to `addr`. The VM base lives in caller-saved `rdi`, so it is
-    /// kept on the stack across the call. Arguments are moved in order, which
+    /// SysV call to the helper at `addr`. The VM base lives in caller-saved
+    /// `rdi`, so it is kept on the stack across the call. Arguments are moved in order, which
     /// is only safe because callers pass the VM base and immediates.
     fn call(&mut self, addr: u64, args: &[AbiArg], result: Option<Reg>) {
         const ARGS: [Reg; 6] = [RDI, RSI, RDX, RCX, R8, R9];
