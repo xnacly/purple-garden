@@ -14,7 +14,10 @@ use crate::{
 };
 
 /// The slice of hyperfine's `--export-json` schema we read. Times are
-/// seconds; `stddev` is null for a single run.
+/// seconds. hyperfine 1.x puts the statistics on the entry itself, with
+/// `stddev` null for a single run, and reports the `-n` label as `command`;
+/// 2.x nests them under `summary`, one [`Stats`] per metric, and keeps the
+/// label in `name`.
 #[derive(Deserialize)]
 struct Export {
     results: Vec<Entry>,
@@ -22,13 +25,62 @@ struct Export {
 
 #[derive(Deserialize)]
 struct Entry {
-    /// The `-n` label, i.e. the runtime name.
+    /// The command line; 1.x replaces it with the `-n` label.
     command: String,
+    /// The `-n` label, i.e. the runtime name, in 2.x.
+    name: Option<String>,
+    mean: Option<f64>,
+    stddev: Option<f64>,
+    min: Option<f64>,
+    user: Option<f64>,
+    system: Option<f64>,
+    summary: Option<Summary>,
+}
+
+#[derive(Deserialize)]
+struct Summary {
+    time_wall_clock: Stats,
+    time_user: Stats,
+    time_system: Stats,
+}
+
+#[derive(Deserialize)]
+struct Stats {
     mean: f64,
     stddev: Option<f64>,
     min: f64,
-    user: f64,
-    system: f64,
+}
+
+impl Entry {
+    /// `(wall, user, system)` in seconds, whichever schema the export used.
+    fn times(&self) -> Result<(Stats, f64, f64), String> {
+        if let Some(s) = &self.summary {
+            return Ok((
+                Stats {
+                    mean: s.time_wall_clock.mean,
+                    stddev: s.time_wall_clock.stddev,
+                    min: s.time_wall_clock.min,
+                },
+                s.time_user.mean,
+                s.time_system.mean,
+            ));
+        }
+        match (self.mean, self.min, self.user, self.system) {
+            (Some(mean), Some(min), Some(user), Some(system)) => Ok((
+                Stats {
+                    mean,
+                    stddev: self.stddev,
+                    min,
+                },
+                user,
+                system,
+            )),
+            _ => Err(format!(
+                "hyperfine json: `{}` has neither 1.x fields nor a 2.x `summary`",
+                self.command
+            )),
+        }
+    }
 }
 
 /// Benchmark every runtime on one workload in a single hyperfine invocation
@@ -84,19 +136,22 @@ pub fn measure(
 pub fn parse(workload: &str, json: &str) -> Result<Vec<Measurement>, String> {
     let export: Export =
         serde_json::from_str(json).map_err(|e| format!("hyperfine json: {e}"))?;
-    Ok(export
+    export
         .results
         .into_iter()
-        .map(|r| Measurement {
-            workload: workload.to_string(),
-            runtime: r.command,
-            time_ms: TimeStats {
-                mean: r.mean * 1e3,
-                min: r.min * 1e3,
-                stddev: r.stddev.unwrap_or(0.0) * 1e3,
-            },
-            cpu_ms: (r.user + r.system) * 1e3,
-            memory_mb: None,
+        .map(|r| {
+            let (wall, user, system) = r.times()?;
+            Ok(Measurement {
+                workload: workload.to_string(),
+                runtime: r.name.unwrap_or(r.command),
+                time_ms: TimeStats {
+                    mean: wall.mean * 1e3,
+                    min: wall.min * 1e3,
+                    stddev: wall.stddev.unwrap_or(0.0) * 1e3,
+                },
+                cpu_ms: (user + system) * 1e3,
+                memory_mb: None,
+            })
         })
-        .collect())
+        .collect()
 }
