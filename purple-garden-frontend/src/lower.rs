@@ -713,6 +713,12 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                 };
 
                 let default_block = self.new_block();
+                // Set before any arm is lowered: a nested match copies the
+                // params of the block it starts in.
+                for &block in check_blocks.iter().chain(&body_blocks) {
+                    self.block_mut(block).params = case_params;
+                }
+                self.block_mut(default_block).params = case_params;
                 if cases.is_empty() {
                     self.block_mut(entry).term = Some(Terminator::Jump {
                         id: default_block,
@@ -739,17 +745,17 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                         default_block
                     };
 
-                    let check_block_mut = self.block_mut(check_blocks[i]);
-                    check_block_mut.term = Some(Terminator::Branch {
+                    // Lowering an arm may end in a different block than it
+                    // started in (a nested match ends in its join block), so
+                    // terminators go on the current block, never the entry.
+                    self.block_mut(self.ctx.block).term = Some(Terminator::Branch {
                         cond,
                         yes: (body_blocks[i], case_params),
                         no: (no_target, case_params),
                         span: case_span,
                     });
-                    check_block_mut.params = case_params;
 
                     self.switch_to_block(body_blocks[i]);
-                    self.block_mut(body_blocks[i]).params = case_params;
 
                     // A match arm is its own scope: `let` bindings inside it
                     // (including ones that shadow a param) must not leak into
@@ -764,7 +770,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                     self.ctx.env = saved_env;
 
                     let body_jump_params = self.ctx.func.intern_params(vec![value]);
-                    self.block_mut(body_blocks[i]).term = Some(Terminator::Jump {
+                    self.block_mut(self.ctx.block).term = Some(Terminator::Jump {
                         id: join,
                         params: body_jump_params,
                         span: case_span,
@@ -787,9 +793,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                 self.ctx.env = saved_env;
                 let default_jump_params = self.ctx.func.intern_params(vec![last]);
                 let join_params = self.ctx.func.intern_params(vec![last]);
-                let default_block_mut = self.block_mut(default_block);
-                default_block_mut.params = case_params;
-                default_block_mut.term = Some(Terminator::Jump {
+                self.block_mut(self.ctx.block).term = Some(Terminator::Jump {
                     id: join,
                     params: default_jump_params,
                     span: default_span,

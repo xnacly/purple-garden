@@ -196,3 +196,37 @@ fn is_alpha(s:Str) Int {
 testing.assert(is_alpha(str.concat("al" "pha")) == 1)
 testing.assert(is_alpha(str.slice("xalphax" 1 6)) == 1)
 testing.assert(is_alpha(str.concat("al" "phb")) == 0)
+
+#! Match arms used to put their terminator on the block the arm started in.
+#! A nested match ends in its own join block, so the outer jump overwrote the
+#! inner match's branch and the arm fell through to an undefined value, in
+#! case arms and the default arm alike.
+fn nested_in_arm(a:Int) Int {
+    match {
+        a > 0 {
+            let q = a - 1
+            match {
+                q == 0 { 10 }
+                { 20 }
+            }
+        }
+        { 1 }
+    }
+}
+testing.assert(nested_in_arm(0) == 1)
+testing.assert(nested_in_arm(1) == 10)
+testing.assert(nested_in_arm(2) == 20)
+fn nested_in_default(a:Int) Int {
+    match {
+        a == 0 { 1 }
+        {
+            match {
+                a == 1 { 10 }
+                { 20 }
+            }
+        }
+    }
+}
+testing.assert(nested_in_default(0) == 1)
+testing.assert(nested_in_default(1) == 10)
+testing.assert(nested_in_default(2) == 20)
