@@ -1,0 +1,40 @@
+# N-queens: count every placement of 13 queens on a 13x13 board.
+# Garden has no arrays and no bit operators, so the queens placed so far are
+# packed into one Int as base-16 digits (column + 1, newest in the lowest
+# digit) and the safety check peels them off with / and %. Every runtime uses
+# the same encoding, so the work is identical: deep backtracking recursion
+# with a short integer-arithmetic inner recursion per candidate square.
+# 13 digits of 4 bits stay below 2^53, so the doubles in JS and Lua are exact.
+import "testing"
+
+#! True when a queen in column col, dist rows below the newest queen packed
+#! into placed, attacks none of the placed queens.
+fn safe(placed:Int col:Int dist:Int) Bool {
+    match {
+        placed == 0 { true }
+        {
+            let q = placed % 16 - 1
+            match {
+                q == col { false }
+                q - col == dist { false }
+                col - q == dist { false }
+                { safe(placed / 16 col dist + 1) }
+            }
+        }
+    }
+}
+
+#! Count the solutions that extend placed, trying columns col.. in row.
+fn solve(n:Int row:Int col:Int placed:Int) Int {
+    match {
+        row == n { 1 }
+        col == n { 0 }
+        safe(placed col 1) {
+            solve(n row + 1 0 placed * 16 + col + 1) + solve(n row col + 1 placed)
+        }
+        { solve(n row col + 1 placed) }
+    }
+}
+
+# 13 queens have 73712 solutions (OEIS A000170).
+testing.assert(solve(13 0 0 0) == 73712)
