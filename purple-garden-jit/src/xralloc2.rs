@@ -16,11 +16,21 @@
 use std::alloc::{Allocator, Global};
 
 use purple_garden_ir::Id;
+use purple_garden_runtime::Type;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
     Gpr,
     Fpr,
+}
+
+impl From<&Type<'_>> for Class {
+    fn from(value: &Type<'_>) -> Self {
+        match value {
+            Type::Double => Self::Fpr,
+            _ => Self::Gpr,
+        }
+    }
 }
 
 /// A physical register, numbered within its class' register file.
