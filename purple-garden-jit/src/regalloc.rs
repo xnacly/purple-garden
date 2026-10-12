@@ -8,20 +8,62 @@
 //! values it would clobber must be copied into free registers around the instruction and again
 //! copied back.
 //!
-//! xralloc2 is target-independent by allowing a pool of registers to be defined
+//! xralloc2 is target-independent by allowing a pool of registers to be defined per
+//! [`Class`]: general purpose registers hold integers and pointers, floating point
+//! registers hold doubles. The classes are separate register files, so a value in one
+//! never conflicts with a value in the other.
 
 use std::alloc::{Allocator, Global};
 
 use purple_garden_ir::Id;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Class {
+    Gpr,
+    Xmm,
+}
+
+/// A physical register, numbered within its class' register file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reg {
+    Gpr(u8),
+    Xmm(u8),
+}
+
+impl Reg {
+    #[must_use]
+    pub fn new(class: Class, num: u8) -> Self {
+        match class {
+            Class::Gpr => Self::Gpr(num),
+            Class::Xmm => Self::Xmm(num),
+        }
+    }
+
+    #[must_use]
+    pub fn class(self) -> Class {
+        match self {
+            Self::Gpr(_) => Class::Gpr,
+            Self::Xmm(_) => Class::Xmm,
+        }
+    }
+
+    #[must_use]
+    pub fn num(self) -> u8 {
+        match self {
+            Self::Gpr(num) | Self::Xmm(num) => num,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Xralloc2<S: Allocator = Global> {
-    map: Vec<Option<u8>, S>,
+    map: Vec<Option<Reg>, S>,
     /// `(last_use, reg)` of every value currently holding a register.
-    active: Vec<(u32, u8), S>,
-    free: Vec<u8, S>,
-    /// Bitmask of every register handed out since [`Xralloc2::reset`].
-    used: u32,
+    active: Vec<(u32, Reg), S>,
+    /// Free registers per [`Class`].
+    free: [Vec<u8, S>; 2],
+    /// Bitmask per [`Class`] of every register handed out since [`Xralloc2::reset`].
+    used: [u32; 2],
 }
 
 impl Default for Xralloc2 {
@@ -35,73 +77,80 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         Self {
             map: Vec::new_in(scratch.clone()),
             active: Vec::new_in(scratch.clone()),
-            free: Vec::new_in(scratch),
-            used: 0,
+            free: [Vec::new_in(scratch.clone()), Vec::new_in(scratch)],
+            used: [0; 2],
         }
     }
 
-    /// `pool` is popped from the back, so the preferred registers go last.
-    pub fn reset(&mut self, ids: usize, pool: &[u8]) {
+    /// Pools are popped from the back, so the preferred registers go last.
+    pub fn reset(&mut self, ids: usize, gprs: &[u8], xmms: &[u8]) {
         self.map.clear();
         self.map.resize(ids, None);
         self.active.clear();
-        self.free.clear();
-        self.free.extend_from_slice(pool);
-        self.used = 0;
+        for (free, pool) in self.free.iter_mut().zip([gprs, xmms]) {
+            free.clear();
+            free.extend_from_slice(pool);
+        }
+        self.used = [0; 2];
     }
 
-    pub fn reg(&self, id: Id) -> Option<u8> {
+    pub fn reg(&self, id: Id) -> Option<Reg> {
         self.map.get(id.0 as usize).copied().flatten()
     }
 
-    /// Assign `id` a register, reusing those of values whose last use is at or
-    /// before `at`. Idempotent for already assigned ids.
-    pub fn alloc(&mut self, id: Id, at: u32, last_use: u32) -> Option<u8> {
+    /// Assign `id` a register of `class`, reusing those of values whose last
+    /// use is at or before `at`. Idempotent for already assigned ids.
+    pub fn alloc(&mut self, id: Id, class: Class, at: u32, last_use: u32) -> Option<Reg> {
         if let Some(reg) = self.reg(id) {
             return Some(reg);
         }
         let Self { active, free, .. } = self;
         active.retain(|&(end, reg)| {
             if end <= at {
-                free.push(reg);
+                free[reg.class() as usize].push(reg.num());
             }
             end > at
         });
-        let reg = self.free.pop()?;
+        let reg = Reg::new(class, self.free[class as usize].pop()?);
         self.active.push((last_use, reg));
         *self.map.get_mut(id.0 as usize)? = Some(reg);
-        self.used |= 1 << reg;
+        self.mark_used(reg);
         Some(reg)
     }
 
     /// Registers holding values still needed after `pos`.
-    pub fn live_after(&self, pos: u32) -> impl Iterator<Item = u8> + '_ {
+    pub fn live_after(&self, pos: u32) -> impl Iterator<Item = Reg> + '_ {
         self.active
             .iter()
             .filter(move |&&(end, _)| end > pos)
             .map(|&(_, reg)| reg)
     }
 
-    /// Borrow a free register matching `pred` until [`Xralloc2::give_back`].
-    pub fn take_free(&mut self, pred: impl Fn(u8) -> bool) -> Option<u8> {
-        let i = self.free.iter().rposition(|&reg| pred(reg))?;
-        let reg = self.free.swap_remove(i);
-        self.used |= 1 << reg;
+    /// Borrow a free register of `class` matching `pred` until [`Xralloc2::give_back`].
+    pub fn take_free(&mut self, class: Class, pred: impl Fn(u8) -> bool) -> Option<Reg> {
+        let free = &mut self.free[class as usize];
+        let i = free.iter().rposition(|&reg| pred(reg))?;
+        let reg = Reg::new(class, free.swap_remove(i));
+        self.mark_used(reg);
         Some(reg)
     }
 
-    pub fn give_back(&mut self, reg: u8) {
-        self.free.push(reg);
+    pub fn give_back(&mut self, reg: Reg) {
+        self.free[reg.class() as usize].push(reg.num());
     }
 
-    pub fn used(&self, reg: u8) -> bool {
-        self.used & (1 << reg) != 0
+    pub fn used(&self, reg: Reg) -> bool {
+        self.used[reg.class() as usize] & (1 << reg.num()) != 0
+    }
+
+    fn mark_used(&mut self, reg: Reg) {
+        self.used[reg.class() as usize] |= 1 << reg.num();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Xralloc2;
+    use super::{Class, Reg, Xralloc2};
     use purple_garden_ir::Id;
 
     /// A value dying at `at` frees its register for the one defined there,
@@ -109,8 +158,23 @@ mod tests {
     #[test]
     fn dying_value_hands_its_register_to_the_next_def() {
         let mut ra = Xralloc2::default();
-        ra.reset(2, &[1, 0]);
-        assert_eq!(ra.alloc(Id(0), 0, 4), Some(0));
-        assert_eq!(ra.alloc(Id(1), 4, 6), Some(0));
+        ra.reset(2, &[1, 0], &[]);
+        assert_eq!(ra.alloc(Id(0), Class::Gpr, 0, 4), Some(Reg::Gpr(0)));
+        assert_eq!(ra.alloc(Id(1), Class::Gpr, 4, 6), Some(Reg::Gpr(0)));
+    }
+
+    /// The classes are separate register files: a double and an integer
+    /// never compete for a register, and a dying double only frees an xmm.
+    #[test]
+    fn classes_are_allocated_independently() {
+        let mut ra = Xralloc2::default();
+        ra.reset(4, &[0], &[0]);
+        assert_eq!(ra.alloc(Id(0), Class::Gpr, 0, 10), Some(Reg::Gpr(0)));
+        assert_eq!(ra.alloc(Id(1), Class::Xmm, 0, 2), Some(Reg::Xmm(0)));
+        assert_eq!(ra.alloc(Id(2), Class::Gpr, 2, 4), None);
+        assert_eq!(ra.alloc(Id(3), Class::Xmm, 2, 4), Some(Reg::Xmm(0)));
+        assert!(ra.used(Reg::Gpr(0)));
+        assert!(ra.used(Reg::Xmm(0)));
+        assert!(!ra.used(Reg::Xmm(1)));
     }
 }

@@ -17,7 +17,7 @@ mod encode;
 
 use std::{alloc::Allocator, collections::HashMap};
 
-use crate::regalloc::Xralloc2;
+use crate::regalloc::{Class, Reg as Preg, Xralloc2};
 use encode::{
     Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBX, RCX, RDI, RDX, RSI, RSP, Reg,
     patch_rel32,
@@ -43,6 +43,14 @@ macro_rules! skip {
 const VM: Reg = RDI;
 /// Never holds a value: breaks edge-move cycles and holds helper addresses.
 const SCRATCH: Reg = RAX;
+
+/// The encoder's view of an allocated register. Only GPRs are requested so far.
+fn gpr(reg: Preg) -> Reg {
+    match reg {
+        Preg::Gpr(num) => Reg(num),
+        Preg::Xmm(_) => unreachable!("the x86 backend only allocates GPRs"),
+    }
+}
 
 /// Allocatable GPRs, popped from the back: caller-saved first so leaf functions dont require a
 /// prologue, `rcx`/`rdx` last since `idiv` clobbers them.
@@ -91,7 +99,7 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
         return Some(());
     }
 
-    ra.reset(liveness.len(), POOL);
+    ra.reset(liveness.len(), POOL, &[]);
     let calls = Lowering::new(func, liveness, globals, strings, natives, ra, buffers, entry).lower()?;
 
     // The body is emitted first since the callee-saved registers it uses are
@@ -104,7 +112,7 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     //     add rsp, 8
     //     pop <saved>      ; reverse order
     //     ret
-    let saved = CALLEE_SAVED.iter().copied().filter(|reg| ra.used(reg.0));
+    let saved = CALLEE_SAVED.iter().copied().filter(|reg| ra.used(Preg::Gpr(reg.0)));
 
     // SysV wants rsp 16-byte aligned at every `call`. On entry rsp is 8 past
     // that (our caller pushed the return address) and every push flips it, so
@@ -436,8 +444,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// register is clear of every value the interval overlaps.
     fn def(&mut self, id: ir::Id, at: u32) -> Reg {
         let (start, last_use) = self.liveness[id.0 as usize];
-        match self.ra.alloc(id, at.min(start), last_use) {
-            Some(reg) => Reg(reg),
+        match self.ra.alloc(id, Class::Gpr, at.min(start), last_use) {
+            Some(reg) => gpr(reg),
             None => {
                 bail!(self, "out of registers at %v{}", id.0);
                 SCRATCH
@@ -447,7 +455,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
 
     fn ensure_register(&mut self, id: ir::Id) -> Reg {
         match self.ra.reg(id) {
-            Some(reg) => Reg(reg),
+            Some(reg) => gpr(reg),
             // Not proven impossible: the block layout isn't guaranteed to put
             // every definition before its uses.
             None => {
@@ -909,11 +917,11 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 };
 
                 let subject = self.ensure_register(*subject);
-                let Some(base) = self.ra.take_free(|_| true) else {
+                let Some(base) = self.ra.take_free(Class::Gpr, |_| true) else {
                     bail!(self, "no free register for the switch table");
                     return;
                 };
-                let base = Reg(base);
+                let base = gpr(base);
 
                 // rax = the subject's slot. A subject below `first` wraps around
                 // to a huge slot, so one unsigned compare sends everything
@@ -952,7 +960,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     src: base,
                 });
                 self.emit(Insn::JmpReg { reg: SCRATCH });
-                self.ra.give_back(base.0);
+                self.ra.give_back(Preg::Gpr(base.0));
 
                 while !self.out.len().is_multiple_of(4) {
                     self.out.push(0xcc);
@@ -1067,13 +1075,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         saves.extend(
             self.ra
                 .live_after(self.pos)
-                .map(Reg)
+                .map(gpr)
                 .filter(|reg| clobbers.contains(reg))
                 .map(|reg| (reg, reg)),
         );
         for save in &mut saves {
-            match self.ra.take_free(|free| !clobbers.contains(&Reg(free))) {
-                Some(free) => save.1 = Reg(free),
+            match self.ra.take_free(Class::Gpr, |free| !clobbers.contains(&Reg(free))) {
+                Some(free) => save.1 = gpr(free),
                 None => bail!(
                     self,
                     "no free register to preserve {} across a clobber",
@@ -1096,7 +1104,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 dst: reg,
                 src: copy,
             });
-            self.ra.give_back(copy.0);
+            self.ra.give_back(Preg::Gpr(copy.0));
         }
         *self.saves = saves;
     }
