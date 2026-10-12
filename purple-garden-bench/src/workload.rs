@@ -1,4 +1,5 @@
-//! Workload directories: one program in four languages per directory.
+//! Workload directories: one program per directory, ported to up to four
+//! languages. A runtime without a port is skipped for that workload.
 
 use std::{
     fs,
@@ -14,6 +15,16 @@ pub struct Workload {
 }
 
 impl Workload {
+    /// Whether this workload has a port for `rt`.
+    pub fn has(&self, rt: &Runtime) -> bool {
+        self.dir.join(rt.spec.source).is_file()
+    }
+
+    /// The runtimes this workload is ported to, in `runtimes` order.
+    pub fn ported<'r>(&self, runtimes: &'r [Runtime]) -> Vec<&'r Runtime> {
+        runtimes.iter().filter(|rt| self.has(rt)).collect()
+    }
+
     /// `[program, source_file]` to run this workload on `rt`.
     pub fn command(&self, rt: &Runtime) -> Vec<String> {
         vec![
@@ -48,17 +59,19 @@ pub fn discover(dir: &Path, only: Option<&str>) -> Result<Vec<Workload>, String>
 }
 
 /// Run every program once so a wrong result fails with a readable message
-/// rather than hyperfine's generic non-zero-exit abort.
+/// rather than hyperfine's generic non-zero-exit abort. A missing port is
+/// noted and skipped: some workloads are left out for a runtime on purpose,
+/// e.g. where CPython would take minutes.
 pub fn preflight(workloads: &[Workload], runtimes: &[Runtime]) -> Result<(), String> {
     let mut failures = Vec::new();
     for w in workloads {
         for rt in runtimes {
-            let cmd = w.command(rt);
             let tag = format!("{}/{}", w.name, rt.name());
-            if !Path::new(&cmd[1]).is_file() {
-                failures.push(format!("{tag}: missing {}", cmd[1]));
+            if !w.has(rt) {
+                eprintln!("{tag}: no {} port, skipped", rt.spec.source);
                 continue;
             }
+            let cmd = w.command(rt);
             let status = Command::new(&cmd[0])
                 .args(&cmd[1..])
                 .stdout(Stdio::null())
@@ -75,7 +88,7 @@ pub fn preflight(workloads: &[Workload], runtimes: &[Runtime]) -> Result<(), Str
         Ok(())
     } else {
         Err(format!(
-            "preflight failed (wrong result or missing port):\n  {}",
+            "preflight failed (wrong result):\n  {}",
             failures.join("\n  ")
         ))
     }

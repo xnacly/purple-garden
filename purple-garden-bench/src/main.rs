@@ -125,14 +125,14 @@ fn run(args: &RunArgs) -> Result<(), String> {
     Ok(())
 }
 
-/// Time every runtime on one workload with hyperfine, then measure peak RSS
-/// with one extra run per runtime.
+/// Time one workload on every runtime it is ported to with hyperfine, then
+/// measure peak RSS with one extra run per runtime.
 fn measure(
     w: &Workload,
     runtimes: &[Runtime],
     args: &RunArgs,
 ) -> Result<Vec<Measurement>, String> {
-    let mut measured = hyperfine::measure(w, runtimes, args.runs, args.warmup)?;
+    let mut measured = hyperfine::measure(w, &w.ported(runtimes), args.runs, args.warmup)?;
     if !args.no_memory {
         for m in &mut measured {
             let rt = runtimes

@@ -83,11 +83,12 @@ impl Entry {
     }
 }
 
-/// Benchmark every runtime on one workload in a single hyperfine invocation
-/// (`-N`: no shell), each command labelled with its runtime name.
+/// Benchmark one workload on the runtimes it is ported to in a single
+/// hyperfine invocation (`-N`: no shell), each command labelled with its
+/// runtime name.
 pub fn measure(
     w: &Workload,
-    runtimes: &[Runtime],
+    runtimes: &[&Runtime],
     runs: u32,
     warmup: u32,
 ) -> Result<Vec<Measurement>, String> {
