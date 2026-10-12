@@ -10,6 +10,10 @@
 //! The low three bits go into ModRM/SIB fields. Bit 3 is carried by a REX
 //! prefix (`REX.R` for the ModRM `reg` field, `REX.B` for the ModRM `r/m`
 //! field, or opcode low bits for `movabs`).
+//!
+//! The SSE registers `xmm0..xmm15` are a separate file with the same
+//! numbering and the same ModRM/REX split; the opcode's mandatory prefix
+//! (`f2` for scalar double ops) is what makes a register number mean an xmm.
 
 use std::{alloc::Allocator, fmt};
 
@@ -40,6 +44,16 @@ impl fmt::Display for Reg {
                 "r12", "r13", "r14", "r15",
             ][self.0 as usize],
         )
+    }
+}
+
+/// An SSE register holding one double in its low 64 bits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Xmm(pub u8);
+
+impl fmt::Display for Xmm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "xmm{}", self.0)
     }
 }
 
@@ -262,6 +276,24 @@ pub enum Insn {
     Idiv {
         divisor: Reg,
     },
+    /// `addsd xmm{dst}, xmm{src}`: the low doubles add, the high lane of
+    /// dst is left alone. The same for sub, mul and div below.
+    AddSd {
+        dst: Xmm,
+        src: Xmm,
+    },
+    SubSd {
+        dst: Xmm,
+        src: Xmm,
+    },
+    MulSd {
+        dst: Xmm,
+        src: Xmm,
+    },
+    DivSd {
+        dst: Xmm,
+        src: Xmm,
+    },
 }
 
 impl Insn {
@@ -402,6 +434,12 @@ impl Insn {
                 code.push(rex(0, divisor.0));
                 code.extend_from_slice(&[0xf7, modrm(7, divisor.0)]);
             }
+            // F2 0F 58/5C/59/5E /r = `addsd/subsd/mulsd/divsd xmm1, xmm2/m64`,
+            // ModRM.reg is dst.
+            Insn::AddSd { dst, src } => sse(code, 0xf2, 0x58, dst.0, src.0),
+            Insn::SubSd { dst, src } => sse(code, 0xf2, 0x5c, dst.0, src.0),
+            Insn::MulSd { dst, src } => sse(code, 0xf2, 0x59, dst.0, src.0),
+            Insn::DivSd { dst, src } => sse(code, 0xf2, 0x5e, dst.0, src.0),
         }
     }
 }
@@ -458,6 +496,10 @@ impl fmt::Display for Insn {
             Insn::JmpReg { reg } => write!(f, "jmp {}", reg),
             Insn::Cqo => write!(f, "cqo"),
             Insn::Idiv { divisor } => write!(f, "idiv {}", divisor),
+            Insn::AddSd { dst, src } => write!(f, "addsd {}, {}", dst, src),
+            Insn::SubSd { dst, src } => write!(f, "subsd {}, {}", dst, src),
+            Insn::MulSd { dst, src } => write!(f, "mulsd {}, {}", dst, src),
+            Insn::DivSd { dst, src } => write!(f, "divsd {}, {}", dst, src),
         }
     }
 }
@@ -505,6 +547,20 @@ fn modrm(reg: u8, rm: u8) -> u8 {
 /// - `test r/m64, r64`: both are sources.
 fn reg_reg<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, rm: u8) {
     code.extend_from_slice(&[rex(reg, rm), opcode, modrm(reg, rm)]);
+}
+
+/// Register-register SSE op: `prefix [REX] 0F opcode ModRM(reg, rm)`.
+///
+/// The mandatory `prefix` (`f2` for scalar double, `66` for packed integer)
+/// goes before REX, which here only carries the high register bits: SSE ops
+/// ignore REX.W, so the prefix is dropped when neither register needs it.
+/// For the two-xmm ops `reg` is dst and `rm` is src.
+fn sse<A: Allocator>(code: &mut Vec<u8, A>, prefix: u8, opcode: u8, reg: u8, rm: u8) {
+    code.push(prefix);
+    if reg >= 8 || rm >= 8 {
+        code.push(0x40 | (u8::from(reg >= 8) << 2) | u8::from(rm >= 8));
+    }
+    code.extend_from_slice(&[0x0f, opcode, modrm(reg, rm)]);
 }
 
 /// Register-immediate op: `REX.W 0x81 /digit r/m64, imm32`.
@@ -611,6 +667,76 @@ mod tests {
         let mut code = Vec::new();
         insn.encode(&mut code);
         code
+    }
+
+    #[test]
+    /// Scalar double ops, bytes checked against gas.
+    fn sse_encodings() {
+        use super::Xmm;
+
+        assert_eq!(
+            enc(Insn::AddSd {
+                dst: Xmm(0),
+                src: Xmm(1)
+            }),
+            [0xf2, 0x0f, 0x58, 0xc1]
+        ); // addsd xmm0,xmm1
+        assert_eq!(
+            enc(Insn::AddSd {
+                dst: Xmm(8),
+                src: Xmm(1)
+            }),
+            [0xf2, 0x44, 0x0f, 0x58, 0xc1]
+        ); // addsd xmm8,xmm1
+        assert_eq!(
+            enc(Insn::AddSd {
+                dst: Xmm(3),
+                src: Xmm(15)
+            }),
+            [0xf2, 0x41, 0x0f, 0x58, 0xdf]
+        ); // addsd xmm3,xmm15
+        assert_eq!(
+            enc(Insn::SubSd {
+                dst: Xmm(0),
+                src: Xmm(1)
+            }),
+            [0xf2, 0x0f, 0x5c, 0xc1]
+        ); // subsd xmm0,xmm1
+        assert_eq!(
+            enc(Insn::SubSd {
+                dst: Xmm(9),
+                src: Xmm(10)
+            }),
+            [0xf2, 0x45, 0x0f, 0x5c, 0xca]
+        ); // subsd xmm9,xmm10
+        assert_eq!(
+            enc(Insn::MulSd {
+                dst: Xmm(2),
+                src: Xmm(3)
+            }),
+            [0xf2, 0x0f, 0x59, 0xd3]
+        ); // mulsd xmm2,xmm3
+        assert_eq!(
+            enc(Insn::MulSd {
+                dst: Xmm(12),
+                src: Xmm(0)
+            }),
+            [0xf2, 0x44, 0x0f, 0x59, 0xe0]
+        ); // mulsd xmm12,xmm0
+        assert_eq!(
+            enc(Insn::DivSd {
+                dst: Xmm(4),
+                src: Xmm(5)
+            }),
+            [0xf2, 0x0f, 0x5e, 0xe5]
+        ); // divsd xmm4,xmm5
+        assert_eq!(
+            enc(Insn::DivSd {
+                dst: Xmm(1),
+                src: Xmm(14)
+            }),
+            [0xf2, 0x41, 0x0f, 0x5e, 0xce]
+        ); // divsd xmm1,xmm14
     }
 
     #[test]
