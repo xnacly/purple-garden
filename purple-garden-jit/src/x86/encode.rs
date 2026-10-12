@@ -444,65 +444,6 @@ impl Insn {
     }
 }
 
-impl fmt::Display for Insn {
-    /// Render one instruction as the JIT's readable assembly format.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Insn::Ret => write!(f, "ret"),
-            Insn::LoadSlot { dst, slot } => write!(f, "mov {}, [rdi+{:#x}]", dst, slot * 8),
-            Insn::StoreSlot { src, slot } => write!(f, "mov [rdi+{:#x}], {}", slot * 8, src),
-            Insn::LoadMem { dst, base, offset } => {
-                write!(f, "mov {}, [{}+{:#x}]", dst, base, offset)
-            }
-            Insn::StoreMem { base, offset, src } => {
-                write!(f, "mov [{}+{:#x}], {}", base, offset, src)
-            }
-            Insn::LeaMem { dst, base, offset } => {
-                write!(f, "lea {}, [{}+{:#x}]", dst, base, offset)
-            }
-            Insn::Mov { dst, src } => write!(f, "mov {}, {}", dst, src),
-            Insn::MovImm { dst, imm } => write!(f, "mov {}, {imm}", dst),
-            Insn::Add { dst, src } => write!(f, "add {}, {}", dst, src),
-            Insn::Sub { dst, src } => write!(f, "sub {}, {}", dst, src),
-            Insn::Imul { dst, src } => write!(f, "imul {}, {}", dst, src),
-            Insn::Neg { reg } => write!(f, "neg {}", reg),
-            Insn::AddImm { dst, imm } => write!(f, "add {}, {imm}", dst),
-            Insn::SubImm { dst, imm } => write!(f, "sub {}, {imm}", dst),
-            Insn::AndImm { dst, imm } => write!(f, "and {}, {imm}", dst),
-            Insn::CmpImm { reg, imm } => write!(f, "cmp {}, {imm}", reg),
-            Insn::Cmp { lhs, rhs } => write!(f, "cmp {}, {}", lhs, rhs),
-            Insn::CmpMem { reg, base, offset } => {
-                write!(f, "cmp {}, [{}+{:#x}]", reg, base, offset)
-            }
-            Insn::Test { lhs, rhs } => write!(f, "test {}, {}", lhs, rhs),
-            Insn::Sete { dst } => write!(f, "sete {}b", dst),
-            Insn::Setl { dst } => write!(f, "setl {}b", dst),
-            Insn::Setg { dst } => write!(f, "setg {}b", dst),
-            Insn::ImulImm { dst, src, imm } => write!(f, "imul {}, {}, {imm}", dst, src),
-            Insn::MovAbs { dst, imm } => write!(f, "movabs {}, {imm:#x}", dst),
-            Insn::CallReg { reg } => write!(f, "call {}", reg),
-            Insn::CallRel { disp } => write!(f, "call rip+{disp:#x}"),
-            Insn::Zero { reg } => write!(f, "xor {}, {}", reg, reg),
-            Insn::Push { reg } => write!(f, "push {}", reg),
-            Insn::Pop { reg } => write!(f, "pop {}", reg),
-            Insn::ShrImm { dst, imm } => write!(f, "shr {}, {imm}", dst),
-            Insn::LeaRip { dst, disp } => write!(f, "lea {}, [rip+{disp:#x}]", dst),
-            Insn::LoadI32Scaled { dst, base, index } => {
-                write!(f, "movsxd {}, dword [{}+{}*4]", dst, base, index)
-            }
-            Insn::LoadScaled8 { dst, base, index } => {
-                write!(f, "mov {}, qword [{}+{}*8]", dst, base, index)
-            }
-            Insn::JmpReg { reg } => write!(f, "jmp {}", reg),
-            Insn::Cqo => write!(f, "cqo"),
-            Insn::Idiv { divisor } => write!(f, "idiv {}", divisor),
-            Insn::AddSd { dst, src } => write!(f, "addsd {}, {}", dst, src),
-            Insn::SubSd { dst, src } => write!(f, "subsd {}, {}", dst, src),
-            Insn::MulSd { dst, src } => write!(f, "mulsd {}, {}", dst, src),
-            Insn::DivSd { dst, src } => write!(f, "divsd {}, {}", dst, src),
-        }
-    }
-}
 
 /// REX.W prefix for 64-bit operand size, plus high register bits.
 ///
