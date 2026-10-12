@@ -40,7 +40,7 @@ mod arch;
 #[path = "aarch64/mod.rs"]
 mod arch;
 pub mod mem;
-mod regalloc;
+mod xralloc2;
 
 pub use mem::CodeArena;
 use purple_garden_ir as ir;
@@ -59,7 +59,7 @@ pub type Natives<A> = HashMap<ir::Id, BuiltinFn, RandomState, A>;
 pub struct Jit<S: Allocator + Clone = Global> {
     code: Vec<u8, S>,
     liveness: Vec<(u32, u32), S>,
-    regalloc: regalloc::Xralloc2<S>,
+    regalloc: xralloc2::Xralloc2<S>,
     scratch: arch::Scratch<S>,
 }
 
@@ -82,7 +82,7 @@ impl<S: Allocator + Clone> Jit<S> {
         Self {
             code: Vec::new_in(scratch.clone()),
             liveness: Vec::new_in(scratch.clone()),
-            regalloc: regalloc::Xralloc2::new_in(scratch.clone()),
+            regalloc: xralloc2::Xralloc2::new_in(scratch.clone()),
             scratch: arch::Scratch::new_in(scratch),
         }
     }
