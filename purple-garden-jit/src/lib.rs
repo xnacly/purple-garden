@@ -665,9 +665,11 @@ mod tests_x86 {
         let _ = record_ty;
     }
 
+    /// `fn f() Double { 3.1415 }`: the bits are staged through rax into an
+    /// xmm, which the return stores to vm.r[0] as the raw double.
     #[test]
-    fn skips_unsupported_functions() {
-        let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Int));
+    fn compiles_double_const_returning_function() {
+        let mut func = Func::new("double_ret", Id(0), vec![], Some(Type::Double));
         func.blocks.push(Block {
             tombstone: false,
             id: Id(0),
@@ -676,12 +678,60 @@ mod tests_x86 {
                     id: Id(0),
                     ty: Type::Double,
                 },
-                value: Const::Double(1.0f64.to_bits()),
+                value: Const::Double(3.1415f64.to_bits()),
                 span: 0,
             }],
             params: EMPTY_PARAMS,
             term: Some(Terminator::Return {
                 value: Some(Id(0)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        let mut expected = vec![0x48, 0xb8]; // movabs rax, bits
+        expected.extend_from_slice(&3.1415f64.to_bits().to_le_bytes());
+        expected.extend_from_slice(&[
+            0x66, 0x48, 0x0f, 0x6e, 0xc0, // movq xmm0, rax
+            0xf2, 0x0f, 0x11, 0x47, 0x00, // movsd [rdi+0], xmm0
+            0x31, 0xc0, // xor eax, eax: no trap
+            0xc3,
+        ]);
+        assert_eq!(jit.code(), expected);
+        assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), 3.1415);
+    }
+
+    /// Double arithmetic isn't lowered yet, so a function using it stays bytecode.
+    #[test]
+    fn skips_unsupported_functions() {
+        let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Double));
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            instructions: vec![
+                Instr::LoadConst {
+                    dst: TypeId {
+                        id: Id(0),
+                        ty: Type::Double,
+                    },
+                    value: Const::Double(1.0f64.to_bits()),
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::DAdd,
+                    dst: TypeId {
+                        id: Id(1),
+                        ty: Type::Double,
+                    },
+                    lhs: Id(0),
+                    rhs: Id(0),
+                    span: 0,
+                },
+            ],
+            params: EMPTY_PARAMS,
+            term: Some(Terminator::Return {
+                value: Some(Id(1)),
                 span: 0,
             }),
         });

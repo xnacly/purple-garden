@@ -68,7 +68,7 @@ const CALL_CLOBBERS: Clobbers = Clobbers {
 const CALL_STACK: i32 = 16;
 
 /// Allocatable XMM regs, also popped from the back; none are callee saved
-const XMM_POOL: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+const XMM_POOL: &[u8] = &[14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
 /// scratch reg, not in pool, cycles and helper loc
 const XMM_SCRATCH: Xmm = Xmm(15);
 
@@ -605,6 +605,24 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let dst = self.gpr(dst);
                 self.emit(Insn::MovAbs { dst, imm: value.0 });
             }
+            ir::Instr::LoadConst {
+                dst,
+                value: ir::Const::Double(bits),
+                ..
+            } => {
+                // xmm doesnt have an immediate form:
+                // so we move the bits in the GPR scratch.
+                let dst = self.def(dst, self.pos + 1);
+                let dst = self.xmm(dst);
+                self.emit(Insn::MovAbs {
+                    dst: GPR_SCRATCH,
+                    imm: *bits,
+                });
+                self.emit(Insn::MovqToXmm {
+                    dst,
+                    src: GPR_SCRATCH,
+                });
+            }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let Some(imm) = (match value {
                     ir::Const::False => Some(0),
@@ -871,9 +889,20 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ir::Terminator::Return { value, .. } => {
                 if let Some(value) = value {
                     let src = self.ensure_register(*value);
-                    let src = self.gpr(src);
-                    self.emit(Insn::StoreSlot { src, slot: 0 });
+                    match src {
+                        Preg::Gpr(gpr) => {
+                            self.emit(Insn::StoreSlot {
+                                src: Reg(gpr),
+                                slot: 0,
+                            });
+                        }
+                        Preg::Fpr(fpr) => self.emit(Insn::StoreSlotSd {
+                            src: Xmm(fpr),
+                            slot: 0,
+                        }),
+                    }
                 }
+
                 self.emit(Insn::Zero { reg: GPR_SCRATCH });
                 self.jump(Cond::Always, Target::Epilogue);
             }
