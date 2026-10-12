@@ -20,14 +20,14 @@ use purple_garden_ir::Id;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
     Gpr,
-    Xmm,
+    Fpr,
 }
 
 /// A physical register, numbered within its class' register file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reg {
     Gpr(u8),
-    Xmm(u8),
+    Fpr(u8),
 }
 
 impl Reg {
@@ -35,7 +35,7 @@ impl Reg {
     pub fn new(class: Class, num: u8) -> Self {
         match class {
             Class::Gpr => Self::Gpr(num),
-            Class::Xmm => Self::Xmm(num),
+            Class::Fpr => Self::Fpr(num),
         }
     }
 
@@ -43,14 +43,14 @@ impl Reg {
     pub fn class(self) -> Class {
         match self {
             Self::Gpr(_) => Class::Gpr,
-            Self::Xmm(_) => Class::Xmm,
+            Self::Fpr(_) => Class::Fpr,
         }
     }
 
     #[must_use]
     pub fn num(self) -> u8 {
         match self {
-            Self::Gpr(num) | Self::Xmm(num) => num,
+            Self::Gpr(num) | Self::Fpr(num) => num,
         }
     }
 }
@@ -83,11 +83,11 @@ impl<S: Allocator + Clone> Xralloc2<S> {
     }
 
     /// Pools are popped from the back, so the preferred registers go last.
-    pub fn reset(&mut self, ids: usize, gprs: &[u8], xmms: &[u8]) {
+    pub fn reset(&mut self, ids: usize, gprs: &[u8], fprs: &[u8]) {
         self.map.clear();
         self.map.resize(ids, None);
         self.active.clear();
-        for (free, pool) in self.free.iter_mut().zip([gprs, xmms]) {
+        for (free, pool) in self.free.iter_mut().zip([gprs, fprs]) {
             free.clear();
             free.extend_from_slice(pool);
         }
@@ -164,17 +164,17 @@ mod tests {
     }
 
     /// The classes are separate register files: a double and an integer
-    /// never compete for a register, and a dying double only frees an xmm.
+    /// never compete for a register, and a dying double only frees an fpr.
     #[test]
     fn classes_are_allocated_independently() {
         let mut ra = Xralloc2::default();
         ra.reset(4, &[0], &[0]);
         assert_eq!(ra.alloc(Id(0), Class::Gpr, 0, 10), Some(Reg::Gpr(0)));
-        assert_eq!(ra.alloc(Id(1), Class::Xmm, 0, 2), Some(Reg::Xmm(0)));
+        assert_eq!(ra.alloc(Id(1), Class::Fpr, 0, 2), Some(Reg::Fpr(0)));
         assert_eq!(ra.alloc(Id(2), Class::Gpr, 2, 4), None);
-        assert_eq!(ra.alloc(Id(3), Class::Xmm, 2, 4), Some(Reg::Xmm(0)));
+        assert_eq!(ra.alloc(Id(3), Class::Fpr, 2, 4), Some(Reg::Fpr(0)));
         assert!(ra.used(Reg::Gpr(0)));
-        assert!(ra.used(Reg::Xmm(0)));
-        assert!(!ra.used(Reg::Xmm(1)));
+        assert!(ra.used(Reg::Fpr(0)));
+        assert!(!ra.used(Reg::Fpr(1)));
     }
 }

@@ -48,7 +48,7 @@ const SCRATCH: Reg = RAX;
 fn gpr(reg: Preg) -> Reg {
     match reg {
         Preg::Gpr(num) => Reg(num),
-        Preg::Xmm(_) => unreachable!("the x86 backend only allocates GPRs"),
+        Preg::Fpr(_) => unreachable!("the x86 backend only allocates GPRs"),
     }
 }
 
