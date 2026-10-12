@@ -294,6 +294,28 @@ pub enum Insn {
         dst: Xmm,
         src: Xmm,
     },
+    /// `movsd xmm{dst}, xmm{src}`: copies the low double, the high lane of
+    /// dst is left alone.
+    MovSd {
+        dst: Xmm,
+        src: Xmm,
+    },
+    /// `movq xmm{dst}, r{src}`: the GPR's 64 bits become the low double,
+    /// the high lane is zeroed. How a double constant reaches an xmm.
+    MovqToXmm {
+        dst: Xmm,
+        src: Reg,
+    },
+    /// `movsd xmm{dst}, [rdi + slot*8]`
+    LoadSlotSd {
+        dst: Xmm,
+        slot: u8,
+    },
+    /// `movsd [rdi + slot*8], xmm{src}`
+    StoreSlotSd {
+        src: Xmm,
+        slot: u8,
+    },
 }
 
 impl Insn {
@@ -440,6 +462,17 @@ impl Insn {
             Insn::SubSd { dst, src } => sse(code, 0xf2, 0x5c, dst.0, src.0),
             Insn::MulSd { dst, src } => sse(code, 0xf2, 0x59, dst.0, src.0),
             Insn::DivSd { dst, src } => sse(code, 0xf2, 0x5e, dst.0, src.0),
+            // F2 0F 10 /r = `movsd xmm1, xmm2/m64`, ModRM.reg is dst.
+            Insn::MovSd { dst, src } => sse(code, 0xf2, 0x10, dst.0, src.0),
+            // 66 REX.W 0F 6E /r = `movq xmm, r/m64`. REX.W is what makes it
+            // a 64-bit move (without it the same opcode is `movd`), so this
+            // doesn't go through [`sse`], which emits REX only for high regs.
+            Insn::MovqToXmm { dst, src } => {
+                code.extend_from_slice(&[0x66, rex(dst.0, src.0), 0x0f, 0x6e, modrm(dst.0, src.0)]);
+            }
+            // F2 0F 10 /r and F2 0F 11 /r with the slot memory operand.
+            Insn::LoadSlotSd { dst, slot } => movsd_slot(code, 0x10, dst.0, slot),
+            Insn::StoreSlotSd { src, slot } => movsd_slot(code, 0x11, src.0, slot),
         }
     }
 }
@@ -533,6 +566,19 @@ fn mov_slot<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, slot: u8) 
     // ModRM mod=01 (disp8), reg field = GPR, rm = rdi.
     let m = 0x40 | ((reg & 7) << 3) | RDI.0;
     code.extend_from_slice(&[rex(reg, RDI.0), opcode, m, slot * 8]);
+}
+
+/// `movsd` between xmm `reg` and `[rdi + slot*8]` (opcode 0x10 load, 0x11
+/// store): the same `mod=01` ModRM and disp8 as [`mov_slot`] behind the `f2`
+/// prefix, with REX only carrying the high register bit since SSE ignores
+/// REX.W.
+fn movsd_slot<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, slot: u8) {
+    code.push(0xf2);
+    if reg >= 8 {
+        code.push(0x44);
+    }
+    let m = 0x40 | ((reg & 7) << 3) | RDI.0;
+    code.extend_from_slice(&[0x0f, opcode, m, slot * 8]);
 }
 
 /// Memory op using `[base + offset]`, where ModRM.reg is the register operand
@@ -678,6 +724,77 @@ mod tests {
             }),
             [0xf2, 0x41, 0x0f, 0x5e, 0xce]
         ); // divsd xmm1,xmm14
+    }
+
+    #[test]
+    /// Double moves between xmm, from a GPR and to and from VM slots, bytes
+    /// checked against gas. Slot 0 keeps the disp8 form like `mov_slot`.
+    fn sse_move_encodings() {
+        use super::{R9, R12, RAX, Xmm};
+
+        assert_eq!(
+            enc(Insn::MovSd {
+                dst: Xmm(2),
+                src: Xmm(9)
+            }),
+            [0xf2, 0x41, 0x0f, 0x10, 0xd1]
+        ); // movsd xmm2,xmm9
+        assert_eq!(
+            enc(Insn::MovSd {
+                dst: Xmm(0),
+                src: Xmm(1)
+            }),
+            [0xf2, 0x0f, 0x10, 0xc1]
+        ); // movsd xmm0,xmm1
+        assert_eq!(
+            enc(Insn::MovqToXmm {
+                dst: Xmm(3),
+                src: RAX
+            }),
+            [0x66, 0x48, 0x0f, 0x6e, 0xd8]
+        ); // movq xmm3,rax
+        assert_eq!(
+            enc(Insn::MovqToXmm {
+                dst: Xmm(10),
+                src: R12
+            }),
+            [0x66, 0x4d, 0x0f, 0x6e, 0xd4]
+        ); // movq xmm10,r12
+        assert_eq!(
+            enc(Insn::MovqToXmm {
+                dst: Xmm(1),
+                src: R9
+            }),
+            [0x66, 0x49, 0x0f, 0x6e, 0xc9]
+        ); // movq xmm1,r9
+        assert_eq!(
+            enc(Insn::LoadSlotSd {
+                dst: Xmm(1),
+                slot: 1
+            }),
+            [0xf2, 0x0f, 0x10, 0x4f, 0x08]
+        ); // movsd xmm1,[rdi+0x8]
+        assert_eq!(
+            enc(Insn::LoadSlotSd {
+                dst: Xmm(8),
+                slot: 0
+            }),
+            [0xf2, 0x44, 0x0f, 0x10, 0x47, 0x00]
+        ); // movsd xmm8,[rdi+0x0]
+        assert_eq!(
+            enc(Insn::StoreSlotSd {
+                src: Xmm(8),
+                slot: 2
+            }),
+            [0xf2, 0x44, 0x0f, 0x11, 0x47, 0x10]
+        ); // movsd [rdi+0x10],xmm8
+        assert_eq!(
+            enc(Insn::StoreSlotSd {
+                src: Xmm(2),
+                slot: 15
+            }),
+            [0xf2, 0x0f, 0x11, 0x57, 0x78]
+        ); // movsd [rdi+0x78],xmm2
     }
 
     #[test]
