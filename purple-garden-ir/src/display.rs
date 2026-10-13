@@ -193,6 +193,9 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
         let mut rows = Vec::new();
         let mut push = |pos, indent, text| rows.push(Row { pos, indent, text });
 
+        if self.unused {
+            push(None, 0, "// unused; not lowered".to_string());
+        }
         push(None, 0, format!("// {}", self.name));
         push(
             None,

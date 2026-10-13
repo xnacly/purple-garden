@@ -350,7 +350,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         // out before any function is compiled, entries padded so each header
         // stays aligned.
         let mut strs: Vec<(u32, &'cc str), S> = Vec::new_in(self.live_set.allocator().clone());
-        for func in ir {
+        for func in ir.iter().filter(|f| !f.unused) {
             for block in func.blocks.iter().filter(|b| !b.tombstone) {
                 for instr in &block.instructions {
                     if let ir::Instr::LoadConst {
@@ -416,7 +416,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         self.const_pool = pool.into_boxed_slice();
         debug_assert_eq!(self.const_pool.as_ptr(), base);
 
-        for func in ir {
+        for func in ir.iter().filter(|f| !f.unused) {
             self.cc(func, arena.as_mut())?;
         }
 

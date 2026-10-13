@@ -9,6 +9,9 @@ mod ir;
 /// bytecode based optimisations, mainly peephole
 mod bc;
 
+/// whole-program dead function elimination, only for programs run from their entry
+pub use ir::dce_functions;
+
 pub fn ir<'f, F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'f, F>], scratch: &S) {
     let mut scratch = ir::Scratch::new_in(scratch);
     // must only be indexed with [ir::Func::id]

@@ -334,6 +334,9 @@ pub struct Func<'f, A: Allocator = Global> {
     pub span: u32,
     pub params: Vec<Id, A>,
     pub ret: Option<Type<'f>>,
+    /// Never called from the entry, so the backends don't lower it. Set by `opt::dce_functions`
+    /// for programs that only run from their entry.
+    pub unused: bool,
     pub blocks: Vec<Block<'f, A>, A>,
     /// Owning storage for every block-param / Branch-arg / Jump-arg
     /// `[Id]` list this function references. Together with [`ParamsId`]
@@ -433,6 +436,7 @@ impl<'f, A: Allocator + Clone> Func<'f, A> {
             span: 0,
             params: func_params,
             ret,
+            unused: false,
             blocks: Vec::new_in(alloc.clone()),
             params_pool,
             cases_pool: Pool::new_in(alloc.clone()),

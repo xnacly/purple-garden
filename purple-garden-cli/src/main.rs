@@ -225,6 +225,7 @@ fn pipeline<A: Pages + Clone>(
 
     if conf.opt >= 1 {
         purple_garden_opt::ir(&mut ir, &scratch);
+        purple_garden_opt::dce_functions(&mut ir, &scratch);
         scratch.reset();
     }
 
