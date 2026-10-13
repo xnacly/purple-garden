@@ -6,10 +6,12 @@
 mod addrof_fold;
 mod branch_cmp;
 mod const_fold;
+mod const_fold_const_calls;
 mod const_fold_syscalls;
 mod dce;
 mod imm_fold;
 mod indirect_jump;
+mod is_const_call;
 mod load_store_fold;
 mod ret_inline;
 mod switch_fold;
@@ -27,15 +29,12 @@ pub struct ConstDef {
     instr: u32,
 }
 
-/// Shared analysis state for IR-level passes that need SSA use counts
-/// plus a map of fold-eligible `LoadConst` defs. One instance is
-/// reused across every function in a compile (reset by [`Scratch::reset`]) on
-/// `uses` and `consts`) so the allocation amortises.
+/// Shared analysis state for IR-level passes that need SSA use counts plus a map of fold-eligible
+/// `LoadConst` defs. One instance is reused across every function in a compile (reset by
+/// [`Scratch::reset`]).
 ///
-/// Both vecs are indexed by `Id.0`. Invariant: `uses.len() ==
-/// consts.len()`; [`Scratch::ensure`] is the only place they grow,
-/// and they grow together so callers can index either side without
-/// bounds-checking the other.
+/// Both vecs are indexed by `Id.0`. [`Scratch::ensure`] is the only place they grow, and they grow
+/// together so callers can index either side without bounds-checking the other.
 pub struct Scratch<'scratch, S: Allocator = Global> {
     uses: Vec<u32, &'scratch S>,
     consts: Vec<Option<ConstDef>, &'scratch S>,
@@ -193,10 +192,12 @@ pub(super) fn predecessor_counts<F: Allocator, S: Allocator>(
 pub use addrof_fold::addrof_fold;
 pub use branch_cmp::branch_cmp;
 pub use const_fold::const_fold;
+pub use const_fold_const_calls::const_fold_const_calls;
 pub use const_fold_syscalls::const_fold_syscalls;
 pub use dce::dce;
 pub use imm_fold::imm_fold;
 pub use indirect_jump::indirect_jump;
+pub use is_const_call::is_const_call;
 pub use load_store_fold::load_store_fold;
 pub use ret_inline::ret_inline;
 pub use switch_fold::switch_fold;
