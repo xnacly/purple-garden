@@ -36,6 +36,9 @@ pub fn ir<'f, F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'f, F
         ir::const_fold(fun, &mut scratch);
         ir::const_fold_syscalls(fun, &mut scratch);
 
+        // Order: after const_fold, for its constants, and before imm_fold, which would turn `x * 2`
+        // into an immediate multiply
+        ir::arith_simplify(fun, &mut scratch);
         ir::imm_fold(fun, &mut scratch);
         ir::branch_cmp(fun, &mut scratch);
         // Order: after branch_cmp, it folds the BranchCmp/BranchCmpImm chains

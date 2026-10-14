@@ -4,6 +4,7 @@
 //! run, in what order) lives in [crate::ir] in `src/opt/mod.rs`.
 
 mod addrof_fold;
+mod arith_simplify;
 mod branch_cmp;
 mod const_fold;
 mod const_fold_const_calls;
@@ -39,6 +40,8 @@ pub struct ConstDef {
 pub struct Scratch<'scratch, S: Allocator = Global> {
     uses: Vec<u32, &'scratch S>,
     consts: Vec<Option<ConstDef>, &'scratch S>,
+    /// `remap[id]` is the value replacing `id`, see [`Scratch::alias`].
+    remap: Vec<Option<Id>, &'scratch S>,
 }
 
 impl Default for Scratch<'_> {
@@ -52,6 +55,7 @@ impl<'scratch, S: Allocator> Scratch<'scratch, S> {
         Self {
             uses: Vec::new_in(scratch),
             consts: Vec::new_in(scratch),
+            remap: Vec::new_in(scratch),
         }
     }
 
@@ -64,6 +68,7 @@ impl<'scratch, S: Allocator> Scratch<'scratch, S> {
     pub fn reset(&mut self) {
         self.uses.clear();
         self.consts.clear();
+        self.remap.clear();
     }
 
     /// Returns the recorded `ConstDef` for `id`, no use-count gate.
@@ -87,6 +92,29 @@ impl<'scratch, S: Allocator> Scratch<'scratch, S> {
     pub fn record_const(&mut self, id: Id, block: u32, instr: u32) {
         self.ensure(id);
         self.consts[id.0 as usize] = Some(ConstDef { block, instr });
+    }
+
+    /// Record that `id` is the same value as `to`, for [`ir::Func::replace_uses`] with
+    /// [`Scratch::remap`] to rewrite its uses once the pass is done.
+    pub fn alias(&mut self, id: Id, to: Id) {
+        let len = id.0 as usize + 1;
+        if self.remap.len() < len {
+            self.remap.resize(len, None);
+        }
+        self.remap[id.0 as usize] = Some(to);
+    }
+
+    /// `id` with every recorded alias followed.
+    pub fn resolve(&self, mut id: Id) -> Id {
+        while let Some(&Some(to)) = self.remap.get(id.0 as usize) {
+            id = to;
+        }
+        id
+    }
+
+    /// Recorded aliases, empty if there are none.
+    pub fn remap(&self) -> &[Option<Id>] {
+        &self.remap
     }
 
     /// Record one use of `id`. After the analyze pass `uses[id.0]` is
@@ -191,6 +219,7 @@ pub(super) fn predecessor_counts<F: Allocator, S: Allocator>(
 
 // reexports
 pub use addrof_fold::addrof_fold;
+pub use arith_simplify::arith_simplify;
 pub use branch_cmp::branch_cmp;
 pub use const_fold::const_fold;
 pub use const_fold_const_calls::const_fold_const_calls;

@@ -365,9 +365,9 @@ pub struct Func<'f, A: Allocator = Global> {
 }
 
 /// The lists of one kind of a function, back to back in one allocation and
-/// addressed by the index [`Pool::intern`] returns. Interned lists never
-/// change, a rewrite interns a new one and the old stays until the function is
-/// dropped.
+/// addressed by the index [`Pool::intern`] returns. Interned lists only change
+/// in place through [`Func::replace_uses`], any other rewrite interns a new one
+/// and the old stays until the function is dropped.
 #[derive(Debug, Clone)]
 pub struct Pool<T, A: Allocator = Global> {
     items: Vec<T, A>,
@@ -599,6 +599,64 @@ impl<A: Allocator> Func<'_, A> {
                 for &p in self.params(*no_params) {
                     f(p);
                 }
+            }
+        }
+    }
+
+    /// Rewrites every use of a value to the one `remap` maps it to, following chains, in one sweep;
+    /// the `_mut` counterpart of [`Func::for_each_use_of_instr`] and [`Func::for_each_use_of_term`].
+    ///
+    /// Interned params are rewritten in place, every list at once: a remapped value is defined by
+    /// an instruction, never by a block param, so each of its pool entries is a use.
+    pub fn replace_uses(&mut self, remap: &[Option<Id>]) {
+        let replace = |id: &mut Id| {
+            while let Some(&Some(to)) = remap.get(id.0 as usize) {
+                *id = to;
+            }
+        };
+
+        self.params_pool.items.iter_mut().for_each(replace);
+
+        for block in self.blocks.iter_mut().filter(|b| !b.tombstone) {
+            for instr in &mut block.instructions {
+                match instr {
+                    Instr::Bin { lhs, rhs, .. } => {
+                        replace(lhs);
+                        replace(rhs);
+                    }
+                    Instr::BinImm { lhs, .. } => replace(lhs),
+                    Instr::Cast { from, .. } => replace(&mut from.id),
+                    Instr::Lookup { subject, .. } => replace(subject),
+                    Instr::Store { src, base, .. } => {
+                        replace(src);
+                        replace(base);
+                    }
+                    Instr::Load { base, .. } | Instr::AddrOf { base, .. } => replace(base),
+                    Instr::Call { .. }
+                    | Instr::Sys { .. }
+                    | Instr::LoadConst { .. }
+                    | Instr::Noop
+                    | Instr::Alloc { .. } => {}
+                }
+            }
+
+            let Some(term) = &mut block.term else {
+                continue;
+            };
+            match term {
+                Terminator::Return {
+                    value: Some(id), ..
+                } => replace(id),
+                Terminator::Branch { cond, .. } => replace(cond),
+                Terminator::BranchCmpImm { lhs, .. } => replace(lhs),
+                Terminator::BranchCmp { lhs, rhs, .. } => {
+                    replace(lhs);
+                    replace(rhs);
+                }
+                Terminator::Switch { subject, .. } => replace(subject),
+                Terminator::Return { value: None, .. }
+                | Terminator::Jump { .. }
+                | Terminator::Tail { .. } => {}
             }
         }
     }
@@ -894,6 +952,157 @@ mod tests {
             id: Id(id),
             ty: Type::Int,
         }
+    }
+
+    /// Every use the visitors report is rewritten by [`Func::replace_uses`], so an operand added
+    /// to one but not the other fails here.
+    #[test]
+    fn replace_uses_rewrites_every_visited_use() {
+        let mut fun = Func::new("f", Id(0), vec![], None);
+        let mut next = 0;
+        let mut v = || {
+            next += 1;
+            Id(next)
+        };
+        let target = |fun: &mut Func, id| (Id(0), fun.intern_params([id]));
+
+        let instructions = vec![
+            Instr::Bin {
+                op: BinOp::IAdd,
+                dst: type_id(200),
+                lhs: v(),
+                rhs: v(),
+                span: 0,
+            },
+            Instr::BinImm {
+                op: BinOp::IAdd,
+                dst: type_id(201),
+                lhs: v(),
+                imm: 1,
+                span: 0,
+            },
+            Instr::Call {
+                dst: type_id(202),
+                func: Id(0),
+                args: fun.intern_params([v(), v()]),
+                span: 0,
+            },
+            Instr::Cast {
+                dst: type_id(203),
+                from: type_id(v().0),
+                span: 0,
+            },
+            Instr::Lookup {
+                dst: type_id(204),
+                subject: v(),
+                entries: fun.intern_entries([]),
+                default: Const::Int(0),
+                span: 0,
+            },
+            Instr::Store {
+                src: v(),
+                base: v(),
+                offset: 0,
+                span: 0,
+            },
+            Instr::Load {
+                dst: type_id(205),
+                base: v(),
+                offset: 0,
+                span: 0,
+            },
+            Instr::AddrOf {
+                dst: type_id(206),
+                base: v(),
+                offset: 0,
+                span: 0,
+            },
+        ];
+        let terms = vec![
+            Terminator::Return {
+                value: Some(v()),
+                span: 0,
+            },
+            Terminator::Jump {
+                id: Id(0),
+                params: fun.intern_params([v()]),
+                span: 0,
+            },
+            Terminator::Branch {
+                cond: v(),
+                yes: target(&mut fun, v()),
+                no: target(&mut fun, v()),
+                span: 0,
+            },
+            Terminator::BranchCmpImm {
+                op: BinOp::ILt,
+                lhs: v(),
+                imm: 0,
+                yes: target(&mut fun, v()),
+                no: target(&mut fun, v()),
+                span: 0,
+            },
+            Terminator::BranchCmp {
+                op: BinOp::ILt,
+                lhs: v(),
+                rhs: v(),
+                yes: target(&mut fun, v()),
+                no: target(&mut fun, v()),
+                span: 0,
+            },
+            Terminator::Tail {
+                func: Id(0),
+                args: fun.intern_params([v()]),
+                span: 0,
+            },
+            Terminator::Switch {
+                subject: v(),
+                cases: {
+                    let target = target(&mut fun, v());
+                    fun.intern_cases([Case {
+                        key: Const::Int(0),
+                        target,
+                    }])
+                },
+                default: target(&mut fun, v()),
+                span: 0,
+            },
+        ];
+        let mut instructions = Some(instructions);
+        fun.blocks = terms
+            .into_iter()
+            .enumerate()
+            .map(|(i, term)| Block {
+                tombstone: false,
+                id: Id(i as u32),
+                instructions: instructions.take().unwrap_or_default(),
+                params: EMPTY_PARAMS,
+                term: Some(term),
+            })
+            .collect();
+
+        let uses = |fun: &Func| {
+            let mut uses = vec![];
+            for block in &fun.blocks {
+                for instr in &block.instructions {
+                    fun.for_each_use_of_instr(instr, |id| uses.push(id.0));
+                }
+                fun.for_each_use_of_term(block.term.as_ref().unwrap(), |id| uses.push(id.0));
+            }
+            uses
+        };
+        let before = uses(&fun);
+        let mut sorted = before.clone();
+        sorted.sort();
+        assert_eq!(sorted, (1..=next).collect::<Vec<_>>());
+
+        let remap: Vec<_> = (0..=next)
+            .map(|id| (id != 0).then_some(Id(id + 100)))
+            .collect();
+        fun.replace_uses(&remap);
+
+        let after = uses(&fun);
+        assert_eq!(after, before.iter().map(|id| id + 100).collect::<Vec<_>>());
     }
 
     #[test]
