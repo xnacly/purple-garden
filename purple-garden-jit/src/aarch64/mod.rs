@@ -18,7 +18,7 @@ pub fn compile_func<F: Allocator, S: std::alloc::Allocator, N: std::alloc::Alloc
     _: &std::collections::HashMap<ir::Const<'_>, u32>,
     _: &[purple_garden_runtime::Value],
     _: &crate::Natives<N>,
-    _: &mut crate::regalloc::Xralloc2<S>,
+    _: &mut crate::xralloc2::Xralloc2<S>,
     _: &mut Scratch<S>,
 ) -> Option<()> {
     purple_garden_shared::trace!("[jit::aarch64] skipped: backend scaffold only");

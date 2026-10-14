@@ -193,6 +193,9 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
         let mut rows = Vec::new();
         let mut push = |pos, indent, text| rows.push(Row { pos, indent, text });
 
+        if self.unused {
+            push(None, 0, "// unused; not lowered".to_string());
+        }
         push(None, 0, format!("// {}", self.name));
         push(
             None,
@@ -200,7 +203,11 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
             format!(
                 "fn f{}({}) -> {} {{",
                 self.id.0,
-                format_ids(&self.params),
+                self.params
+                    .iter()
+                    .map(|p| format!("%v{}:{}", p.id.0, p.ty))
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 self.ret
                     .as_ref()
                     .map_or_else(|| "Void".to_string(), std::string::ToString::to_string)

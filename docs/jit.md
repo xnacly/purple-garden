@@ -17,7 +17,7 @@ Modules:
 - `purple-garden-jit/src/x86/mod.rs`: x86-64 admission, register allocation,
   lowering, encoding, and patching.
 - `purple-garden-jit/src/aarch64/mod.rs`: same for aarch64
-- `purple-garden-jit/src/regalloc.rs`: target-independent linear-scan register
+- `purple-garden-jit/src/xralloc2.rs`: target-independent linear-scan register
   allocator.
 - `purple-garden-runtime/src/jit_helpers.rs`: runtime helper calls used from
   native code, for instance for allocation, bounds checking, vm traps, etc

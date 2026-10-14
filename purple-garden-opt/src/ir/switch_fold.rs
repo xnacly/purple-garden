@@ -182,7 +182,21 @@ mod tests {
     /// `b{2k+1}` returns `k + 1`, the last block `b{2n}` returns 0. Every block
     /// takes and passes the params `(%v0, %v1)`.
     fn chain(cases: &[(Id, Key)]) -> Func<'static> {
-        let mut fun = Func::new("f", Id(0), vec![V0, V1], Some(Type::Int));
+        let mut fun = Func::new(
+            "f",
+            Id(0),
+            vec![
+                TypeId {
+                    id: V0,
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: V1,
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
         let params = fun.intern_params(vec![V0, V1]);
         for (k, &(subject, key)) in cases.iter().enumerate() {
             let k = k as u32;

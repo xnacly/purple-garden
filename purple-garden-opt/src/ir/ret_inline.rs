@@ -87,7 +87,15 @@ mod tests {
     /// collapses to `b0: ret %v0` and tombstones b1.
     #[test]
     fn inlines_single_predecessor_and_tombstones_join() {
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let b0_params = fun.intern_params(vec![Id(0)]);
         let b1_params = fun.intern_params(vec![Id(1)]);
         let jump_params = fun.intern_params(vec![Id(0)]);
@@ -134,7 +142,15 @@ mod tests {
     /// return block. Both become Returns, and the join is tombstoned.
     #[test]
     fn inlines_all_arms_and_tombstones_join() {
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let b0_params = fun.intern_params(vec![Id(0)]);
         let b1_params = fun.intern_params(vec![Id(0)]);
         let b2_params = fun.intern_params(vec![Id(0)]);
@@ -223,7 +239,15 @@ mod tests {
     /// to copy that computation into every predecessor.
     #[test]
     fn does_not_inline_when_return_does_not_alias_join_param() {
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let b0_params = fun.intern_params(vec![Id(0)]);
         let b1_params = fun.intern_params(vec![Id(1)]);
         let jump_params = fun.intern_params(vec![Id(0)]);
@@ -267,7 +291,15 @@ mod tests {
     /// A non-trivial join (one with instructions) is not inlinable.
     #[test]
     fn does_not_inline_join_with_instructions() {
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let b0_params = fun.intern_params(vec![Id(0)]);
         let b1_params = fun.intern_params(vec![Id(1)]);
         let jump_params = fun.intern_params(vec![Id(0)]);

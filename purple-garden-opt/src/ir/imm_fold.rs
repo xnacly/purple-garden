@@ -163,7 +163,15 @@ mod tests {
 
     #[test]
     fn folds_single_use_rhs_const() {
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let params = fun.intern_params(vec![Id(0)]);
         fun.blocks = vec![Block {
             tombstone: false,
@@ -208,7 +216,15 @@ mod tests {
 
     #[test]
     fn leaves_multi_use_const_alone() {
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let params = fun.intern_params(vec![Id(0)]);
         fun.blocks = vec![Block {
             tombstone: false,
@@ -253,7 +269,15 @@ mod tests {
 
     #[test]
     fn swaps_lhs_compare_const() {
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(Type::Bool));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Bool),
+        );
         let params = fun.intern_params(vec![Id(0)]);
         fun.blocks = vec![Block {
             tombstone: false,

@@ -1,5 +1,6 @@
 use std::alloc::Allocator;
 
+use purple_garden_ir::Const;
 use purple_garden_runtime::op::Op;
 
 /// ir based optimisations
@@ -8,8 +9,15 @@ mod ir;
 /// bytecode based optimisations, mainly peephole
 mod bc;
 
-pub fn ir<F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'_, F>], scratch: &S) {
+/// whole-program dead function elimination, only for programs run from their entry
+pub use ir::dce_functions;
+
+pub fn ir<'f, F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'f, F>], scratch: &S) {
     let mut scratch = ir::Scratch::new_in(scratch);
+    // must only be indexed with [ir::Func::id]
+    let mut function_consts = Vec::with_capacity_in(ir.len(), scratch.alloc());
+    // since its of size ir.len
+    function_consts.resize(ir.len(), None::<Const<'f>>);
 
     for fun in ir {
         // so all other blocks.last() are valid
@@ -17,11 +25,20 @@ pub fn ir<F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'_, F>], 
             continue;
         }
 
+        // Order: first, so const_fold folds the constants it inserts and tailcall never sees the
+        // folded calls.
+        //
+        // Since callees are defined before use, so their entries are already recorded
+        ir::const_fold_const_calls(fun, &function_consts);
+
         // Order: we constant fold before imm_folding, otherwise we have fragmented half optimised
         // constant operations, we could have fully merged together at compiletime
         ir::const_fold(fun, &mut scratch);
         ir::const_fold_syscalls(fun, &mut scratch);
 
+        // Order: after const_fold, for its constants, and before imm_fold, which would turn `x * 2`
+        // into an immediate multiply
+        ir::arith_simplify(fun, &mut scratch);
         ir::imm_fold(fun, &mut scratch);
         ir::branch_cmp(fun, &mut scratch);
         // Order: after branch_cmp, it folds the BranchCmp/BranchCmpImm chains
@@ -43,6 +60,10 @@ pub fn ir<F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'_, F>], 
         // Order: dead code elimination always last, for the backends having less work (and the reg
         // allocator)
         ir::dce(fun, &mut scratch);
+
+        // Order: after the whole pipeline of a function, check if the return value of the function
+        // it processed is constant
+        function_consts[fun.id.0 as usize] = ir::is_const_call(fun);
     }
 }
 

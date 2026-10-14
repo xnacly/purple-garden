@@ -40,7 +40,7 @@ mod arch;
 #[path = "aarch64/mod.rs"]
 mod arch;
 pub mod mem;
-mod regalloc;
+mod xralloc2;
 
 pub use mem::CodeArena;
 use purple_garden_ir as ir;
@@ -59,7 +59,7 @@ pub type Natives<A> = HashMap<ir::Id, BuiltinFn, RandomState, A>;
 pub struct Jit<S: Allocator + Clone = Global> {
     code: Vec<u8, S>,
     liveness: Vec<(u32, u32), S>,
-    regalloc: regalloc::Xralloc2<S>,
+    regalloc: xralloc2::Xralloc2<S>,
     scratch: arch::Scratch<S>,
 }
 
@@ -82,7 +82,7 @@ impl<S: Allocator + Clone> Jit<S> {
         Self {
             code: Vec::new_in(scratch.clone()),
             liveness: Vec::new_in(scratch.clone()),
-            regalloc: regalloc::Xralloc2::new_in(scratch.clone()),
+            regalloc: xralloc2::Xralloc2::new_in(scratch.clone()),
             scratch: arch::Scratch::new_in(scratch),
         }
     }
@@ -180,7 +180,15 @@ mod tests_x86 {
     /// `fn identity(a) int { a }`: load the arg, store it back as the result.
     #[test]
     fn identity_returns_arg() {
-        let mut func = Func::new("identity", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut func = Func::new(
+            "identity",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -202,7 +210,21 @@ mod tests_x86 {
     /// `fn second(a b) int { b }`: the result is the second arg (vm.r[1]).
     #[test]
     fn returns_second_arg() {
-        let mut func = Func::new("second", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let mut func = Func::new(
+            "second",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0), Id(1)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -275,7 +297,20 @@ mod tests_x86 {
         let mut func = Func::new(
             "alloc_live",
             Id(0),
-            vec![Id(0), Id(1), Id(2)],
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(2),
+                    ty: Type::Int,
+                },
+            ],
             Some(record_ty),
         );
         let params = func.intern_params(vec![Id(0), Id(1), Id(2)]);
@@ -348,7 +383,21 @@ mod tests_x86 {
 
     #[test]
     fn compiles_tail_recursive_factorial_loop() {
-        let mut func = Func::new("factorial", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let mut func = Func::new(
+            "factorial",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
         let args0 = func.intern_params([Id(5), Id(6)]);
         let params = func.intern_params(vec![Id(0), Id(1)]);
         let ret_args = func.intern_params(vec![Id(1)]);
@@ -443,7 +492,21 @@ mod tests_x86 {
 
     #[test]
     fn idiv_clobbers_do_not_overwrite_live_values() {
-        let mut func = Func::new("div_plus", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let mut func = Func::new(
+            "div_plus",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0), Id(1)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -482,9 +545,75 @@ mod tests_x86 {
         assert_eq!(run(jit.code(), [20, 7, 0])[0], 17);
     }
 
+    /// `fn f(a..f) int { a / 3 + a + .. + f }`: every param stays live across
+    /// the idiv, so its result lands in rcx or rdx, which the save around the
+    /// idiv must not restore over.
+    #[test]
+    fn imm_divisor_result_survives_clobber_restore() {
+        let int = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let ids: Vec<_> = (0..6).map(Id).collect();
+        let mut func = Func::new(
+            "div_sum",
+            Id(0),
+            ids.iter().map(|&id| TypeId { id, ty: Type::Int }).collect(),
+            Some(Type::Int),
+        );
+        let params = func.intern_params(ids);
+        let mut instructions = vec![Instr::BinImm {
+            op: BinOp::IDiv,
+            dst: int(6),
+            lhs: Id(0),
+            imm: 3,
+            span: 0,
+        }];
+        for param in 0..6 {
+            instructions.push(Instr::Bin {
+                op: BinOp::IAdd,
+                dst: int(7 + param),
+                lhs: Id(6 + param),
+                rhs: Id(param),
+                span: 0,
+            });
+        }
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions,
+            term: Some(Terminator::Return {
+                value: Some(Id(12)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        let (_arena, f) = exec(jit.code());
+        let mut regs = [30, 1, 2, 3, 4, 5];
+        unsafe { f(regs.as_mut_ptr()) };
+        assert_eq!(regs[0], 10 + 30 + 1 + 2 + 3 + 4 + 5);
+    }
+
     /// `fn f(a, b) int { a <op> b }` with a register divisor.
     fn reg_div_func(op: BinOp) -> Func<'static> {
-        let mut func = Func::new("reg_div", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let mut func = Func::new(
+            "reg_div",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0), Id(1)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -528,7 +657,21 @@ mod tests_x86 {
     /// clobber from the register-divisor idiv.
     #[test]
     fn reg_divisor_clobbers_do_not_overwrite_live_values() {
-        let mut func = Func::new("mod_plus", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let mut func = Func::new(
+            "mod_plus",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0), Id(1)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -592,7 +735,15 @@ mod tests_x86 {
     #[test]
     fn loads_record_field_from_pointer_arg() {
         let record_ty = record(vec![("first", Type::Int), ("second", Type::Int)]);
-        let mut func = Func::new("field", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut func = Func::new(
+            "field",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: record_ty.clone(),
+            }],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -626,7 +777,15 @@ mod tests_x86 {
             "nested",
             record(vec![("first", Type::Int), ("second", Type::Int)]),
         )]);
-        let mut func = Func::new("nested_field", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut func = Func::new(
+            "nested_field",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: record_ty.clone(),
+            }],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -665,9 +824,11 @@ mod tests_x86 {
         let _ = record_ty;
     }
 
+    /// `fn f() Double { 3.1415 }`: the bits are staged through rax into an
+    /// xmm, which the return stores to vm.r[0] as the raw double.
     #[test]
-    fn skips_unsupported_functions() {
-        let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Int));
+    fn compiles_double_const_returning_function() {
+        let mut func = Func::new("double_ret", Id(0), vec![], Some(Type::Double));
         func.blocks.push(Block {
             tombstone: false,
             id: Id(0),
@@ -676,7 +837,7 @@ mod tests_x86 {
                     id: Id(0),
                     ty: Type::Double,
                 },
-                value: Const::Double(1.0f64.to_bits()),
+                value: Const::Double(3.1415f64.to_bits()),
                 span: 0,
             }],
             params: EMPTY_PARAMS,
@@ -686,7 +847,163 @@ mod tests_x86 {
             }),
         });
 
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        let mut expected = vec![0x48, 0xb8]; // movabs rax, bits
+        expected.extend_from_slice(&3.1415f64.to_bits().to_le_bytes());
+        expected.extend_from_slice(&[
+            0x66, 0x48, 0x0f, 0x6e, 0xc0, // movq xmm0, rax
+            0xf2, 0x0f, 0x11, 0x47, 0x00, // movsd [rdi+0], xmm0
+            0x31, 0xc0, // xor eax, eax: no trap
+            0xc3,
+        ]);
+        assert_eq!(jit.code(), expected);
+        assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), 3.1415);
+    }
+
+    /// Casts aren't lowered yet, so a function using them stays bytecode.
+    #[test]
+    fn skips_unsupported_functions() {
+        let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Double));
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            instructions: vec![
+                Instr::LoadConst {
+                    dst: TypeId {
+                        id: Id(0),
+                        ty: Type::Int,
+                    },
+                    value: Const::Int(1),
+                    span: 0,
+                },
+                Instr::Cast {
+                    dst: TypeId {
+                        id: Id(1),
+                        ty: Type::Double,
+                    },
+                    from: TypeId {
+                        id: Id(0),
+                        ty: Type::Int,
+                    },
+                    span: 0,
+                },
+            ],
+            params: EMPTY_PARAMS,
+            term: Some(Terminator::Return {
+                value: Some(Id(1)),
+                span: 0,
+            }),
+        });
+
         assert!(Jit::new().compile_func(&func).is_none());
+    }
+
+    /// `fn f() Double { lhs <op> rhs }`, the operands loaded as constants since
+    /// double params aren't lowered yet.
+    fn double_bin_func(op: BinOp, lhs: f64, rhs: f64) -> Func<'static> {
+        let double = |id| TypeId {
+            id: Id(id),
+            ty: Type::Double,
+        };
+        let mut func = Func::new("double_bin", Id(0), vec![], Some(Type::Double));
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            instructions: vec![
+                Instr::LoadConst {
+                    dst: double(0),
+                    value: Const::Double(lhs.to_bits()),
+                    span: 0,
+                },
+                Instr::LoadConst {
+                    dst: double(1),
+                    value: Const::Double(rhs.to_bits()),
+                    span: 0,
+                },
+                Instr::Bin {
+                    op,
+                    dst: double(2),
+                    lhs: Id(0),
+                    rhs: Id(1),
+                    span: 0,
+                },
+            ],
+            params: EMPTY_PARAMS,
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+        func
+    }
+
+    #[test]
+    fn double_bin_ops() {
+        if !std::arch::is_x86_feature_detected!("avx") {
+            return;
+        }
+        for (op, expected) in [
+            (BinOp::DAdd, 9.0),
+            (BinOp::DSub, 5.0),
+            (BinOp::DMul, 14.0),
+            (BinOp::DDiv, 3.5),
+        ] {
+            let mut jit = Jit::new();
+            jit.compile_func(&double_bin_func(op, 7.0, 2.0))
+                .expect("jit double bin op");
+            assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), expected);
+        }
+    }
+
+    /// Every NaN compare is false, as in the VM.
+    #[test]
+    fn double_compares() {
+        for (op, lhs, rhs, expected) in [
+            (BinOp::DLt, 1.0, 2.0, 1),
+            (BinOp::DLt, 2.0, 1.0, 0),
+            (BinOp::DLt, 1.0, 1.0, 0),
+            (BinOp::DLt, f64::NAN, 1.0, 0),
+            (BinOp::DLt, 1.0, f64::NAN, 0),
+            (BinOp::DGt, 2.0, 1.0, 1),
+            (BinOp::DGt, 1.0, 2.0, 0),
+            (BinOp::DGt, 1.0, 1.0, 0),
+            (BinOp::DGt, f64::NAN, 1.0, 0),
+            (BinOp::DGt, 1.0, f64::NAN, 0),
+        ] {
+            let mut func = double_bin_func(op, lhs, rhs);
+            func.blocks[0].instructions[2] = Instr::Bin {
+                op,
+                dst: TypeId {
+                    id: Id(2),
+                    ty: Type::Bool,
+                },
+                lhs: Id(0),
+                rhs: Id(1),
+                span: 0,
+            };
+            let mut jit = Jit::new();
+            jit.compile_func(&func).expect("jit double compare");
+            assert_eq!(
+                run(jit.code(), [0, 0, 0])[0],
+                expected,
+                "{lhs} {op:?} {rhs}"
+            );
+        }
+    }
+
+    /// IEEE 754, like the VM: no trap, the zero's sign picks the infinity.
+    #[test]
+    fn double_div_by_zero_is_inf() {
+        if !std::arch::is_x86_feature_detected!("avx") {
+            return;
+        }
+        for (zero, expected) in [(0.0, f64::INFINITY), (-0.0, f64::NEG_INFINITY)] {
+            let mut jit = Jit::new();
+            jit.compile_func(&double_bin_func(BinOp::DDiv, 1.0, zero))
+                .expect("jit ddiv");
+            assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), expected);
+        }
     }
 
     /// Full dispatch path: JIT page injected into syscalls, Call replaced by
