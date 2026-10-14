@@ -274,6 +274,11 @@ enum AbiArg {
     Imm(u64),
 }
 
+/// Divisors [`Lowering::div`] leaves to shifts.
+fn pow2(imm: i32) -> bool {
+    imm > 1 && imm.count_ones() == 1
+}
+
 #[derive(Clone, Copy)]
 enum Divisor {
     Reg(Reg),
@@ -653,7 +658,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 lhs,
                 imm,
                 ..
-            } if *imm != 0 && (*op == BinOp::IDiv || *imm != 2) => {
+            } if *imm != 0 && !pow2(*imm) => {
                 let lhs = self.ensure_register(*lhs);
                 let lhs = self.gpr(lhs);
                 self.div(*op, dst.id, lhs, Divisor::Imm(*imm));
@@ -701,11 +706,49 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     BinOp::IDiv | BinOp::IMod if imm == 0 => {
                         self.trap_div_zero();
                     }
-                    BinOp::IMod if imm == 2 => {
-                        if dst != lhs {
-                            self.emit(Insn::Mov { dst, src: lhs });
+                    BinOp::IDiv | BinOp::IMod => {
+                        // Shifts round down, division truncates: bias a negative x by imm - 1
+                        // to round it toward zero instead.
+                        let k = imm.trailing_zeros() as u8;
+                        self.emit(Insn::Mov {
+                            dst: GPR_SCRATCH,
+                            src: lhs,
+                        });
+                        self.emit(Insn::SarImm {
+                            dst: GPR_SCRATCH,
+                            imm: 63,
+                        });
+                        self.emit(Insn::ShrImm {
+                            dst: GPR_SCRATCH,
+                            imm: 64 - k,
+                        });
+                        self.emit(Insn::Add {
+                            dst: GPR_SCRATCH,
+                            src: lhs,
+                        });
+                        if *op == BinOp::IDiv {
+                            self.emit(Insn::SarImm {
+                                dst: GPR_SCRATCH,
+                                imm: k,
+                            });
+                            self.emit(Insn::Mov {
+                                dst,
+                                src: GPR_SCRATCH,
+                            });
+                        } else {
+                            // x - x / imm * imm
+                            self.emit(Insn::AndImm {
+                                dst: GPR_SCRATCH,
+                                imm: -imm,
+                            });
+                            if dst != lhs {
+                                self.emit(Insn::Mov { dst, src: lhs });
+                            }
+                            self.emit(Insn::Sub {
+                                dst,
+                                src: GPR_SCRATCH,
+                            });
                         }
-                        self.emit(Insn::AndImm { dst, imm: 1 });
                     }
                     _ => bail!(self, "unsupported binimm op {op:?}"),
                 }

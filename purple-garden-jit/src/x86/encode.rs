@@ -251,6 +251,11 @@ pub enum Insn {
         dst: Reg,
         imm: u8,
     },
+    /// `sar r{dst}, imm`; arithmetic shift right, filling with the sign bit.
+    SarImm {
+        dst: Reg,
+        imm: u8,
+    },
     /// `lea r{dst}, [rip + disp]`; `disp` counts from the end of the
     /// instruction, so it patches like a jump's rel32.
     LeaRip {
@@ -474,6 +479,10 @@ impl Insn {
             // REX.W 0xc1 /5 ib = `shr r/m64, imm8`.
             Insn::ShrImm { dst, imm } => {
                 code.extend_from_slice(&[rex(0, dst.0), 0xc1, modrm(5, dst.0), imm]);
+            }
+            // REX.W 0xc1 /7 ib = `sar r/m64, imm8`.
+            Insn::SarImm { dst, imm } => {
+                code.extend_from_slice(&[rex(0, dst.0), 0xc1, modrm(7, dst.0), imm]);
             }
             // REX.W 0x8d /r = `lea r64, m`. ModRM mod=00 r/m=101 is the
             // rip-relative form, a disp32 follows.
@@ -1044,6 +1053,14 @@ mod tests {
             enc(Insn::ShrImm { dst: R9, imm: 3 }),
             [0x49, 0xc1, 0xe9, 0x03]
         ); // shr r9,3
+        assert_eq!(
+            enc(Insn::SarImm { dst: RAX, imm: 63 }),
+            [0x48, 0xc1, 0xf8, 0x3f]
+        ); // sar rax,63
+        assert_eq!(
+            enc(Insn::SarImm { dst: R12, imm: 4 }),
+            [0x49, 0xc1, 0xfc, 0x04]
+        ); // sar r12,4
         assert_eq!(
             enc(Insn::LeaRip {
                 dst: RCX,

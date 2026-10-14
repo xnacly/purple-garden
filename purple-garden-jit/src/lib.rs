@@ -597,6 +597,58 @@ mod tests_x86 {
         assert_eq!(regs[0], 10 + 30 + 1 + 2 + 3 + 4 + 5);
     }
 
+    /// Power of two divisors lower to shifts, which have to truncate toward zero like the VM.
+    #[test]
+    fn pow2_divisors_truncate_like_the_vm() {
+        for op in [BinOp::IDiv, BinOp::IMod] {
+            for imm in [2, 16, 1 << 30] {
+                let mut func = Func::new(
+                    "pow2",
+                    Id(0),
+                    vec![TypeId {
+                        id: Id(0),
+                        ty: Type::Int,
+                    }],
+                    Some(Type::Int),
+                );
+                let params = func.intern_params([Id(0)]);
+                func.blocks.push(Block {
+                    tombstone: false,
+                    id: Id(0),
+                    params,
+                    instructions: vec![Instr::BinImm {
+                        op,
+                        dst: TypeId {
+                            id: Id(1),
+                            ty: Type::Int,
+                        },
+                        lhs: Id(0),
+                        imm,
+                        span: 0,
+                    }],
+                    term: Some(Terminator::Return {
+                        value: Some(Id(1)),
+                        span: 0,
+                    }),
+                });
+
+                let mut jit = Jit::new();
+                jit.compile_func(&func).expect("jit pow2 divisor");
+                for x in [i64::MIN, -33, -17, -16, -3, -1, 0, 1, 3, 16, 33, i64::MAX] {
+                    let expected = match op {
+                        BinOp::IDiv => x / imm as i64,
+                        _ => x % imm as i64,
+                    };
+                    assert_eq!(
+                        run(jit.code(), [x as u64, 0, 0])[0] as i64,
+                        expected,
+                        "{x} {op:?} {imm}"
+                    );
+                }
+            }
+        }
+    }
+
     /// `fn f(a, b) int { a <op> b }` with a register divisor.
     fn reg_div_func(op: BinOp) -> Func<'static> {
         let mut func = Func::new(
