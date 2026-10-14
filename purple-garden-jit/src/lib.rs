@@ -180,7 +180,15 @@ mod tests_x86 {
     /// `fn identity(a) int { a }`: load the arg, store it back as the result.
     #[test]
     fn identity_returns_arg() {
-        let mut func = Func::new("identity", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut func = Func::new(
+            "identity",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -202,7 +210,21 @@ mod tests_x86 {
     /// `fn second(a b) int { b }`: the result is the second arg (vm.r[1]).
     #[test]
     fn returns_second_arg() {
-        let mut func = Func::new("second", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let mut func = Func::new(
+            "second",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0), Id(1)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -275,7 +297,20 @@ mod tests_x86 {
         let mut func = Func::new(
             "alloc_live",
             Id(0),
-            vec![Id(0), Id(1), Id(2)],
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(2),
+                    ty: Type::Int,
+                },
+            ],
             Some(record_ty),
         );
         let params = func.intern_params(vec![Id(0), Id(1), Id(2)]);
@@ -348,7 +383,21 @@ mod tests_x86 {
 
     #[test]
     fn compiles_tail_recursive_factorial_loop() {
-        let mut func = Func::new("factorial", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let mut func = Func::new(
+            "factorial",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
         let args0 = func.intern_params([Id(5), Id(6)]);
         let params = func.intern_params(vec![Id(0), Id(1)]);
         let ret_args = func.intern_params(vec![Id(1)]);
@@ -443,7 +492,21 @@ mod tests_x86 {
 
     #[test]
     fn idiv_clobbers_do_not_overwrite_live_values() {
-        let mut func = Func::new("div_plus", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let mut func = Func::new(
+            "div_plus",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0), Id(1)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -492,7 +555,12 @@ mod tests_x86 {
             ty: Type::Int,
         };
         let ids: Vec<_> = (0..6).map(Id).collect();
-        let mut func = Func::new("div_sum", Id(0), ids.clone(), Some(Type::Int));
+        let mut func = Func::new(
+            "div_sum",
+            Id(0),
+            ids.iter().map(|&id| TypeId { id, ty: Type::Int }).collect(),
+            Some(Type::Int),
+        );
         let params = func.intern_params(ids);
         let mut instructions = vec![Instr::BinImm {
             op: BinOp::IDiv,
@@ -531,7 +599,21 @@ mod tests_x86 {
 
     /// `fn f(a, b) int { a <op> b }` with a register divisor.
     fn reg_div_func(op: BinOp) -> Func<'static> {
-        let mut func = Func::new("reg_div", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let mut func = Func::new(
+            "reg_div",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0), Id(1)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -575,7 +657,21 @@ mod tests_x86 {
     /// clobber from the register-divisor idiv.
     #[test]
     fn reg_divisor_clobbers_do_not_overwrite_live_values() {
-        let mut func = Func::new("mod_plus", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
+        let mut func = Func::new(
+            "mod_plus",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0), Id(1)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -639,7 +735,15 @@ mod tests_x86 {
     #[test]
     fn loads_record_field_from_pointer_arg() {
         let record_ty = record(vec![("first", Type::Int), ("second", Type::Int)]);
-        let mut func = Func::new("field", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut func = Func::new(
+            "field",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: record_ty.clone(),
+            }],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -673,7 +777,15 @@ mod tests_x86 {
             "nested",
             record(vec![("first", Type::Int), ("second", Type::Int)]),
         )]);
-        let mut func = Func::new("nested_field", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut func = Func::new(
+            "nested_field",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: record_ty.clone(),
+            }],
+            Some(Type::Int),
+        );
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
             tombstone: false,

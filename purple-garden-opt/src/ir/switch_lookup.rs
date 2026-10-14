@@ -129,7 +129,15 @@ mod tests {
     /// `switch %v0` over `keys`: case `k` goes to arm `b{k+1}` returning `k+1`,
     /// the default arm returns 0.
     fn switch(keys: &[i64]) -> Func<'static> {
-        let mut fun = Func::new("f", Id(0), vec![V0], Some(Type::Int));
+        let mut fun = Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: V0,
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let params = fun.intern_params(vec![V0]);
         let cases = (1..)
             .zip(keys)

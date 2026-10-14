@@ -176,7 +176,15 @@ mod tests {
             | BinOp::DGt => Type::Bool,
             _ => ty.clone(),
         };
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(out.clone()));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: ty.clone(),
+            }],
+            Some(out.clone()),
+        );
         let params = fun.intern_params(vec![Id(0)]);
         let mut instructions = vec![];
         let mut operand = |c: Option<Const<'static>>, id| {
@@ -367,7 +375,15 @@ mod tests {
             id: Id(id),
             ty: Type::Int,
         };
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let params = fun.intern_params(vec![Id(0)]);
         fun.blocks = vec![Block {
             tombstone: false,

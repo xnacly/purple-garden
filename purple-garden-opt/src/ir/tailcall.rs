@@ -116,7 +116,15 @@ mod tests {
     /// Return of the call's dst must be rewritten to a Tail.
     #[test]
     fn rewrites_call_return_pattern_a() {
-        let mut fun = ir::Func::new("tail", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "tail",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let args0 = fun.intern_params([Id(0)]);
         let b0_params = fun.intern_params(vec![Id(0)]);
         fun.blocks = vec![Block {
@@ -152,7 +160,15 @@ mod tests {
     /// also a tail call.
     #[test]
     fn rewrites_call_jump_to_trivial_return_pattern_b() {
-        let mut fun = ir::Func::new("tail", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "tail",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let args0 = fun.intern_params([Id(0)]);
         let b0_params = fun.intern_params(vec![Id(0)]);
         let b1_params = fun.intern_params(vec![Id(2)]);
@@ -202,7 +218,15 @@ mod tests {
     /// tail call and must be left in place.
     #[test]
     fn leaves_non_tail_call_alone() {
-        let mut fun = ir::Func::new("nontail", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "nontail",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let args0 = fun.intern_params([Id(0)]);
         let b0_params = fun.intern_params(vec![Id(0)]);
         fun.blocks = vec![Block {

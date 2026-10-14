@@ -203,7 +203,11 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
             format!(
                 "fn f{}({}) -> {} {{",
                 self.id.0,
-                format_ids(&self.params),
+                self.params
+                    .iter()
+                    .map(|p| format!("%v{}:{}", p.id.0, p.ty))
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 self.ret
                     .as_ref()
                     .map_or_else(|| "Void".to_string(), std::string::ToString::to_string)

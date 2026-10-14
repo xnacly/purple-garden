@@ -319,6 +319,9 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
         let body = self.parse_body()?;
 
         let id = self.next_id();
+        for _ in args {
+            self.next_id();
+        }
         Ok(self.push_node(Node::Fn {
             id,
             docs,

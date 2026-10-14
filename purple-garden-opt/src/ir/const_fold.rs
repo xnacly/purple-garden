@@ -535,7 +535,15 @@ mod tests {
     fn leaves_non_const_operand_alone() {
         // %v0 is a function parameter (not a constant). %v1 = 5.
         // %v2 = IAdd %v0, %v1 must stay a Bin; we can't fold an unknown.
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let params = fun.intern_params(vec![Id(0)]);
         fun.blocks = vec![Block {
             tombstone: false,

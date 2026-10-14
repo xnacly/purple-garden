@@ -833,7 +833,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                 let prev_env = std::mem::replace(&mut self.env, Vec::new_in(self.scratch));
                 self.env.push(Map::new_in(self.scratch));
                 let mut typed_arguments = Vec::with_capacity_in(args.len(), self.scratch);
-                for (arg_name, arg_type) in *args {
+                for (i, (arg_name, arg_type)) in args.iter().enumerate() {
                     let lex::Token {
                         t: lex::Type::Ident(inner_name),
                         ..
@@ -847,6 +847,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                         self.ast, *arg_type, self.arena,
                     );
                     let binding = self.map.alloc(t);
+                    self.map.bind(*id + 1 + i, binding);
                     self.env_insert(inner_name, binding);
                     typed_arguments.push((inner_name, t));
                 }

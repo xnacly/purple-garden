@@ -468,13 +468,17 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
 
                 self.func_name_to_id.insert(ident_name, (id, ret));
                 let mut func_params = Vec::with_capacity_in(args.len(), self.scratch.clone());
-                func_params.extend(args.iter().map(|(token, _)| {
+                let fn_value_id = ast.value_id(node_id);
+                func_params.extend(args.iter().enumerate().map(|(i, (token, _))| {
                     let id = self.ctx.id_store.new_value();
                     let Type::Ident(ident) = token.t else {
                         unreachable!();
                     };
                     self.ctx.env.insert(ident, id);
-                    id
+                    TypeId {
+                        id,
+                        ty: self.types.get(fn_value_id + 1 + i).cloned().unwrap(),
+                    }
                 }));
                 let mut func = Func::new_in(ident_name, id, func_params, ret, self.ir.clone())
                     .with_span(name.start as u32);

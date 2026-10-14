@@ -117,7 +117,15 @@ mod tests {
     }
 
     fn func_with_instructions(instructions: Vec<Instr<'static>>) -> Func<'static> {
-        let mut fun = Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let params = fun.intern_params(vec![Id(0)]);
         fun.blocks.push(Block {
             tombstone: false,
@@ -360,7 +368,15 @@ mod tests {
 
     #[test]
     fn does_not_fold_across_blocks() {
-        let mut fun = Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let entry_params = fun.intern_params(vec![Id(0)]);
         let empty_params = fun.intern_params(Vec::new());
         fun.blocks.push(Block {

@@ -244,7 +244,7 @@ pub enum Node<'src, 'ast> {
         id: usize,
         docs: &'ast [Token<'src>],
         name: Token<'src>,
-        /// (<identifier>, <type>)
+        /// (<identifier>, <type>), the i-th arg's value id is `id + 1 + i`
         args: &'ast [(Token<'src>, TypeExprId)],
         return_type: TypeExprId,
         body: &'ast [NodeId],

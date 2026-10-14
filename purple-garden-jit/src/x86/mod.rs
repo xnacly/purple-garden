@@ -182,7 +182,7 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
 }
 
 fn is_result_slot_identity<F: Allocator>(func: &ir::Func<'_, F>, entry: ir::Id) -> bool {
-    let Some(&result_param) = func.params.first() else {
+    let Some(result_param) = func.params.first().map(|p| p.id) else {
         return false;
     };
     let block = &func.blocks[entry.0 as usize];
@@ -420,18 +420,23 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         }
 
         // Args arrive in the VM register file: param i in vm.r[i].
-        for (slot, &param) in self.func.params.iter().enumerate() {
+        for (slot, param) in self.func.params.iter().enumerate() {
             let used = self
                 .liveness
-                .get(param.0 as usize)
+                .get(param.id.0 as usize)
                 .is_some_and(|&(start, _)| start != u32::MAX);
             if used {
-                let dst = self.def_class(param, 0, Class::Gpr);
-                let dst = self.gpr(dst);
-                self.emit(Insn::LoadSlot {
-                    dst,
-                    slot: slot as u8,
-                });
+                let slot = slot as u8;
+                match self.def(param, 0) {
+                    Preg::Gpr(dst) => self.emit(Insn::LoadSlot {
+                        dst: Reg(dst),
+                        slot,
+                    }),
+                    Preg::Fpr(dst) => self.emit(Insn::LoadSlotSd {
+                        dst: Xmm(dst),
+                        slot,
+                    }),
+                }
             }
         }
 
@@ -1051,7 +1056,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ir::Terminator::Tail {
                 func: callee, args, ..
             } if *callee == func.id => {
-                self.edge_moves(func.params(*args), &func.params, pos);
+                let entry_params = func.params(func.blocks[self.entry.0 as usize].params);
+                self.edge_moves(func.params(*args), entry_params, pos);
                 self.jump(Cond::Always, Target::Block(self.entry));
             }
             ir::Terminator::Switch {

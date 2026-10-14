@@ -103,7 +103,15 @@ mod tests {
     #[test]
     fn folds_single_use_ieq_imm_branch_condition() {
         let mut scratch = super::super::Scratch::default();
-        let mut fun = Func::new("f", Id(0), vec![Id(0)], None);
+        let mut fun = Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            None,
+        );
         let params = fun.intern_params(vec![Id(0)]);
         fun.blocks = vec![Block {
             tombstone: false,
@@ -144,7 +152,15 @@ mod tests {
     #[test]
     fn leaves_multi_use_ieq_imm_branch_condition() {
         let mut scratch = super::super::Scratch::default();
-        let mut fun = Func::new("f", Id(0), vec![Id(0)], None);
+        let mut fun = Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            None,
+        );
         let params = fun.intern_params(vec![Id(0), Id(1)]);
         fun.blocks = vec![Block {
             tombstone: false,

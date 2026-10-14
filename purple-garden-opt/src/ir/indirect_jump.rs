@@ -110,14 +110,22 @@ fn rewrite_branch_edges(
 #[cfg(test)]
 mod tests {
     use super::indirect_jump;
-    use purple_garden_ir::{self as ir, Block, Id, Terminator, ptype::Type};
+    use purple_garden_ir::{self as ir, Block, Id, Terminator, TypeId, ptype::Type};
 
     /// Build a function where b0 branches to b1 (which jumps to b3) and
     /// b2 (which does real work). After `indirect_jump`, b0 should branch
     /// directly to b3 on the yes edge and b1 should be tombstoned.
     #[test]
     fn collapses_trivial_jump_through_yes_edge() {
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let b0_params = fun.intern_params(vec![Id(0)]);
         let b1_params = fun.intern_params(vec![]);
         let b2_params = fun.intern_params(vec![]);
@@ -189,7 +197,15 @@ mod tests {
     /// collapsed; its edge must point to the original block.
     #[test]
     fn leaves_non_trivial_intermediate_alone() {
-        let mut fun = ir::Func::new("f", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let b0_params = fun.intern_params(vec![Id(0)]);
         let b1_params = fun.intern_params(vec![]);
         let b2_params = fun.intern_params(vec![]);

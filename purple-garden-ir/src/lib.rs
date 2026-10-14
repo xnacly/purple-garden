@@ -332,7 +332,7 @@ pub struct Func<'f, A: Allocator = Global> {
     pub name: &'f str,
     pub id: Id,
     pub span: u32,
-    pub params: Vec<Id, A>,
+    pub params: Vec<TypeId<'f>, A>,
     pub ret: Option<Type<'f>>,
     /// Never called from the entry, so the backends don't lower it. Set by `opt::dce_functions`
     /// for programs that only run from their entry.
@@ -408,7 +408,7 @@ impl<T, A: Allocator> Pool<T, A> {
 
 impl<'f> Func<'f> {
     #[must_use]
-    pub fn new(name: &'f str, id: Id, params: Vec<Id>, ret: Option<Type<'f>>) -> Self {
+    pub fn new(name: &'f str, id: Id, params: Vec<TypeId<'f>>, ret: Option<Type<'f>>) -> Self {
         Self::new_in(name, id, params, ret, Global)
     }
 }
@@ -422,7 +422,7 @@ impl<'f, A: Allocator + Clone> Func<'f, A> {
     pub fn new_in(
         name: &'f str,
         id: Id,
-        params: impl IntoIterator<Item = Id>,
+        params: impl IntoIterator<Item = TypeId<'f>>,
         ret: Option<Type<'f>>,
         alloc: A,
     ) -> Self {
@@ -458,7 +458,7 @@ impl<'f, A: Allocator> Func<'f, A> {
 
     /// Interns the function's own parameters, e.g. as its entry block's params.
     pub fn intern_own_params(&mut self) -> ParamsId {
-        ParamsId(self.params_pool.intern(self.params.iter().copied()))
+        ParamsId(self.params_pool.intern(self.params.iter().map(|p| p.id)))
     }
 
     #[must_use]
@@ -1107,7 +1107,15 @@ mod tests {
 
     #[test]
     fn live_set_tracks_block_params_instructions_and_terminators() {
-        let mut fun = Func::new("live", Id(0), vec![Id(0)], Some(Type::Int));
+        let mut fun = Func::new(
+            "live",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
         let b0_params = fun.intern_params(vec![Id(0)]);
         let b1_params = fun.intern_params(vec![Id(3)]);
         let b2_params = fun.intern_params(vec![Id(4)]);
