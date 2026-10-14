@@ -269,7 +269,9 @@ function render() {
     renderControls();
     render();
   } catch (e) {
-    document.getElementById("status").textContent = `failed to load benchmark data: ${e.message}`;
+    const status = document.getElementById("status");
+    status.textContent = `failed to render benchmark data: ${e.message}`;
+    status.hidden = false;
     document.getElementById("meta").textContent = "";
   }
 })();
