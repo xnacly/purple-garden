@@ -222,6 +222,10 @@ pub enum Insn {
     Setg {
         dst: Reg,
     },
+    /// `seta r{dst}b`; unsigned greater than, how [`Insn::Ucomisd`] reports `>`.
+    Seta {
+        dst: Reg,
+    },
     /// `movabs r{dst}, imm64`; `MovImm` is i32-only, addresses need 64 bits.
     MovAbs {
         dst: Reg,
@@ -293,6 +297,36 @@ pub enum Insn {
     DivSd {
         dst: Xmm,
         src: Xmm,
+    },
+    /// `vaddsd xmm{dst}, xmm{lhs}, xmm{rhs}`: AVX's three-operand form, so dst
+    /// may alias either operand. The high lane comes from lhs, not from dst,
+    /// so unlike the SSE ops it doesn't depend on dst's old value. The same
+    /// for sub, mul and div below.
+    VAddSd {
+        dst: Xmm,
+        lhs: Xmm,
+        rhs: Xmm,
+    },
+    VSubSd {
+        dst: Xmm,
+        lhs: Xmm,
+        rhs: Xmm,
+    },
+    VMulSd {
+        dst: Xmm,
+        lhs: Xmm,
+        rhs: Xmm,
+    },
+    VDivSd {
+        dst: Xmm,
+        lhs: Xmm,
+        rhs: Xmm,
+    },
+    /// `ucomisd xmm{lhs}, xmm{rhs}`: compares the low doubles into the flags
+    /// like an unsigned compare. Unordered (a NaN) sets ZF, PF and CF.
+    Ucomisd {
+        lhs: Xmm,
+        rhs: Xmm,
     },
     /// `movsd xmm{dst}, xmm{src}`: copies the low double, the high lane of
     /// dst is left alone.
@@ -378,6 +412,7 @@ impl Insn {
             Insn::Sete { dst } => setcc(code, 0x94, dst),
             Insn::Setl { dst } => setcc(code, 0x9c, dst),
             Insn::Setg { dst } => setcc(code, 0x9f, dst),
+            Insn::Seta { dst } => setcc(code, 0x97, dst),
             // REX.W 0x69 /r id = `imul r64, r/m64, imm32`, ModRM.reg is dst.
             Insn::ImulImm { dst, src, imm } => {
                 code.extend_from_slice(&[rex(dst.0, src.0), 0x69, modrm(dst.0, src.0)]);
@@ -462,6 +497,14 @@ impl Insn {
             Insn::SubSd { dst, src } => sse(code, 0xf2, 0x5c, dst.0, src.0),
             Insn::MulSd { dst, src } => sse(code, 0xf2, 0x59, dst.0, src.0),
             Insn::DivSd { dst, src } => sse(code, 0xf2, 0x5e, dst.0, src.0),
+            // VEX.LIG.F2.0F 58/5C/59/5E /r = `vaddsd/vsubsd/vmulsd/vdivsd xmm1,
+            // xmm2, xmm3/m64`, the same opcodes as the SSE forms.
+            Insn::VAddSd { dst, lhs, rhs } => vex_sd(code, 0x58, dst.0, lhs.0, rhs.0),
+            Insn::VSubSd { dst, lhs, rhs } => vex_sd(code, 0x5c, dst.0, lhs.0, rhs.0),
+            Insn::VMulSd { dst, lhs, rhs } => vex_sd(code, 0x59, dst.0, lhs.0, rhs.0),
+            Insn::VDivSd { dst, lhs, rhs } => vex_sd(code, 0x5e, dst.0, lhs.0, rhs.0),
+            // 66 0F 2E /r = `ucomisd xmm1, xmm2/m64`, ModRM.reg is lhs.
+            Insn::Ucomisd { lhs, rhs } => sse(code, 0x66, 0x2e, lhs.0, rhs.0),
             // F2 0F 10 /r = `movsd xmm1, xmm2/m64`, ModRM.reg is dst.
             Insn::MovSd { dst, src } => sse(code, 0xf2, 0x10, dst.0, src.0),
             // 66 REX.W 0F 6E /r = `movq xmm, r/m64`. REX.W is what makes it
@@ -535,6 +578,29 @@ fn sse<A: Allocator>(code: &mut Vec<u8, A>, prefix: u8, opcode: u8, reg: u8, rm:
         code.push(0x40 | (u8::from(reg >= 8) << 2) | u8::from(rm >= 8));
     }
     code.extend_from_slice(&[0x0f, opcode, modrm(reg, rm)]);
+}
+
+/// Three-operand scalar double AVX op: `VEX opcode ModRM(reg, rm)`, with the
+/// second operand in `VEX.vvvv`.
+///
+/// VEX replaces both the `f2` prefix (`pp=11`) and REX, storing the high
+/// register bits inverted. The two byte form `c5` only has room for `R`, so
+/// an `rm >= 8` needs the three byte form `c4`, which adds `X`, `B` and the
+/// opcode map (`00001` for `0f`):
+///
+/// ```text
+/// c5 [R vvvv L pp]
+/// c4 [R X B mmmmm] [W vvvv L pp]
+/// ```
+fn vex_sd<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, vvvv: u8, rm: u8) {
+    let r = u8::from(reg < 8) << 7;
+    let vvvv_pp = ((!vvvv & 0xf) << 3) | 0b11;
+    if rm < 8 {
+        code.extend_from_slice(&[0xc5, r | vvvv_pp]);
+    } else {
+        code.extend_from_slice(&[0xc4, r | 0x40 | 0x01, vvvv_pp]);
+    }
+    code.extend_from_slice(&[opcode, modrm(reg, rm)]);
 }
 
 /// Register-immediate op: `REX.W 0x81 /digit r/m64, imm32`.
@@ -724,6 +790,75 @@ mod tests {
             }),
             [0xf2, 0x41, 0x0f, 0x5e, 0xce]
         ); // divsd xmm1,xmm14
+        assert_eq!(
+            enc(Insn::Ucomisd {
+                lhs: Xmm(0),
+                rhs: Xmm(1)
+            }),
+            [0x66, 0x0f, 0x2e, 0xc1]
+        ); // ucomisd xmm0,xmm1
+        assert_eq!(
+            enc(Insn::Ucomisd {
+                lhs: Xmm(2),
+                rhs: Xmm(9)
+            }),
+            [0x66, 0x41, 0x0f, 0x2e, 0xd1]
+        ); // ucomisd xmm2,xmm9
+        assert_eq!(
+            enc(Insn::Ucomisd {
+                lhs: Xmm(12),
+                rhs: Xmm(3)
+            }),
+            [0x66, 0x44, 0x0f, 0x2e, 0xe3]
+        ); // ucomisd xmm12,xmm3
+    }
+
+    #[test]
+    /// AVX scalar double ops, bytes checked against gas. An rhs >= xmm8 needs
+    /// the three byte VEX prefix.
+    fn vex_encodings() {
+        use super::Xmm;
+
+        assert_eq!(
+            enc(Insn::VAddSd {
+                dst: Xmm(0),
+                lhs: Xmm(1),
+                rhs: Xmm(2)
+            }),
+            [0xc5, 0xf3, 0x58, 0xc2]
+        ); // vaddsd xmm0,xmm1,xmm2
+        assert_eq!(
+            enc(Insn::VSubSd {
+                dst: Xmm(1),
+                lhs: Xmm(0),
+                rhs: Xmm(15)
+            }),
+            [0xc4, 0xc1, 0x7b, 0x5c, 0xcf]
+        ); // vsubsd xmm1,xmm0,xmm15
+        assert_eq!(
+            enc(Insn::VMulSd {
+                dst: Xmm(9),
+                lhs: Xmm(14),
+                rhs: Xmm(3)
+            }),
+            [0xc5, 0x0b, 0x59, 0xcb]
+        ); // vmulsd xmm9,xmm14,xmm3
+        assert_eq!(
+            enc(Insn::VDivSd {
+                dst: Xmm(8),
+                lhs: Xmm(7),
+                rhs: Xmm(12)
+            }),
+            [0xc4, 0x41, 0x43, 0x5e, 0xc4]
+        ); // vdivsd xmm8,xmm7,xmm12
+        assert_eq!(
+            enc(Insn::VAddSd {
+                dst: Xmm(0),
+                lhs: Xmm(0),
+                rhs: Xmm(0)
+            }),
+            [0xc5, 0xfb, 0x58, 0xc0]
+        ); // vaddsd xmm0,xmm0,xmm0
     }
 
     #[test]
@@ -821,6 +956,7 @@ mod tests {
         assert_eq!(enc(Insn::Setl { dst: RSI }), [0x40, 0x0f, 0x9c, 0xc6]); // setl sil
         assert_eq!(enc(Insn::Setg { dst: R8 }), [0x41, 0x0f, 0x9f, 0xc0]); // setg r8b
         assert_eq!(enc(Insn::Sete { dst: RSI }), [0x40, 0x0f, 0x94, 0xc6]); // sete sil
+        assert_eq!(enc(Insn::Seta { dst: R8 }), [0x41, 0x0f, 0x97, 0xc0]); // seta r8b
         assert_eq!(
             enc(Insn::ImulImm {
                 dst: RAX,

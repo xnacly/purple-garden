@@ -482,6 +482,53 @@ mod tests_x86 {
         assert_eq!(run(jit.code(), [20, 7, 0])[0], 17);
     }
 
+    /// `fn f(a..f) int { a / 3 + a + .. + f }`: every param stays live across
+    /// the idiv, so its result lands in rcx or rdx, which the save around the
+    /// idiv must not restore over.
+    #[test]
+    fn imm_divisor_result_survives_clobber_restore() {
+        let int = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let ids: Vec<_> = (0..6).map(Id).collect();
+        let mut func = Func::new("div_sum", Id(0), ids.clone(), Some(Type::Int));
+        let params = func.intern_params(ids);
+        let mut instructions = vec![Instr::BinImm {
+            op: BinOp::IDiv,
+            dst: int(6),
+            lhs: Id(0),
+            imm: 3,
+            span: 0,
+        }];
+        for param in 0..6 {
+            instructions.push(Instr::Bin {
+                op: BinOp::IAdd,
+                dst: int(7 + param),
+                lhs: Id(6 + param),
+                rhs: Id(param),
+                span: 0,
+            });
+        }
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions,
+            term: Some(Terminator::Return {
+                value: Some(Id(12)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        let (_arena, f) = exec(jit.code());
+        let mut regs = [30, 1, 2, 3, 4, 5];
+        unsafe { f(regs.as_mut_ptr()) };
+        assert_eq!(regs[0], 10 + 30 + 1 + 2 + 3 + 4 + 5);
+    }
+
     /// `fn f(a, b) int { a <op> b }` with a register divisor.
     fn reg_div_func(op: BinOp) -> Func<'static> {
         let mut func = Func::new("reg_div", Id(0), vec![Id(0), Id(1)], Some(Type::Int));
@@ -702,7 +749,7 @@ mod tests_x86 {
         assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), 3.1415);
     }
 
-    /// Double arithmetic isn't lowered yet, so a function using it stays bytecode.
+    /// Casts aren't lowered yet, so a function using them stays bytecode.
     #[test]
     fn skips_unsupported_functions() {
         let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Double));
@@ -713,19 +760,20 @@ mod tests_x86 {
                 Instr::LoadConst {
                     dst: TypeId {
                         id: Id(0),
-                        ty: Type::Double,
+                        ty: Type::Int,
                     },
-                    value: Const::Double(1.0f64.to_bits()),
+                    value: Const::Int(1),
                     span: 0,
                 },
-                Instr::Bin {
-                    op: BinOp::DAdd,
+                Instr::Cast {
                     dst: TypeId {
                         id: Id(1),
                         ty: Type::Double,
                     },
-                    lhs: Id(0),
-                    rhs: Id(0),
+                    from: TypeId {
+                        id: Id(0),
+                        ty: Type::Int,
+                    },
                     span: 0,
                 },
             ],
@@ -737,6 +785,113 @@ mod tests_x86 {
         });
 
         assert!(Jit::new().compile_func(&func).is_none());
+    }
+
+    /// `fn f() Double { lhs <op> rhs }`, the operands loaded as constants since
+    /// double params aren't lowered yet.
+    fn double_bin_func(op: BinOp, lhs: f64, rhs: f64) -> Func<'static> {
+        let double = |id| TypeId {
+            id: Id(id),
+            ty: Type::Double,
+        };
+        let mut func = Func::new("double_bin", Id(0), vec![], Some(Type::Double));
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            instructions: vec![
+                Instr::LoadConst {
+                    dst: double(0),
+                    value: Const::Double(lhs.to_bits()),
+                    span: 0,
+                },
+                Instr::LoadConst {
+                    dst: double(1),
+                    value: Const::Double(rhs.to_bits()),
+                    span: 0,
+                },
+                Instr::Bin {
+                    op,
+                    dst: double(2),
+                    lhs: Id(0),
+                    rhs: Id(1),
+                    span: 0,
+                },
+            ],
+            params: EMPTY_PARAMS,
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+        func
+    }
+
+    #[test]
+    fn double_bin_ops() {
+        if !std::arch::is_x86_feature_detected!("avx") {
+            return;
+        }
+        for (op, expected) in [
+            (BinOp::DAdd, 9.0),
+            (BinOp::DSub, 5.0),
+            (BinOp::DMul, 14.0),
+            (BinOp::DDiv, 3.5),
+        ] {
+            let mut jit = Jit::new();
+            jit.compile_func(&double_bin_func(op, 7.0, 2.0))
+                .expect("jit double bin op");
+            assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), expected);
+        }
+    }
+
+    /// Every NaN compare is false, as in the VM.
+    #[test]
+    fn double_compares() {
+        for (op, lhs, rhs, expected) in [
+            (BinOp::DLt, 1.0, 2.0, 1),
+            (BinOp::DLt, 2.0, 1.0, 0),
+            (BinOp::DLt, 1.0, 1.0, 0),
+            (BinOp::DLt, f64::NAN, 1.0, 0),
+            (BinOp::DLt, 1.0, f64::NAN, 0),
+            (BinOp::DGt, 2.0, 1.0, 1),
+            (BinOp::DGt, 1.0, 2.0, 0),
+            (BinOp::DGt, 1.0, 1.0, 0),
+            (BinOp::DGt, f64::NAN, 1.0, 0),
+            (BinOp::DGt, 1.0, f64::NAN, 0),
+        ] {
+            let mut func = double_bin_func(op, lhs, rhs);
+            func.blocks[0].instructions[2] = Instr::Bin {
+                op,
+                dst: TypeId {
+                    id: Id(2),
+                    ty: Type::Bool,
+                },
+                lhs: Id(0),
+                rhs: Id(1),
+                span: 0,
+            };
+            let mut jit = Jit::new();
+            jit.compile_func(&func).expect("jit double compare");
+            assert_eq!(
+                run(jit.code(), [0, 0, 0])[0],
+                expected,
+                "{lhs} {op:?} {rhs}"
+            );
+        }
+    }
+
+    /// IEEE 754, like the VM: no trap, the zero's sign picks the infinity.
+    #[test]
+    fn double_div_by_zero_is_inf() {
+        if !std::arch::is_x86_feature_detected!("avx") {
+            return;
+        }
+        for (zero, expected) in [(0.0, f64::INFINITY), (-0.0, f64::NEG_INFINITY)] {
+            let mut jit = Jit::new();
+            jit.compile_func(&double_bin_func(BinOp::DDiv, 1.0, zero))
+                .expect("jit ddiv");
+            assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), expected);
+        }
     }
 
     /// Full dispatch path: JIT page injected into syscalls, Call replaced by

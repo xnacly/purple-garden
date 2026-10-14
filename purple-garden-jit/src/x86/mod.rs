@@ -327,6 +327,8 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     /// Set once a helper or native function is called; the prologue then aligns the stack.
     calls: bool,
     unsupported: bool,
+    /// Double arithmetic is only lowered to the three-operand AVX forms.
+    avx: bool,
     /// `block_offsets[block_id]` is the body offset of the block's first byte,
     /// `usize::MAX` for blocks not emitted.
     block_offsets: &'a mut Vec<usize, S>,
@@ -375,6 +377,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             pos: 0,
             calls: false,
             unsupported: false,
+            avx: std::arch::is_x86_feature_detected!("avx"),
             block_offsets,
             patches,
             move_pairs,
@@ -637,16 +640,30 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let dst = self.gpr(dst);
                 self.emit(Insn::MovImm { dst, imm });
             }
+            // div defines dst itself, only after saving what idiv clobbers: a dst
+            // defined before could sit in rcx/rdx and be restored over.
+            ir::Instr::BinImm {
+                op: op @ (BinOp::IDiv | BinOp::IMod),
+                dst,
+                lhs,
+                imm,
+                ..
+            } if *imm != 0 && (*op == BinOp::IDiv || *imm != 2) => {
+                let lhs = self.ensure_register(*lhs);
+                let lhs = self.gpr(lhs);
+                self.div(*op, dst.id, lhs, Divisor::Imm(*imm));
+            }
             ir::Instr::BinImm {
                 op, dst, lhs, imm, ..
             } => {
                 let lhs = self.ensure_register(*lhs);
                 let lhs = self.gpr(lhs);
                 let imm = *imm;
+                let dst = self.def(dst, self.pos + 1);
+                let dst = self.gpr(dst);
+
                 match op {
                     BinOp::IAdd | BinOp::ISub => {
-                        let dst = self.def(dst, self.pos + 1);
-                        let dst = self.gpr(dst);
                         if dst != lhs {
                             self.emit(Insn::Mov { dst, src: lhs });
                         }
@@ -656,8 +673,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         });
                     }
                     BinOp::IEq => {
-                        let dst = self.def(dst, self.pos + 1);
-                        let dst = self.gpr(dst);
                         if imm == 0 {
                             self.emit(Insn::Test { lhs, rhs: lhs });
                         } else {
@@ -668,8 +683,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         self.emit(Insn::Sete { dst });
                     }
                     BinOp::ILt | BinOp::IGt => {
-                        let dst = self.def(dst, self.pos + 1);
-                        let dst = self.gpr(dst);
                         self.emit(Insn::CmpImm { reg: lhs, imm });
                         self.emit(Insn::MovImm { dst, imm: 0 });
                         self.emit(match op {
@@ -678,25 +691,77 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         });
                     }
                     BinOp::IMul => {
-                        let dst = self.def(dst, self.pos + 1);
-                        let dst = self.gpr(dst);
                         self.emit(Insn::ImulImm { dst, src: lhs, imm });
                     }
                     BinOp::IDiv | BinOp::IMod if imm == 0 => {
-                        self.def(dst, self.pos + 1);
                         self.trap_div_zero();
                     }
                     BinOp::IMod if imm == 2 => {
-                        let dst = self.def(dst, self.pos + 1);
-                        let dst = self.gpr(dst);
                         if dst != lhs {
                             self.emit(Insn::Mov { dst, src: lhs });
                         }
                         self.emit(Insn::AndImm { dst, imm: 1 });
                     }
-                    BinOp::IDiv | BinOp::IMod => self.div(*op, dst.id, lhs, Divisor::Imm(imm)),
                     _ => bail!(self, "unsupported binimm op {op:?}"),
                 }
+            }
+            ir::Instr::Bin {
+                op: op @ (BinOp::DAdd | BinOp::DSub | BinOp::DMul | BinOp::DDiv),
+                dst,
+                lhs,
+                rhs,
+                ..
+            } => {
+                if !self.avx {
+                    bail!(
+                        self,
+                        "double bin ops need avx, your shitty ass system is too old :^)"
+                    );
+                }
+
+                let lhs = self.ensure_register(*lhs);
+                let lhs = self.xmm(lhs);
+
+                let rhs = self.ensure_register(*rhs);
+                let rhs = self.xmm(rhs);
+
+                let dst = self.def(dst, self.pos + 1);
+                let dst = self.xmm(dst);
+
+                self.emit(match op {
+                    BinOp::DAdd => Insn::VAddSd { dst, lhs, rhs },
+                    BinOp::DSub => Insn::VSubSd { dst, lhs, rhs },
+                    BinOp::DMul => Insn::VMulSd { dst, lhs, rhs },
+                    _ => Insn::VDivSd { dst, lhs, rhs },
+                });
+            }
+            ir::Instr::Bin {
+                op: op @ (BinOp::DLt | BinOp::DGt),
+                dst,
+                lhs,
+                rhs,
+                ..
+            } => {
+                let lhs = self.ensure_register(*lhs);
+                let lhs = self.xmm(lhs);
+
+                let rhs = self.ensure_register(*rhs);
+                let rhs = self.xmm(rhs);
+
+                let dst = self.def(dst, self.pos + 1);
+                let dst = self.gpr(dst);
+
+                // ucomisd reports `<` like a NaN, via CF, but `>` only when
+                // ordered, so `<` is lowered as the swapped `>`: false for NaN
+                // like the VM.
+                let (lhs, rhs) = if *op == BinOp::DLt {
+                    (rhs, lhs)
+                } else {
+                    (lhs, rhs)
+                };
+                self.emit(Insn::Ucomisd { lhs, rhs });
+                self.emit(Insn::MovImm { dst, imm: 0 });
+                self.emit(Insn::Seta { dst });
             }
             ir::Instr::Bin {
                 op, dst, lhs, rhs, ..
