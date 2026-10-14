@@ -72,6 +72,8 @@ jobs:
           mkdir -p pages/data
           cp bench-results.json "pages/data/${SHA}.json"
           cp bench/cross/site/* pages/
+          # a cached app.js from an older site breaks a fresh index.html
+          sed -i "s|src=\"app.js\"|src=\"app.js?v=${SHA::7}\"|" pages/index.html
           touch pages/.nojekyll
           cargo run --release -p purple-garden-bench --locked -- index pages/data
           git -C pages add -A
