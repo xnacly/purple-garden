@@ -328,15 +328,26 @@ pub enum Insn {
         lhs: Xmm,
         rhs: Xmm,
     },
-    /// `movsd xmm{dst}, xmm{src}`: copies the low double, the high lane of
-    /// dst is left alone.
-    MovSd {
+    /// `movaps xmm{dst}, xmm{src}`: copies the whole register, so unlike
+    /// `movsd` it doesn't wait on dst's old value.
+    Movaps {
         dst: Xmm,
         src: Xmm,
+    },
+    /// `xorps xmm{dst}, xmm{dst}`: zeroes dst without reading it, so ops that
+    /// only write the low lane don't wait on its old value.
+    Zeroxmm {
+        dst: Xmm,
     },
     /// `movq xmm{dst}, r{src}`: the GPR's 64 bits become the low double,
     /// the high lane is zeroed. How a double constant reaches an xmm.
     MovqToXmm {
+        dst: Xmm,
+        src: Reg,
+    },
+    /// `cvtsi2sd xmm{dst}, r{src}`: the signed int as the low double, the high
+    /// lane of dst is left alone.
+    Cvtsi2sd {
         dst: Xmm,
         src: Reg,
     },
@@ -505,13 +516,19 @@ impl Insn {
             Insn::VDivSd { dst, lhs, rhs } => vex_sd(code, 0x5e, dst.0, lhs.0, rhs.0),
             // 66 0F 2E /r = `ucomisd xmm1, xmm2/m64`, ModRM.reg is lhs.
             Insn::Ucomisd { lhs, rhs } => sse(code, 0x66, 0x2e, lhs.0, rhs.0),
-            // F2 0F 10 /r = `movsd xmm1, xmm2/m64`, ModRM.reg is dst.
-            Insn::MovSd { dst, src } => sse(code, 0xf2, 0x10, dst.0, src.0),
+            // 0F 28 /r = `movaps xmm1, xmm2/m128`, ModRM.reg is dst.
+            Insn::Movaps { dst, src } => sse_ps(code, 0x28, dst.0, src.0),
+            // 0F 57 /r = `xorps xmm1, xmm2/m128`.
+            Insn::Zeroxmm { dst } => sse_ps(code, 0x57, dst.0, dst.0),
             // 66 REX.W 0F 6E /r = `movq xmm, r/m64`. REX.W is what makes it
             // a 64-bit move (without it the same opcode is `movd`), so this
             // doesn't go through [`sse`], which emits REX only for high regs.
             Insn::MovqToXmm { dst, src } => {
                 code.extend_from_slice(&[0x66, rex(dst.0, src.0), 0x0f, 0x6e, modrm(dst.0, src.0)]);
+            }
+            // F2 REX.W 0F 2A /r = `cvtsi2sd xmm, r/m64`, REX.W for the 64-bit int.
+            Insn::Cvtsi2sd { dst, src } => {
+                code.extend_from_slice(&[0xf2, rex(dst.0, src.0), 0x0f, 0x2a, modrm(dst.0, src.0)]);
             }
             // F2 0F 10 /r and F2 0F 11 /r with the slot memory operand.
             Insn::LoadSlotSd { dst, slot } => movsd_slot(code, 0x10, dst.0, slot),
@@ -574,6 +591,12 @@ fn reg_reg<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, rm: u8) {
 /// For the two-xmm ops `reg` is dst and `rm` is src.
 fn sse<A: Allocator>(code: &mut Vec<u8, A>, prefix: u8, opcode: u8, reg: u8, rm: u8) {
     code.push(prefix);
+    sse_ps(code, opcode, reg, rm);
+}
+
+/// [`sse`] without a prefix: the packed single ops, whose full register forms
+/// also serve doubles.
+fn sse_ps<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, rm: u8) {
     if reg >= 8 || rm >= 8 {
         code.push(0x40 | (u8::from(reg >= 8) << 2) | u8::from(rm >= 8));
     }
@@ -865,22 +888,55 @@ mod tests {
     /// Double moves between xmm, from a GPR and to and from VM slots, bytes
     /// checked against gas. Slot 0 keeps the disp8 form like `mov_slot`.
     fn sse_move_encodings() {
-        use super::{R9, R12, RAX, Xmm};
+        use super::{R9, R12, RAX, RBX, Xmm};
 
         assert_eq!(
-            enc(Insn::MovSd {
-                dst: Xmm(2),
-                src: Xmm(9)
+            enc(Insn::Cvtsi2sd {
+                dst: Xmm(0),
+                src: RAX
             }),
-            [0xf2, 0x41, 0x0f, 0x10, 0xd1]
-        ); // movsd xmm2,xmm9
+            [0xf2, 0x48, 0x0f, 0x2a, 0xc0]
+        ); // cvtsi2sd xmm0,rax
         assert_eq!(
-            enc(Insn::MovSd {
+            enc(Insn::Cvtsi2sd {
+                dst: Xmm(3),
+                src: R12
+            }),
+            [0xf2, 0x49, 0x0f, 0x2a, 0xdc]
+        ); // cvtsi2sd xmm3,r12
+        assert_eq!(
+            enc(Insn::Cvtsi2sd {
+                dst: Xmm(9),
+                src: RBX
+            }),
+            [0xf2, 0x4c, 0x0f, 0x2a, 0xcb]
+        ); // cvtsi2sd xmm9,rbx
+        assert_eq!(
+            enc(Insn::Movaps {
                 dst: Xmm(0),
                 src: Xmm(1)
             }),
-            [0xf2, 0x0f, 0x10, 0xc1]
-        ); // movsd xmm0,xmm1
+            [0x0f, 0x28, 0xc1]
+        ); // movaps xmm0,xmm1
+        assert_eq!(
+            enc(Insn::Movaps {
+                dst: Xmm(2),
+                src: Xmm(9)
+            }),
+            [0x41, 0x0f, 0x28, 0xd1]
+        ); // movaps xmm2,xmm9
+        assert_eq!(
+            enc(Insn::Movaps {
+                dst: Xmm(12),
+                src: Xmm(3)
+            }),
+            [0x44, 0x0f, 0x28, 0xe3]
+        ); // movaps xmm12,xmm3
+        assert_eq!(enc(Insn::Zeroxmm { dst: Xmm(0) }), [0x0f, 0x57, 0xc0]); // xorps xmm0,xmm0
+        assert_eq!(
+            enc(Insn::Zeroxmm { dst: Xmm(11) }),
+            [0x45, 0x0f, 0x57, 0xdb]
+        ); // xorps xmm11,xmm11
         assert_eq!(
             enc(Insn::MovqToXmm {
                 dst: Xmm(3),
