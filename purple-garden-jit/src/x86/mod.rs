@@ -640,15 +640,24 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let Some(imm) = (match value {
                     ir::Const::False => Some(0),
                     ir::Const::True => Some(1),
-                    ir::Const::Int(i) => i32::try_from(*i).ok(),
+                    ir::Const::Int(i) => Some(*i),
                     _ => None,
                 }) else {
                     bail!(self, "const is not a bool or i32");
                     return;
                 };
+
                 let dst = self.def(dst, self.pos + 1);
                 let dst = self.gpr(dst);
-                self.emit(Insn::MovImm { dst, imm });
+                if imm > i32::MAX as i64 || imm < i32::MIN as i64 {
+                    let imm = imm.cast_unsigned();
+                    self.emit(Insn::MovAbs { dst, imm });
+                } else {
+                    self.emit(Insn::MovImm {
+                        dst,
+                        imm: imm as i32,
+                    });
+                }
             }
             // div defines dst itself, only after saving what idiv clobbers: a dst
             // defined before could sit in rcx/rdx and be restored over.
