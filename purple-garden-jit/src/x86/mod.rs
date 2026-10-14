@@ -1430,6 +1430,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 slot: slot as u8,
             });
         }
+        // The args are in their slots, so values they were the last use of free their registers
+        // for the copies.
+        self.ra.expire(self.pos);
         let saves = self.save_clobbered(CALL_CLOBBERS);
         match callee {
             Callee::Sys(f) => self.call(

@@ -114,6 +114,16 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         if let Some(reg) = self.reg(id) {
             return Some(reg);
         }
+        self.expire(at);
+        let reg = Reg::new(class, self.free[class as usize].pop()?);
+        self.active.push((last_use, reg));
+        *self.map.get_mut(id.0 as usize)? = Some(reg);
+        self.mark_used(reg);
+        Some(reg)
+    }
+
+    /// Free the registers of values whose last use is at or before `at`.
+    pub fn expire(&mut self, at: u32) {
         let Self { active, free, .. } = self;
         active.retain(|&(end, reg)| {
             if end <= at {
@@ -121,11 +131,6 @@ impl<S: Allocator + Clone> Xralloc2<S> {
             }
             end > at
         });
-        let reg = Reg::new(class, self.free[class as usize].pop()?);
-        self.active.push((last_use, reg));
-        *self.map.get_mut(id.0 as usize)? = Some(reg);
-        self.mark_used(reg);
-        Some(reg)
     }
 
     /// Registers holding values still needed after `pos`.
