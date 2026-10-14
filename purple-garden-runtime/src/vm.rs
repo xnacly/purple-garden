@@ -460,7 +460,6 @@ impl<'vm> Vm<'vm> {
                 Op::DDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
-                    trap_if!(r == 0 as f64, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l / r);
                 },
                 Op::DGt { dst, lhs, rhs } => unsafe {
@@ -1059,11 +1058,12 @@ mod ops {
         assert_eq!(switch(SwitchKind::Int, int(-1), int(-2)), -1);
     }
 
+    /// Unlike integer division, IEEE 754 defines it: no trap.
     #[test]
-    fn ddiv_by_zero_traps() {
+    fn ddiv_by_zero_is_inf() {
         let mut vm = Vm::new(VmConfig::default());
         vm.globals.push(Value::from(4.0_f64));
-        vm.globals.push(Value::from(0.0_f64));
+        vm.globals.push(Value::from(-0.0_f64));
         vm.bytecode = vec![
             Op::LoadG { dst: 0, idx: 0 },
             Op::LoadG { dst: 1, idx: 1 },
@@ -1074,8 +1074,8 @@ mod ops {
             },
             Op::Halt,
         ];
-        let err = vm.run::<false>(&[]).expect_err("ddiv by zero should trap");
-        assert!(matches!(err, Anomaly::DivisionByZero { .. }));
+        vm.run::<false>(&[]).unwrap();
+        assert_eq!(vm.r(2).as_f64(), f64::NEG_INFINITY);
     }
 
     #[test]

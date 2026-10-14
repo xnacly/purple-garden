@@ -238,12 +238,7 @@ fn try_const_fold<S: Allocator>(
                     let (Const::Double(lhs), Const::Double(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
-                    let lhs = f64::from_bits(*lhs);
-                    let rhs = f64::from_bits(*rhs);
-                    if rhs == 0.0 {
-                        return false;
-                    }
-                    (lhs / rhs).into()
+                    (f64::from_bits(*lhs) / f64::from_bits(*rhs)).into()
                 }
                 BinOp::DLt => {
                     let (Const::Double(lhs), Const::Double(rhs)) = (lhs_value, rhs_value) else {
@@ -798,7 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn leaves_ddiv_by_zero_alone() {
+    fn folds_ddiv_by_zero_to_inf() {
         let mut fun = ir::Func::new("f", Id(0), vec![], Some(Type::Double));
         let params = fun.intern_params(vec![]);
         fun.blocks = vec![Block {
@@ -834,10 +829,10 @@ mod tests {
 
         assert!(matches!(
             fun.blocks[0].instructions[2],
-            Instr::Bin {
-                op: BinOp::DDiv,
+            Instr::LoadConst {
+                value: Const::Double(bits),
                 ..
-            }
+            } if f64::from_bits(bits) == f64::INFINITY
         ));
     }
 }
