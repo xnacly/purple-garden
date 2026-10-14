@@ -340,6 +340,12 @@ pub enum Insn {
         dst: Xmm,
         src: Reg,
     },
+    /// `cvtsi2sd xmm{dst}, r{src}`: the signed int as the low double, the high
+    /// lane of dst is left alone.
+    Cvtsi2sd {
+        dst: Xmm,
+        src: Reg,
+    },
     /// `movsd xmm{dst}, [rdi + slot*8]`
     LoadSlotSd {
         dst: Xmm,
@@ -512,6 +518,10 @@ impl Insn {
             // doesn't go through [`sse`], which emits REX only for high regs.
             Insn::MovqToXmm { dst, src } => {
                 code.extend_from_slice(&[0x66, rex(dst.0, src.0), 0x0f, 0x6e, modrm(dst.0, src.0)]);
+            }
+            // F2 REX.W 0F 2A /r = `cvtsi2sd xmm, r/m64`, REX.W for the 64-bit int.
+            Insn::Cvtsi2sd { dst, src } => {
+                code.extend_from_slice(&[0xf2, rex(dst.0, src.0), 0x0f, 0x2a, modrm(dst.0, src.0)]);
             }
             // F2 0F 10 /r and F2 0F 11 /r with the slot memory operand.
             Insn::LoadSlotSd { dst, slot } => movsd_slot(code, 0x10, dst.0, slot),
@@ -865,8 +875,29 @@ mod tests {
     /// Double moves between xmm, from a GPR and to and from VM slots, bytes
     /// checked against gas. Slot 0 keeps the disp8 form like `mov_slot`.
     fn sse_move_encodings() {
-        use super::{R9, R12, RAX, Xmm};
+        use super::{R9, R12, RAX, RBX, Xmm};
 
+        assert_eq!(
+            enc(Insn::Cvtsi2sd {
+                dst: Xmm(0),
+                src: RAX
+            }),
+            [0xf2, 0x48, 0x0f, 0x2a, 0xc0]
+        ); // cvtsi2sd xmm0,rax
+        assert_eq!(
+            enc(Insn::Cvtsi2sd {
+                dst: Xmm(3),
+                src: R12
+            }),
+            [0xf2, 0x49, 0x0f, 0x2a, 0xdc]
+        ); // cvtsi2sd xmm3,r12
+        assert_eq!(
+            enc(Insn::Cvtsi2sd {
+                dst: Xmm(9),
+                src: RBX
+            }),
+            [0xf2, 0x4c, 0x0f, 0x2a, 0xcb]
+        ); // cvtsi2sd xmm9,rbx
         assert_eq!(
             enc(Insn::MovSd {
                 dst: Xmm(2),

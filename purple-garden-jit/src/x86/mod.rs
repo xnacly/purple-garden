@@ -219,7 +219,7 @@ pub struct Scratch<S: Allocator> {
     body: Vec<u8, S>,
     block_offsets: Vec<usize, S>,
     patches: Vec<Patch, S>,
-    move_pairs: Vec<(Reg, Reg), S>,
+    move_pairs: Vec<(Preg, Preg), S>,
     /// `(reg, copy)` pairs preserved across a clobbering instruction.
     saves: Vec<(Preg, Preg), S>,
     /// Body offsets of the rel32s (self calls) that address the function's own start.
@@ -335,7 +335,7 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     patches: &'a mut Vec<Patch, S>,
     /// Reusable `(src, dst)` buffer for the parallel-move resolver in
     /// [`Lowering::edge_moves`].
-    move_pairs: &'a mut Vec<(Reg, Reg), S>,
+    move_pairs: &'a mut Vec<(Preg, Preg), S>,
     /// Reusable `(reg, copy)` buffer of [`Lowering::save_clobbered`].
     saves: &'a mut Vec<(Preg, Preg), S>,
     self_refs: &'a mut Vec<usize, S>,
@@ -821,6 +821,15 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     _ => bail!(self, "unsupported bin op {op:?}"),
                 }
             }
+            ir::Instr::Cast { dst, from, .. }
+                if from.ty == ir::ptype::Type::Int && dst.ty == ir::ptype::Type::Double =>
+            {
+                let src = self.ensure_register(from.id);
+                let src = self.gpr(src);
+                let dst = self.def(dst, self.pos + 1);
+                let dst = self.xmm(dst);
+                self.emit(Insn::Cvtsi2sd { dst, src });
+            }
             ir::Instr::Lookup {
                 dst,
                 subject,
@@ -1212,8 +1221,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         for (&s, &d) in src.iter().zip(dst) {
             let s = self.ensure_register(s);
             let d = self.def_class(d, at, s.class());
-            let s = self.gpr(s);
-            let d = self.gpr(d);
             if s != d {
                 todo.push((s, d));
             }
@@ -1226,30 +1233,42 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             for i in 0..todo.len() {
                 let (src, dst) = todo[i];
                 if !todo.iter().any(|&(s, _)| s == dst) {
-                    self.emit(Insn::Mov { dst, src });
+                    self.mov(dst, src);
                     todo.swap_remove(i);
                     continue 'outer;
                 }
             }
 
             let (start_src, start_dst) = todo.swap_remove(0);
-            self.emit(Insn::Mov {
-                dst: GPR_SCRATCH,
-                src: start_src,
-            });
+            let scratch = match start_src {
+                Preg::Gpr(_) => Preg::Gpr(GPR_SCRATCH.0),
+                Preg::Fpr(_) => Preg::Fpr(XMM_SCRATCH.0),
+            };
+            self.mov(scratch, start_src);
             let mut cur_freed = start_src;
             while let Some(idx) = todo.iter().position(|&(_, d)| d == cur_freed) {
                 let (src, dst) = todo.swap_remove(idx);
-                self.emit(Insn::Mov { dst, src });
+                self.mov(dst, src);
                 cur_freed = src;
             }
-            self.emit(Insn::Mov {
-                dst: start_dst,
-                src: GPR_SCRATCH,
-            });
+            self.mov(start_dst, scratch);
         }
 
         *self.move_pairs = todo;
+    }
+
+    fn mov(&mut self, dst: Preg, src: Preg) {
+        match (dst, src) {
+            (Preg::Gpr(dst), Preg::Gpr(src)) => self.emit(Insn::Mov {
+                dst: Reg(dst),
+                src: Reg(src),
+            }),
+            (Preg::Fpr(dst), Preg::Fpr(src)) => self.emit(Insn::MovSd {
+                dst: Xmm(dst),
+                src: Xmm(src),
+            }),
+            _ => bail!(self, "move between {src:?} and {dst:?}"),
+        }
     }
 
     /// Copy values living in `clobbers` past this instruction into free

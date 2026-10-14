@@ -861,10 +861,10 @@ mod tests_x86 {
         assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), 3.1415);
     }
 
-    /// Casts aren't lowered yet, so a function using them stays bytecode.
+    /// Double to Int casts aren't lowered yet, so a function using them stays bytecode.
     #[test]
     fn skips_unsupported_functions() {
-        let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Double));
+        let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Int));
         func.blocks.push(Block {
             tombstone: false,
             id: Id(0),
@@ -872,19 +872,19 @@ mod tests_x86 {
                 Instr::LoadConst {
                     dst: TypeId {
                         id: Id(0),
-                        ty: Type::Int,
+                        ty: Type::Double,
                     },
-                    value: Const::Int(1),
+                    value: Const::Double(1.5f64.to_bits()),
                     span: 0,
                 },
                 Instr::Cast {
                     dst: TypeId {
                         id: Id(1),
-                        ty: Type::Double,
+                        ty: Type::Int,
                     },
                     from: TypeId {
                         id: Id(0),
-                        ty: Type::Int,
+                        ty: Type::Double,
                     },
                     span: 0,
                 },
@@ -990,6 +990,131 @@ mod tests_x86 {
                 "{lhs} {op:?} {rhs}"
             );
         }
+    }
+
+    /// `fn f(n:Int) Double { n as Double }`
+    #[test]
+    fn casts_int_to_double() {
+        let mut func = Func::new(
+            "cast",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Double),
+        );
+        let params = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Cast {
+                dst: TypeId {
+                    id: Id(1),
+                    ty: Type::Double,
+                },
+                from: TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(1)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit cast");
+        for n in [0i64, -7, 1 << 53] {
+            assert_eq!(
+                f64::from_bits(run(jit.code(), [n as u64, 0, 0])[0]),
+                n as f64
+            );
+        }
+    }
+
+    /// `fn f(n:Int a:Double b:Double) Double { match { n == 0 { a - b } { f(n - 1 b a) } } }`:
+    /// the tail call swaps a and b, a cycle only the xmm scratch breaks, and the join's params
+    /// are doubles only through the values its edge passes.
+    #[test]
+    fn double_tail_loop_swaps_args() {
+        let ty = |id, ty| TypeId { id: Id(id), ty };
+        let mut func = Func::new(
+            "swap",
+            Id(0),
+            vec![ty(0, Type::Int), ty(1, Type::Double), ty(2, Type::Double)],
+            Some(Type::Double),
+        );
+        let params = func.intern_params([Id(0), Id(1), Id(2)]);
+        let done_args = func.intern_params([Id(1), Id(2)]);
+        let done_params = func.intern_params([Id(4), Id(5)]);
+        let swapped = func.intern_params([Id(7), Id(2), Id(1)]);
+        func.blocks = vec![
+            Block {
+                tombstone: false,
+                id: Id(0),
+                params,
+                instructions: vec![Instr::BinImm {
+                    op: BinOp::IEq,
+                    dst: ty(3, Type::Bool),
+                    lhs: Id(0),
+                    imm: 0,
+                    span: 0,
+                }],
+                term: Some(Terminator::Branch {
+                    cond: Id(3),
+                    yes: (Id(1), done_args),
+                    no: (Id(2), params),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(1),
+                params: done_params,
+                instructions: vec![Instr::Bin {
+                    op: BinOp::DSub,
+                    dst: ty(6, Type::Double),
+                    lhs: Id(4),
+                    rhs: Id(5),
+                    span: 0,
+                }],
+                term: Some(Terminator::Return {
+                    value: Some(Id(6)),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(2),
+                params,
+                instructions: vec![Instr::BinImm {
+                    op: BinOp::ISub,
+                    dst: ty(7, Type::Int),
+                    lhs: Id(0),
+                    imm: 1,
+                    span: 0,
+                }],
+                term: Some(Terminator::Tail {
+                    func: Id(0),
+                    args: swapped,
+                    span: 0,
+                }),
+            },
+        ];
+
+        if !std::arch::is_x86_feature_detected!("avx") {
+            return;
+        }
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit double loop");
+        let run = |n: u64| f64::from_bits(run(jit.code(), [n, 5f64.to_bits(), 2f64.to_bits()])[0]);
+        assert_eq!(run(0), 3.0);
+        assert_eq!(run(3), -3.0);
+        assert_eq!(run(4), 3.0);
     }
 
     /// IEEE 754, like the VM: no trap, the zero's sign picks the infinity.
