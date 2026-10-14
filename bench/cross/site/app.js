@@ -4,12 +4,9 @@
 //   data/index.json   [{ file, sha, date, run_unix, ref }]  sorted by run_unix
 //   data/<sha>.json   one report: { sha, date, runtimes, results: [...] }
 //
-// Four charts on one screen, each switchable to a table of the same data:
+// Charts, each switchable to a table of the same data:
 //   per-bench — latest run, CPU time per benchmark in ms, one bar per runtime
-//   time      — history: sum of per-workload mean wall time per runtime
-//   cpu       — history: sum of per-workload user+system time per runtime
-//   memory    — history: mean of per-workload peak RSS per runtime (summing
-//               peak RSS of separate processes is not a physical quantity)
+//   history   — one chart per benchmark, CPU time in ms per commit, one line per runtime
 
 const RUNTIMES = ["garden", "bun", "luajit", "python3"];
 const COLORS = {
@@ -19,40 +16,11 @@ const COLORS = {
   python3: "#facc15",
 };
 
-const sum = (xs) => xs.reduce((a, b) => a + b, 0);
-const mean = (xs) => sum(xs) / xs.length;
-
-const METRICS = [
-  {
-    key: "time",
-    label: "total wall time (ms)",
-    sub: "sum of per-workload mean wall time",
-    unit: "ms",
-    get: (m) => m.time_ms.mean,
-    agg: sum,
-  },
-  {
-    key: "cpu",
-    label: "total CPU time (ms)",
-    sub: "sum of per-workload user + system time",
-    unit: "ms",
-    get: (m) => m.cpu_ms,
-    agg: sum,
-  },
-  {
-    key: "memory",
-    label: "mean peak RSS (MiB)",
-    sub: "mean of per-workload peak resident set size",
-    unit: "MiB",
-    get: (m) => m.memory_mb,
-    agg: mean,
-  },
-];
-
 const state = {
   log: true,
   enabled: new Set(RUNTIMES),
   reports: [],
+  history: [],
   charts: {},
 };
 
@@ -76,15 +44,11 @@ async function load() {
 const short = (sha) => sha.slice(0, 7);
 const fmt = (v) => v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2);
 
-/// Aggregate one metric for one runtime in one report, or null if that
-/// runtime has no usable values (skipped runtime, --no-memory, ...).
-function aggregate(report, runtime, metric) {
-  const vals = report.results
-    .filter((m) => m.runtime === runtime)
-    .map(metric.get)
-    .filter((v) => typeof v === "number");
-  return vals.length ? { value: metric.agg(vals), n: vals.length } : null;
-}
+/// CPU time of one workload on one runtime, null if the runtime skipped it.
+const cpu = (report, workload, runtime) =>
+  report.results.find((m) => m.workload === workload && m.runtime === runtime)?.cpu_ms ?? null;
+
+const workloads = (report) => [...new Set(report.results.map((m) => m.workload))].sort();
 
 function yScale(title) {
   return {
@@ -102,6 +66,25 @@ function renderTable(id, head, rows) {
   table.innerHTML =
     `<thead>${tr(head, "th")}</thead>` +
     `<tbody>${rows.map((r) => tr(r, "td")).join("")}</tbody>`;
+}
+
+function renderHistoryPanels() {
+  const history = document.getElementById("history");
+  const all = [...new Set(state.reports.flatMap(workloads))].sort();
+  for (const w of all) {
+    history.insertAdjacentHTML(
+      "beforeend",
+      `<section class="panel">
+        <h2>${w} <small id="${w}-sub"></small></h2>
+        <label class="rt"><input type="checkbox" class="table-toggle" /> table</label>
+        <div class="chart" style="position: relative; height: 320px">
+          <canvas id="${w}-canvas"></canvas>
+        </div>
+        <table id="${w}-table" hidden></table>
+      </section>`,
+    );
+  }
+  return all;
 }
 
 function renderControls() {
@@ -150,14 +133,12 @@ function renderMeta() {
 /// Latest run, CPU time per benchmark.
 function renderPerBench() {
   const latest = state.reports.at(-1);
-  const workloads = [...new Set(latest.results.map((m) => m.workload))].sort();
-  const cpu = (w, rt) =>
-    latest.results.find((m) => m.workload === w && m.runtime === rt)?.cpu_ms ?? null;
+  const benches = workloads(latest);
   const runtimes = RUNTIMES.filter((r) => state.enabled.has(r));
 
   const datasets = runtimes.map((rt) => ({
     label: rt,
-    data: workloads.map((w) => cpu(w, rt)),
+    data: benches.map((w) => cpu(latest, w, rt)),
     backgroundColor: COLORS[rt],
     borderRadius: 3,
   }));
@@ -168,10 +149,10 @@ function renderPerBench() {
   renderTable(
     "per-bench-table",
     ["workload", ...runtimes.map((rt) => `${rt} ms`)],
-    workloads.map((w) => [
+    benches.map((w) => [
       w,
       ...runtimes.map((rt) => {
-        const v = cpu(w, rt);
+        const v = cpu(latest, w, rt);
         return v == null ? null : fmt(v);
       }),
     ]),
@@ -180,7 +161,7 @@ function renderPerBench() {
   state.charts.perBench?.destroy();
   state.charts.perBench = new Chart(document.getElementById("per-bench-canvas"), {
     type: "bar",
-    data: { labels: workloads, datasets },
+    data: { labels: benches, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -199,45 +180,44 @@ function renderPerBench() {
   });
 }
 
-function renderMetric(metric) {
+/// One benchmark across every commit.
+function renderHistory(workload) {
   const runtimes = RUNTIMES.filter((r) => state.enabled.has(r));
   const series = Object.fromEntries(
-    runtimes.map((rt) => [rt, state.reports.map((r) => aggregate(r, rt, metric))]),
+    runtimes.map((rt) => [rt, state.reports.map((r) => cpu(r, workload, rt))]),
   );
 
-  const latest = runtimes
+  document.getElementById(`${workload}-sub`).textContent = runtimes
     .map((rt) => {
-      const a = series[rt].at(-1);
-      return a ? `${rt} ${fmt(a.value)}` : null;
+      const v = series[rt].at(-1);
+      return v == null ? null : `${rt} ${fmt(v)} ms`;
     })
     .filter(Boolean)
     .join(" · ");
-  document.getElementById(`${metric.key}-sub`).textContent =
-    `${latest} ${metric.unit} — ${metric.sub}`;
 
   renderTable(
-    `${metric.key}-table`,
-    ["commit", "date", ...runtimes.map((rt) => `${rt} ${metric.unit}`)],
+    `${workload}-table`,
+    ["commit", "date", ...runtimes.map((rt) => `${rt} ms`)],
     state.reports
       .map((r, i) => [
         `<a href="https://github.com/xnacly/purple-garden/commit/${r.sha}">${short(r.sha)}</a>`,
         r.date,
         ...runtimes.map((rt) => {
-          const a = series[rt][i];
-          return a ? fmt(a.value) : null;
+          const v = series[rt][i];
+          return v == null ? null : fmt(v);
         }),
       ])
       .reverse(),
   );
 
-  state.charts[metric.key]?.destroy();
-  state.charts[metric.key] = new Chart(document.getElementById(`${metric.key}-canvas`), {
+  state.charts[workload]?.destroy();
+  state.charts[workload] = new Chart(document.getElementById(`${workload}-canvas`), {
     type: "line",
     data: {
       labels: state.reports.map((r) => short(r.sha)),
       datasets: runtimes.map((rt) => ({
         label: rt,
-        data: series[rt].map((a) => a?.value ?? null),
+        data: series[rt],
         borderColor: COLORS[rt],
         backgroundColor: COLORS[rt],
         pointRadius: state.reports.length > 40 ? 0 : 3,
@@ -250,7 +230,7 @@ function renderMetric(metric) {
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       scales: {
-        y: yScale(metric.label),
+        y: yScale("CPU time (ms)"),
         x: { ticks: { maxTicksLimit: 12, autoSkip: true }, grid: { display: false } },
       },
       plugins: {
@@ -260,10 +240,7 @@ function renderMetric(metric) {
               const r = state.reports[items[0].dataIndex];
               return `${short(r.sha)} · ${r.date}${r.ref ? ` · ${r.ref}` : ""}`;
             },
-            label: (c) => {
-              const a = series[c.dataset.label][c.dataIndex];
-              return a ? ` ${c.dataset.label}: ${fmt(a.value)} ${metric.unit} (${a.n} workloads)` : "";
-            },
+            label: (c) => (c.parsed.y == null ? "" : ` ${c.dataset.label}: ${fmt(c.parsed.y)} ms`),
           },
         },
       },
@@ -279,7 +256,7 @@ function renderMetric(metric) {
 function render() {
   renderMeta();
   renderPerBench();
-  for (const metric of METRICS) renderMetric(metric);
+  for (const w of state.history) renderHistory(w);
 }
 
 (async () => {
@@ -288,6 +265,7 @@ function render() {
     if (!state.reports.length) throw new Error("index.json is empty");
     document.getElementById("status").hidden = true;
     document.getElementById("content").hidden = false;
+    state.history = renderHistoryPanels();
     renderControls();
     render();
   } catch (e) {
