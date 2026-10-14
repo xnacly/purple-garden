@@ -828,6 +828,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let src = self.gpr(src);
                 let dst = self.def(dst, self.pos + 1);
                 let dst = self.xmm(dst);
+                self.emit(Insn::Zeroxmm { dst });
                 self.emit(Insn::Cvtsi2sd { dst, src });
             }
             ir::Instr::Lookup {
@@ -1263,7 +1264,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 dst: Reg(dst),
                 src: Reg(src),
             }),
-            (Preg::Fpr(dst), Preg::Fpr(src)) => self.emit(Insn::MovSd {
+            (Preg::Fpr(dst), Preg::Fpr(src)) => self.emit(Insn::Movaps {
                 dst: Xmm(dst),
                 src: Xmm(src),
             }),
