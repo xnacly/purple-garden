@@ -14,9 +14,10 @@ impl<'t, A: Allocator> TypecheckOutput<'t, A> {
         let mut out = String::new();
         for &node in ast.roots {
             match ast.node(node) {
-                Node::Let { id, name, .. } => {
+                Node::Let { name, rhs, .. } => {
                     use std::fmt::Write as _;
-                    writeln!(&mut out, "{}: {}", name.t.as_str(), self.type_at(*id)).unwrap();
+                    let ty = self.type_at(ast.value_id(*rhs));
+                    writeln!(&mut out, "{}: {ty}", name.t.as_str()).unwrap();
                 }
                 Node::Fn {
                     name,
@@ -100,11 +101,11 @@ impl<'t, A: Allocator> TypecheckOutput<'t, A> {
                     self.render_node(ast, member, indent + 1, out);
                 }
             }
-            Node::Let { id, name, rhs, .. } => {
+            Node::Let { name, rhs, .. } => {
                 self.render_value(
                     indent,
                     format!("let {}", name.t.as_str()),
-                    self.type_at(*id),
+                    self.type_at(ast.value_id(*rhs)),
                     out,
                 );
                 self.render_node(ast, *rhs, indent + 1, out);

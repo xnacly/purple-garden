@@ -798,13 +798,23 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                 let Some(inner) = self.node(*rhs).known() else {
                     return TcType::Poison;
                 };
+                if matches!(self.ty(inner), Type::Void) {
+                    self.report(Diagnostic::at_token(
+                        "RHS of let has to return a value, but it didnt",
+                        name,
+                    ));
+                    return TcType::Poison;
+                }
                 let binding = self
                     .map
                     .ref_of(inner)
                     .expect("known ids always have a type");
+
                 self.env_insert(inner_name, binding);
-                self.map.bind(*id, binding);
-                TcType::Known(*id)
+                // This was previously binding let to have the type of its rhs; thus enabling things
+                // like f(let x = 3.1415) to be valid in the typechecker, even though lowering would
+                // protest and not produce anything
+                self.alias(*id, self.void)
             }
             Node::Fn {
                 id,
@@ -1481,7 +1491,7 @@ mod tests {
     fn let_types_the_binding_and_later_reads() {
         let (ast, out) = check(b"let x = 1.5\nx");
         assert!(out.diagnostics.is_empty());
-        assert_eq!(root_type(&ast, &out, 0), Some(Type::Double));
+        assert_eq!(root_type(&ast, &out, 0), Some(Type::Void));
         assert_eq!(root_type(&ast, &out, 1), Some(Type::Double));
     }
 
@@ -1535,7 +1545,7 @@ mod tests {
     fn default_only_match_takes_the_default_branch_type() {
         let (ast, out) = check(b"let x = match { { 3 } }\nx + 1");
         assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
-        assert_eq!(root_type(&ast, &out, 0), Some(Type::Int));
+        assert_eq!(root_type(&ast, &out, 0), Some(Type::Void));
         assert_eq!(root_type(&ast, &out, 1), Some(Type::Int));
     }
 
@@ -1560,6 +1570,57 @@ mod tests {
             messages(&out),
             vec!["`f` should return Int, but returns Void"]
         );
+    }
+
+    #[test]
+    fn let_is_void_while_its_binding_keeps_the_rhs_type() {
+        let (ast, out) = check(b"let x = 5\nx");
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(root_type(&ast, &out, 0), Some(Type::Void));
+        assert_eq!(root_type(&ast, &out, 1), Some(Type::Int));
+    }
+
+    #[test]
+    fn fn_body_ending_in_let_returns_void() {
+        let (_, out) = check(b"fn f() Int { let x = 5 }");
+        assert_eq!(
+            messages(&out),
+            vec!["`f` should return Int, but returns Void"]
+        );
+    }
+
+    #[test]
+    fn let_as_call_argument_is_void() {
+        let (_, out) = check(b"fn g(x:Int) Int { x }\ng(let c = 2)");
+        assert_eq!(
+            messages(&out),
+            vec!["`g` expected x:Int, got x:Void instead"]
+        );
+    }
+
+    #[test]
+    fn let_as_match_case_body_is_void() {
+        let (_, out) = check(b"match { true { let w = 1 } { 2 } }");
+        assert_eq!(
+            messages(&out),
+            vec!["Match cases must resolve to the same type, but got Int and Void"]
+        );
+    }
+
+    #[test]
+    fn let_rhs_must_be_a_value() {
+        let (_, out) = check(b"let a = let b = 4");
+        assert_eq!(
+            messages(&out),
+            vec!["RHS of let has to return a value, but it didnt"]
+        );
+    }
+
+    #[test]
+    fn summary_shows_let_bindings_with_their_rhs_type() {
+        let (ast, out) = check(b"let x = 5");
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        assert_eq!(out.render_summary(&ast), "x: Int\n");
     }
 
     #[test]
