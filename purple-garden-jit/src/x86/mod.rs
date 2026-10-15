@@ -849,7 +849,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         }
                     }
                     // Strings are interned: equal contents share one pointer.
-                    BinOp::IEq | BinOp::SEq | BinOp::ILt | BinOp::IGt => {
+                    BinOp::IEq | BinOp::BEq | BinOp::SEq | BinOp::ILt | BinOp::IGt => {
                         let dst = self.def(dst, self.pos + 1);
                         let dst = self.gpr(dst);
                         self.emit(Insn::Cmp { lhs, rhs });

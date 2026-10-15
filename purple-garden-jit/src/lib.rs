@@ -649,6 +649,43 @@ mod tests_x86 {
         }
     }
 
+    /// `fn f(a:Bool b:Bool) Bool { a == b }`
+    #[test]
+    fn bool_equality() {
+        let bool = |id| TypeId {
+            id: Id(id),
+            ty: Type::Bool,
+        };
+        let mut func = Func::new("beq", Id(0), vec![bool(0), bool(1)], Some(Type::Bool));
+        let params = func.intern_params([Id(0), Id(1)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Bin {
+                op: BinOp::BEq,
+                dst: bool(2),
+                lhs: Id(0),
+                rhs: Id(1),
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit beq");
+        for (a, b) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+            assert_eq!(
+                run(jit.code(), [a, b, 0])[0],
+                u64::from(a == b),
+                "{a} == {b}"
+            );
+        }
+    }
+
     /// `fn f(a, b) int { a <op> b }` with a register divisor.
     fn reg_div_func(op: BinOp) -> Func<'static> {
         let mut func = Func::new(
