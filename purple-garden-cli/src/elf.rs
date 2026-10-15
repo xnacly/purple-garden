@@ -47,14 +47,20 @@ pub(crate) fn addresses<S: Allocator + Clone, A: Allocator + Clone>(
         .map(|(f, name)| (f as usize as u64, name))
         .collect();
     for (f, name) in [
-        (purple_garden_runtime::jit_sys as usize, "jit_sys"),
-        (purple_garden_runtime::jit_alloc as usize, "jit_alloc"),
         (
-            purple_garden_runtime::jit_trap_div_zero as usize,
+            purple_garden_runtime::jit_sys as *const () as usize,
+            "jit_sys",
+        ),
+        (
+            purple_garden_runtime::jit_alloc as *const () as usize,
+            "jit_alloc",
+        ),
+        (
+            purple_garden_runtime::jit_trap_div_zero as *const () as usize,
             "jit_trap_div_zero",
         ),
         (
-            purple_garden_runtime::jit_trap_stack_overflow as usize,
+            purple_garden_runtime::jit_trap_stack_overflow as *const () as usize,
             "jit_trap_stack_overflow",
         ),
     ] {
