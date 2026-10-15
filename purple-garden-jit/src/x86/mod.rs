@@ -19,10 +19,7 @@ use std::{alloc::Allocator, collections::HashMap};
 
 use crate::{
     arch::encode::Xmm,
-    xralloc2::{
-        Class::{self, Fpr},
-        Reg as Preg, Xralloc2,
-    },
+    xralloc2::{Class, Reg as Preg, Xralloc2},
 };
 use encode::{
     Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBX, RCX, RDI, RDX, RSI, RSP, Reg,

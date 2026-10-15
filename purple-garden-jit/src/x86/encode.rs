@@ -285,24 +285,6 @@ pub enum Insn {
     Idiv {
         divisor: Reg,
     },
-    /// `addsd xmm{dst}, xmm{src}`: the low doubles add, the high lane of
-    /// dst is left alone. The same for sub, mul and div below.
-    AddSd {
-        dst: Xmm,
-        src: Xmm,
-    },
-    SubSd {
-        dst: Xmm,
-        src: Xmm,
-    },
-    MulSd {
-        dst: Xmm,
-        src: Xmm,
-    },
-    DivSd {
-        dst: Xmm,
-        src: Xmm,
-    },
     /// `vaddsd xmm{dst}, xmm{lhs}, xmm{rhs}`: AVX's three-operand form, so dst
     /// may alias either operand. The high lane comes from lhs, not from dst,
     /// so unlike the SSE ops it doesn't depend on dst's old value. The same
@@ -511,12 +493,6 @@ impl Insn {
                 code.push(rex(0, divisor.0));
                 code.extend_from_slice(&[0xf7, modrm(7, divisor.0)]);
             }
-            // F2 0F 58/5C/59/5E /r = `addsd/subsd/mulsd/divsd xmm1, xmm2/m64`,
-            // ModRM.reg is dst.
-            Insn::AddSd { dst, src } => sse(code, 0xf2, 0x58, dst.0, src.0),
-            Insn::SubSd { dst, src } => sse(code, 0xf2, 0x5c, dst.0, src.0),
-            Insn::MulSd { dst, src } => sse(code, 0xf2, 0x59, dst.0, src.0),
-            Insn::DivSd { dst, src } => sse(code, 0xf2, 0x5e, dst.0, src.0),
             // VEX.LIG.F2.0F 58/5C/59/5E /r = `vaddsd/vsubsd/vmulsd/vdivsd xmm1,
             // xmm2, xmm3/m64`, the same opcodes as the SSE forms.
             Insn::VAddSd { dst, lhs, rhs } => vex_sd(code, 0x58, dst.0, lhs.0, rhs.0),
@@ -759,69 +735,6 @@ mod tests {
     fn sse_encodings() {
         use super::Xmm;
 
-        assert_eq!(
-            enc(Insn::AddSd {
-                dst: Xmm(0),
-                src: Xmm(1)
-            }),
-            [0xf2, 0x0f, 0x58, 0xc1]
-        ); // addsd xmm0,xmm1
-        assert_eq!(
-            enc(Insn::AddSd {
-                dst: Xmm(8),
-                src: Xmm(1)
-            }),
-            [0xf2, 0x44, 0x0f, 0x58, 0xc1]
-        ); // addsd xmm8,xmm1
-        assert_eq!(
-            enc(Insn::AddSd {
-                dst: Xmm(3),
-                src: Xmm(15)
-            }),
-            [0xf2, 0x41, 0x0f, 0x58, 0xdf]
-        ); // addsd xmm3,xmm15
-        assert_eq!(
-            enc(Insn::SubSd {
-                dst: Xmm(0),
-                src: Xmm(1)
-            }),
-            [0xf2, 0x0f, 0x5c, 0xc1]
-        ); // subsd xmm0,xmm1
-        assert_eq!(
-            enc(Insn::SubSd {
-                dst: Xmm(9),
-                src: Xmm(10)
-            }),
-            [0xf2, 0x45, 0x0f, 0x5c, 0xca]
-        ); // subsd xmm9,xmm10
-        assert_eq!(
-            enc(Insn::MulSd {
-                dst: Xmm(2),
-                src: Xmm(3)
-            }),
-            [0xf2, 0x0f, 0x59, 0xd3]
-        ); // mulsd xmm2,xmm3
-        assert_eq!(
-            enc(Insn::MulSd {
-                dst: Xmm(12),
-                src: Xmm(0)
-            }),
-            [0xf2, 0x44, 0x0f, 0x59, 0xe0]
-        ); // mulsd xmm12,xmm0
-        assert_eq!(
-            enc(Insn::DivSd {
-                dst: Xmm(4),
-                src: Xmm(5)
-            }),
-            [0xf2, 0x0f, 0x5e, 0xe5]
-        ); // divsd xmm4,xmm5
-        assert_eq!(
-            enc(Insn::DivSd {
-                dst: Xmm(1),
-                src: Xmm(14)
-            }),
-            [0xf2, 0x41, 0x0f, 0x5e, 0xce]
-        ); // divsd xmm1,xmm14
         assert_eq!(
             enc(Insn::Ucomisd {
                 lhs: Xmm(0),
