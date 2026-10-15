@@ -950,37 +950,18 @@ mod tests_x86 {
         assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), 3.1415);
     }
 
-    /// Double to Int casts aren't lowered yet, so a function using them stays bytecode.
+    /// Tail calls to other functions aren't lowered yet, so a function using them stays bytecode.
     #[test]
     fn skips_unsupported_functions() {
         let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Int));
         func.blocks.push(Block {
             tombstone: false,
             id: Id(0),
-            instructions: vec![
-                Instr::LoadConst {
-                    dst: TypeId {
-                        id: Id(0),
-                        ty: Type::Double,
-                    },
-                    value: Const::Double(1.5f64.to_bits()),
-                    span: 0,
-                },
-                Instr::Cast {
-                    dst: TypeId {
-                        id: Id(1),
-                        ty: Type::Int,
-                    },
-                    from: TypeId {
-                        id: Id(0),
-                        ty: Type::Double,
-                    },
-                    span: 0,
-                },
-            ],
+            instructions: vec![],
             params: EMPTY_PARAMS,
-            term: Some(Terminator::Return {
-                value: Some(Id(1)),
+            term: Some(Terminator::Tail {
+                func: Id(1),
+                args: EMPTY_PARAMS,
                 span: 0,
             }),
         });
@@ -1078,6 +1059,92 @@ mod tests_x86 {
                 expected,
                 "{lhs} {op:?} {rhs}"
             );
+        }
+    }
+
+    /// `fn f(x:<from>) <to> { x as <to> }`
+    fn cast_func(from: Type<'static>, to: Type<'static>) -> Func<'static> {
+        let mut func = Func::new(
+            "cast",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: from.clone(),
+            }],
+            Some(to.clone()),
+        );
+        let params = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Cast {
+                dst: TypeId { id: Id(1), ty: to },
+                from: TypeId {
+                    id: Id(0),
+                    ty: from,
+                },
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(1)),
+                span: 0,
+            }),
+        });
+        func
+    }
+
+    /// Like the VM's `as i64`: truncates toward zero, saturates out of range and maps NaN to 0.
+    #[test]
+    fn casts_double_to_int() {
+        let mut jit = Jit::new();
+        jit.compile_func(&cast_func(Type::Double, Type::Int))
+            .expect("jit double to int");
+        for x in [
+            0.0,
+            -0.0,
+            3.9,
+            -3.9,
+            0.5,
+            -0.5,
+            9007199254740993.0,
+            9223372036854775807.0,
+            -9223372036854775808.0,
+            1e19,
+            -1e19,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ] {
+            assert_eq!(
+                run(jit.code(), [x.to_bits(), 0, 0])[0] as i64,
+                x as i64,
+                "{x} as Int"
+            );
+        }
+    }
+
+    #[test]
+    fn casts_int_to_bool() {
+        let mut jit = Jit::new();
+        jit.compile_func(&cast_func(Type::Int, Type::Bool))
+            .expect("jit int to bool");
+        for x in [0, 1, -1, 42, i64::MIN, i64::MAX] {
+            assert_eq!(
+                run(jit.code(), [x as u64, 0, 0])[0],
+                u64::from(x != 0),
+                "{x} as Bool"
+            );
+        }
+    }
+
+    #[test]
+    fn casts_bool_to_int() {
+        let mut jit = Jit::new();
+        jit.compile_func(&cast_func(Type::Bool, Type::Int))
+            .expect("jit bool to int");
+        for x in [0, 1] {
+            assert_eq!(run(jit.code(), [x, 0, 0])[0], x, "{x} as Int");
         }
     }
 

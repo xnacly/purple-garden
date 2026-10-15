@@ -226,6 +226,21 @@ pub enum Insn {
     Seta {
         dst: Reg,
     },
+    /// `setne r{dst}b`; set r{dst}'s low byte to 1 if the last compare was not equal.
+    Setne {
+        dst: Reg,
+    },
+    /// `cmovae r{dst}, r{src}`; move if unsigned `>=`, the carry flag is clear.
+    Cmovae {
+        dst: Reg,
+        src: Reg,
+    },
+    /// `cmovp r{dst}, r{src}`; move if the parity flag is set, which [`Insn::Ucomisd`] sets for
+    /// NaN.
+    Cmovp {
+        dst: Reg,
+        src: Reg,
+    },
     /// `movabs r{dst}, imm64`; `MovImm` is i32-only, addresses need 64 bits.
     MovAbs {
         dst: Reg,
@@ -338,6 +353,12 @@ pub enum Insn {
         dst: Xmm,
         src: Reg,
     },
+    /// `cvttsd2si r{dst}, xmm{src}`: the low double truncated toward zero, `i64::MIN` for NaN
+    /// and out of range doubles.
+    Cvttsd2si {
+        dst: Reg,
+        src: Xmm,
+    },
     /// `movsd xmm{dst}, [rdi + slot*8]`
     LoadSlotSd {
         dst: Xmm,
@@ -411,6 +432,14 @@ impl Insn {
             Insn::Setl { dst } => setcc(code, 0x9c, dst),
             Insn::Setg { dst } => setcc(code, 0x9f, dst),
             Insn::Seta { dst } => setcc(code, 0x97, dst),
+            Insn::Setne { dst } => setcc(code, 0x95, dst),
+            // REX.W 0F 43/4A /r = `cmovae/cmovp r64, r/m64`, ModRM.reg is dst.
+            Insn::Cmovae { dst, src } => {
+                code.extend_from_slice(&[rex(dst.0, src.0), 0x0f, 0x43, modrm(dst.0, src.0)]);
+            }
+            Insn::Cmovp { dst, src } => {
+                code.extend_from_slice(&[rex(dst.0, src.0), 0x0f, 0x4a, modrm(dst.0, src.0)]);
+            }
             // REX.W 0x69 /r id = `imul r64, r/m64, imm32`, ModRM.reg is dst.
             Insn::ImulImm { dst, src, imm } => {
                 code.extend_from_slice(&[rex(dst.0, src.0), 0x69, modrm(dst.0, src.0)]);
@@ -514,6 +543,10 @@ impl Insn {
             // F2 REX.W 0F 2A /r = `cvtsi2sd xmm, r/m64`, REX.W for the 64-bit int.
             Insn::Cvtsi2sd { dst, src } => {
                 code.extend_from_slice(&[0xf2, rex(dst.0, src.0), 0x0f, 0x2a, modrm(dst.0, src.0)]);
+            }
+            // F2 REX.W 0F 2C /r = `cvttsd2si r64, xmm/m64`, ModRM.reg is the GPR dst.
+            Insn::Cvttsd2si { dst, src } => {
+                code.extend_from_slice(&[0xf2, rex(dst.0, src.0), 0x0f, 0x2c, modrm(dst.0, src.0)]);
             }
             // F2 0F 10 /r and F2 0F 11 /r with the slot memory operand.
             Insn::LoadSlotSd { dst, slot } => movsd_slot(code, 0x10, dst.0, slot),
@@ -834,6 +867,20 @@ mod tests {
             [0xf2, 0x4c, 0x0f, 0x2a, 0xcb]
         ); // cvtsi2sd xmm9,rbx
         assert_eq!(
+            enc(Insn::Cvttsd2si {
+                dst: RBX,
+                src: Xmm(0)
+            }),
+            [0xf2, 0x48, 0x0f, 0x2c, 0xd8]
+        ); // cvttsd2si rbx,xmm0
+        assert_eq!(
+            enc(Insn::Cvttsd2si {
+                dst: R12,
+                src: Xmm(9)
+            }),
+            [0xf2, 0x4d, 0x0f, 0x2c, 0xe1]
+        ); // cvttsd2si r12,xmm9
+        assert_eq!(
             enc(Insn::Movaps {
                 dst: Xmm(0),
                 src: Xmm(1)
@@ -913,7 +960,7 @@ mod tests {
     #[test]
     /// Signed compares and the immediate multiply, bytes checked against objdump.
     fn compare_and_imul_imm_encodings() {
-        use super::{R8, R9, R10, RAX, RCX, RSI};
+        use super::{R8, R9, R10, R12, RAX, RBX, RCX, RSI};
 
         assert_eq!(
             enc(Insn::CmpMem {
@@ -935,6 +982,24 @@ mod tests {
         assert_eq!(enc(Insn::Setg { dst: R8 }), [0x41, 0x0f, 0x9f, 0xc0]); // setg r8b
         assert_eq!(enc(Insn::Sete { dst: RSI }), [0x40, 0x0f, 0x94, 0xc6]); // sete sil
         assert_eq!(enc(Insn::Seta { dst: R8 }), [0x41, 0x0f, 0x97, 0xc0]); // seta r8b
+        assert_eq!(enc(Insn::Setne { dst: RSI }), [0x40, 0x0f, 0x95, 0xc6]); // setne sil
+        assert_eq!(enc(Insn::Setne { dst: R8 }), [0x41, 0x0f, 0x95, 0xc0]); // setne r8b
+        assert_eq!(
+            enc(Insn::Cmovae { dst: RBX, src: RAX }),
+            [0x48, 0x0f, 0x43, 0xd8]
+        ); // cmovae rbx,rax
+        assert_eq!(
+            enc(Insn::Cmovae { dst: R12, src: RAX }),
+            [0x4c, 0x0f, 0x43, 0xe0]
+        ); // cmovae r12,rax
+        assert_eq!(
+            enc(Insn::Cmovp { dst: RBX, src: RAX }),
+            [0x48, 0x0f, 0x4a, 0xd8]
+        ); // cmovp rbx,rax
+        assert_eq!(
+            enc(Insn::Cmovp { dst: R12, src: RAX }),
+            [0x4c, 0x0f, 0x4a, 0xe0]
+        ); // cmovp r12,rax
         assert_eq!(
             enc(Insn::ImulImm {
                 dst: RAX,

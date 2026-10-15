@@ -870,15 +870,71 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     _ => bail!(self, "unsupported bin op {op:?}"),
                 }
             }
-            ir::Instr::Cast { dst, from, .. }
-                if from.ty == ir::ptype::Type::Int && dst.ty == ir::ptype::Type::Double =>
-            {
+            ir::Instr::Cast { dst, from, .. } => {
+                use ir::ptype::Type::{Bool, Double, Int};
                 let src = self.ensure_register(from.id);
-                let src = self.gpr(src);
-                let dst = self.def(dst, self.pos + 1);
-                let dst = self.xmm(dst);
-                self.emit(Insn::Zeroxmm { dst });
-                self.emit(Insn::Cvtsi2sd { dst, src });
+                let to = self.def(dst, self.pos + 1);
+                match (&from.ty, &dst.ty) {
+                    (Int, Double) => {
+                        let src = self.gpr(src);
+                        let dst = self.xmm(to);
+                        self.emit(Insn::Zeroxmm { dst });
+                        self.emit(Insn::Cvtsi2sd { dst, src });
+                    }
+                    // Like Rust's `as`: cvttsd2si gives i64::MIN for NaN and both overflows, the
+                    // conditional moves fix up NaN to 0 and positive overflow to i64::MAX.
+                    (Double, Int) => {
+                        let src = self.xmm(src);
+                        let dst = self.gpr(to);
+                        self.emit(Insn::Cvttsd2si { dst, src });
+                        self.emit(Insn::MovAbs {
+                            dst: GPR_SCRATCH,
+                            imm: 2f64.powi(63).to_bits(),
+                        });
+                        self.emit(Insn::MovqToXmm {
+                            dst: XMM_SCRATCH,
+                            src: GPR_SCRATCH,
+                        });
+                        self.emit(Insn::Ucomisd {
+                            lhs: src,
+                            rhs: XMM_SCRATCH,
+                        });
+                        self.emit(Insn::MovAbs {
+                            dst: GPR_SCRATCH,
+                            imm: i64::MAX as u64,
+                        });
+                        self.emit(Insn::Cmovae {
+                            dst,
+                            src: GPR_SCRATCH,
+                        });
+                        self.emit(Insn::Ucomisd { lhs: src, rhs: src });
+                        // mov leaves the flags alone, xor wouldn't
+                        self.emit(Insn::MovImm {
+                            dst: GPR_SCRATCH,
+                            imm: 0,
+                        });
+                        self.emit(Insn::Cmovp {
+                            dst,
+                            src: GPR_SCRATCH,
+                        });
+                    }
+                    (Int, Bool) => {
+                        let src = self.gpr(src);
+                        let dst = self.gpr(to);
+                        self.emit(Insn::Test { lhs: src, rhs: src });
+                        self.emit(Insn::MovImm { dst, imm: 0 });
+                        self.emit(Insn::Setne { dst });
+                    }
+                    // Bool and Int share the same representation.
+                    (Bool, Int) => {
+                        let src = self.gpr(src);
+                        let dst = self.gpr(to);
+                        if dst != src {
+                            self.emit(Insn::Mov { dst, src });
+                        }
+                    }
+                    _ => bail!(self, "unsupported cast from {} to {}", from.ty, dst.ty),
+                }
             }
             ir::Instr::Lookup {
                 dst,
