@@ -22,9 +22,10 @@ pub struct Config {
     ///
     /// -D prints readable bytecode and named native machine code.
     ///
-    /// -DD writes a minimal relocatable ELF object to stdout, for instance to be passed to objdump:
+    /// -DD writes a minimal relocatable ELF object to stdout, including relocation data for runtime
+    ///     functions, for instance to be passed to objdump:
     ///
-    ///    objdump -d (purple-garden -d -DD script.garden | psub)
+    ///    objdump -dr (purple-garden -d -DD examples/fib.garden | psub)
     ///
     /// Dumping does not stop execution. Add -d when stdout must contain only
     /// the dump, particularly with -DD.

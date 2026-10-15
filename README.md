@@ -6,8 +6,9 @@ memory control, and optional garbage collection. It is built to be easily
 embedded and extended from Rust.
 
 ```garden
-import ("io")
-io.println("Hello World")
+import ("io" "str")
+
+io.println(str.concat("Hello" " World"))
 ```
 
 ## Features / Design Goals
@@ -88,6 +89,81 @@ For an intro to purple garden see
 ```bash
 git clone git@github.com:xnacly/purple-garden.git
 cargo run -- --help
+```
+
+### Bytecode Disassembly
+
+Functions the JIT does not (YET) compile, run on the register based virtual
+machine. The -D option prints their bytecode, annotated with the source line
+each instruction stems from, while jitted functions are called via `sys` and
+shown as a hexdump. --no-jit fully disables the jit and thus shows the bytecode
+of every function:
+
+```fish
+cargo run -- -Dd --no-jit examples/factorial.garden
+```
+
+Producing:
+
+```text
+globals:
+  0000:    2432902008176640000
+
+00000000 <factorial>:
+  0000:    push r2                                    ; 6: fn factorial(n:Int a:Int) Int {
+  0001:    jmpne_imm r0, #0, 0005 <factorial.bb_0005> ; 8: n == 0 { a }
+  0002:    mov r0, r1
+  0003:    pop r2
+  0004:    ret
+00000005 <factorial.bb_0005>:
+  0005:    isub_imm r2, r0, #1                        ; 9: { factorial(n-1 n*a) }
+  0006:    imul r1, r0, r1
+  0007:    mov r0, r2
+  0008:    pop r2
+  0009:    tail 0000 <factorial>
+
+0000000a <entry>:
+  000a:    load_imm r0, #20                           ; 13: testing.assert(factorial(20 1) == 2432902008176640000)
+  000b:    load_imm r1, #1
+  000c:    call 0000 <factorial>
+  000d:    load_global r1, 0
+  000e:    ieq r0, r0, r1
+  000f:    sys 0 <testing.assert>
+  0010:    ret
+  0011:    halt
+```
+
+### JIT disassembly
+
+Since purple garden gets its main performance from just in time compilation it
+includes a -DD option for ELF compatible byte formatting, including relocatable
+info for jit internal helpers and standard library calls, invokable via:
+
+```fish
+objdump -dr (cargo run -- -DDd examples/factorial.garden | psub)
+```
+
+Producing: 
+
+```x86-asm
+0000000000000000 <jit_factorial>:
+   0:	48 8b 77 00          	mov    0x0(%rdi),%rsi
+   4:	4c 8b 47 08          	mov    0x8(%rdi),%r8
+   8:	48 85 f6             	test   %rsi,%rsi
+   b:	0f 85 0b 00 00 00    	jne    1c <jit_factorial+0x1c>
+  11:	4c 89 47 00          	mov    %r8,0x0(%rdi)
+  15:	31 c0                	xor    %eax,%eax
+  17:	c3                   	ret
+  18:	cc                   	int3
+  19:	cc                   	int3
+  1a:	cc                   	int3
+  1b:	cc                   	int3
+  1c:	49 89 f1             	mov    %rsi,%r9
+  1f:	49 81 e9 01 00 00 00 	sub    $0x1,%r9
+  26:	4c 0f af c6          	imul   %rsi,%r8
+  2a:	4c 89 ce             	mov    %r9,%rsi
+  2d:	e9 d6 ff ff ff       	jmp    8 <jit_factorial+0x8>
+  32:	c3                   	ret
 ```
 
 ### Benchmarks
