@@ -650,9 +650,17 @@ impl<'vm> Vm<'vm> {
                         return Err(self.pending_trap.take().unwrap());
                     }
                 },
-                Op::Native { idx } => unsafe {
+                Op::Native {
+                    idx,
+                    returns_double,
+                } => unsafe {
                     self.pc = pc;
-                    crate::enter_native((self as *mut Vm).cast(), *syscalls.add(idx as usize));
+                    let enter = if returns_double {
+                        crate::enter_native_double
+                    } else {
+                        crate::enter_native
+                    };
+                    enter((self as *mut Vm).cast(), *syscalls.add(idx as usize));
                     if std::hint::unlikely(self.pending_trap.is_some()) {
                         return Err(self.pending_trap.take().unwrap());
                     }

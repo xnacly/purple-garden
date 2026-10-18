@@ -1018,6 +1018,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let Some(target) = self.functions.get(func).map(CcCallTarget::from) else {
                     unreachable!();
                 };
+                // a tail call returns the callee's result as its own
+                let returns_double = fun.ret == Some(ptype::Type::Double);
 
                 let args = fun.params(*args);
                 // If the tail target needs a wider argument zone than this the shuffle would write
@@ -1030,7 +1032,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 if tail_clobbers_callee_saved {
                     match target {
                         CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
-                        CcCallTarget::Native { idx } => self.emit(Op::Native { idx }),
+                        CcCallTarget::Native { idx } => self.emit(Op::Native {
+                            idx,
+                            returns_double,
+                        }),
                     };
                     self.emit_epilogue(lo, max_reg);
                     self.emit(Op::Ret);
@@ -1041,7 +1046,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                             self.emit(Op::Tail { func: pc as u32 });
                         }
                         CcCallTarget::Native { idx } => {
-                            self.emit(Op::Native { idx });
+                            self.emit(Op::Native {
+                                idx,
+                                returns_double,
+                            });
                             self.emit(Op::Ret);
                         }
                     }
@@ -1197,6 +1205,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             ir::Instr::Call {
                 dst, func, args, ..
             } => {
+                let returns_double_call = dst.ty == ptype::Type::Double;
                 let args = owner.params(*args);
                 let Some(target) = self.functions.get(func).map(CcCallTarget::from) else {
                     unreachable!();
@@ -1242,7 +1251,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let dst = self.ensure_register(dst.id);
                 match target {
                     CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
-                    CcCallTarget::Native { idx } => self.emit(Op::Native { idx }),
+                    CcCallTarget::Native { idx } => self.emit(Op::Native {
+                        idx,
+                        returns_double: returns_double_call,
+                    }),
                 };
                 self.emit(Op::Mov { dst, src: 0 });
                 self.scratch.reverse();

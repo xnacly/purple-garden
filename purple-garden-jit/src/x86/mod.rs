@@ -46,6 +46,9 @@ macro_rules! skip {
 const VM: Reg = RDI;
 /// Never holds a value: breaks edge-move cycles and holds helper addresses.
 const GPR_SCRATCH: Reg = RAX;
+/// Native functions take argument i in `ARG_GPRS[i]`, or in `xmm{i}` if it is a Double, and
+/// return in `rax` or `xmm0`, see `enter_native`.
+const ARG_GPRS: [Reg; 6] = [RSI, RDX, RCX, R8, R9, R10];
 
 /// Allocatable GPRs, popped from the back: caller-saved first so leaf functions dont require a
 /// prologue, `rcx`/`rdx` last since `idiv` clobbers them.
@@ -81,10 +84,10 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     ra: &mut Xralloc2<S>,
     buffers: &mut Scratch<S>,
 ) -> Option<()> {
-    if func.params.len() > 32 {
+    if func.params.len() > ARG_GPRS.len() {
         skip!(
             func,
-            "too many params for disp8 slot loads: {}",
+            "more params than argument registers: {}",
             func.params.len()
         );
     }
@@ -92,17 +95,6 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     let Some(entry) = func.blocks.iter().find(|b| !b.tombstone).map(|b| b.id) else {
         skip!(func, "empty function");
     };
-
-    if is_result_slot_identity(func, entry) {
-        // Native calls receive arg0 in vm.r[0] and must return through vm.r[0]
-        //
-        // When a function returns that parameter unchanged, the VM register file already holds the
-        // required boundary state, nothing to do here other than return without a trap
-        Insn::Zero { reg: GPR_SCRATCH }.encode(out);
-        Insn::Ret.encode(out);
-        purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
-        return Some(());
-    }
 
     ra.reset(liveness.len(), GPR_POOL, XMM_POOL);
     let calls = Lowering::new(
@@ -178,21 +170,6 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     Some(())
 }
 
-fn is_result_slot_identity<F: Allocator>(func: &ir::Func<'_, F>, entry: ir::Id) -> bool {
-    let Some(result_param) = func.params.first().map(|p| p.id) else {
-        return false;
-    };
-    let block = &func.blocks[entry.0 as usize];
-    block.instructions.is_empty()
-        && matches!(
-            block.term,
-            Some(ir::Terminator::Return {
-                value: Some(value),
-                ..
-            }) if value == result_param
-        )
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Target {
     Block(ir::Id),
@@ -236,12 +213,10 @@ impl<S: Allocator + Clone> Scratch<S> {
     }
 }
 
-/// Target of a call that passes its arguments through `vm.r`.
+/// Target of a native to native call, see [`Lowering::call_native`].
 #[derive(Clone, Copy)]
 enum Callee {
-    /// A builtin: called through `jit_sys`, which aborts if it trapped.
-    Sys(BuiltinFn),
-    /// A natively compiled function: called directly.
+    /// A natively compiled function.
     Native(BuiltinFn),
     /// The function being compiled, whose address isn't known yet.
     This,
@@ -420,24 +395,20 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             patch_rel32(self.out, fine, fine + 4, resume).expect("short forward jump");
         }
 
-        // Args arrive in the VM register file: param i in vm.r[i].
-        for (slot, param) in self.func.params.iter().enumerate() {
-            let used = self
+        for (i, param) in self.func.params.iter().enumerate() {
+            let Some(&(_, last_use)) = self
                 .liveness
                 .get(param.id.0 as usize)
-                .is_some_and(|&(start, _)| start != u32::MAX);
-            if used {
-                let slot = slot as u8;
-                match self.def(param, 0) {
-                    Preg::Gpr(dst) => self.emit(Insn::LoadSlot {
-                        dst: Reg(dst),
-                        slot,
-                    }),
-                    Preg::Fpr(dst) => self.emit(Insn::LoadSlotSd {
-                        dst: Xmm(dst),
-                        slot,
-                    }),
-                }
+                .filter(|&&(start, _)| start != u32::MAX)
+            else {
+                continue;
+            };
+            let reg = match Class::from(&param.ty) {
+                Class::Gpr => Preg::Gpr(ARG_GPRS[i].0),
+                Class::Fpr => Preg::Fpr(i as u8),
+            };
+            if self.ra.alloc_at(param.id, reg, last_use).is_none() {
+                bail!(self, "param register {reg:?} is taken");
             }
         }
 
@@ -1066,7 +1037,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let args = func.params(*args);
                 match fun.native.zip(self.native_entry_moves(fun, args, dst)) {
                     Some((native, moves)) => self.call_native_entry(native, moves, dst),
-                    None => self.call_builtin(Callee::Sys(fun.ptr), args, dst),
+                    None => self.call_builtin(fun.ptr, args, dst),
                 }
             }
             ir::Instr::Call {
@@ -1084,7 +1055,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     return;
                 };
                 let func = self.func;
-                self.call_builtin(callee, func.params(*args), dst);
+                self.call_native(callee, func.params(*args), dst);
             }
             _ => bail!(self, "unsupported instruction {i:?}"),
         }
@@ -1101,21 +1072,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ir::Terminator::Return { value, .. } => {
                 if let Some(value) = value {
                     let src = self.ensure_register(*value);
-                    match src {
-                        Preg::Gpr(gpr) => {
-                            self.emit(Insn::StoreSlot {
-                                src: Reg(gpr),
-                                slot: 0,
-                            });
-                        }
-                        Preg::Fpr(fpr) => self.emit(Insn::StoreSlotSd {
-                            src: Xmm(fpr),
-                            slot: 0,
-                        }),
+                    let ret = match src {
+                        Preg::Gpr(_) => Preg::Gpr(RAX.0),
+                        Preg::Fpr(_) => Preg::Fpr(0),
+                    };
+                    if src != ret {
+                        self.mov(ret, src);
                     }
                 }
-
-                self.emit(Insn::Zero { reg: GPR_SCRATCH });
                 self.jump(Cond::Always, Target::Epilogue);
             }
             ir::Terminator::Jump { id, params, .. } => {
@@ -1492,18 +1456,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.restore(saves);
     }
 
-    /// Call `callee` the way the interpreter calls a builtin: arguments in
-    /// `vm.r[0..]`, the result in `vm.r[0]`, a trap leaves this function so
-    /// the interpreter surfaces it. The callee may write its argument
-    /// registers, but this function's caller only spilled those up to this
-    /// function's own arity; only `entry`, which nothing calls with live
+    /// Call the builtin `f` the way the interpreter does: arguments in `vm.r[0..]`, the result in
+    /// `vm.r[0]`, through `jit_sys`, which aborts on a trap. Only for builtins without a usable
+    /// native entry. The builtin may write its argument registers, but this function's caller only
+    /// spilled those up to this function's own arity; only `entry`, which nothing calls with live
     /// registers, may pass more.
-    ///
-    /// Builtins go through `jit_sys`, which aborts on a trap. Native functions
-    /// keep `rdi`, so they are called directly: a trampoline
-    /// in between doubles the `call`/`ret` pairs per frame, and deep recursion
-    /// then mispredicts most returns once the return stack buffer wraps.
-    fn call_builtin(&mut self, callee: Callee, args: &[ir::Id], dst: &ir::TypeId<'ir>) {
+    fn call_builtin(&mut self, f: BuiltinFn, args: &[ir::Id], dst: &ir::TypeId<'ir>) {
         if args.len() > self.func.params.len().max(1) && self.func.id != ir::Id(0) {
             bail!(
                 self,
@@ -1528,14 +1486,43 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         // for the copies.
         self.ra.expire(self.pos);
         let saves = self.save_clobbered(CALL_CLOBBERS);
+        self.call(
+            purple_garden_runtime::jit_sys as *const () as u64,
+            &[AbiArg::Reg(VM), AbiArg::Imm(f as usize as u64)],
+            None,
+        );
+        self.restore(saves);
+        let dst = self.def(dst, self.pos + 1);
+        let dst = self.gpr(dst);
+        self.emit(Insn::LoadSlot { dst, slot: 0 });
+    }
+
+    /// Call the native function `callee`: argument i in `ARG_GPRS[i]` or `xmm{i}` by its class, the
+    /// result in `rax` or `xmm0`, no memory in between. Natives keep `rdi` and the callee saved
+    /// registers, so only values live across the call in the others are copied away. More
+    /// arguments than registers would need the stack and stay bytecode.
+    fn call_native(&mut self, callee: Callee, args: &[ir::Id], dst: &ir::TypeId<'ir>) {
+        if args.len() > ARG_GPRS.len() {
+            bail!(self, "{} args, more than argument registers", args.len());
+            return;
+        }
+        let mut moves = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
+        moves.clear();
+        for (i, &arg) in args.iter().enumerate() {
+            let src = self.ensure_register(arg);
+            let dst = match src {
+                Preg::Gpr(_) => Preg::Gpr(ARG_GPRS[i].0),
+                Preg::Fpr(_) => Preg::Fpr(i as u8),
+            };
+            if src != dst {
+                moves.push((src, dst));
+            }
+        }
+        let saves = self.save_clobbered(CALL_CLOBBERS);
+        self.parallel_move(moves);
+        self.calls = true;
         match callee {
-            Callee::Sys(f) => self.call(
-                purple_garden_runtime::jit_sys as *const () as u64,
-                &[AbiArg::Reg(VM), AbiArg::Imm(f as usize as u64)],
-                None,
-            ),
             Callee::Native(f) => {
-                self.calls = true;
                 self.emit(Insn::MovAbs {
                     dst: GPR_SCRATCH,
                     imm: f as usize as u64,
@@ -1543,15 +1530,24 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 self.emit(Insn::CallReg { reg: GPR_SCRATCH });
             }
             Callee::This => {
-                self.calls = true;
                 self.emit(Insn::CallRel { disp: 0 });
                 self.self_refs.push(self.out.len() - 4);
             }
         }
         self.restore(saves);
-        let dst = self.def(dst, self.pos + 1);
-        let dst = self.gpr(dst);
-        self.emit(Insn::LoadSlot { dst, slot: 0 });
+        self.take_result(dst);
+    }
+
+    /// Moves a call's result from `rax` or `xmm0` into `dst`.
+    fn take_result(&mut self, dst: &ir::TypeId<'ir>) {
+        let ret = match self.def(dst, self.pos + 1) {
+            _ if dst.ty == ir::ptype::Type::Void => return,
+            Preg::Gpr(gpr) => (Preg::Gpr(gpr), Preg::Gpr(RAX.0)),
+            Preg::Fpr(fpr) => (Preg::Fpr(fpr), Preg::Fpr(0)),
+        };
+        if ret.0 != ret.1 {
+            self.mov(ret.0, ret.1);
+        }
     }
 
     /// The moves placing `args` where SysV wants them for `fun`'s native entry, after the vm in
@@ -1624,14 +1620,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             imm: CALL_STACK,
         });
         self.restore(saves);
-        let ret = match self.def(dst, self.pos + 1) {
-            _ if dst.ty == ir::ptype::Type::Void => return,
-            Preg::Gpr(gpr) => (Preg::Gpr(gpr), Preg::Gpr(RAX.0)),
-            Preg::Fpr(fpr) => (Preg::Fpr(fpr), Preg::Fpr(0)),
-        };
-        if ret.0 != ret.1 {
-            self.mov(ret.0, ret.1);
-        }
+        self.take_result(dst);
     }
 
     /// Raise the trap, the helper leaves native code through `jit_abort`:

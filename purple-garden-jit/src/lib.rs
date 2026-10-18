@@ -158,40 +158,50 @@ mod tests_x86 {
         )
     }
 
-    /// `code` made executable, the arena has to outlive every call.
-    fn exec(code: &[u8]) -> (CodeArena, unsafe extern "C" fn(*mut u64)) {
-        let mut arena = CodeArena::new().expect("code arena");
-        let entry = arena.push(code).expect("code fits the arena");
-        arena.seal().expect("seal the code arena");
-        let f = unsafe {
-            std::mem::transmute::<super::BuiltinFn, unsafe extern "C" fn(*mut u64)>(entry)
-        };
-        (arena, f)
-    }
-
     /// Enter native code from a real `vm` the way the interpreter does, so a trap
-    /// can leave through `jit_abort`.
-    fn enter(code: &[u8], vm: &mut purple_garden_runtime::Vm) {
+    /// can leave through `jit_abort`. `enter` stores the result into `vm.r[0]`.
+    fn enter_with(
+        code: &[u8],
+        vm: &mut purple_garden_runtime::Vm,
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+    ) {
         let mut arena = CodeArena::new().expect("code arena");
         let entry = arena.push(code).expect("code fits the arena");
         arena.seal().expect("seal the code arena");
-        unsafe {
-            purple_garden_runtime::enter_native(
-                (vm as *mut purple_garden_runtime::Vm).cast(),
-                entry,
-            )
-        };
+        unsafe { enter((vm as *mut purple_garden_runtime::Vm).cast(), entry) };
     }
 
-    /// Run native code that takes `*mut u64` (the VM register file) and return
-    /// the resulting register slots.
-    fn run(code: &[u8], mut regs: [u64; 3]) -> [u64; 3] {
-        let (_arena, f) = exec(code);
-        unsafe { f(regs.as_mut_ptr()) };
-        regs
+    fn enter(code: &[u8], vm: &mut purple_garden_runtime::Vm) {
+        enter_with(code, vm, purple_garden_runtime::enter_native);
     }
 
-    /// `fn identity(a) int { a }`: load the arg, store it back as the result.
+    /// Enter native code with `args` in the first vm registers, returning the
+    /// first registers afterwards: the result in the first one.
+    fn run<const N: usize>(code: &[u8], args: [u64; N]) -> [u64; N] {
+        run_with(code, args, purple_garden_runtime::enter_native)
+    }
+
+    /// [`run`] for code returning a Double.
+    fn run_double<const N: usize>(code: &[u8], args: [u64; N]) -> f64 {
+        f64::from_bits(run_with(code, args, purple_garden_runtime::enter_native_double)[0])
+    }
+
+    fn run_with<const N: usize>(
+        code: &[u8],
+        args: [u64; N],
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+    ) -> [u64; N] {
+        use purple_garden_runtime::{Value, Vm, VmConfig};
+
+        let mut vm = Vm::new(VmConfig::default());
+        for (i, &arg) in args.iter().enumerate() {
+            *vm.r_mut(i) = Value(arg);
+        }
+        enter_with(code, &mut vm, enter);
+        std::array::from_fn(|i| vm.r(i).0)
+    }
+
+    /// `fn identity(a) int { a }`: the argument arrives in rsi, the result leaves in rax.
     #[test]
     fn identity_returns_arg() {
         let mut func = Func::new(
@@ -217,11 +227,11 @@ mod tests_x86 {
 
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
-        assert_eq!(jit.code(), [0x31, 0xc0, 0xc3]); // xor eax,eax; ret
+        assert_eq!(jit.code(), [0x48, 0x89, 0xf0, 0xc3]); // mov rax,rsi; ret
         assert_eq!(run(jit.code(), [42, 0xdead, 0xaffe]), [42, 0xdead, 0xaffe]);
     }
 
-    /// `fn second(a b) int { b }`: the result is the second arg (vm.r[1]).
+    /// `fn second(a b) int { b }`: the result is the second argument, in rdx.
     #[test]
     fn returns_second_arg() {
         let mut func = Func::new(
@@ -256,10 +266,7 @@ mod tests_x86 {
         assert_eq!(
             jit.code(),
             [
-                0x48, 0x8b, 0x77, 0x00, // mov rsi,[rdi+0]
-                0x48, 0x8b, 0x77, 0x08, // mov rsi,[rdi+8]
-                0x48, 0x89, 0x77, 0x00, // mov [rdi+0],rsi
-                0x31, 0xc0, // xor eax,eax: no trap
+                0x48, 0x89, 0xd0, // mov rax,rdx
                 0xc3,
             ]
         );
@@ -387,11 +394,11 @@ mod tests_x86 {
             no_gc: true,
             ..VmConfig::default()
         });
-        let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
-        slots[0..3].copy_from_slice(&[1, 2, 3]);
-        let (_arena, f) = exec(jit.code());
-        unsafe { f(&mut vm as *mut Vm as *mut u64) };
-        let payload = unsafe { std::slice::from_raw_parts(slots[0] as *const u64, 4) };
+        for (i, arg) in [1, 2, 3].into_iter().enumerate() {
+            *vm.r_mut(i) = purple_garden_runtime::Value(arg);
+        }
+        enter(jit.code(), &mut vm);
+        let payload = unsafe { std::slice::from_raw_parts(vm.r(0).0 as *const u64, 4) };
         assert_eq!(payload, &[1, 2, 3, 255]);
     }
 
@@ -605,10 +612,10 @@ mod tests_x86 {
 
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
-        let (_arena, f) = exec(jit.code());
-        let mut regs = [30, 1, 2, 3, 4, 5];
-        unsafe { f(regs.as_mut_ptr()) };
-        assert_eq!(regs[0], 10 + 30 + 1 + 2 + 3 + 4 + 5);
+        assert_eq!(
+            run(jit.code(), [30, 1, 2, 3, 4, 5])[0],
+            10 + 30 + 1 + 2 + 3 + 4 + 5
+        );
     }
 
     /// Power of two divisors lower to shifts, which have to truncate toward zero like the VM.
@@ -802,10 +809,7 @@ mod tests_x86 {
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit native entry call");
         assert!(!calls_jit_sys(jit.code()));
-        assert_eq!(
-            f64::from_bits(run(jit.code(), [3, 1.5f64.to_bits(), 0])[0]),
-            4.5
-        );
+        assert_eq!(run_double(jit.code(), [3, 1.5f64.to_bits(), 0]), 4.5);
     }
 
     /// `fn g(x:Int) Int { add_one(x) + x }`: x survives the call in a register the callee keeps.
@@ -1119,8 +1123,8 @@ mod tests_x86 {
         let _ = record_ty;
     }
 
-    /// `fn f() Double { 3.1415 }`: the bits are staged through rax into an
-    /// xmm, which the return stores to vm.r[0] as the raw double.
+    /// `fn f() Double { 3.1415 }`: the bits are staged through rax into xmm0,
+    /// where the double is returned.
     #[test]
     fn compiles_double_const_returning_function() {
         let mut func = Func::new("double_ret", Id(0), vec![], Some(Type::Double));
@@ -1148,12 +1152,10 @@ mod tests_x86 {
         expected.extend_from_slice(&3.1415f64.to_bits().to_le_bytes());
         expected.extend_from_slice(&[
             0x66, 0x48, 0x0f, 0x6e, 0xc0, // movq xmm0, rax
-            0xf2, 0x0f, 0x11, 0x47, 0x00, // movsd [rdi+0], xmm0
-            0x31, 0xc0, // xor eax, eax: no trap
             0xc3,
         ]);
         assert_eq!(jit.code(), expected);
-        assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), 3.1415);
+        assert_eq!(run_double(jit.code(), [0, 0, 0]), 3.1415);
     }
 
     /// Tail calls to other functions aren't lowered yet, so a function using them stays bytecode.
@@ -1175,8 +1177,7 @@ mod tests_x86 {
         assert!(Jit::new().compile_func(&func).is_none());
     }
 
-    /// `fn f() Double { lhs <op> rhs }`, the operands loaded as constants since
-    /// double params aren't lowered yet.
+    /// `fn f() Double { lhs <op> rhs }`, the operands loaded as constants.
     fn double_bin_func(op: BinOp, lhs: f64, rhs: f64) -> Func<'static> {
         let double = |id| TypeId {
             id: Id(id),
@@ -1228,7 +1229,7 @@ mod tests_x86 {
             let mut jit = Jit::new();
             jit.compile_func(&double_bin_func(op, 7.0, 2.0))
                 .expect("jit double bin op");
-            assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), expected);
+            assert_eq!(run_double(jit.code(), [0, 0, 0]), expected);
         }
     }
 
@@ -1391,10 +1392,7 @@ mod tests_x86 {
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit cast");
         for n in [0i64, -7, 1 << 53] {
-            assert_eq!(
-                f64::from_bits(run(jit.code(), [n as u64, 0, 0])[0]),
-                n as f64
-            );
+            assert_eq!(run_double(jit.code(), [n as u64, 0, 0]), n as f64);
         }
     }
 
@@ -1473,7 +1471,7 @@ mod tests_x86 {
         }
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit double loop");
-        let run = |n: u64| f64::from_bits(run(jit.code(), [n, 5f64.to_bits(), 2f64.to_bits()])[0]);
+        let run = |n: u64| run_double(jit.code(), [n, 5f64.to_bits(), 2f64.to_bits()]);
         assert_eq!(run(0), 3.0);
         assert_eq!(run(3), -3.0);
         assert_eq!(run(4), 3.0);
@@ -1489,7 +1487,7 @@ mod tests_x86 {
             let mut jit = Jit::new();
             jit.compile_func(&double_bin_func(BinOp::DDiv, 1.0, zero))
                 .expect("jit ddiv");
-            assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), expected);
+            assert_eq!(run_double(jit.code(), [0, 0, 0]), expected);
         }
     }
 
@@ -1499,20 +1497,26 @@ mod tests_x86 {
     /// Vm is repr(C) with r as its first field and Value is repr(transparent)
     /// over u64, so rdi is &vm.r[0] the native fn receives &mut Vm. The page
     /// pointer transmutes directly to BuiltinFn, entered through
-    /// `enter_native`. A bare `ret` leaves r0 untouched.
+    /// `enter_native`, which loads r0 into rsi and stores rax back into r0.
     #[test]
     fn jit_fn_injected_as_syscall_and_dispatched() {
         use purple_garden_runtime::{Vm, VmConfig, op::Op};
 
         let mut arena = super::CodeArena::new().expect("code arena");
-        let entry = arena.push(&[0xc3]).expect("arena has room");
+        // mov rax,rsi; ret: returns its first argument
+        let entry = arena
+            .push(&[0x48, 0x89, 0xf0, 0xc3])
+            .expect("arena has room");
         arena.seal().expect("seal arena");
 
         let syscalls = vec![entry];
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = vec![
             Op::LoadI { dst: 0, value: 187 },
-            Op::Native { idx: 0 },
+            Op::Native {
+                idx: 0,
+                returns_double: false,
+            },
             Op::Halt,
         ];
         vm.run::<false>(&syscalls).expect("vm run");

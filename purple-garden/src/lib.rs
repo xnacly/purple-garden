@@ -581,8 +581,13 @@ impl<'p> Program<'p> {
                 }
             }
             CcCallTarget::Native { idx } => {
+                let enter = if function.signature.ret == embed::Type::Double {
+                    purple_garden_runtime::enter_native_double
+                } else {
+                    purple_garden_runtime::enter_native
+                };
                 unsafe {
-                    purple_garden_runtime::enter_native(
+                    enter(
                         (&mut self.vm as *mut Vm).cast(),
                         self.syscalls[idx as usize],
                     )

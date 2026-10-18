@@ -5,51 +5,87 @@ use crate::{
     gc::{AllocType, MAX_ALLOC_SIZE},
 };
 
-/// Calls the native function `target` from the interpreter. Saves every callee saved register
-/// and records the slot of the call's return address in [`Vm::native_entry_rsp`], so
-/// [`jit_abort`] can leave native code from any depth and both paths restore the registers.
-///
-/// # Safety
-///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`] and `target` native code
-/// following [`BuiltinFn`]'s convention.
-#[cfg(target_arch = "x86_64")]
-#[unsafe(naked)]
-pub unsafe extern "C" fn enter_native(vm: *mut c_void, target: BuiltinFn) {
-    std::arch::naked_asm!(
-        "push rbx",
-        "push rbp",
-        "push r12",
-        "push r13",
-        "push r14",
-        "push r15",
-        // the return address and six pushes leave rsp 8 off the 16 byte alignment call wants
-        "sub rsp, 8",
-        "lea rax, [rsp - 8]",
-        "mov [rdi + {entry_rsp}], rax",
-        "call rsi",
-        // returning and jit_abort both land here
-        "add rsp, 8",
-        "pop r15",
-        "pop r14",
-        "pop r13",
-        "pop r12",
-        "pop rbp",
-        "pop rbx",
-        "ret",
-        entry_rsp = const crate::NATIVE_ENTRY_RSP_OFFSET,
-    )
+/// Generates an [`enter_native`]-style entry storing the result with `$store`.
+macro_rules! enter_native {
+    ($(#[$doc:meta])* $name:ident, $store:literal) => {
+        $(#[$doc])*
+        ///
+        /// # Safety
+        ///
+        /// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`] and `target` native code
+        /// taking its arguments by position, see [`enter_native`].
+        #[cfg(target_arch = "x86_64")]
+        #[unsafe(naked)]
+        pub unsafe extern "C" fn $name(vm: *mut c_void, target: BuiltinFn) {
+            std::arch::naked_asm!(
+                "push rbx",
+                "push rbp",
+                "push r12",
+                "push r13",
+                "push r14",
+                "push r15",
+                // the return address and six pushes leave rsp 8 off the 16 byte alignment
+                // call wants
+                "sub rsp, 8",
+                "lea rax, [rsp - 8]",
+                "mov [rdi + {entry_rsp}], rax",
+                "mov r11, rsi",
+                // argument i arrives in the i-th gpr and the i-th xmm register, the callee uses
+                // the one its type needs
+                "mov rsi, [rdi]",
+                "mov rdx, [rdi + 8]",
+                "mov rcx, [rdi + 16]",
+                "mov r8, [rdi + 24]",
+                "mov r9, [rdi + 32]",
+                "mov r10, [rdi + 40]",
+                "movq xmm0, [rdi]",
+                "movq xmm1, [rdi + 8]",
+                "movq xmm2, [rdi + 16]",
+                "movq xmm3, [rdi + 24]",
+                "movq xmm4, [rdi + 32]",
+                "movq xmm5, [rdi + 40]",
+                "call r11",
+                // returning and jit_abort both land here
+                $store,
+                "add rsp, 8",
+                "pop r15",
+                "pop r14",
+                "pop r13",
+                "pop r12",
+                "pop rbp",
+                "pop rbx",
+                "ret",
+                entry_rsp = const crate::NATIVE_ENTRY_RSP_OFFSET,
+            )
+        }
+
+        /// Native code only exists on x86_64, elsewhere there is nothing to enter.
+        ///
+        /// # Safety
+        ///
+        /// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
+        #[cfg(not(target_arch = "x86_64"))]
+        pub unsafe extern "C" fn $name(vm: *mut c_void, target: BuiltinFn) {
+            unsafe { target(vm) }
+        }
+    };
 }
 
-/// Native code only exists on x86_64, elsewhere there is nothing to abort from.
-///
-/// # Safety
-///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`] and `target` follow
-/// [`BuiltinFn`]'s convention.
-#[cfg(not(target_arch = "x86_64"))]
-pub unsafe extern "C" fn enter_native(vm: *mut c_void, target: BuiltinFn) {
-    unsafe { target(vm) }
+enter_native! {
+    /// Calls the native function `target` from the interpreter. Native functions take argument i
+    /// in `rsi, rdx, rcx, r8, r9, r10`[i] or `xmm0..xmm5`[i] by type and return in `rax`, this
+    /// loads `vm.r[0..6]` into both and stores `rax` into `vm.r[0]`, see [`enter_native_double`]
+    /// for Double results.
+    ///
+    /// Saves every callee saved register and records the slot of the call's return address in
+    /// [`Vm::native_entry_rsp`], so [`jit_abort`] can leave native code from any depth and both
+    /// paths restore the registers.
+    enter_native, "mov [rdi], rax"
+}
+
+enter_native! {
+    /// [`enter_native`] for a native function returning a Double in `xmm0`.
+    enter_native_double, "movq [rdi], xmm0"
 }
 
 /// Leaves native code from any depth, as if the outermost native function entered through
