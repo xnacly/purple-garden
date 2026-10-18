@@ -174,7 +174,16 @@ mod tests_x86 {
         vm: &mut purple_garden_runtime::Vm,
         enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
     ) {
-        let mut arena = CodeArena::new().expect("code arena");
+        enter_in(CodeArena::new().expect("code arena"), code, vm, enter);
+    }
+
+    /// Enter `code` placed after the natives already in `arena`.
+    fn enter_in(
+        mut arena: CodeArena,
+        code: &[u8],
+        vm: &mut purple_garden_runtime::Vm,
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+    ) {
         let entry = arena.push(code).expect("code fits the arena");
         arena.seal().expect("seal the code arena");
         unsafe { enter((vm as *mut purple_garden_runtime::Vm).cast(), entry) };
@@ -200,13 +209,23 @@ mod tests_x86 {
         args: [u64; N],
         enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
     ) -> [u64; N] {
+        run_in(CodeArena::new().expect("code arena"), code, args, enter)
+    }
+
+    /// [`run_with`] for `code` placed after the natives already in `arena`.
+    fn run_in<const N: usize>(
+        arena: CodeArena,
+        code: &[u8],
+        args: [u64; N],
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+    ) -> [u64; N] {
         use purple_garden_runtime::{Value, Vm, VmConfig};
 
         let mut vm = Vm::new(VmConfig::default());
         for (i, &arg) in args.iter().enumerate() {
             *vm.r_mut(i) = Value(arg);
         }
-        enter_with(code, &mut vm, enter);
+        enter_in(arena, code, &mut vm, enter);
         std::array::from_fn(|i| vm.r(i).0)
     }
 
@@ -925,7 +944,6 @@ mod tests_x86 {
         );
         let mut arena = CodeArena::new().expect("code arena");
         let inc = arena.push(&inc).expect("code fits the arena");
-        arena.seal().expect("seal the code arena");
 
         let mut func = Func::new("f", Id(2), vec![int(0)], Some(Type::Int));
         let params = func.intern_params([Id(0)]);
@@ -955,15 +973,18 @@ mod tests_x86 {
             }),
         });
 
-        let code = compile_with(&func, &HashMap::from_iter([(Id(1), inc)]), 0);
-        assert_eq!(run(&code, [5])[0], 11);
+        let code = compile_with(
+            &func,
+            &HashMap::from_iter([(Id(1), inc)]),
+            arena.next_entry(),
+        );
+        let ret = run_in(arena, &code, [5], purple_garden_runtime::enter_native);
+        assert_eq!(ret[0], 11);
     }
 
     /// `fn f(x:Int) Int { inc(x) * 2 }`: a direct `call rel32` to inc, both in one arena.
     #[test]
     fn calls_other_natives_directly() {
-        use purple_garden_runtime::{Value, Vm, VmConfig};
-
         let int = |id| TypeId {
             id: Id(id),
             ty: Type::Int,
@@ -1011,13 +1032,8 @@ mod tests_x86 {
                 .any(|w| w == (inc as usize as u64).to_le_bytes()),
             "no movabs of inc's address"
         );
-        let f = arena.push(&code).expect("code fits the arena");
-        arena.seal().expect("seal the code arena");
-
-        let mut vm = Vm::new(VmConfig::default());
-        *vm.r_mut(0) = Value(20);
-        unsafe { purple_garden_runtime::enter_native((&mut vm as *mut Vm).cast(), f) };
-        assert_eq!(vm.r(0).as_int(), 42);
+        let ret = run_in(arena, &code, [20], purple_garden_runtime::enter_native);
+        assert_eq!(ret[0], 42);
     }
 
     /// `fn g(x:Double y:Double) Double { half(y) }` as a tail call, y moving into xmm0.
@@ -1034,7 +1050,6 @@ mod tests_x86 {
         );
         let mut arena = CodeArena::new().expect("code arena");
         let half = arena.push(&half).expect("code fits the arena");
-        arena.seal().expect("seal the code arena");
 
         let mut func = Func::new("g", Id(2), vec![double(0), double(1)], Some(Type::Double));
         let params = func.intern_params([Id(0), Id(1)]);
@@ -1051,8 +1066,19 @@ mod tests_x86 {
             }),
         });
 
-        let code = compile_with(&func, &HashMap::from_iter([(Id(1), half)]), 0);
-        assert_eq!(run_double(&code, [1f64.to_bits(), 9f64.to_bits()]), 4.5);
+        let code = compile_with(
+            &func,
+            &HashMap::from_iter([(Id(1), half)]),
+            arena.next_entry(),
+        );
+        let args = [1f64.to_bits(), 9f64.to_bits()];
+        let ret = run_in(
+            arena,
+            &code,
+            args,
+            purple_garden_runtime::enter_native_double,
+        );
+        assert_eq!(f64::from_bits(ret[0]), 4.5);
     }
 
     /// `fn f(a, b) int { a <op> b }` with a register divisor.

@@ -122,8 +122,9 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     // an even number of pushes leaves it misaligned. Only matters if the body
     // calls helpers.
     let pad = calls && saved.clone().count() % 2 == 0;
+    let frameless = !pad && saved.clone().next().is_none();
 
-    if !pad && saved.clone().next().is_none() {
+    if frameless {
         // The epilogue is a bare `ret`, so each `jmp epilogue` (e9 + rel32) in
         // the body becomes `ret` (c3). The rel32 bytes become int3 (cc): nothing
         // executes past a ret and nothing jumps into them, and rewriting in
@@ -159,10 +160,13 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
         patch_rel32(out, body_at + rel, body_at + rel + 4, start).expect("within the function");
     }
     // Calls to other natives, as distances from where this function lands at `at`.
-    for &(rel, target) in &buffers.native_refs {
-        let from = at + (body_at + rel + 4 - start);
+    let patch_native = |out: &mut Vec<u8, S>, rel: usize, target: usize| {
+        let from = at + (rel + 4 - start);
         let disp = i32::try_from(target as isize - from as isize).expect("natives share an arena");
-        out[body_at + rel..body_at + rel + 4].copy_from_slice(&disp.to_le_bytes());
+        out[rel..rel + 4].copy_from_slice(&disp.to_le_bytes());
+    };
+    for &(rel, target) in &buffers.native_refs {
+        patch_native(out, body_at + rel, target);
     }
     let epilogue = |out: &mut Vec<u8, S>| {
         if pad {
@@ -174,15 +178,26 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     };
     epilogue(out);
     Insn::Ret.encode(out);
-    // A tail call leaves the frame like a return, then jumps to the callee in rax, which returns
-    // to this function's caller.
-    if !buffers.tail_refs.is_empty() {
-        let tail_at = out.len();
+    // A tail call leaves the frame like a return, then jumps to the callee, which returns to this
+    // function's caller. Without a frame that is the jump itself, otherwise each callee gets an
+    // epilogue ending in the jump.
+    buffers
+        .tail_refs
+        .sort_unstable_by_key(|&(_, target)| target);
+    for refs in buffers.tail_refs.chunk_by(|a, b| a.1 == b.1) {
+        let target = refs[0].1;
+        if frameless {
+            for &(rel, _) in refs {
+                patch_native(out, body_at + rel, target);
+            }
+            continue;
+        }
+        let stub = out.len();
         epilogue(out);
-        Insn::JmpReg { reg: GPR_SCRATCH }.encode(out);
-        for &rel in &buffers.tail_refs {
-            patch_rel32(out, body_at + rel, body_at + rel + 4, tail_at)
-                .expect("within the function");
+        let rel = encode::jump(out, Cond::Always);
+        patch_native(out, rel, target);
+        for &(rel, _) in refs {
+            patch_rel32(out, body_at + rel, body_at + rel + 4, stub).expect("within the function");
         }
     }
 
@@ -195,8 +210,8 @@ enum Target {
     Block(ir::Id),
     /// The shared epilogue appended after the body.
     Epilogue,
-    /// The epilogue of tail calls, appended after [`Target::Epilogue`] once the frame is known.
-    TailEpilogue,
+    /// A tail call to the native function at this address, resolved once the frame is known.
+    Tail(usize),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -220,8 +235,8 @@ pub struct Scratch<S: Allocator> {
     saves: Vec<(Preg, Preg), S>,
     /// Body offsets of the rel32s (self calls) that address the function's own start.
     self_refs: Vec<usize, S>,
-    /// Body offsets of the rel32s (tail calls) that jump to the tail epilogue.
-    tail_refs: Vec<usize, S>,
+    /// Body offsets of the rel32s (tail calls) and the native function each jumps to.
+    tail_refs: Vec<(usize, usize), S>,
     /// Body offsets of the rel32s (native calls) and the native function each calls.
     native_refs: Vec<(usize, usize), S>,
 }
@@ -344,7 +359,7 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     /// Reusable `(reg, copy)` buffer of [`Lowering::save_clobbered`].
     saves: &'a mut Vec<(Preg, Preg), S>,
     self_refs: &'a mut Vec<usize, S>,
-    tail_refs: &'a mut Vec<usize, S>,
+    tail_refs: &'a mut Vec<(usize, usize), S>,
     native_refs: &'a mut Vec<(usize, usize), S>,
 }
 
@@ -1245,11 +1260,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                 }
                 self.parallel_move(moves);
-                self.emit(Insn::MovAbs {
-                    dst: GPR_SCRATCH,
-                    imm: f as usize as u64,
-                });
-                self.jump(Cond::Always, Target::TailEpilogue);
+                self.jump(Cond::Always, Target::Tail(f as usize));
             }
             ir::Terminator::Switch {
                 subject,
@@ -1738,8 +1749,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         for i in 0..self.patches.len() {
             let Patch { rel, target, from } = self.patches[i];
             let offset = match target {
-                Target::TailEpilogue => {
-                    self.tail_refs.push(rel);
+                Target::Tail(f) => {
+                    self.tail_refs.push((rel, f));
                     continue;
                 }
                 Target::Epilogue => end,
