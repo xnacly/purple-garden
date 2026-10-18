@@ -648,12 +648,19 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     src: GPR_SCRATCH,
                 });
             }
+            // a Void value is never read, whatever the register holds will do
+            ir::Instr::LoadConst {
+                dst,
+                value: ir::Const::Undefined,
+                ..
+            } => {
+                self.def(dst, self.pos + 1);
+            }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let Some(imm) = (match value {
                     ir::Const::False => Some(0),
                     ir::Const::True => Some(1),
                     ir::Const::Int(i) => Some(*i),
-                    ir::Const::Undefined => Some(Value::UNDEF.0 as i64),
                     _ => None,
                 }) else {
                     bail!(self, "const is not a bool or i32");

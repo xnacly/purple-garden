@@ -1186,6 +1186,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                         let value = matches!(value, Const::True) as i32;
                         self.emit(Op::LoadI { dst, value });
                     }
+                    // a Void value is never read, whatever the register holds will do
+                    Const::Undefined => {}
                     _ => {
                         let idx = self.intern(value);
                         self.emit(Op::LoadG { dst, idx });
