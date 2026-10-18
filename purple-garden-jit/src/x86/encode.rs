@@ -345,6 +345,11 @@ pub enum Insn {
         dst: Xmm,
         src: Reg,
     },
+    /// `movq r{dst}, xmm{src}`: the low double's bits into a GPR.
+    MovqFromXmm {
+        dst: Reg,
+        src: Xmm,
+    },
     /// `cvtsi2sd xmm{dst}, r{src}`: the signed int as the low double, the high
     /// lane of dst is left alone.
     Cvtsi2sd {
@@ -519,6 +524,10 @@ impl Insn {
             // doesn't go through [`sse`], which emits REX only for high regs.
             Insn::MovqToXmm { dst, src } => {
                 code.extend_from_slice(&[0x66, rex(dst.0, src.0), 0x0f, 0x6e, modrm(dst.0, src.0)]);
+            }
+            // 66 REX.W 0F 7E /r = `movq r/m64, xmm`, ModRM.reg is the xmm src.
+            Insn::MovqFromXmm { dst, src } => {
+                code.extend_from_slice(&[0x66, rex(src.0, dst.0), 0x0f, 0x7e, modrm(src.0, dst.0)]);
             }
             // F2 REX.W 0F 2A /r = `cvtsi2sd xmm, r/m64`, REX.W for the 64-bit int.
             Insn::Cvtsi2sd { dst, src } => {
@@ -809,6 +818,20 @@ mod tests {
     fn sse_move_encodings() {
         use super::{R9, R12, RAX, RBX, Xmm};
 
+        assert_eq!(
+            enc(Insn::MovqFromXmm {
+                dst: RAX,
+                src: Xmm(3)
+            }),
+            [0x66, 0x48, 0x0f, 0x7e, 0xd8]
+        ); // movq rax,xmm3
+        assert_eq!(
+            enc(Insn::MovqFromXmm {
+                dst: R12,
+                src: Xmm(9)
+            }),
+            [0x66, 0x4d, 0x0f, 0x7e, 0xcc]
+        ); // movq r12,xmm9
         assert_eq!(
             enc(Insn::Cvtsi2sd {
                 dst: Xmm(0),

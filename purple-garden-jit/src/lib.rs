@@ -771,7 +771,7 @@ mod tests_x86 {
     fn calls_native_entries_with_hardware_args_and_result() {
         let mut func = Func::new(
             "f",
-            Id(0),
+            Id(1),
             vec![
                 TypeId {
                     id: Id(0),
@@ -1127,7 +1127,7 @@ mod tests_x86 {
     /// where the double is returned.
     #[test]
     fn compiles_double_const_returning_function() {
-        let mut func = Func::new("double_ret", Id(0), vec![], Some(Type::Double));
+        let mut func = Func::new("double_ret", Id(1), vec![], Some(Type::Double));
         func.blocks.push(Block {
             tombstone: false,
             id: Id(0),
@@ -1183,7 +1183,7 @@ mod tests_x86 {
             id: Id(id),
             ty: Type::Double,
         };
-        let mut func = Func::new("double_bin", Id(0), vec![], Some(Type::Double));
+        let mut func = Func::new("double_bin", Id(1), vec![], Some(Type::Double));
         func.blocks.push(Block {
             tombstone: false,
             id: Id(0),
@@ -1273,7 +1273,7 @@ mod tests_x86 {
     fn cast_func(from: Type<'static>, to: Type<'static>) -> Func<'static> {
         let mut func = Func::new(
             "cast",
-            Id(0),
+            Id(1),
             vec![TypeId {
                 id: Id(0),
                 ty: from.clone(),
@@ -1404,7 +1404,7 @@ mod tests_x86 {
         let ty = |id, ty| TypeId { id: Id(id), ty };
         let mut func = Func::new(
             "swap",
-            Id(0),
+            Id(1),
             vec![ty(0, Type::Int), ty(1, Type::Double), ty(2, Type::Double)],
             Some(Type::Double),
         );
@@ -1459,7 +1459,7 @@ mod tests_x86 {
                     span: 0,
                 }],
                 term: Some(Terminator::Tail {
-                    func: Id(0),
+                    func: Id(1),
                     args: swapped,
                     span: 0,
                 }),

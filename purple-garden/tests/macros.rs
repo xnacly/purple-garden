@@ -410,3 +410,13 @@ fn bytecode_reads_double_results_of_native_calls() {
     let squared: f64 = program.run_take().expect("runs");
     assert_eq!(squared, 2.25);
 }
+
+/// A native entry hands its last value to the vm in rax, Doubles too.
+#[test]
+fn native_entry_returns_doubles_to_the_vm() {
+    let mut program = purple_garden::Pg::new()
+        .compile(b"fn half(x:Double) Double { x / 2.0 }\nlet h = half(5.0)\nh * 2.0")
+        .expect("compiles");
+    let value: f64 = program.run_take().expect("runs");
+    assert_eq!(value, 5.0);
+}

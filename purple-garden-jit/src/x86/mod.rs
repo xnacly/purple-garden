@@ -1073,13 +1073,19 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         match term {
             ir::Terminator::Return { value, .. } => {
                 if let Some(value) = value {
-                    let src = self.ensure_register(*value);
-                    let ret = match src {
-                        Preg::Gpr(_) => Preg::Gpr(RAX.0),
-                        Preg::Fpr(_) => Preg::Fpr(0),
-                    };
-                    if src != ret {
-                        self.mov(ret, src);
+                    match self.ensure_register(*value) {
+                        // only enter_native calls the entry, it reads the result from rax
+                        Preg::Fpr(fpr) if self.func.id == ir::Id(0) => {
+                            self.emit(Insn::MovqFromXmm {
+                                dst: RAX,
+                                src: Xmm(fpr),
+                            });
+                        }
+                        Preg::Fpr(fpr) if fpr != 0 => self.mov(Preg::Fpr(0), Preg::Fpr(fpr)),
+                        Preg::Gpr(gpr) if gpr != RAX.0 => {
+                            self.mov(Preg::Gpr(RAX.0), Preg::Gpr(gpr))
+                        }
+                        _ => {}
                     }
                 }
                 self.jump(Cond::Always, Target::Epilogue);
