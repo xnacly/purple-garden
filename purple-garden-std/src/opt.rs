@@ -21,4 +21,18 @@ pub mod opt {
     pub fn some(inner: Slot<"T">) -> Option<Slot<"T">> {
         Some(inner)
     }
+
+    /// Returns the value `opt` holds, `default` if it is None.
+    ///
+    /// ## Examples
+    ///
+    /// ```garden
+    /// import ("opt" "str")
+    ///
+    /// opt.or(str.get("garden" 9) 0)
+    /// ```
+    #[pg_fn(with_slots)]
+    pub fn or(opt: Option<Slot<"T">>, default: Slot<"T">) -> Slot<"T"> {
+        opt.unwrap_or(default)
+    }
 }
