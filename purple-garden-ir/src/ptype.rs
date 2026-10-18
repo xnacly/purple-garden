@@ -22,22 +22,29 @@ pub enum Type<'t> {
     Int,
     Double,
     Str,
-    /// Option layout is:
+    /// An Option is a pointer to a boxed tag and payload, thus one word whatever it wraps. Option
+    /// layout is:
     ///
     /// ```text
     /// byte  0        8        16
     ///       +--------+--------+
-    ///       | tag    | ptr    |
+    ///       | tag    | payload|
     ///       +--------+--------+
     /// ```
     ///
     /// Where tag is either 0 for None or 1 for Some
     ///
+    /// The payload is the wrapped value's word: Int, Double and Bool inline, Str, Array, Record
+    /// and nested Options as their pointer. All Nones share one block per vm.
+    ///
     /// PERF: Niche optimisation to avoid heap allocs via `Type::option_repr -> OptionRepr { NullPtr
-    /// | NaNSentinal | BoolSentinal | Tagged }`
-    /// - optimise to use nullptr for None and ptr for some, thus just being 8 byte
-    /// - optimise to use NaN values for Option(Double)
-    /// - optimise to use non 0..1 values for Option(Bool)
+    /// | BoolSentinal | Tagged }`, every representation stays one word:
+    /// - Str, Array, Record: nullptr for None and the pointer itself for Some
+    /// - Bool: 2 for None, 0 and 1 for Some
+    /// - Int and Double have no value to spare and stay Tagged, NaN for None is out since NaN is a
+    ///   valid Double
+    /// - a niche needs a spare value in the inner representation: Option<Option<Str>> can't use
+    ///   nullptr twice, so the outer Option stays Tagged with the inner word, possibly 0, as payload
     Option(&'t Type<'t>),
     /// Arrays are pointer-sized values. The heap payload behind an `Array<T>`
     /// is contiguous and starts with a length word:
@@ -233,11 +240,11 @@ impl<'t> Type<'t> {
                 unreachable!("slots size asked, this is not supposed to happen")
             }
             Type::Record(fields) => record_size(fields),
-            Type::Option(inner) => WORD_SIZE + inner.size(),
             Type::Bool
             | Type::Int
             | Type::Double
             | Type::Str
+            | Type::Option(_)
             | Type::Array(_)
             | Type::Foreign(_) => WORD_SIZE,
         }
@@ -371,6 +378,28 @@ mod tests {
 
         assert_eq!(ty.size(), 8);
         assert_eq!(ty.align(), 8);
+    }
+
+    #[test]
+    fn options_are_pointers_to_their_box() {
+        let point = record(vec![("x", Type::Int), ("y", Type::Int)]);
+        for inner in [
+            Type::Int,
+            Type::Double,
+            Type::Bool,
+            Type::Str,
+            point,
+            arr(Type::Int),
+            opt(Type::Int),
+        ] {
+            let ty = opt(inner);
+            assert_eq!(ty.size(), 8, "{ty}");
+            assert_eq!(ty.align(), 8, "{ty}");
+        }
+
+        let ty = record(vec![("a", opt(Type::Int)), ("b", Type::Int)]);
+        assert_eq!(ty.size(), 16);
+        assert_eq!(ty.field_offset("b"), Some(8));
     }
 
     #[test]
