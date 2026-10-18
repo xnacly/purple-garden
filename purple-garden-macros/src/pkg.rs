@@ -23,7 +23,6 @@ struct PgFunction {
     intrinsic: Option<Ident>,
     args: Vec<FunctionArg>,
     ret: Type,
-    result: bool,
     raw: bool,
 }
 
@@ -158,7 +157,7 @@ fn expand_function(api: &Path, fun: &mut ItemFn) -> syn::Result<ExpandedFunction
 impl PgFunction {
     fn parse(fun: &mut ItemFn) -> syn::Result<Self> {
         let ident = fun.sig.ident.clone();
-        let (ret, result) = return_type(&fun.sig.output);
+        let ret = return_type(&fun.sig.output)?;
         let attrs = take_pg_fn_attrs(&mut fun.attrs)?;
 
         if attrs.raw && attrs.pure {
@@ -198,7 +197,6 @@ impl PgFunction {
             with_slots: attrs.with_slots,
             intrinsic: attrs.intrinsic,
             ret,
-            result,
             raw: attrs.raw,
             ident,
         })
@@ -242,11 +240,10 @@ impl PgFunction {
     }
 
     fn wrapper_call(&self, api: &Path) -> TokenStream2 {
-        match (self.result, returns_unit(&self.ret)) {
-            (false, true) => self.call_unit_function(),
-            (false, false) => self.call_value_function(api),
-            (true, true) => self.call_unit_result_function(api),
-            (true, false) => self.call_value_result_function(api),
+        if returns_unit(&self.ret) {
+            self.call_unit_function()
+        } else {
+            self.call_value_function(api)
         }
     }
 
@@ -261,11 +258,10 @@ impl PgFunction {
     }
 
     fn unsafe_wrapper_call(&self, api: &Path) -> TokenStream2 {
-        match (self.result, returns_unit(&self.ret)) {
-            (false, true) => self.call_unsafe_unit_function(),
-            (false, false) => self.call_unsafe_value_function(api),
-            (true, true) => self.call_unsafe_unit_result_function(api),
-            (true, false) => self.call_unsafe_value_result_function(api),
+        if returns_unit(&self.ret) {
+            self.call_unsafe_unit_function()
+        } else {
+            self.call_unsafe_value_function(api)
         }
     }
 
@@ -290,33 +286,6 @@ impl PgFunction {
         }
     }
 
-    fn call_unit_result_function(&self, api: &Path) -> TokenStream2 {
-        let fn_name = &self.ident;
-        let args = self.arg_bindings();
-
-        quote! {
-            if let Err(msg) = #fn_name(#(#args),*) {
-                vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc });
-            }
-        }
-    }
-
-    fn call_value_result_function(&self, api: &Path) -> TokenStream2 {
-        let fn_name = &self.ident;
-        let args = self.arg_bindings();
-        let ret_ty = &self.ret;
-
-        quote! {
-            match #fn_name(#(#args),*) {
-                Ok(ret) => {
-                    let ret = <#ret_ty as #api::embed::IntoVm>::into_vm(ret, vm);
-                    *vm.r_mut(0) = ret;
-                }
-                Err(msg) => vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc }),
-            }
-        }
-    }
-
     fn call_unsafe_unit_function(&self) -> TokenStream2 {
         let fn_name = &self.ident;
         let args = self.unsafe_arg_bindings();
@@ -338,37 +307,10 @@ impl PgFunction {
         }
     }
 
-    fn call_unsafe_unit_result_function(&self, api: &Path) -> TokenStream2 {
-        let fn_name = &self.ident;
-        let args = self.unsafe_arg_bindings();
-
-        quote! {
-            if let Err(msg) = #fn_name(#(#args),*) {
-                vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc });
-            }
-        }
-    }
-
-    fn call_unsafe_value_result_function(&self, api: &Path) -> TokenStream2 {
-        let fn_name = &self.ident;
-        let args = self.unsafe_arg_bindings();
-        let ret_ty = &self.ret;
-
-        quote! {
-            match #fn_name(#(#args),*) {
-                Ok(ret) => {
-                    let ret = <#ret_ty as #api::embed::IntoVm>::into_vm(ret, vm);
-                    *vm.r_mut(0) = ret;
-                }
-                Err(msg) => vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc }),
-            }
-        }
-    }
-
     /// The entry native code calls directly, see `NativeFn`: Rust `f64` arguments and result stay
     /// `f64`, everything else crosses as a `Value` word and is decoded like in the wrapper.
     fn native(&self, api: &Path) -> Option<TokenStream2> {
-        if self.result || self.intrinsic.is_some() {
+        if self.intrinsic.is_some() {
             return None;
         }
         let name = format_ident!("__pg_native_{}", self.ident);
@@ -483,7 +425,7 @@ impl PgFunction {
             None => quote!(None),
         };
         let ret_ty = &self.ret;
-        let native = if self.result || self.intrinsic.is_some() {
+        let native = if self.intrinsic.is_some() {
             quote!(None)
         } else {
             let name = format_ident!("__pg_native_{}", self.ident);
@@ -585,30 +527,27 @@ fn parse_garden_args<'a>(
     .collect()
 }
 
-fn return_type(output: &ReturnType) -> (Type, bool) {
+/// Builtins can't fail: a failure the caller can handle is an `Option`, the rest are traps the
+/// runtime raises itself.
+fn return_type(output: &ReturnType) -> syn::Result<Type> {
     match output {
-        ReturnType::Default => (syn::parse_quote!(()), false),
-        ReturnType::Type(_, ty) => result_ok_type(ty)
-            .map(|ok| (ok, true))
-            .unwrap_or_else(|| (ty.as_ref().clone(), false)),
+        ReturnType::Default => Ok(syn::parse_quote!(())),
+        ReturnType::Type(_, ty) => match ty.as_ref() {
+            Type::Path(path)
+                if path
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|s| s.ident == "Result") =>
+            {
+                Err(syn::Error::new_spanned(
+                    ty,
+                    "pg_fn functions cannot return Result, return an Option instead",
+                ))
+            }
+            ty => Ok(ty.clone()),
+        },
     }
-}
-
-fn result_ok_type(ty: &Type) -> Option<Type> {
-    let Type::Path(type_path) = ty else {
-        return None;
-    };
-    let segment = type_path.path.segments.last()?;
-    if segment.ident != "Result" {
-        return None;
-    }
-    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
-        return None;
-    };
-    let Some(syn::GenericArgument::Type(ok)) = args.args.first() else {
-        return None;
-    };
-    Some(ok.clone())
 }
 
 fn returns_unit(ty: &Type) -> bool {

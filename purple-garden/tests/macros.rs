@@ -112,10 +112,6 @@ mod native {
         format!("hi {name}")
     }
 
-    pub fn checked(n: i64) -> Result<i64, &'static str> {
-        Ok(n)
-    }
-
     #[purple_garden::pg_fn(with_slots)]
     pub fn id(x: Slot<"T">) -> Slot<"T"> {
         x
@@ -393,11 +389,6 @@ fn pg_fn_native_entries_take_and_return_hardware_values() {
         )
     };
     assert_eq!(unsafe { id(vm_ptr, Value::from(7_i64)) }.as_int(), 7);
-
-    assert!(
-        native("checked").is_none(),
-        "Result builtins have no native entry"
-    );
 }
 
 /// The entry tail calls a native Double function and stays bytecode, its `Op::Native` reads the
