@@ -344,6 +344,10 @@ pub enum Op {
         offset: u32,
     },
     Ret,
+    /// Trap with [`crate::Anomaly::AssertionFailed`] when `cond` is falsy.
+    Assert {
+        cond: u8,
+    },
     /// Stop the dispatch loop
     Halt,
     Nop,

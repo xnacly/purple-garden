@@ -1309,7 +1309,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     &self.scratch,
                 );
             }
-            ir::Instr::Assert { .. } => todo!("lower to Op::Assert"),
+            ir::Instr::Assert { cond, .. } => {
+                let cond = self.ensure_register(*cond);
+                self.emit(Op::Assert { cond });
+            }
             ir::Instr::Noop {} => {}
             ir::Instr::Bin {
                 op, dst, lhs, rhs, ..
@@ -1713,6 +1716,29 @@ mod tests {
             )),
             "expected int-to-double cast to lower to CastToDouble: {:?}",
             ops
+        );
+    }
+
+    #[test]
+    fn lowers_assert_to_op_assert() {
+        let ops = compile_one(entry_fun(
+            vec![
+                Instr::LoadConst {
+                    dst: type_id(0, Type::Bool),
+                    value: Const::True,
+                    span: 0,
+                },
+                Instr::Assert {
+                    cond: Id(0),
+                    span: 0,
+                },
+            ],
+            None,
+        ));
+
+        assert!(
+            has_op(&ops, |op| matches!(op, Op::Assert { cond: 0 })),
+            "expected Instr::Assert to lower to Op::Assert: {ops:?}"
         );
     }
 

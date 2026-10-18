@@ -529,6 +529,9 @@ impl<'vm> Vm<'vm> {
                         continue;
                     }
                 },
+                Op::Assert { cond } => unsafe {
+                    trap_if!(!r!(cond).as_bool(), Anomaly::AssertionFailed { pc });
+                },
                 Op::JmpEqI { lhs, imm, target } => unsafe {
                     if r!(lhs).as_int() == imm as i64 {
                         pc = target as usize;
@@ -940,6 +943,13 @@ mod ops {
             },
         ]);
         assert_eq!(vm.r(2).as_int(), 42);
+    }
+
+    #[test]
+    fn assert_traps_on_false_only() {
+        run(vec![Op::LoadI { dst: 0, value: 1 }, Op::Assert { cond: 0 }]);
+        let err = run_err(vec![Op::LoadI { dst: 0, value: 0 }, Op::Assert { cond: 0 }]);
+        assert!(matches!(err, Anomaly::AssertionFailed { pc: 1 }));
     }
 
     #[test]

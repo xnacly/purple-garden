@@ -264,6 +264,7 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                     "jmpt r{cond}, {target:04x} <{}>",
                     target_label(*target, cur_func)
                 ),
+                Op::Assert { cond } => format!("assert r{cond}"),
                 Op::JmpF { cond, target } => format!(
                     "jmpf r{cond}, {target:04x} <{}>",
                     target_label(*target, cur_func)

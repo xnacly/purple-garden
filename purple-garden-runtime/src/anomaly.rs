@@ -8,6 +8,7 @@ pub enum Anomaly {
     InvalidSyscall { pc: usize },
     AllocationFailed { pc: usize },
     StackOverflow { pc: usize },
+    AssertionFailed { pc: usize },
     Msg { msg: &'static str, pc: usize },
 }
 
@@ -27,6 +28,7 @@ impl Anomaly {
             Anomaly::InvalidSyscall { .. } => "Invalid syscall",
             Anomaly::AllocationFailed { .. } => "Allocation failed",
             Anomaly::StackOverflow { .. } => "Stack space exhausted",
+            Anomaly::AssertionFailed { .. } => "Assertion failed",
             Anomaly::Msg { msg, .. } => msg,
         }
     }
@@ -40,6 +42,7 @@ impl Anomaly {
             | Anomaly::StackOverflow { pc }
             | Anomaly::InvalidSyscall { pc }
             | Anomaly::AllocationFailed { pc }
+            | Anomaly::AssertionFailed { pc }
             | Anomaly::Msg { pc, .. } => *pc,
         }
     }
