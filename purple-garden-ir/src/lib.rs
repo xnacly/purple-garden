@@ -46,6 +46,15 @@ pub struct Fn<'f> {
     /// `println`. `Some` => callable only via the group name
     pub specialises: Option<&'f str>,
     pub with_slots: bool,
+    /// Lowered by the frontend instead of being called
+    pub intrinsic: Option<Intrinsic>,
+}
+
+/// Builtins the frontend lowers to IR instead of an [`Instr::Sys`] call, their Rust body never runs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Intrinsic {
+    /// [`Instr::Assert`] on the Bool argument
+    Assert,
 }
 
 impl<'f> Fn<'f> {

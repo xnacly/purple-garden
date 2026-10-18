@@ -20,6 +20,7 @@ struct PgFunction {
     pure: bool,
     specialises: Option<String>,
     with_slots: bool,
+    intrinsic: Option<Ident>,
     args: Vec<FunctionArg>,
     ret: Type,
     result: bool,
@@ -162,6 +163,13 @@ impl PgFunction {
             ));
         }
 
+        if attrs.intrinsic.is_some() && (attrs.pure || attrs.specialises.is_some()) {
+            return Err(syn::Error::new(
+                ident.span(),
+                "pg_fn(intrinsic) functions are lowered instead of called, they cannot be pure or specialise an overload group",
+            ));
+        }
+
         if attrs.with_slots && attrs.specialises.is_some() {
             return Err(syn::Error::new(
                 ident.span(),
@@ -183,6 +191,7 @@ impl PgFunction {
             specialises: attrs.specialises,
             args,
             with_slots: attrs.with_slots,
+            intrinsic: attrs.intrinsic,
             ret,
             result,
             raw: attrs.raw,
@@ -417,6 +426,10 @@ impl PgFunction {
             None => quote!(None),
         };
         let with_slots = self.with_slots;
+        let intrinsic = match &self.intrinsic {
+            Some(intrinsic) => quote!(Some(#api::embed::Intrinsic::#intrinsic)),
+            None => quote!(None),
+        };
         let ret_ty = &self.ret;
         let arg_names = self
             .args
@@ -436,6 +449,7 @@ impl PgFunction {
                 ret: <#ret_ty as #api::embed::PgType>::TYPE,
                 specialises: #specialises,
                 with_slots: #with_slots,
+                intrinsic: #intrinsic,
             }
         }
     }
@@ -546,6 +560,9 @@ struct PgFnAttrs {
     /// `#[pg_fn(with_slots)]`: the signature uses `embed::Slot<"T">` generics, bound per call
     /// by the typechecker
     with_slots: bool,
+    /// `#[pg_fn(intrinsic = Name)]`: lowered by the frontend to IR instead of being called, see
+    /// `Intrinsic`
+    intrinsic: Option<Ident>,
 }
 
 impl PgFnAttrs {
@@ -565,6 +582,7 @@ impl PgFnAttrs {
         self.raw |= other.raw;
         self.specialises = other.specialises.or_else(|| self.specialises.take());
         self.with_slots |= other.with_slots;
+        self.intrinsic = other.intrinsic.or_else(|| self.intrinsic.take());
     }
 
     fn parse_option(&mut self, meta: Meta) -> syn::Result<()> {
@@ -588,12 +606,17 @@ impl PgFnAttrs {
             return Ok(());
         }
 
+        if meta.path().is_ident("intrinsic") {
+            self.intrinsic = Some(parse_intrinsic_option(meta)?);
+            return Ok(());
+        }
+
         Err(syn::Error::new(meta.span(), "unknown pg_fn option"))
     }
 }
 
 /// Strip and parse the `#[pg_fn(..)]` marker off a stdlib fn, leaving its other
-/// attributes intact. Accepts `pure`, `unsafe`, `with_slots` and
+/// attributes intact. Accepts `pure`, `unsafe`, `with_slots`, `intrinsic = Name` and
 /// `specialises = "group"` in any order.
 fn take_pg_fn_attrs(attrs: &mut Vec<Attribute>) -> syn::Result<PgFnAttrs> {
     let mut pg_fn_attrs = PgFnAttrs::default();
@@ -610,6 +633,28 @@ fn take_pg_fn_attrs(attrs: &mut Vec<Attribute>) -> syn::Result<PgFnAttrs> {
 
     *attrs = out;
     Ok(pg_fn_attrs)
+}
+
+fn parse_intrinsic_option(meta: Meta) -> syn::Result<Ident> {
+    let Meta::NameValue(name_value) = meta else {
+        return Err(syn::Error::new(
+            meta.span(),
+            "`intrinsic` must be `intrinsic = Name`",
+        ));
+    };
+
+    let syn::Expr::Path(path) = &name_value.value else {
+        return Err(syn::Error::new(
+            name_value.value.span(),
+            "`intrinsic` must name an `Intrinsic` variant",
+        ));
+    };
+    path.path.get_ident().cloned().ok_or_else(|| {
+        syn::Error::new(
+            name_value.value.span(),
+            "`intrinsic` must name an `Intrinsic` variant",
+        )
+    })
 }
 
 fn parse_specialises_option(meta: Meta) -> syn::Result<String> {

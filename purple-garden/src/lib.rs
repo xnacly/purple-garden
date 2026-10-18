@@ -36,7 +36,7 @@ pub use purple_garden_macros::{GardenOpaque, GardenValue, pg_fn, pg_pkg};
 /// value conversion.
 pub mod embed {
     pub use purple_garden_runtime::{
-        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, Slot, Type, Value, Vm, VmConfig,
+        Anomaly, Field, Fn, FromVm, IntoVm, Intrinsic, PgType, Pkg, Slot, Type, Value, Vm, VmConfig,
     };
 
     #[doc(hidden)]
