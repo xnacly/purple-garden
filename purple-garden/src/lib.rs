@@ -432,7 +432,7 @@ impl<'p> Program<'p> {
     pub fn run(&mut self) -> Result<(), Anomaly> {
         self.vm.reset();
         if let Some(entry) = self.entry_native {
-            unsafe { entry((&mut self.vm as *mut Vm).cast()) };
+            unsafe { purple_garden_runtime::enter_native((&mut self.vm as *mut Vm).cast(), entry) };
             if let Some(anomaly) = self.vm.take_trap() {
                 return Err(anomaly);
             }
@@ -580,7 +580,15 @@ impl<'p> Program<'p> {
                 }
             }
             CcCallTarget::Native { idx } => {
-                unsafe { self.syscalls[idx as usize]((&mut self.vm as *mut Vm).cast()) };
+                unsafe {
+                    purple_garden_runtime::enter_native(
+                        (&mut self.vm as *mut Vm).cast(),
+                        self.syscalls[idx as usize],
+                    )
+                };
+                if let Some(anomaly) = self.vm.take_trap() {
+                    return Err(anomaly);
+                }
             }
         };
 

@@ -650,6 +650,13 @@ impl<'vm> Vm<'vm> {
                         return Err(self.pending_trap.take().unwrap());
                     }
                 },
+                Op::Native { idx } => unsafe {
+                    self.pc = pc;
+                    crate::enter_native((self as *mut Vm).cast(), *syscalls.add(idx as usize));
+                    if std::hint::unlikely(self.pending_trap.is_some()) {
+                        return Err(self.pending_trap.take().unwrap());
+                    }
+                },
                 Op::Ret => {
                     if BACKTRACE {
                         self.backtrace.pop();

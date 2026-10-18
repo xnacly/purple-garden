@@ -273,6 +273,11 @@ pub enum Op {
         idx: u16,
         argc: u8,
     },
+    /// Enter the native function at [`Vm::syscalls`] index `idx` through
+    /// [`crate::enter_native`], a trap inside it leaves through [`crate::jit_abort`] back to here.
+    Native {
+        idx: u16,
+    },
     /// Push `src` onto [`Vm::spilled`]. Used both for caller-save spill
     /// around [`Op::Call`] / [`Op::Sys`] and for cycle-breaking inside
     /// `bc::Cc::emit_arg_shuffle`.

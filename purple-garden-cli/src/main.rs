@@ -291,7 +291,7 @@ fn pipeline<A: Pages + Clone>(
 
     vm.reset();
     let run = if let Some(entry_native) = entry_native {
-        unsafe { entry_native((&mut vm as *mut Vm).cast()) };
+        unsafe { purple_garden_runtime::enter_native((&mut vm as *mut Vm).cast(), entry_native) };
         vm.take_trap().map_or(Ok(()), Err)
     } else {
         vm.pc = entry;

@@ -10,8 +10,8 @@
 //! opportunistic function based fast path: if the target-specific backend returns
 //! `None`, the bytecode compiler lowers the same IR function normally. A
 //! successful native function is retained as executable memory and injected into
-//! the VM as a syscall entry, so the VM can dispatch native and Rust builtins
-//! through the same `Op::Sys` mechanism.
+//! the VM as a syscall entry, the VM enters it through `Op::Native` while Rust
+//! builtins stay on `Op::Sys`.
 //!
 //! The high-level pipeline is:
 //!
@@ -1288,12 +1288,12 @@ mod tests_x86 {
     }
 
     /// Full dispatch path: JIT page injected into syscalls, Call replaced by
-    /// Sys, result readable from r0 after vm.run().
+    /// Native, result readable from r0 after vm.run().
     ///
     /// Vm is repr(C) with r as its first field and Value is repr(transparent)
     /// over u64, so rdi is &vm.r[0] the native fn receives &mut Vm. The page
-    /// pointer transmutes directly to BuiltinFn, so we need no second native
-    /// call mechanism. A bare `ret` leaves r0 untouched.
+    /// pointer transmutes directly to BuiltinFn, entered through
+    /// `enter_native`. A bare `ret` leaves r0 untouched.
     #[test]
     fn jit_fn_injected_as_syscall_and_dispatched() {
         use purple_garden_runtime::{Vm, VmConfig, op::Op};
@@ -1306,7 +1306,7 @@ mod tests_x86 {
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = vec![
             Op::LoadI { dst: 0, value: 187 },
-            Op::Sys { idx: 0, argc: 1 },
+            Op::Native { idx: 0 },
             Op::Halt,
         ];
         vm.run::<false>(&syscalls).expect("vm run");

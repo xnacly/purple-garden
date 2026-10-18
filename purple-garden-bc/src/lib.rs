@@ -1030,10 +1030,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 if tail_clobbers_callee_saved {
                     match target {
                         CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
-                        CcCallTarget::Native { idx } => self.emit(Op::Sys {
-                            idx,
-                            argc: args.len() as u8,
-                        }),
+                        CcCallTarget::Native { idx } => self.emit(Op::Native { idx }),
                     };
                     self.emit_epilogue(lo, max_reg);
                     self.emit(Op::Ret);
@@ -1044,10 +1041,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                             self.emit(Op::Tail { func: pc as u32 });
                         }
                         CcCallTarget::Native { idx } => {
-                            self.emit(Op::Sys {
-                                idx,
-                                argc: args.len() as u8,
-                            });
+                            self.emit(Op::Native { idx });
                             self.emit(Op::Ret);
                         }
                     }
@@ -1246,10 +1240,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let dst = self.ensure_register(dst.id);
                 match target {
                     CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
-                    CcCallTarget::Native { idx } => self.emit(Op::Sys {
-                        idx,
-                        argc: args.len() as u8,
-                    }),
+                    CcCallTarget::Native { idx } => self.emit(Op::Native { idx }),
                 };
                 self.emit(Op::Mov { dst, src: 0 });
                 self.scratch.reverse();

@@ -314,6 +314,10 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                     "call {func:04x} <{}>",
                     funcs_by_pc.get(func).unwrap().name()
                 ),
+                Op::Native { idx } => format!(
+                    "native {idx} <{}>",
+                    native_names.get(idx).map_or("???", String::as_str),
+                ),
                 Op::Sys { idx, .. } => format!(
                     "sys {idx} <{}>",
                     native_names
