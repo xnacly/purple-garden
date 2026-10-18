@@ -1446,6 +1446,17 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// instruction's dst is assigned, so neither a copy nor dst can take an
     /// operand register the instruction still reads.
     fn save_clobbered(&mut self, clobbers: Clobbers) -> Vec<(Preg, Preg), S> {
+        let saves = self.reserve_copies(clobbers);
+        for &(reg, copy) in &saves {
+            let dst = self.gpr(copy);
+            let src = self.gpr(reg);
+            self.emit(Insn::Mov { dst, src });
+        }
+        saves
+    }
+
+    /// The `(reg, copy)` pairs [`Lowering::save_clobbered`] would copy, without emitting them.
+    fn reserve_copies(&mut self, clobbers: Clobbers) -> Vec<(Preg, Preg), S> {
         let mut saves = std::mem::replace(self.saves, Vec::new_in(self.scratch()));
         saves.clear();
         saves.extend(
@@ -1470,11 +1481,21 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 ),
             }
         }
-        for &(reg, copy) in &saves {
-            let dst = self.gpr(copy);
-            let src = self.gpr(reg);
-            self.emit(Insn::Mov { dst, src });
-        }
+        saves
+    }
+
+    /// Moves the arguments of a call into place and copies the values live across it out of the
+    /// registers it clobbers, as one parallel move: the registers of arguments dying at the call
+    /// can hold the copies, the resolver reads them first.
+    fn move_args_and_save(
+        &mut self,
+        mut moves: Vec<(Preg, Preg), S>,
+        clobbers: Clobbers,
+    ) -> Vec<(Preg, Preg), S> {
+        self.ra.expire(self.pos);
+        let saves = self.reserve_copies(clobbers);
+        moves.extend_from_slice(&saves);
+        self.parallel_move(moves);
         saves
     }
 
@@ -1586,8 +1607,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 moves.push((src, dst));
             }
         }
-        let saves = self.save_clobbered(CALL_CLOBBERS);
-        self.parallel_move(moves);
+        let saves = self.move_args_and_save(moves, CALL_CLOBBERS);
         self.calls = true;
         match callee {
             Callee::Native(f) => {
@@ -1661,8 +1681,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         moves: Vec<(Preg, Preg), S>,
         dst: &ir::TypeId<'ir>,
     ) {
-        let saves = self.save_clobbered(CALL_CLOBBERS);
-        self.parallel_move(moves);
+        let saves = self.move_args_and_save(moves, CALL_CLOBBERS);
         self.calls = true;
         self.emit(Insn::SubImm {
             dst: RSP,
