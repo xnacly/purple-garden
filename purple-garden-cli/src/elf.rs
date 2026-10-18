@@ -4,8 +4,8 @@ use std::{
     io::{self, Write},
 };
 
-use purple_garden_bc::{Cc, CcFunc, dis::Disassembler};
-use purple_garden_runtime::BuiltinFn;
+use purple_garden_bc::{Cc, CcFunc};
+use purple_garden_runtime::{BuiltinFn, Pkg};
 
 // INFO: this sucks to look at but encoding elf64 requires the layout, it is what it is.
 
@@ -36,16 +36,26 @@ const SECTIONS: usize = 6;
 
 const R_X86_64_64: u64 = 1;
 
-/// Names of the runtime addresses the jit embeds as `movabs` immediates: the helpers, builtins
-/// and the entries of native functions.
+/// Names of the runtime addresses the jit embeds as `movabs` immediates: the helpers, the native
+/// entries of builtins and the entries of native functions.
 pub(crate) fn addresses<S: Allocator + Clone, A: Allocator + Clone>(
     cc: &Cc<'_, S, A>,
     syscalls: &[BuiltinFn],
 ) -> HashMap<u64, String> {
-    let mut names: HashMap<u64, String> = Disassembler::<S, A>::build_fn_map()
-        .into_iter()
-        .map(|(f, name)| (f as usize as u64, name))
-        .collect();
+    fn builtins(pkgs: &[Pkg], path: &str, names: &mut HashMap<u64, String>) {
+        for pkg in pkgs {
+            let path = format!("{path}{}.", pkg.name);
+            for f in pkg.fns {
+                if let Some(native) = f.native {
+                    names.insert(native as usize as u64, format!("{path}{}", f.name));
+                }
+            }
+            builtins(pkg.pkgs, &path, names);
+        }
+    }
+
+    let mut names = HashMap::new();
+    builtins(purple_garden_std::STD, "", &mut names);
     for (f, name) in [
         (
             purple_garden_runtime::jit_alloc as *const () as usize,
@@ -58,6 +68,10 @@ pub(crate) fn addresses<S: Allocator + Clone, A: Allocator + Clone>(
         (
             purple_garden_runtime::jit_trap_stack_overflow as *const () as usize,
             "jit_trap_stack_overflow",
+        ),
+        (
+            purple_garden_runtime::jit_trap_assert as *const () as usize,
+            "jit_trap_assert",
         ),
     ] {
         names.insert(f as u64, name.to_string());
