@@ -1,5 +1,6 @@
 # Regressions for codegen bugs
 import "testing"
+import "opt"
 import "str"
 
 #! Branch successor-param liveness: if the param-shuffle into the join
@@ -194,7 +195,10 @@ fn is_alpha(s:Str) Int {
     }
 }
 testing.assert(is_alpha(str.concat("al" "pha")) == 1)
-testing.assert(is_alpha(str.slice("xalphax" 1 6)) == 1)
+testing.assert(is_alpha(opt.or(str.slice("xalphax" 1 6) "")) == 1)
+testing.assert(opt.or(str.slice("xalphax" 6 1) "none") == "none")
+testing.assert(opt.or(str.get("garden" 0) 0) == 103)
+testing.assert(opt.or(str.get("garden" 6) 0 - 1) == 0 - 1)
 testing.assert(is_alpha(str.concat("al" "phb")) == 0)
 
 #! Match arms used to put their terminator on the block the arm started in.
