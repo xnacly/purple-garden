@@ -1297,6 +1297,55 @@ mod tests_x86 {
         let _ = record_ty;
     }
 
+    /// `p.x = p.y` on a `Record<x:Double y:Double>`, returning `p.y`: Double fields go through xmm
+    /// registers.
+    #[test]
+    fn loads_and_stores_double_record_fields() {
+        let record_ty = record(vec![("x", Type::Double), ("y", Type::Double)]);
+        let mut func = Func::new(
+            "copy_y",
+            Id(1),
+            vec![TypeId {
+                id: Id(0),
+                ty: record_ty,
+            }],
+            Some(Type::Double),
+        );
+        let params = func.intern_params(vec![Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Load {
+                    dst: TypeId {
+                        id: Id(1),
+                        ty: Type::Double,
+                    },
+                    base: Id(0),
+                    offset: 8,
+                    span: 0,
+                },
+                Instr::Store {
+                    src: Id(1),
+                    base: Id(0),
+                    offset: 0,
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(1)),
+                span: 0,
+            }),
+        });
+
+        let mut record = [1.5f64.to_bits(), 2.25f64.to_bits()];
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(run_double(jit.code(), [record.as_mut_ptr() as u64]), 2.25);
+        assert_eq!(f64::from_bits(record[0]), 2.25);
+    }
+
     #[test]
     fn takes_nested_record_address_and_loads_field() {
         let record_ty = record(vec![(

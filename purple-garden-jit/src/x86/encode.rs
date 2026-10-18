@@ -341,6 +341,18 @@ pub enum Insn {
         dst: Reg,
         src: Xmm,
     },
+    /// `movsd xmm{dst}, [r{base} + offset]`
+    LoadMemSd {
+        dst: Xmm,
+        base: Reg,
+        offset: u32,
+    },
+    /// `movsd [r{base} + offset], xmm{src}`
+    StoreMemSd {
+        base: Reg,
+        offset: u32,
+        src: Xmm,
+    },
     /// `cvtsi2sd xmm{dst}, r{src}`: the signed int as the low double, the high
     /// lane of dst is left alone.
     Cvtsi2sd {
@@ -366,6 +378,8 @@ impl Insn {
             Insn::LoadMem { dst, base, offset } => mem_disp(code, 0x8b, dst.0, base.0, offset),
             Insn::StoreMem { base, offset, src } => mem_disp(code, 0x89, src.0, base.0, offset),
             Insn::LeaMem { dst, base, offset } => mem_disp(code, 0x8d, dst.0, base.0, offset),
+            Insn::LoadMemSd { dst, base, offset } => movsd_mem(code, 0x10, dst.0, base.0, offset),
+            Insn::StoreMemSd { base, offset, src } => movsd_mem(code, 0x11, src.0, base.0, offset),
             // 0x3b = `cmp r64, r/m64`.
             Insn::CmpMem { reg, base, offset } => mem_disp(code, 0x3b, reg.0, base.0, offset),
             // 0x89 = `mov r/m64, r64`.
@@ -639,6 +653,23 @@ fn reg_imm<A: Allocator>(code: &mut Vec<u8, A>, digit: u8, rm: u8, imm: i32) {
 /// byte offsets, unlike VM register slots, so callers pass the offset through
 /// unchanged.
 fn mem_disp<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, base: u8, offset: u32) {
+    code.extend_from_slice(&[rex(reg, base), opcode]);
+    mem_operand(code, reg, base, offset);
+}
+
+/// `movsd` between xmm `reg` and `[base + offset]` (opcode 0x10 load, 0x11 store). `F2 0F op`,
+/// with a REX only for extended registers since W means nothing here.
+fn movsd_mem<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, base: u8, offset: u32) {
+    code.push(0xf2);
+    if reg >= 8 || base >= 8 {
+        code.push(rex(reg, base) & !0x08);
+    }
+    code.extend_from_slice(&[0x0f, opcode]);
+    mem_operand(code, reg, base, offset);
+}
+
+/// ModRM, SIB and displacement of `[base + offset]` with `reg` in ModRM.reg.
+fn mem_operand<A: Allocator>(code: &mut Vec<u8, A>, reg: u8, base: u8, offset: u32) {
     let disp8 = u8::try_from(offset)
         .ok()
         .filter(|offset| *offset <= i8::MAX as u8);
@@ -648,7 +679,7 @@ fn mem_disp<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, base: u8, 
     let rm = if needs_sib(base) { RSP.0 } else { base & 7 };
     let m = mode | ((reg & 7) << 3) | rm;
 
-    code.extend_from_slice(&[rex(reg, base), opcode, m]);
+    code.push(m);
     if needs_sib(base) {
         code.push(sib_no_index(base));
     }
@@ -782,9 +813,42 @@ mod tests {
     }
 
     #[test]
-    /// Double moves between xmm and from a GPR, bytes checked against gas.
+    /// Double moves between xmm, from a GPR and to and from memory, bytes checked against gas.
     fn sse_move_encodings() {
-        use super::{R9, R12, RAX, RBX, Xmm};
+        use super::{R9, R12, RAX, RBP, RBX, RCX, Xmm};
+
+        assert_eq!(
+            enc(Insn::LoadMemSd {
+                dst: Xmm(0),
+                base: RCX,
+                offset: 8
+            }),
+            [0xf2, 0x0f, 0x10, 0x41, 0x08]
+        ); // movsd xmm0,[rcx+8]
+        assert_eq!(
+            enc(Insn::StoreMemSd {
+                base: RCX,
+                offset: 8,
+                src: Xmm(2)
+            }),
+            [0xf2, 0x0f, 0x11, 0x51, 0x08]
+        ); // movsd [rcx+8],xmm2
+        assert_eq!(
+            enc(Insn::LoadMemSd {
+                dst: Xmm(9),
+                base: R12,
+                offset: 0x100
+            }),
+            [0xf2, 0x45, 0x0f, 0x10, 0x8c, 0x24, 0x00, 0x01, 0x00, 0x00]
+        ); // movsd xmm9,[r12+0x100]
+        assert_eq!(
+            enc(Insn::StoreMemSd {
+                base: RBP,
+                offset: 0,
+                src: Xmm(15)
+            }),
+            [0xf2, 0x44, 0x0f, 0x11, 0x7d, 0x00]
+        ); // movsd [rbp+0],xmm15
 
         assert_eq!(
             enc(Insn::MovqFromXmm {

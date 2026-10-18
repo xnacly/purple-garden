@@ -562,13 +562,20 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 src, base, offset, ..
             } if *offset <= i32::MAX as u32 => {
                 let src = self.ensure_register(*src);
-                let src = self.gpr(src);
                 let base = self.ensure_register(*base);
                 let base = self.gpr(base);
-                self.emit(Insn::StoreMem {
-                    base,
-                    offset: *offset,
-                    src,
+                let offset = *offset;
+                self.emit(match src {
+                    Preg::Gpr(src) => Insn::StoreMem {
+                        base,
+                        offset,
+                        src: Reg(src),
+                    },
+                    Preg::Fpr(src) => Insn::StoreMemSd {
+                        base,
+                        offset,
+                        src: Xmm(src),
+                    },
                 });
             }
             ir::Instr::Assert { cond, .. } => {
@@ -592,12 +599,19 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             } if *offset <= i32::MAX as u32 => {
                 let base = self.ensure_register(*base);
                 let base = self.gpr(base);
+                let offset = *offset;
                 let dst = self.def(dst, self.pos + 1);
-                let dst = self.gpr(dst);
-                self.emit(Insn::LoadMem {
-                    dst,
-                    base,
-                    offset: *offset,
+                self.emit(match dst {
+                    Preg::Gpr(dst) => Insn::LoadMem {
+                        dst: Reg(dst),
+                        base,
+                        offset,
+                    },
+                    Preg::Fpr(dst) => Insn::LoadMemSd {
+                        dst: Xmm(dst),
+                        base,
+                        offset,
+                    },
                 });
             }
             ir::Instr::AddrOf {
