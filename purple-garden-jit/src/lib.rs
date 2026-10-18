@@ -169,6 +169,20 @@ mod tests_x86 {
         (arena, f)
     }
 
+    /// Enter native code from a real `vm` the way the interpreter does, so a trap
+    /// can leave through `jit_abort`.
+    fn enter(code: &[u8], vm: &mut purple_garden_runtime::Vm) {
+        let mut arena = CodeArena::new().expect("code arena");
+        let entry = arena.push(code).expect("code fits the arena");
+        arena.seal().expect("seal the code arena");
+        unsafe {
+            purple_garden_runtime::enter_native(
+                (vm as *mut purple_garden_runtime::Vm).cast(),
+                entry,
+            )
+        };
+    }
+
     /// Run native code that takes `*mut u64` (the VM register file) and return
     /// the resulting register slots.
     fn run(code: &[u8], mut regs: [u64; 3]) -> [u64; 3] {
@@ -812,8 +826,7 @@ mod tests_x86 {
         let mut vm = Vm::new(VmConfig::default());
         let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
         slots[0..2].copy_from_slice(&[20, 0]);
-        let (_arena, f) = exec(jit.code());
-        unsafe { f(&mut vm as *mut Vm as *mut u64) };
+        enter(jit.code(), &mut vm);
 
         assert!(matches!(
             vm.take_trap(),

@@ -7,11 +7,11 @@
 //! computation happen in GPRs. The jit moves arguments from `vm.r[0..n]` to GPRs in a jitted
 //! functions prologue.
 //!
-//! On return `rax` holds the trap flag: zero, or nonzero once a trap is pending
-//! and every native frame must unwind to the interpreter. Native functions
+//! A trap records its anomaly in a runtime helper, which leaves every native frame through
+//! `jit_abort` back to the interpreter, so calls need no trap check. Native functions
 //! preserve `rdi` and clobber only the SysV caller-saved registers, so native
 //! to native calls are plain `call`s: no trampoline, no spill of the VM base.
-//! The interpreter calls natives as a [`BuiltinFn`] and ignores `rax`.
+//! The interpreter enters natives through `enter_native` and ignores `rax`.
 
 mod encode;
 
@@ -239,9 +239,9 @@ impl<S: Allocator + Clone> Scratch<S> {
 /// Target of a call that passes its arguments through `vm.r`.
 #[derive(Clone, Copy)]
 enum Callee {
-    /// A builtin: called through `jit_sys`, which reports whether it trapped.
+    /// A builtin: called through `jit_sys`, which aborts if it trapped.
     Sys(BuiltinFn),
-    /// A natively compiled function: called directly, returns the trap flag.
+    /// A natively compiled function: called directly.
     Native(BuiltinFn),
     /// The function being compiled, whose address isn't known yet.
     This,
@@ -416,7 +416,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 &[AbiArg::Reg(VM)],
                 None,
             );
-            self.jump(Cond::Always, Target::Epilogue);
             let resume = self.out.len();
             patch_rel32(self.out, fine, fine + 4, resume).expect("short forward jump");
         }
@@ -1467,8 +1466,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// function's own arity; only `entry`, which nothing calls with live
     /// registers, may pass more.
     ///
-    /// Builtins go through `jit_sys` for the trap flag. Native functions return
-    /// it themselves and keep `rdi`, so they are called directly: a trampoline
+    /// Builtins go through `jit_sys`, which aborts on a trap. Native functions
+    /// keep `rdi`, so they are called directly: a trampoline
     /// in between doubles the `call`/`ret` pairs per frame, and deep recursion
     /// then mispredicts most returns once the return stack buffer wraps.
     fn call_builtin(&mut self, callee: Callee, args: &[ir::Id], dst: &ir::TypeId<'ir>) {
@@ -1516,15 +1515,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 self.self_refs.push(self.out.len() - 4);
             }
         }
-        self.emit(Insn::Test { lhs: RAX, rhs: RAX });
-        self.jump(Cond::NotZero, Target::Epilogue);
         self.restore(saves);
         let dst = self.def(dst, self.pos + 1);
         let dst = self.gpr(dst);
         self.emit(Insn::LoadSlot { dst, slot: 0 });
     }
 
-    /// Raise the trap and leave with the flag the helper returns in `rax`:
+    /// Raise the trap, the helper leaves native code through `jit_abort`:
     /// nothing live needs to survive the call.
     fn trap_div_zero(&mut self) {
         self.call(
@@ -1532,7 +1529,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             &[AbiArg::Reg(VM)],
             None,
         );
-        self.jump(Cond::Always, Target::Epilogue);
     }
 
     /// SysV call to the helper at `addr`. The VM base lives in caller-saved

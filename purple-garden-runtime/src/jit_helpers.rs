@@ -69,8 +69,8 @@ pub unsafe extern "C" fn jit_abort(vm: *mut c_void) -> ! {
     )
 }
 
-/// Raise a divide-by-zero trap from JIT code. Returns the trap flag native
-/// functions hand back in `rax`, so the caller can leave right away.
+/// Raise a divide-by-zero trap from JIT code and leave native code through
+/// [`jit_abort`].
 ///
 /// The JIT cannot write [`Anomaly`] directly because Rust enum layout is not a
 /// stable ABI. Callers pass the erased [`Vm`] pointer they received at entry.
@@ -80,46 +80,45 @@ pub unsafe extern "C" fn jit_abort(vm: *mut c_void) -> ! {
 /// # Safety
 ///
 /// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
-pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) -> u64 {
-    let vm = unsafe { &mut *vm.cast::<Vm>() };
-    vm.trap(Anomaly::DivisionByZero { pc: vm.pc });
-    1
+pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) -> ! {
+    let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
+    vm_ref.trap(Anomaly::DivisionByZero { pc: vm_ref.pc });
+    unsafe { abort(vm) }
 }
 
 /// Raise a stack overflow from JIT code that reached
-/// [`Vm::native_stack_limit`]. Returns the trap flag like
-/// [`jit_trap_div_zero`].
+/// [`Vm::native_stack_limit`] and leave like [`jit_trap_div_zero`].
 ///
 /// # Safety
 ///
 /// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
-pub unsafe extern "C" fn jit_trap_stack_overflow(vm: *mut c_void) -> u64 {
-    let vm = unsafe { &mut *vm.cast::<Vm>() };
-    vm.trap(Anomaly::StackOverflow { pc: vm.pc });
-    1
+pub unsafe extern "C" fn jit_trap_stack_overflow(vm: *mut c_void) -> ! {
+    let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
+    vm_ref.trap(Anomaly::StackOverflow { pc: vm_ref.pc });
+    unsafe { abort(vm) }
 }
 
-/// Call the builtin `f` from JIT code, reporting whether it trapped: the
-/// native code then returns, so the interpreter surfaces the trap. Natively
-/// compiled functions report the flag themselves and are called directly.
+/// Call the builtin `f` from JIT code, leaving native code through [`jit_abort`]
+/// if it trapped.
 ///
 /// # Safety
 ///
 /// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`] whose `r0..`
 /// hold `f`'s arguments.
-pub unsafe extern "C" fn jit_sys(vm: *mut c_void, f: BuiltinFn) -> u64 {
+pub unsafe extern "C" fn jit_sys(vm: *mut c_void, f: BuiltinFn) {
     unsafe { f(vm) };
-    u64::from(unsafe { &*vm.cast::<Vm>() }.pending_trap.is_some())
+    if unsafe { &*vm.cast::<Vm>() }.pending_trap.is_some() {
+        unsafe { abort(vm) }
+    }
 }
 
 /// Allocate GC-managed memory from JIT code through [`Vm::try_alloc`].
 ///
 /// `alloc_type` is an [`AllocType`] discriminant, and `size`/`align` are passed
-/// to [`Layout::from_size_align`]. Returns the payload pointer on success.
-/// Invalid allocation kinds, invalid layouts, or oversized allocations trap and
-/// return null; JIT callers must branch on null and return to the native VM
-/// entry before using the pointer, so the pending trap can be surfaced. Valid
-/// requests use the same collect/no-collect policy as interpreter allocations.
+/// to [`Layout::from_size_align`]. Returns the payload pointer. Invalid
+/// allocation kinds, invalid layouts, oversized and failed allocations trap and
+/// leave native code through [`jit_abort`]. Valid requests use the same
+/// collect/no-collect policy as interpreter allocations.
 ///
 /// # Safety
 ///
@@ -130,28 +129,28 @@ pub unsafe extern "C" fn jit_alloc(
     size: usize,
     align: usize,
 ) -> *mut u8 {
-    let vm = unsafe { &mut *vm.cast::<Vm>() };
-
-    let Some(alloc_type) = AllocType::from_u8(alloc_type) else {
-        vm.trap(Anomaly::AllocationFailed { pc: vm.pc });
-        return std::ptr::null_mut();
-    };
-    let Ok(layout) = Layout::from_size_align(size, align) else {
-        vm.trap(Anomaly::AllocationFailed { pc: vm.pc });
-        return std::ptr::null_mut();
-    };
-    if layout.size() > MAX_ALLOC_SIZE {
-        vm.trap(Anomaly::AllocationFailed { pc: vm.pc });
-        return std::ptr::null_mut();
-    }
-
-    match vm.try_alloc(alloc_type, layout) {
+    let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
+    let ptr = AllocType::from_u8(alloc_type)
+        .zip(Layout::from_size_align(size, align).ok())
+        .filter(|(_, layout)| layout.size() <= MAX_ALLOC_SIZE)
+        .and_then(|(alloc_type, layout)| vm_ref.try_alloc(alloc_type, layout));
+    match ptr {
         Some(ptr) => ptr.as_ptr(),
         None => {
-            vm.trap(Anomaly::AllocationFailed { pc: vm.pc });
-            std::ptr::null_mut()
+            vm_ref.trap(Anomaly::AllocationFailed { pc: vm_ref.pc });
+            unsafe { abort(vm) }
         }
     }
+}
+
+/// Leaves native code with the trap `vm` holds, see [`jit_abort`].
+unsafe fn abort(vm: *mut c_void) -> ! {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        jit_abort(vm)
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    unreachable!("native code only exists on x86_64, {vm:?} can't be in it")
 }
 
 #[cfg(all(test, target_arch = "x86_64"))]
