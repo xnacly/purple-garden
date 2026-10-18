@@ -94,6 +94,7 @@ impl<'c> From<Const<'c>> for Value {
             Const::True => 1u64,
             Const::Int(i) => i as u64,
             Const::Double(bits) => bits,
+            Const::Undefined => Value::UNDEF.0,
             _ => unimplemented!("0xDEADAFFE"),
         })
     }

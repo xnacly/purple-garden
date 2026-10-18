@@ -328,7 +328,7 @@ impl<'a> From<Const<'a>> for Type<'a> {
             Const::Int(_) => Self::Int,
             Const::Double(_) => Self::Double,
             Const::Str(_) => Self::Str,
-            Const::Undefined => unreachable!(),
+            Const::Undefined => Self::Void,
         }
     }
 }

@@ -526,7 +526,7 @@ impl Display for Const<'_> {
             Const::Int(int) => write!(f, "{int}"),
             Const::Double(bits) => write!(f, "{}", f64::from_bits(*bits)),
             Const::Str(str) => write!(f, "`{}`", truncated_string_display(str)),
-            Const::Undefined => unreachable!(),
+            Const::Undefined => write!(f, "undefined"),
         }
     }
 }

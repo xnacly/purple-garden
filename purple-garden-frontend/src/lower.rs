@@ -589,14 +589,28 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                             .get(*id)
                             .cloned()
                             .expect("typechecker should have typed the call");
-                        let args = self.ctx.func.intern_params(a);
-                        self.emit(Instr::Sys {
-                            dst,
-                            path: pkg_name,
-                            fun,
-                            args,
-                            span: name.start as u32,
-                        });
+                        let span = name.start as u32;
+                        match fun.intrinsic {
+                            Some(purple_garden_ir::Intrinsic::Assert) => {
+                                self.emit(Instr::Assert { cond: a[0], span });
+                                // the call still produces its Void value
+                                self.emit(Instr::LoadConst {
+                                    dst,
+                                    value: Const::Undefined,
+                                    span,
+                                });
+                            }
+                            None => {
+                                let args = self.ctx.func.intern_params(a);
+                                self.emit(Instr::Sys {
+                                    dst,
+                                    path: pkg_name,
+                                    fun,
+                                    args,
+                                    span,
+                                });
+                            }
+                        }
                     }
                     // user defined function
                     Node::Ident { name, .. } => {
