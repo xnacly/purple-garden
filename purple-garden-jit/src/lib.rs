@@ -1297,6 +1297,64 @@ mod tests_x86 {
         let _ = record_ty;
     }
 
+    /// `fn g(x:Double) Double { half(x) + x }`: x survives the call in a callee saved gpr, no xmm
+    /// register is.
+    #[test]
+    fn doubles_live_across_calls_in_gprs() {
+        let double = |id| TypeId {
+            id: Id(id),
+            ty: Type::Double,
+        };
+        let half = compile_with(
+            &unary_func(1, Type::Double, BinOp::DDiv, Const::Double(2f64.to_bits())),
+            &HashMap::new(),
+            0,
+        );
+        let mut arena = CodeArena::new().expect("code arena");
+        let half = arena.push(&half).expect("code fits the arena");
+
+        let mut func = Func::new("g", Id(2), vec![double(0)], Some(Type::Double));
+        let params = func.intern_params([Id(0)]);
+        let args = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Call {
+                    dst: double(1),
+                    func: Id(1),
+                    args,
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::DAdd,
+                    dst: double(2),
+                    lhs: Id(1),
+                    rhs: Id(0),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+
+        let code = compile_with(
+            &func,
+            &HashMap::from_iter([(Id(1), half)]),
+            arena.next_entry(),
+        );
+        let ret = run_in(
+            arena,
+            &code,
+            [3f64.to_bits()],
+            purple_garden_runtime::enter_native_double,
+        );
+        assert_eq!(f64::from_bits(ret[0]), 4.5);
+    }
+
     /// `p.x = p.y` on a `Record<x:Double y:Double>`, returning `p.y`: Double fields go through xmm
     /// registers.
     #[test]

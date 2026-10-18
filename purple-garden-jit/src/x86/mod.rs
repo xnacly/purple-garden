@@ -1497,9 +1497,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     fn save_clobbered(&mut self, clobbers: Clobbers) -> Vec<(Preg, Preg), S> {
         let saves = self.reserve_copies(clobbers);
         for &(reg, copy) in &saves {
-            let dst = self.gpr(copy);
-            let src = self.gpr(reg);
-            self.emit(Insn::Mov { dst, src });
+            self.mov(copy, reg);
         }
         saves
     }
@@ -1515,12 +1513,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 .map(|reg| (reg, reg)),
         );
         for save in &mut saves {
-            // A helper call clobbers every fpr, so a live double finds no
-            // copy and the function falls back until fprs can be spilled.
+            // A call clobbers every fpr, so a live double moves into a callee saved gpr instead.
             let class = save.0.class();
+            let free = |class| move |free| !clobbers.contains(Preg::new(class, free));
             match self
                 .ra
-                .take_free(class, |free| !clobbers.contains(Preg::new(class, free)))
+                .take_free(class, free(class))
+                .or_else(|| self.ra.take_free(Class::Gpr, free(Class::Gpr)))
             {
                 Some(free) => save.1 = free,
                 None => bail!(
@@ -1550,9 +1549,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
 
     fn restore(&mut self, saves: Vec<(Preg, Preg), S>) {
         for &(reg, copy) in &saves {
-            let dst = self.gpr(reg);
-            let src = self.gpr(copy);
-            self.emit(Insn::Mov { dst, src });
+            self.mov(reg, copy);
             self.ra.give_back(copy);
         }
         *self.saves = saves;
@@ -1627,19 +1624,28 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 self.self_refs.push(self.out.len() - 4);
             }
         }
-        self.restore(saves);
-        self.take_result(dst);
+        let ret = match Class::from(&dst.ty) {
+            Class::Gpr => Preg::Gpr(RAX.0),
+            Class::Fpr => Preg::Fpr(0),
+        };
+        self.take_result(dst, ret, saves);
     }
 
-    /// Moves a call's result from `rax` or `xmm0` into `dst`.
-    fn take_result(&mut self, dst: &ir::TypeId<'ir>) {
-        let ret = match self.def(dst, self.pos + 1) {
-            _ if dst.ty == ir::ptype::Type::Void => return,
-            Preg::Gpr(gpr) => (Preg::Gpr(gpr), Preg::Gpr(RAX.0)),
-            Preg::Fpr(fpr) => (Preg::Fpr(fpr), Preg::Fpr(0)),
-        };
-        if ret.0 != ret.1 {
-            self.mov(ret.0, ret.1);
+    /// Restores `saves` and moves a call's result from `ret` into `dst`. `dst` may take the
+    /// register of a value dying right after the call, so the restores go first; a double restored
+    /// into xmm0 would overwrite a result there, it waits in the scratch register then.
+    fn take_result(&mut self, dst: &ir::TypeId<'ir>, mut ret: Preg, saves: Vec<(Preg, Preg), S>) {
+        if saves.iter().any(|&(reg, _)| reg == ret) {
+            self.mov(Preg::Fpr(XMM_SCRATCH.0), ret);
+            ret = Preg::Fpr(XMM_SCRATCH.0);
+        }
+        self.restore(saves);
+        if dst.ty == ir::ptype::Type::Void {
+            return;
+        }
+        let dst = self.def(dst, self.pos + 1);
+        if dst != ret {
+            self.mov(dst, ret);
         }
     }
 
@@ -1697,13 +1703,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             imm: native as usize as u64,
         });
         self.emit(Insn::CallReg { reg: GPR_SCRATCH });
-        self.restore(saves);
-        if matches!(fun.ret, ir::ptype::Type::Slot(_)) && dst.ty == ir::ptype::Type::Double {
-            let dst = self.def(dst, self.pos + 1);
-            self.mov(dst, Preg::Gpr(RAX.0));
-        } else {
-            self.take_result(dst);
-        }
+        // a slot result is a Value word, also when bound to a Double
+        let ret = match Class::from(&fun.ret) {
+            Class::Gpr => Preg::Gpr(RAX.0),
+            Class::Fpr => Preg::Fpr(0),
+        };
+        self.take_result(dst, ret, saves);
     }
 
     /// Raise the trap, the helper leaves native code through `jit_abort`:
