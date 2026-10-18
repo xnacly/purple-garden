@@ -768,12 +768,6 @@ mod tests_x86 {
         }),
     };
 
-    /// Whether `code` calls `jit_sys`, the path through `vm.r` native entries replace.
-    fn calls_jit_sys(code: &[u8]) -> bool {
-        let jit_sys = purple_garden_runtime::jit_sys as *const () as u64;
-        code.windows(8).any(|w| w == jit_sys.to_le_bytes())
-    }
-
     /// `fn f(x:Int y:Double) Double { mix(x y) }`: the Int in a gpr, the Double in an xmm
     /// register, the result back in xmm0.
     #[test]
@@ -817,7 +811,6 @@ mod tests_x86 {
 
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit native entry call");
-        assert!(!calls_jit_sys(jit.code()));
         assert_eq!(run_double(jit.code(), [3, 1.5f64.to_bits(), 0]), 4.5);
     }
 
@@ -859,7 +852,6 @@ mod tests_x86 {
 
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit native entry call");
-        assert!(!calls_jit_sys(jit.code()));
         assert_eq!(run(jit.code(), [5, 0, 0])[0], 11);
     }
 

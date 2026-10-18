@@ -149,20 +149,6 @@ pub unsafe extern "C" fn jit_trap_stack_overflow(vm: *mut c_void) -> ! {
     unsafe { abort(vm) }
 }
 
-/// Call the builtin `f` from JIT code, leaving native code through [`jit_abort`]
-/// if it trapped.
-///
-/// # Safety
-///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`] whose `r0..`
-/// hold `f`'s arguments.
-pub unsafe extern "C" fn jit_sys(vm: *mut c_void, f: BuiltinFn) {
-    unsafe { f(vm) };
-    if unsafe { &*vm.cast::<Vm>() }.pending_trap.is_some() {
-        unsafe { abort(vm) }
-    }
-}
-
 /// Allocate GC-managed memory from JIT code through [`Vm::try_alloc`].
 ///
 /// `alloc_type` is an [`AllocType`] discriminant, and `size`/`align` are passed

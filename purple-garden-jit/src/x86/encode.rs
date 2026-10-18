@@ -107,21 +107,9 @@ pub fn patch_rel32(code: &mut [u8], rel: usize, from: usize, target: usize) -> O
 }
 
 /// A single x86-64 instruction. `encode` appends its machine-code bytes
-///
-/// `slot` indexes the VM register file at `[rbx + slot*8]`.
 #[derive(Debug, Clone, Copy)]
 pub enum Insn {
     Ret,
-    /// `mov r{dst}, [rbx + slot*8]`
-    LoadSlot {
-        dst: Reg,
-        slot: u8,
-    },
-    /// `mov [rbx + slot*8], r{src}`
-    StoreSlot {
-        src: Reg,
-        slot: u8,
-    },
     /// `mov r{dst}, [r{base} + offset]`
     LoadMem {
         dst: Reg,
@@ -252,7 +240,9 @@ pub enum Insn {
         reg: Reg,
     },
     /// `call rel32`, `disp` relative to the end of the instruction.
-    CallRel { disp: i32 },
+    CallRel {
+        disp: i32,
+    },
     /// `push r{reg}` / `pop r{reg}` (callee-save frame management).
     Push {
         reg: Reg,
@@ -370,8 +360,6 @@ impl Insn {
     pub fn encode<A: Allocator>(self, code: &mut Vec<u8, A>) {
         match self {
             Insn::Ret => code.push(0xc3),
-            Insn::LoadSlot { dst, slot } => mov_slot(code, 0x8b, dst.0, slot),
-            Insn::StoreSlot { src, slot } => mov_slot(code, 0x89, src.0, slot),
             // Record memory ops all use the same ModRM/SIB memory form. The
             // opcode selects load, store, or address calculation; ModRM.reg is
             // the register operand for all three encodings.
@@ -542,7 +530,6 @@ impl Insn {
     }
 }
 
-
 /// REX.W prefix for 64-bit operand size, plus high register bits.
 ///
 /// ```text
@@ -641,25 +628,6 @@ fn reg_imm<A: Allocator>(code: &mut Vec<u8, A>, digit: u8, rm: u8, imm: i32) {
     code.push(0x81);
     code.push(modrm(digit, rm));
     code.extend_from_slice(&imm.to_le_bytes());
-}
-
-/// `mov` between GPR `reg` and `[rbx + slot*8]` (opcode 0x8b load, 0x89 store).
-///
-/// Memory operands use `mod != 11`, so this cannot use [`modrm`]. We use:
-///
-/// ```text
-/// mod = 01       disp8 follows the ModRM byte
-/// reg = reg&7    loaded/stored GPR
-/// r/m = 011      base register rbx
-/// disp8 = slot*8 byte offset into Vm::r
-/// ```
-///
-/// This is why the lowering rejects more than 32 params: `slot*8`
-/// must fit in a signed 8-bit displacement for this compact addressing form.
-fn mov_slot<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, slot: u8) {
-    // ModRM mod=01 (disp8), reg field = GPR, rm = rbx.
-    let m = 0x40 | ((reg & 7) << 3) | RBX.0;
-    code.extend_from_slice(&[rex(reg, RBX.0), opcode, m, slot * 8]);
 }
 
 /// Memory op using `[base + offset]`, where ModRM.reg is the register operand
@@ -814,8 +782,7 @@ mod tests {
     }
 
     #[test]
-    /// Double moves between xmm, from a GPR and to and from VM slots, bytes
-    /// checked against gas. Slot 0 keeps the disp8 form like `mov_slot`.
+    /// Double moves between xmm and from a GPR, bytes checked against gas.
     fn sse_move_encodings() {
         use super::{R9, R12, RAX, RBX, Xmm};
 
@@ -1071,29 +1038,8 @@ mod tests {
     }
 
     #[test]
-    /// Check the hand-written encoders for representative register and slot forms.
-    fn slot_and_reg_encodings() {
-        assert_eq!(
-            enc(Insn::LoadSlot {
-                dst: Reg(0),
-                slot: 0
-            }),
-            [0x48, 0x8b, 0x43, 0x00]
-        ); // mov rax,[rbx+0]
-        assert_eq!(
-            enc(Insn::StoreSlot {
-                src: Reg(1),
-                slot: 1
-            }),
-            [0x48, 0x89, 0x4b, 0x08]
-        ); // mov [rbx+8],rcx
-        assert_eq!(
-            enc(Insn::LoadSlot {
-                dst: Reg(8),
-                slot: 2
-            }),
-            [0x4c, 0x8b, 0x43, 0x10]
-        ); // mov r8,[rbx+16]
+    /// Check the hand-written encoders for representative register and memory forms.
+    fn reg_and_mem_encodings() {
         assert_eq!(
             enc(Insn::LoadMem {
                 dst: Reg(0),

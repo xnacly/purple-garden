@@ -1073,10 +1073,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ir::Instr::Sys { dst, fun, args, .. } => {
                 let func = self.func;
                 let args = func.params(*args);
-                match fun.native.zip(self.native_entry_moves(fun, args, dst)) {
-                    Some((native, moves)) => self.call_native_entry(native, moves, dst),
-                    None => self.call_builtin(fun.ptr, args, dst),
-                }
+                let Some(native) = fun.native else {
+                    bail!(self, "{} has no native entry", fun.name);
+                    return;
+                };
+                let Some(moves) = self.native_entry_moves(fun, args) else {
+                    return;
+                };
+                self.call_native_entry(native, moves, fun, dst);
             }
             ir::Instr::Call {
                 dst,
@@ -1450,7 +1454,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 dst: Xmm(dst),
                 src: Xmm(src),
             }),
-            _ => bail!(self, "move between {src:?} and {dst:?}"),
+            (Preg::Gpr(dst), Preg::Fpr(src)) => self.emit(Insn::MovqFromXmm {
+                dst: Reg(dst),
+                src: Xmm(src),
+            }),
+            (Preg::Fpr(dst), Preg::Gpr(src)) => self.emit(Insn::MovqToXmm {
+                dst: Xmm(dst),
+                src: Reg(src),
+            }),
         }
     }
 
@@ -1558,47 +1569,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.restore(saves);
     }
 
-    /// Call the builtin `f` the way the interpreter does: arguments in `vm.r[0..]`, the result in
-    /// `vm.r[0]`, through `jit_sys`, which aborts on a trap. Only for builtins without a usable
-    /// native entry. The builtin may write its argument registers, but this function's caller only
-    /// spilled those up to this function's own arity; only `entry`, which nothing calls with live
-    /// registers, may pass more.
-    fn call_builtin(&mut self, f: BuiltinFn, args: &[ir::Id], dst: &ir::TypeId<'ir>) {
-        if args.len() > self.func.params.len().max(1) && self.func.id != ir::Id(0) {
-            bail!(
-                self,
-                "{} args would clobber registers the caller kept",
-                args.len()
-            );
-            return;
-        }
-        if args.len() > 15 {
-            bail!(self, "too many args for disp8 slot stores: {}", args.len());
-            return;
-        }
-        for (slot, &arg) in args.iter().enumerate() {
-            let src = self.ensure_register(arg);
-            let src = self.gpr(src);
-            self.emit(Insn::StoreSlot {
-                src,
-                slot: slot as u8,
-            });
-        }
-        // The args are in their slots, so values they were the last use of free their registers
-        // for the copies.
-        self.ra.expire(self.pos);
-        let saves = self.save_clobbered(CALL_CLOBBERS);
-        self.call(
-            purple_garden_runtime::jit_sys as *const () as u64,
-            &[AbiArg::Reg(VM), AbiArg::Imm(f as usize as u64)],
-            None,
-        );
-        self.restore(saves);
-        let dst = self.def(dst, self.pos + 1);
-        let dst = self.gpr(dst);
-        self.emit(Insn::LoadSlot { dst, slot: 0 });
-    }
-
     /// Call the native function `callee`: argument i in `ARG_GPRS[i]` or `xmm{i}` by its class, the
     /// result in `rax` or `xmm0`, no memory in between. Natives keep `rbx` and the callee saved
     /// registers, so only values live across the call in the others are copied away. More
@@ -1649,33 +1619,35 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     }
 
     /// The moves placing `args` where SysV wants them for `fun`'s native entry, after the vm in
-    /// `rdi`: Doubles in xmm registers, everything else in gprs. `None` if a value's register class
-    /// isn't the declared one, as for a slot bound to a Double, or the registers run out, the call
-    /// then goes through `jit_sys`.
+    /// `rdi`: Doubles in xmm registers, everything else in gprs. A slot crosses as a `Value` word,
+    /// so a Double bound to it moves over into a gpr. More arguments than registers would need the
+    /// stack and bail.
     fn native_entry_moves(
         &mut self,
         fun: &ir::Fn<'_>,
         args: &[ir::Id],
-        dst: &ir::TypeId<'ir>,
     ) -> Option<Vec<(Preg, Preg), S>> {
         const GPR_ARGS: [Reg; 5] = [RSI, RDX, RCX, R8, R9];
         const XMM_ARGS: u8 = 8;
 
-        if fun.ret != ir::ptype::Type::Void && Class::from(&fun.ret) != Class::from(&dst.ty) {
-            return None;
-        }
         let mut moves = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
         moves.clear();
         let (mut gprs, mut xmms) = (GPR_ARGS.iter(), 0..XMM_ARGS);
         for (&arg, ty) in args.iter().zip(fun.args) {
             let src = self.ensure_register(arg);
             let dst = match Class::from(ty) {
-                Class::Gpr => Preg::Gpr(gprs.next()?.0),
-                Class::Fpr => Preg::Fpr(xmms.next()?),
+                Class::Gpr => gprs.next().map(|r| Preg::Gpr(r.0)),
+                Class::Fpr => xmms.next().map(Preg::Fpr),
             };
-            if src.class() != dst.class() {
+            let Some(dst) = dst else {
+                bail!(self, "{} args, more than argument registers", args.len());
                 return None;
-            }
+            };
+            assert!(
+                src.class() == dst.class() || matches!(ty, ir::ptype::Type::Slot(_)),
+                "typecheck lets a {:?} through as {ty:?}",
+                src.class()
+            );
             if src != dst {
                 moves.push((src, dst));
             }
@@ -1683,12 +1655,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         Some(moves)
     }
 
-    /// Calls a builtin's native entry: arguments and result in registers, without `vm.r` and
-    /// `jit_sys`. The vm goes into `rdi` last, an argument may still have been there.
+    /// Calls a builtin's native entry: arguments and result in registers, without `vm.r`. The vm
+    /// goes into `rdi` last, an argument may still have been there.
     fn call_native_entry(
         &mut self,
         native: ir::NativeFn,
         moves: Vec<(Preg, Preg), S>,
+        fun: &ir::Fn<'_>,
         dst: &ir::TypeId<'ir>,
     ) {
         let saves = self.move_args_and_save(moves, CALL_CLOBBERS);
@@ -1700,7 +1673,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         });
         self.emit(Insn::CallReg { reg: GPR_SCRATCH });
         self.restore(saves);
-        self.take_result(dst);
+        if matches!(fun.ret, ir::ptype::Type::Slot(_)) && dst.ty == ir::ptype::Type::Double {
+            let dst = self.def(dst, self.pos + 1);
+            self.mov(dst, Preg::Gpr(RAX.0));
+        } else {
+            self.take_result(dst);
+        }
     }
 
     /// Raise the trap, the helper leaves native code through `jit_abort`:

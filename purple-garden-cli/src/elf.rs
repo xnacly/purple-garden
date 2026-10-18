@@ -48,10 +48,6 @@ pub(crate) fn addresses<S: Allocator + Clone, A: Allocator + Clone>(
         .collect();
     for (f, name) in [
         (
-            purple_garden_runtime::jit_sys as *const () as usize,
-            "jit_sys",
-        ),
-        (
             purple_garden_runtime::jit_alloc as *const () as usize,
             "jit_alloc",
         ),

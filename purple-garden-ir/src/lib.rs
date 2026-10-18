@@ -52,8 +52,7 @@ pub struct Fn<'f> {
     pub with_slots: bool,
     /// Lowered by the frontend instead of being called
     pub intrinsic: Option<Intrinsic>,
-    /// Called by native code without going through `vm.r`, `None` for intrinsics and builtins
-    /// returning a `Result`
+    /// Called by native code without going through `vm.r`, `None` for intrinsics
     pub native: Option<NativeFn>,
 }
 
