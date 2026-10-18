@@ -399,3 +399,14 @@ fn pg_fn_native_entries_take_and_return_hardware_values() {
         "Result builtins have no native entry"
     );
 }
+
+/// The entry tail calls a native Double function and stays bytecode, its `Op::Native` reads the
+/// result from xmm0 since the callee returns a Double.
+#[test]
+fn bytecode_reads_double_results_of_native_calls() {
+    let mut program = purple_garden::Pg::new()
+        .compile(b"fn square(x:Double) Double { x * x }\nsquare(1.5)")
+        .expect("compiles");
+    let squared: f64 = program.run_take().expect("runs");
+    assert_eq!(squared, 2.25);
+}

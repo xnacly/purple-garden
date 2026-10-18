@@ -580,8 +580,11 @@ impl<'p> Program<'p> {
                     self.vm.run::<false>(&self.syscalls)?;
                 }
             }
-            CcCallTarget::Native { idx } => {
-                let enter = if function.signature.ret == embed::Type::Double {
+            CcCallTarget::Native {
+                idx,
+                returns_double,
+            } => {
+                let enter = if returns_double {
                     purple_garden_runtime::enter_native_double
                 } else {
                     purple_garden_runtime::enter_native

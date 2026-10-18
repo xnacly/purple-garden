@@ -30,6 +30,8 @@ pub enum CcFunc<'fun> {
     Native {
         name: &'fun str,
         idx: u16,
+        /// Returns in xmm0 instead of rax, see `Op::Native`
+        returns_double: bool,
     },
 }
 
@@ -53,14 +55,21 @@ impl<'fun> CcFunc<'fun> {
 #[derive(Clone, Copy, Debug)]
 pub enum CcCallTarget {
     Bc { pc: usize },
-    Native { idx: u16 },
+    Native { idx: u16, returns_double: bool },
 }
 
 impl From<&CcFunc<'_>> for CcCallTarget {
     fn from(func: &CcFunc<'_>) -> Self {
         match func {
             CcFunc::Bc { pc, .. } => Self::Bc { pc: *pc },
-            CcFunc::Native { idx, .. } => Self::Native { idx: *idx },
+            CcFunc::Native {
+                idx,
+                returns_double,
+                ..
+            } => Self::Native {
+                idx: *idx,
+                returns_double: *returns_double,
+            },
         }
     }
 }
@@ -637,6 +646,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             CcFunc::Native {
                 name: fun.name,
                 idx,
+                returns_double: fun.ret == Some(ptype::Type::Double),
             },
         );
         true
@@ -1018,8 +1028,6 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let Some(target) = self.functions.get(func).map(CcCallTarget::from) else {
                     unreachable!();
                 };
-                // a tail call returns the callee's result as its own
-                let returns_double = fun.ret == Some(ptype::Type::Double);
 
                 let args = fun.params(*args);
                 // If the tail target needs a wider argument zone than this the shuffle would write
@@ -1032,7 +1040,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 if tail_clobbers_callee_saved {
                     match target {
                         CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
-                        CcCallTarget::Native { idx } => self.emit(Op::Native {
+                        CcCallTarget::Native {
+                            idx,
+                            returns_double,
+                        } => self.emit(Op::Native {
                             idx,
                             returns_double,
                         }),
@@ -1045,7 +1056,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                         CcCallTarget::Bc { pc } => {
                             self.emit(Op::Tail { func: pc as u32 });
                         }
-                        CcCallTarget::Native { idx } => {
+                        CcCallTarget::Native {
+                            idx,
+                            returns_double,
+                        } => {
                             self.emit(Op::Native {
                                 idx,
                                 returns_double,
@@ -1205,7 +1219,6 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             ir::Instr::Call {
                 dst, func, args, ..
             } => {
-                let returns_double_call = dst.ty == ptype::Type::Double;
                 let args = owner.params(*args);
                 let Some(target) = self.functions.get(func).map(CcCallTarget::from) else {
                     unreachable!();
@@ -1251,9 +1264,12 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let dst = self.ensure_register(dst.id);
                 match target {
                     CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
-                    CcCallTarget::Native { idx } => self.emit(Op::Native {
+                    CcCallTarget::Native {
                         idx,
-                        returns_double: returns_double_call,
+                        returns_double,
+                    } => self.emit(Op::Native {
+                        idx,
+                        returns_double,
                     }),
                 };
                 self.emit(Op::Mov { dst, src: 0 });

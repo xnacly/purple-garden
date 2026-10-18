@@ -67,7 +67,7 @@ pub(crate) fn addresses<S: Allocator + Clone, A: Allocator + Clone>(
         names.insert(f as u64, name.to_string());
     }
     for f in cc.functions.values() {
-        if let CcFunc::Native { name, idx } = f {
+        if let CcFunc::Native { name, idx, .. } = f {
             names.insert(
                 syscalls[*idx as usize] as usize as u64,
                 format!("jit_{name}"),
