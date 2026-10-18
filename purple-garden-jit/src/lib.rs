@@ -700,6 +700,156 @@ mod tests_x86 {
         }
     }
 
+    unsafe extern "C" fn no_wrapper(_: *mut std::ffi::c_void) {
+        unreachable!("native code calls the native entry")
+    }
+
+    unsafe extern "C" fn mix(_: *mut std::ffi::c_void, a: u64, b: f64) -> f64 {
+        a as i64 as f64 * b
+    }
+
+    unsafe extern "C" fn add_one(_: *mut std::ffi::c_void, a: u64) -> u64 {
+        a + 1
+    }
+
+    static MIX: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
+        name: "mix",
+        doc: "",
+        ptr: no_wrapper,
+        pure: false,
+        eval: None,
+        arg_names: &["a", "b"],
+        args: &[Type::Int, Type::Double],
+        ret: Type::Double,
+        specialises: None,
+        with_slots: false,
+        intrinsic: None,
+        native: Some(unsafe {
+            std::mem::transmute::<
+                unsafe extern "C" fn(*mut std::ffi::c_void, u64, f64) -> f64,
+                purple_garden_ir::NativeFn,
+            >(mix)
+        }),
+    };
+
+    static ADD_ONE: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
+        name: "add_one",
+        doc: "",
+        ptr: no_wrapper,
+        pure: false,
+        eval: None,
+        arg_names: &["a"],
+        args: &[Type::Int],
+        ret: Type::Int,
+        specialises: None,
+        with_slots: false,
+        intrinsic: None,
+        native: Some(unsafe {
+            std::mem::transmute::<
+                unsafe extern "C" fn(*mut std::ffi::c_void, u64) -> u64,
+                purple_garden_ir::NativeFn,
+            >(add_one)
+        }),
+    };
+
+    /// Whether `code` calls `jit_sys`, the path through `vm.r` native entries replace.
+    fn calls_jit_sys(code: &[u8]) -> bool {
+        let jit_sys = purple_garden_runtime::jit_sys as *const () as u64;
+        code.windows(8).any(|w| w == jit_sys.to_le_bytes())
+    }
+
+    /// `fn f(x:Int y:Double) Double { mix(x y) }`: the Int in a gpr, the Double in an xmm
+    /// register, the result back in xmm0.
+    #[test]
+    fn calls_native_entries_with_hardware_args_and_result() {
+        let mut func = Func::new(
+            "f",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Double,
+                },
+            ],
+            Some(Type::Double),
+        );
+        let params = func.intern_params([Id(0), Id(1)]);
+        let args = func.intern_params([Id(0), Id(1)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Sys {
+                dst: TypeId {
+                    id: Id(2),
+                    ty: Type::Double,
+                },
+                path: "t",
+                fun: &MIX,
+                args,
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit native entry call");
+        assert!(!calls_jit_sys(jit.code()));
+        assert_eq!(
+            f64::from_bits(run(jit.code(), [3, 1.5f64.to_bits(), 0])[0]),
+            4.5
+        );
+    }
+
+    /// `fn g(x:Int) Int { add_one(x) + x }`: x survives the call in a register the callee keeps.
+    #[test]
+    fn native_entry_calls_keep_live_values() {
+        let int = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let mut func = Func::new("g", Id(0), vec![int(0)], Some(Type::Int));
+        let params = func.intern_params([Id(0)]);
+        let args = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Sys {
+                    dst: int(1),
+                    path: "t",
+                    fun: &ADD_ONE,
+                    args,
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::IAdd,
+                    dst: int(2),
+                    lhs: Id(1),
+                    rhs: Id(0),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit native entry call");
+        assert!(!calls_jit_sys(jit.code()));
+        assert_eq!(run(jit.code(), [5, 0, 0])[0], 11);
+    }
+
     /// `fn f(a, b) int { a <op> b }` with a register divisor.
     fn reg_div_func(op: BinOp) -> Func<'static> {
         let mut func = Func::new(

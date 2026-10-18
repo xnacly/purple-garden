@@ -1063,7 +1063,11 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             }
             ir::Instr::Sys { dst, fun, args, .. } => {
                 let func = self.func;
-                self.call_builtin(Callee::Sys(fun.ptr), func.params(*args), dst);
+                let args = func.params(*args);
+                match fun.native.zip(self.native_entry_moves(fun, args, dst)) {
+                    Some((native, moves)) => self.call_native_entry(native, moves, dst),
+                    None => self.call_builtin(Callee::Sys(fun.ptr), args, dst),
+                }
             }
             ir::Instr::Call {
                 dst,
@@ -1354,7 +1358,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 todo.push((s, d));
             }
         }
+        self.parallel_move(todo);
+    }
 
+    /// Performs the `(src, dst)` moves as if all at once, a cycle goes through the scratch
+    /// register of its class.
+    fn parallel_move(&mut self, mut todo: Vec<(Preg, Preg), S>) {
         'outer: loop {
             if todo.is_empty() {
                 break;
@@ -1543,6 +1552,86 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         let dst = self.def(dst, self.pos + 1);
         let dst = self.gpr(dst);
         self.emit(Insn::LoadSlot { dst, slot: 0 });
+    }
+
+    /// The moves placing `args` where SysV wants them for `fun`'s native entry, after the vm in
+    /// `rdi`: Doubles in xmm registers, everything else in gprs. `None` if a value's register class
+    /// isn't the declared one, as for a slot bound to a Double, or the registers run out, the call
+    /// then goes through `jit_sys`.
+    fn native_entry_moves(
+        &mut self,
+        fun: &ir::Fn<'_>,
+        args: &[ir::Id],
+        dst: &ir::TypeId<'ir>,
+    ) -> Option<Vec<(Preg, Preg), S>> {
+        const GPR_ARGS: [Reg; 5] = [RSI, RDX, RCX, R8, R9];
+        const XMM_ARGS: u8 = 8;
+
+        if fun.ret != ir::ptype::Type::Void && Class::from(&fun.ret) != Class::from(&dst.ty) {
+            return None;
+        }
+        let mut moves = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
+        moves.clear();
+        let (mut gprs, mut xmms) = (GPR_ARGS.iter(), 0..XMM_ARGS);
+        for (&arg, ty) in args.iter().zip(fun.args) {
+            let src = self.ensure_register(arg);
+            let dst = match Class::from(ty) {
+                Class::Gpr => Preg::Gpr(gprs.next()?.0),
+                Class::Fpr => Preg::Fpr(xmms.next()?),
+            };
+            if src.class() != dst.class() {
+                return None;
+            }
+            if src != dst {
+                moves.push((src, dst));
+            }
+        }
+        Some(moves)
+    }
+
+    /// Calls a builtin's native entry: arguments and result in registers, without `vm.r` and
+    /// `jit_sys`. Rust may clobber `rdi`, so the vm is kept on the stack across the call.
+    fn call_native_entry(
+        &mut self,
+        native: ir::NativeFn,
+        moves: Vec<(Preg, Preg), S>,
+        dst: &ir::TypeId<'ir>,
+    ) {
+        let saves = self.save_clobbered(CALL_CLOBBERS);
+        self.parallel_move(moves);
+        self.calls = true;
+        self.emit(Insn::SubImm {
+            dst: RSP,
+            imm: CALL_STACK,
+        });
+        self.emit(Insn::StoreMem {
+            base: RSP,
+            offset: 0,
+            src: VM,
+        });
+        self.emit(Insn::MovAbs {
+            dst: GPR_SCRATCH,
+            imm: native as usize as u64,
+        });
+        self.emit(Insn::CallReg { reg: GPR_SCRATCH });
+        self.emit(Insn::LoadMem {
+            dst: VM,
+            base: RSP,
+            offset: 0,
+        });
+        self.emit(Insn::AddImm {
+            dst: RSP,
+            imm: CALL_STACK,
+        });
+        self.restore(saves);
+        let ret = match self.def(dst, self.pos + 1) {
+            _ if dst.ty == ir::ptype::Type::Void => return,
+            Preg::Gpr(gpr) => (Preg::Gpr(gpr), Preg::Gpr(RAX.0)),
+            Preg::Fpr(fpr) => (Preg::Fpr(fpr), Preg::Fpr(0)),
+        };
+        if ret.0 != ret.1 {
+            self.mov(ret.0, ret.1);
+        }
     }
 
     /// Raise the trap, the helper leaves native code through `jit_abort`:
