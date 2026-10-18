@@ -185,6 +185,11 @@ pub enum Instr<'i> {
         offset: u32,
         span: u32,
     },
+    /// Traps with an assertion failure if the Bool `cond` is false.
+    Assert {
+        cond: Id,
+        span: u32,
+    },
     Load {
         dst: TypeId<'i>,
         base: Id,
@@ -216,6 +221,7 @@ impl Instr<'_> {
     pub fn span(&self) -> u32 {
         match self {
             Instr::Store { span, .. }
+            | Instr::Assert { span, .. }
             | Instr::Load { span, .. }
             | Instr::AddrOf { span, .. }
             | Instr::Bin { span, .. }
@@ -502,7 +508,7 @@ impl Func<'_> {
             | Instr::Sys { dst, .. }
             | Instr::Cast { dst, .. }
             | Instr::Lookup { dst, .. } => Some(dst.id),
-            Instr::Store { .. } | Instr::Noop => None,
+            Instr::Store { .. } | Instr::Assert { .. } | Instr::Noop => None,
         }
     }
 }
@@ -526,6 +532,7 @@ impl<A: Allocator> Func<'_, A> {
                 f(*src);
                 f(*base);
             }
+            Instr::Assert { cond, .. } => f(*cond),
             Instr::Load { base, .. } | Instr::AddrOf { base, .. } => f(*base),
             Instr::LoadConst { .. } | Instr::Noop | Instr::Alloc { .. } => {}
         }
@@ -631,6 +638,7 @@ impl<A: Allocator> Func<'_, A> {
                         replace(src);
                         replace(base);
                     }
+                    Instr::Assert { cond, .. } => replace(cond),
                     Instr::Load { base, .. } | Instr::AddrOf { base, .. } => replace(base),
                     Instr::Call { .. }
                     | Instr::Sys { .. }
@@ -1005,6 +1013,7 @@ mod tests {
                 offset: 0,
                 span: 0,
             },
+            Instr::Assert { cond: v(), span: 0 },
             Instr::Load {
                 dst: type_id(205),
                 base: v(),

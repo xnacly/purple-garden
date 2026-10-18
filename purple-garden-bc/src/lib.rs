@@ -1309,6 +1309,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     &self.scratch,
                 );
             }
+            ir::Instr::Assert { .. } => todo!("lower to Op::Assert"),
             ir::Instr::Noop {} => {}
             ir::Instr::Bin {
                 op, dst, lhs, rhs, ..

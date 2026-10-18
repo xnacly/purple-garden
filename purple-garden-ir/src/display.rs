@@ -57,6 +57,7 @@ impl Display for Instr<'_> {
             Instr::Store {
                 src, base, offset, ..
             } => write!(f, "Store %v{}+{}, %v{}", base, offset, src)?,
+            Instr::Assert { cond, .. } => write!(f, "Assert %v{cond}")?,
             Instr::Load {
                 dst, base, offset, ..
             } => write!(f, "%v{dst} = Load %v{}+{}", base, offset)?,
