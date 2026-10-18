@@ -18,6 +18,7 @@ pub mod embed {
 
 mod io;
 mod math;
+mod opt;
 mod str;
 #[macro_use]
 mod syscall_macros;
@@ -68,11 +69,18 @@ fn insert_pkg(index: &mut HashMap<String, &'static Pkg>, parent: String, pkg: &'
     }
 }
 
-pub static SAFE_STD: &[Pkg] = &[io::PACKAGE, math::PACKAGE, str::PACKAGE, testing::PACKAGE];
+pub static SAFE_STD: &[Pkg] = &[
+    io::PACKAGE,
+    math::PACKAGE,
+    opt::PACKAGE,
+    str::PACKAGE,
+    testing::PACKAGE,
+];
 
 pub static STD: &[Pkg] = &[
     io::PACKAGE,
     math::PACKAGE,
+    opt::PACKAGE,
     str::PACKAGE,
     testing::PACKAGE,
     r#unsafe::PACKAGE,
