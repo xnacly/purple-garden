@@ -391,12 +391,16 @@ fn pg_fn_native_entries_take_and_return_hardware_values() {
     assert_eq!(unsafe { id(vm_ptr, Value::from(7_i64)) }.as_int(), 7);
 }
 
-/// The entry tail calls a native Double function and stays bytecode, its `Op::Native` reads the
-/// result from xmm0 since the callee returns a Double.
+/// `wide` has more params than argument registers and stays bytecode, its tail call to the native
+/// Double function `square` reads the result from xmm0.
 #[test]
 fn bytecode_reads_double_results_of_native_calls() {
     let mut program = purple_garden::Pg::new()
-        .compile(b"fn square(x:Double) Double { x * x }\nsquare(1.5)")
+        .compile(
+            b"fn square(x:Double) Double { x * x }
+fn wide(x:Double a:Int b:Int c:Int d:Int e:Int f:Int) Double { square(x) }
+wide(1.5 1 2 3 4 5 6)",
+        )
         .expect("compiles");
     let squared: f64 = program.run_take().expect("runs");
     assert_eq!(squared, 2.25);

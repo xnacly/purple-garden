@@ -44,6 +44,10 @@ use purple_garden_ir::{self as ir, Instr};
 ///         ret %v7
 /// ```
 pub fn tailcall<F: Allocator>(fun: &mut ir::Func<'_, F>) {
+    // the entry runs once and hands its last value to the interpreter, a tail call saves nothing
+    if fun.id == ir::Id(0) {
+        return;
+    }
     let last_id = fun.blocks.len() - 1;
 
     // verify the return block is trivial: no instructions and a simple return
@@ -118,7 +122,7 @@ mod tests {
     fn rewrites_call_return_pattern_a() {
         let mut fun = ir::Func::new(
             "tail",
-            Id(0),
+            Id(1),
             vec![TypeId {
                 id: Id(0),
                 ty: Type::Int,
@@ -162,7 +166,7 @@ mod tests {
     fn rewrites_call_jump_to_trivial_return_pattern_b() {
         let mut fun = ir::Func::new(
             "tail",
-            Id(0),
+            Id(1),
             vec![TypeId {
                 id: Id(0),
                 ty: Type::Int,
@@ -220,7 +224,7 @@ mod tests {
     fn leaves_non_tail_call_alone() {
         let mut fun = ir::Func::new(
             "nontail",
-            Id(0),
+            Id(1),
             vec![TypeId {
                 id: Id(0),
                 ty: Type::Int,
@@ -258,6 +262,40 @@ mod tests {
                 value: Some(Id(0)),
                 ..
             })
+        ));
+    }
+
+    /// The entry keeps its calls, the interpreter reads its last value after it returns.
+    #[test]
+    fn leaves_the_entry_alone() {
+        let mut fun = ir::Func::new("entry", Id(0), vec![], None);
+        let args = fun.intern_params([]);
+        let params = fun.intern_params(vec![]);
+        fun.blocks = vec![Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Call {
+                dst: TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                func: Id(42),
+                args,
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(0)),
+                span: 0,
+            }),
+        }];
+
+        tailcall(&mut fun);
+
+        assert_eq!(fun.blocks[0].instructions.len(), 1);
+        assert!(matches!(
+            &fun.blocks[0].term,
+            Some(Terminator::Return { .. })
         ));
     }
 }

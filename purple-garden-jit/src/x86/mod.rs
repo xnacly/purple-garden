@@ -1246,11 +1246,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ir::Terminator::Tail {
                 func: callee, args, ..
             } => {
-                if self.func.id == ir::Id(0) {
-                    // the entry returns in rax, a Double callee would return in xmm0 instead
-                    bail!(self, "the entry tail calls f{}", callee.0);
-                    return;
-                }
                 let Some(&f) = self.natives.get(callee) else {
                     bail!(self, "f{} is not compiled natively", callee.0);
                     return;
