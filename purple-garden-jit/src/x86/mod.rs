@@ -547,6 +547,22 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     src,
                 });
             }
+            ir::Instr::Assert { cond, .. } => {
+                let cond = self.ensure_register(*cond);
+                let cond = self.gpr(cond);
+                self.emit(Insn::Test {
+                    lhs: cond,
+                    rhs: cond,
+                });
+                let holds = encode::jump(self.out, Cond::NotZero);
+                self.call(
+                    purple_garden_runtime::jit_trap_assert as *const () as u64,
+                    &[AbiArg::Reg(VM)],
+                    None,
+                );
+                let resume = self.out.len();
+                patch_rel32(self.out, holds, holds + 4, resume).expect("short forward jump");
+            }
             ir::Instr::Load {
                 dst, base, offset, ..
             } if *offset <= i32::MAX as u32 => {
@@ -637,6 +653,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     ir::Const::False => Some(0),
                     ir::Const::True => Some(1),
                     ir::Const::Int(i) => Some(*i),
+                    ir::Const::Undefined => Some(Value::UNDEF.0 as i64),
                     _ => None,
                 }) else {
                     bail!(self, "const is not a bool or i32");

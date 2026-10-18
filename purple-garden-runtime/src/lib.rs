@@ -28,7 +28,7 @@ pub use crate::gc::{AllocType, Gc, Metadata};
 #[cfg(target_arch = "x86_64")]
 pub use crate::jit_helpers::jit_abort;
 pub use crate::jit_helpers::{
-    enter_native, jit_alloc, jit_sys, jit_trap_div_zero, jit_trap_stack_overflow,
+    enter_native, jit_alloc, jit_sys, jit_trap_assert, jit_trap_div_zero, jit_trap_stack_overflow,
 };
 pub use crate::value::{
     FromVm, IntoVm, PgType, Slot, Value, alloc_record, copy_record, decode_record_field,

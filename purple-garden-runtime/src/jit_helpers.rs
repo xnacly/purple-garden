@@ -86,6 +86,17 @@ pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) -> ! {
     unsafe { abort(vm) }
 }
 
+/// Raise an assertion failure from JIT code and leave like [`jit_trap_div_zero`].
+///
+/// # Safety
+///
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
+pub unsafe extern "C" fn jit_trap_assert(vm: *mut c_void) -> ! {
+    let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
+    vm_ref.trap(Anomaly::AssertionFailed { pc: vm_ref.pc });
+    unsafe { abort(vm) }
+}
+
 /// Raise a stack overflow from JIT code that reached
 /// [`Vm::native_stack_limit`] and leave like [`jit_trap_div_zero`].
 ///

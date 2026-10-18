@@ -834,6 +834,49 @@ mod tests_x86 {
         ));
     }
 
+    /// `fn f(c:Bool) Bool { testing.assert(c) c }`, a false `c` leaves through `jit_abort`.
+    #[test]
+    fn assert_traps_on_false() {
+        use purple_garden_runtime::{Anomaly, Vm, VmConfig};
+
+        let mut func = Func::new(
+            "assert",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Bool,
+            }],
+            Some(Type::Bool),
+        );
+        let params = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Assert {
+                cond: Id(0),
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(0)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit assert");
+        for (cond, traps) in [(1, false), (0, true)] {
+            let mut vm = Vm::new(VmConfig::default());
+            *vm.r_mut(0) = purple_garden_runtime::Value(cond);
+            enter(jit.code(), &mut vm);
+            assert_eq!(
+                matches!(vm.take_trap(), Some(Anomaly::AssertionFailed { .. })),
+                traps,
+                "assert({cond})"
+            );
+        }
+    }
+
     #[test]
     fn loads_record_field_from_pointer_arg() {
         let record_ty = record(vec![("first", Type::Int), ("second", Type::Int)]);
