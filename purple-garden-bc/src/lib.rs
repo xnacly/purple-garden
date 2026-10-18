@@ -622,6 +622,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     &self.globals.map,
                     &self.str_values,
                     &self.native_fns,
+                    arena.next_entry(),
                 )
         else {
             purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);

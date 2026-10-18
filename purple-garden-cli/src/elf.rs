@@ -90,11 +90,13 @@ pub(crate) fn write(
     let text_off = buf.len();
     let mut funcs = Vec::with_capacity(native_code.len());
     for (name, code) in native_code {
+        // laid out like the code arena, so `call rel32`s between functions resolve
+        pad(&mut buf, 16);
         let off = buf.len() - text_off;
         buf.extend_from_slice(code);
         funcs.push((format!("jit_{name}"), off, code.len()));
     }
-    let text_size: usize = funcs.iter().map(|f| f.2).sum();
+    let text_size = buf.len() - text_off;
 
     // symbol 0 is the null symbol, the functions follow in order
     let mut symbols: HashMap<&str, u32> = funcs

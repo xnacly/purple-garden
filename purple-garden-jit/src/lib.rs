@@ -93,8 +93,14 @@ impl<S: Allocator + Clone> Jit<S> {
         func.live_set_into(&mut self.liveness);
         let scratch = self.liveness.allocator().clone();
         let liveness = std::mem::replace(&mut self.liveness, Vec::new_in(scratch));
-        let result =
-            self.compile_func_with_liveness(func, &liveness, &HashMap::new(), &[], &HashMap::new());
+        let result = self.compile_func_with_liveness(
+            func,
+            &liveness,
+            &HashMap::new(),
+            &[],
+            &HashMap::new(),
+            0,
+        );
         self.liveness = liveness;
         result
     }
@@ -110,6 +116,7 @@ impl<S: Allocator + Clone> Jit<S> {
         globals: &HashMap<ir::Const<'ir>, u32>,
         strings: &[Value],
         natives: &Natives<impl Allocator>,
+        at: usize,
     ) -> Option<()> {
         self.code.clear();
         let result = arch::compile_func(
@@ -119,6 +126,7 @@ impl<S: Allocator + Clone> Jit<S> {
             globals,
             strings,
             natives,
+            at,
             &mut self.regalloc,
             &mut self.scratch,
         );
@@ -855,12 +863,17 @@ mod tests_x86 {
         assert_eq!(run(jit.code(), [5, 0, 0])[0], 11);
     }
 
-    /// Compile `func` with `natives` callable, the way the bytecode backend does.
-    fn compile_with(func: &Func<'static>, natives: &super::Natives<std::alloc::Global>) -> Vec<u8> {
+    /// Compile `func` with `natives` callable for placement at `at`, the way the bytecode backend
+    /// does.
+    fn compile_with(
+        func: &Func<'static>,
+        natives: &super::Natives<std::alloc::Global>,
+        at: usize,
+    ) -> Vec<u8> {
         let mut liveness = Vec::new();
         func.live_set_into(&mut liveness);
         let mut jit = Jit::new();
-        jit.compile_func_with_liveness(func, &liveness, &HashMap::new(), &[], natives)
+        jit.compile_func_with_liveness(func, &liveness, &HashMap::new(), &[], natives, at)
             .expect("jit function");
         jit.code().to_vec()
     }
@@ -916,6 +929,7 @@ mod tests_x86 {
         let inc = compile_with(
             &unary_func(1, Type::Int, BinOp::IAdd, Const::Int(1)),
             &HashMap::new(),
+            0,
         );
         let mut arena = CodeArena::new().expect("code arena");
         let inc = arena.push(&inc).expect("code fits the arena");
@@ -949,8 +963,69 @@ mod tests_x86 {
             }),
         });
 
-        let code = compile_with(&func, &HashMap::from_iter([(Id(1), inc)]));
+        let code = compile_with(&func, &HashMap::from_iter([(Id(1), inc)]), 0);
         assert_eq!(run(&code, [5])[0], 11);
+    }
+
+    /// `fn f(x:Int) Int { inc(x) * 2 }`: a direct `call rel32` to inc, both in one arena.
+    #[test]
+    fn calls_other_natives_directly() {
+        use purple_garden_runtime::{Value, Vm, VmConfig};
+
+        let int = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let mut arena = CodeArena::new().expect("code arena");
+        let inc = compile_with(
+            &unary_func(1, Type::Int, BinOp::IAdd, Const::Int(1)),
+            &HashMap::new(),
+            arena.next_entry(),
+        );
+        let inc = arena.push(&inc).expect("code fits the arena");
+
+        let mut func = Func::new("f", Id(2), vec![int(0)], Some(Type::Int));
+        let params = func.intern_params([Id(0)]);
+        let args = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Call {
+                    dst: int(1),
+                    func: Id(1),
+                    args,
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::IAdd,
+                    dst: int(2),
+                    lhs: Id(1),
+                    rhs: Id(1),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+        let natives = HashMap::from_iter([(Id(1), inc)]);
+        let code = compile_with(&func, &natives, arena.next_entry());
+        assert!(
+            !code
+                .windows(8)
+                .any(|w| w == (inc as usize as u64).to_le_bytes()),
+            "no movabs of inc's address"
+        );
+        let f = arena.push(&code).expect("code fits the arena");
+        arena.seal().expect("seal the code arena");
+
+        let mut vm = Vm::new(VmConfig::default());
+        *vm.r_mut(0) = Value(20);
+        unsafe { purple_garden_runtime::enter_native((&mut vm as *mut Vm).cast(), f) };
+        assert_eq!(vm.r(0).as_int(), 42);
     }
 
     /// `fn g(x:Double y:Double) Double { half(y) }` as a tail call, y moving into xmm0.
@@ -963,6 +1038,7 @@ mod tests_x86 {
         let half = compile_with(
             &unary_func(1, Type::Double, BinOp::DDiv, Const::Double(2f64.to_bits())),
             &HashMap::new(),
+            0,
         );
         let mut arena = CodeArena::new().expect("code arena");
         let half = arena.push(&half).expect("code fits the arena");
@@ -983,7 +1059,7 @@ mod tests_x86 {
             }),
         });
 
-        let code = compile_with(&func, &HashMap::from_iter([(Id(1), half)]));
+        let code = compile_with(&func, &HashMap::from_iter([(Id(1), half)]), 0);
         assert_eq!(run_double(&code, [1f64.to_bits(), 9f64.to_bits()]), 4.5);
     }
 

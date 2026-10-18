@@ -80,6 +80,7 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     globals: &HashMap<ir::Const<'ir>, u32>,
     strings: &[Value],
     natives: &crate::Natives<N>,
+    at: usize,
     ra: &mut Xralloc2<S>,
     buffers: &mut Scratch<S>,
 ) -> Option<()> {
@@ -157,6 +158,12 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     for &rel in &buffers.self_refs {
         patch_rel32(out, body_at + rel, body_at + rel + 4, start).expect("within the function");
     }
+    // Calls to other natives, as distances from where this function lands at `at`.
+    for &(rel, target) in &buffers.native_refs {
+        let from = at + (body_at + rel + 4 - start);
+        let disp = i32::try_from(target as isize - from as isize).expect("natives share an arena");
+        out[body_at + rel..body_at + rel + 4].copy_from_slice(&disp.to_le_bytes());
+    }
     let epilogue = |out: &mut Vec<u8, S>| {
         if pad {
             Insn::AddImm { dst: RSP, imm: 8 }.encode(out);
@@ -215,6 +222,8 @@ pub struct Scratch<S: Allocator> {
     self_refs: Vec<usize, S>,
     /// Body offsets of the rel32s (tail calls) that jump to the tail epilogue.
     tail_refs: Vec<usize, S>,
+    /// Body offsets of the rel32s (native calls) and the native function each calls.
+    native_refs: Vec<(usize, usize), S>,
 }
 
 impl<S: Allocator + Clone> Scratch<S> {
@@ -226,7 +235,8 @@ impl<S: Allocator + Clone> Scratch<S> {
             move_pairs: Vec::new_in(scratch.clone()),
             saves: Vec::new_in(scratch.clone()),
             self_refs: Vec::new_in(scratch.clone()),
-            tail_refs: Vec::new_in(scratch),
+            tail_refs: Vec::new_in(scratch.clone()),
+            native_refs: Vec::new_in(scratch),
         }
     }
 }
@@ -335,6 +345,7 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     saves: &'a mut Vec<(Preg, Preg), S>,
     self_refs: &'a mut Vec<usize, S>,
     tail_refs: &'a mut Vec<usize, S>,
+    native_refs: &'a mut Vec<(usize, usize), S>,
 }
 
 impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, F, S, N> {
@@ -356,6 +367,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             saves,
             self_refs,
             tail_refs,
+            native_refs,
         } = buffers;
         body.clear();
         block_offsets.clear();
@@ -363,6 +375,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         patches.clear();
         self_refs.clear();
         tail_refs.clear();
+        native_refs.clear();
         Self {
             func,
             liveness,
@@ -382,6 +395,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             saves,
             self_refs,
             tail_refs,
+            native_refs,
         }
     }
 
@@ -1610,11 +1624,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.calls = true;
         match callee {
             Callee::Native(f) => {
-                self.emit(Insn::MovAbs {
-                    dst: GPR_SCRATCH,
-                    imm: f as usize as u64,
-                });
-                self.emit(Insn::CallReg { reg: GPR_SCRATCH });
+                self.emit(Insn::CallRel { disp: 0 });
+                self.native_refs.push((self.out.len() - 4, f as usize));
             }
             Callee::This => {
                 self.emit(Insn::CallRel { disp: 0 });
