@@ -146,6 +146,7 @@ mod tests {
         specialises: None,
         with_slots: false,
         intrinsic: None,
+        native: None,
     };
 
     static IMPURE_FN: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
@@ -160,6 +161,7 @@ mod tests {
         specialises: None,
         with_slots: false,
         intrinsic: None,
+        native: None,
     };
 
     #[test]
@@ -340,6 +342,7 @@ mod tests {
             specialises: None,
             with_slots: false,
             intrinsic: None,
+            native: None,
         };
 
         let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Int));
@@ -416,6 +419,7 @@ mod tests {
             specialises: None,
             with_slots: false,
             intrinsic: None,
+            native: None,
         };
 
         let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Str));

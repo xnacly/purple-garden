@@ -29,6 +29,7 @@ struct PgFunction {
 
 struct ExpandedFunction {
     wrapper: TokenStream2,
+    native: Option<TokenStream2>,
     const_eval: Option<TokenStream2>,
     metadata: TokenStream2,
 }
@@ -59,6 +60,9 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             Item::Fn(fun) => match expand_function(&api, fun) {
                 Ok(expanded) => {
                     generated_items.push(Item::Verbatim(expanded.wrapper));
+                    if let Some(native) = expanded.native {
+                        generated_items.push(Item::Verbatim(native));
+                    }
                     if let Some(const_eval) = expanded.const_eval {
                         generated_items.push(Item::Verbatim(const_eval));
                     }
@@ -145,6 +149,7 @@ fn expand_function(api: &Path, fun: &mut ItemFn) -> syn::Result<ExpandedFunction
 
     Ok(ExpandedFunction {
         wrapper: function.wrapper(api),
+        native: function.native(api),
         metadata: function.metadata(api, const_eval.is_some()),
         const_eval,
     })
@@ -360,6 +365,53 @@ impl PgFunction {
         }
     }
 
+    /// The entry native code calls directly, see `NativeFn`: Rust `f64` arguments and result stay
+    /// `f64`, everything else crosses as a `Value` word and is decoded like in the wrapper.
+    fn native(&self, api: &Path) -> Option<TokenStream2> {
+        if self.result || self.intrinsic.is_some() {
+            return None;
+        }
+        let name = format_ident!("__pg_native_{}", self.ident);
+        let fn_name = &self.ident;
+        let params = self.args.iter().map(|arg| {
+            let binding = &arg.binding;
+            let ty = native_ty(&arg.ty, api);
+            quote!(#binding: #ty)
+        });
+        let decoders = self.args.iter().filter(|arg| !is_f64(&arg.ty)).map(|arg| {
+            let binding = &arg.binding;
+            let ty = &arg.ty;
+            quote!(let #binding = <#ty as #api::embed::FromVm>::from_vm(vm, #binding);)
+        });
+        let call_args: Vec<TokenStream2> = if self.raw {
+            self.unsafe_arg_bindings()
+        } else {
+            self.arg_bindings()
+                .map(|binding| quote!(#binding))
+                .collect()
+        };
+        let ret_ty = &self.ret;
+        let ret_sig = native_ret_sig(ret_ty, api);
+        let call = if returns_unit(ret_ty) || is_f64(ret_ty) {
+            quote!(#fn_name(#(#call_args),*))
+        } else {
+            quote! {
+                let ret = #fn_name(#(#call_args),*);
+                <#ret_ty as #api::embed::IntoVm>::into_vm(ret, vm)
+            }
+        };
+
+        Some(quote! {
+            #[doc(hidden)]
+            #[allow(unused_variables)]
+            unsafe extern "C" fn #name(vm: *mut std::ffi::c_void, #(#params),*) #ret_sig {
+                let vm = unsafe { &mut *vm.cast::<#api::embed::Vm>() };
+                #(#decoders)*
+                #call
+            }
+        })
+    }
+
     fn arg_bindings(&self) -> impl Iterator<Item = &Ident> {
         self.args.iter().map(|arg| &arg.binding)
     }
@@ -431,6 +483,21 @@ impl PgFunction {
             None => quote!(None),
         };
         let ret_ty = &self.ret;
+        let native = if self.result || self.intrinsic.is_some() {
+            quote!(None)
+        } else {
+            let name = format_ident!("__pg_native_{}", self.ident);
+            let arg_tys = self.args.iter().map(|arg| native_ty(&arg.ty, api));
+            let ret_sig = native_ret_sig(ret_ty, api);
+            quote! {
+                Some(unsafe {
+                    ::core::mem::transmute::<
+                        unsafe extern "C" fn(*mut ::std::ffi::c_void, #(#arg_tys),*) #ret_sig,
+                        #api::embed::NativeFn,
+                    >(#name)
+                })
+            }
+        };
         let arg_names = self
             .args
             .iter()
@@ -450,6 +517,7 @@ impl PgFunction {
                 specialises: #specialises,
                 with_slots: #with_slots,
                 intrinsic: #intrinsic,
+                native: #native,
             }
         }
     }
@@ -545,6 +613,28 @@ fn result_ok_type(ty: &Type) -> Option<Type> {
 
 fn returns_unit(ty: &Type) -> bool {
     matches!(ty, Type::Tuple(tuple) if tuple.elems.is_empty())
+}
+
+/// Double crosses native entries as `f64` so SysV passes it in an xmm register.
+fn is_f64(ty: &Type) -> bool {
+    matches!(ty, Type::Path(path) if path.qself.is_none() && path.path.is_ident("f64"))
+}
+
+fn native_ty(ty: &Type, api: &Path) -> TokenStream2 {
+    if is_f64(ty) {
+        quote!(f64)
+    } else {
+        quote!(#api::embed::Value)
+    }
+}
+
+fn native_ret_sig(ty: &Type, api: &Path) -> TokenStream2 {
+    if returns_unit(ty) {
+        quote!()
+    } else {
+        let ty = native_ty(ty, api);
+        quote!(-> #ty)
+    }
 }
 
 #[derive(Default)]

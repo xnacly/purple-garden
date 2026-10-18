@@ -32,6 +32,10 @@ use purple_garden_shared::BuiltinFn;
 
 pub type ConstEvalFn = for<'args, 'c> fn(&'args [Const<'c>]) -> Option<Const<'c>>;
 
+/// A builtin's entry for native code, erased: SysV `extern "C"` taking the vm first, Double
+/// arguments and result as `f64` and everything else as one `Value` word
+pub type NativeFn = unsafe extern "C" fn();
+
 #[derive(Debug, Clone)]
 pub struct Fn<'f> {
     pub name: &'f str,
@@ -48,6 +52,9 @@ pub struct Fn<'f> {
     pub with_slots: bool,
     /// Lowered by the frontend instead of being called
     pub intrinsic: Option<Intrinsic>,
+    /// Called by native code without going through `vm.r`, `None` for intrinsics and builtins
+    /// returning a `Result`
+    pub native: Option<NativeFn>,
 }
 
 /// Builtins the frontend lowers to IR instead of an [`Instr::Sys`] call, their Rust body never runs

@@ -1444,6 +1444,7 @@ mod tests {
             eval: None,
             with_slots: true,
             intrinsic: None,
+            native: None,
             arg_names: &["x"],
             args: &[Type::Slot("T")],
             ret: Type::Slot("T"),
