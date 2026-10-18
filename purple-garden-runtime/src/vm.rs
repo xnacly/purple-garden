@@ -1,5 +1,5 @@
 use crate::{
-    Anomaly, BuiltinFn, DEFAULT_STACK_SIZE, MIB, REGISTER_COUNT, Value,
+    Anomaly, BuiltinFn, DEFAULT_STACK_SIZE, IntoVm, MIB, REGISTER_COUNT, Value,
     gc::{AllocType, Gc},
     op::{LookupTable, Op, SwitchKind, SwitchTable},
     string,
@@ -117,6 +117,9 @@ pub struct Vm<'vm> {
     /// Native code traps instead of growing its stack below this, see
     /// [`NATIVE_STACK_LIMIT_OFFSET`]. 0 disables the check.
     pub native_stack_limit: usize,
+    /// The box every None points to, see [`crate::Type::Option`]. Singleton so the vm doesnt
+    /// allocate useless Option::None boxes for all none(d?) optionals
+    pub none: Value,
 
     pub config: VmConfig,
     /// Called when allocation wants to run a collection pass.
@@ -209,7 +212,7 @@ impl<'vm> Vm<'vm> {
             Self::collect
         };
 
-        Self {
+        let mut vm = Self {
             r: [const { Value(0) }; REGISTER_COUNT],
             frames,
             frame_depth: 1,
@@ -224,9 +227,12 @@ impl<'vm> Vm<'vm> {
             backtrace: Vec::new(),
             pending_trap: None,
             native_stack_limit: 0,
+            none: Value::UNDEF,
             config,
             collect_fn: collect,
-        }
+        };
+        vm.none = vm.option_box(0, Value::UNDEF);
+        vm
     }
 
     fn root_frame() -> CallFrame {
@@ -298,6 +304,23 @@ impl<'vm> Vm<'vm> {
     pub fn alloc(&mut self, alloc_type: AllocType, layout: Layout) -> std::ptr::NonNull<u8> {
         self.try_alloc(alloc_type, layout)
             .expect("GC allocation failed")
+    }
+
+    /// Boxes `value` as an Option, see [`crate::Type::Option`]. Every None is [`Vm::none`].
+    pub fn new_option<T: IntoVm>(&mut self, value: Option<T>) -> Value {
+        let Some(value) = value else {
+            return self.none;
+        };
+        let payload = value.into_vm(self);
+        self.option_box(1, payload)
+    }
+
+    fn option_box(&mut self, tag: u64, payload: Value) -> Value {
+        let block = self
+            .alloc(AllocType::Option, Layout::new::<[u64; 2]>())
+            .cast::<[u64; 2]>();
+        unsafe { block.write([tag, payload.0]) };
+        Value(block.as_ptr() as u64)
     }
 
     pub fn new_string(&mut self, s: String) -> Value {
