@@ -600,7 +600,6 @@ dependencies = [
  "clap",
  "lsp-server",
  "lsp-types",
- "purple-garden",
  "purple-garden-allocators",
  "purple-garden-bc",
  "purple-garden-frontend",

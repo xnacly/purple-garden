@@ -279,6 +279,7 @@ fn pipeline<A: Pages + Clone>(
             }
             _ => elf::write(
                 ctx.native_code.as_deref().unwrap_or_default(),
+                &elf::addresses(&ctx, &syscalls),
                 std::io::stdout().lock(),
             )?,
         }
