@@ -372,14 +372,16 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     fn lower(mut self) -> Option<bool> {
         // Native calls recurse on the machine stack: trap like the interpreter
         // before running off its end.
-        let calls_native = self
+        // Functions are defined before use, so only a function calling itself
+        // can recurse, a tail call to itself is a loop.
+        let recurses = self
             .func
             .blocks
             .iter()
             .filter(|b| !b.tombstone)
             .flat_map(|b| &b.instructions)
-            .any(|i| matches!(i, ir::Instr::Call { .. }));
-        if calls_native {
+            .any(|i| matches!(i, ir::Instr::Call { func, .. } if *func == self.func.id));
+        if recurses {
             self.emit(Insn::CmpMem {
                 reg: RSP,
                 base: VM,
