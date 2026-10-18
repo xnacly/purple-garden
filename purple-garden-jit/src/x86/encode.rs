@@ -25,6 +25,7 @@ pub const RCX: Reg = Reg(1);
 pub const RDX: Reg = Reg(2);
 pub const RBX: Reg = Reg(3);
 pub const RSP: Reg = Reg(4);
+pub const RBP: Reg = Reg(5);
 pub const RSI: Reg = Reg(6);
 pub const RDI: Reg = Reg(7);
 pub const R8: Reg = Reg(8);
@@ -107,16 +108,16 @@ pub fn patch_rel32(code: &mut [u8], rel: usize, from: usize, target: usize) -> O
 
 /// A single x86-64 instruction. `encode` appends its machine-code bytes
 ///
-/// `slot` indexes the VM register file at `[rdi + slot*8]`.
+/// `slot` indexes the VM register file at `[rbx + slot*8]`.
 #[derive(Debug, Clone, Copy)]
 pub enum Insn {
     Ret,
-    /// `mov r{dst}, [rdi + slot*8]`
+    /// `mov r{dst}, [rbx + slot*8]`
     LoadSlot {
         dst: Reg,
         slot: u8,
     },
-    /// `mov [rdi + slot*8], r{src}`
+    /// `mov [rbx + slot*8], r{src}`
     StoreSlot {
         src: Reg,
         slot: u8,
@@ -642,23 +643,23 @@ fn reg_imm<A: Allocator>(code: &mut Vec<u8, A>, digit: u8, rm: u8, imm: i32) {
     code.extend_from_slice(&imm.to_le_bytes());
 }
 
-/// `mov` between GPR `reg` and `[rdi + slot*8]` (opcode 0x8b load, 0x89 store).
+/// `mov` between GPR `reg` and `[rbx + slot*8]` (opcode 0x8b load, 0x89 store).
 ///
 /// Memory operands use `mod != 11`, so this cannot use [`modrm`]. We use:
 ///
 /// ```text
 /// mod = 01       disp8 follows the ModRM byte
 /// reg = reg&7    loaded/stored GPR
-/// r/m = 111      base register rdi
+/// r/m = 011      base register rbx
 /// disp8 = slot*8 byte offset into Vm::r
 /// ```
 ///
 /// This is why the lowering rejects more than 32 params: `slot*8`
 /// must fit in a signed 8-bit displacement for this compact addressing form.
 fn mov_slot<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, slot: u8) {
-    // ModRM mod=01 (disp8), reg field = GPR, rm = rdi.
-    let m = 0x40 | ((reg & 7) << 3) | RDI.0;
-    code.extend_from_slice(&[rex(reg, RDI.0), opcode, m, slot * 8]);
+    // ModRM mod=01 (disp8), reg field = GPR, rm = rbx.
+    let m = 0x40 | ((reg & 7) << 3) | RBX.0;
+    code.extend_from_slice(&[rex(reg, RBX.0), opcode, m, slot * 8]);
 }
 
 /// Memory op using `[base + offset]`, where ModRM.reg is the register operand
@@ -1077,22 +1078,22 @@ mod tests {
                 dst: Reg(0),
                 slot: 0
             }),
-            [0x48, 0x8b, 0x47, 0x00]
-        ); // mov rax,[rdi+0]
+            [0x48, 0x8b, 0x43, 0x00]
+        ); // mov rax,[rbx+0]
         assert_eq!(
             enc(Insn::StoreSlot {
                 src: Reg(1),
                 slot: 1
             }),
-            [0x48, 0x89, 0x4f, 0x08]
-        ); // mov [rdi+8],rcx
+            [0x48, 0x89, 0x4b, 0x08]
+        ); // mov [rbx+8],rcx
         assert_eq!(
             enc(Insn::LoadSlot {
                 dst: Reg(8),
                 slot: 2
             }),
-            [0x4c, 0x8b, 0x47, 0x10]
-        ); // mov r8,[rdi+16]
+            [0x4c, 0x8b, 0x43, 0x10]
+        ); // mov r8,[rbx+16]
         assert_eq!(
             enc(Insn::LoadMem {
                 dst: Reg(0),

@@ -2,14 +2,14 @@
 //!
 //! IR is lowered to native code in a single pass, uses xralloc2 to map SSA values to x86 GPRs while emitting.
 //!
-//! The native ABI passes `*mut Vm` in `rdi`. `Vm::r` being the first field, `rdi` is the base of the VM
+//! The native ABI keeps `*mut Vm` in `rbx`. `Vm::r` being the first field, `rbx` is the base of the VM
 //! register file. Arguments arrive in `vm.r[0..n]`; return register is `vm.r[0]`. All
 //! computation happen in GPRs. The jit moves arguments from `vm.r[0..n]` to GPRs in a jitted
 //! functions prologue.
 //!
 //! A trap records its anomaly in a runtime helper, which leaves every native frame through
 //! `jit_abort` back to the interpreter, so calls need no trap check. Native functions
-//! preserve `rdi` and clobber only the SysV caller-saved registers, so native
+//! preserve `rbx` and clobber only the SysV caller-saved registers, so native
 //! to native calls are plain `call`s: no trampoline, no spill of the VM base.
 //! The interpreter enters natives through `enter_native` and ignores `rax`.
 
@@ -22,7 +22,7 @@ use crate::{
     xralloc2::{Class, Reg as Preg, Xralloc2},
 };
 use encode::{
-    Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBX, RCX, RDI, RDX, RSI, RSP, Reg,
+    Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBP, RBX, RCX, RDI, RDX, RSI, RSP, Reg,
     patch_rel32,
 };
 use purple_garden_ir::{self as ir, BinOp};
@@ -42,8 +42,9 @@ macro_rules! skip {
     }};
 }
 
-/// `rdi` holds `*mut Vm` == `&vm.r[0]`, base for slot loads/stores.
-const VM: Reg = RDI;
+/// `rbx` holds `*mut Vm` == `&vm.r[0]`, base for slot loads/stores. Callee saved, so Rust keeps
+/// it across calls, `enter_native` sets it.
+const VM: Reg = RBX;
 /// Never holds a value: breaks edge-move cycles and holds helper addresses.
 const GPR_SCRATCH: Reg = RAX;
 /// Native functions take argument i in `ARG_GPRS[i]`, or in `xmm{i}` if it is a Double, and
@@ -53,19 +54,17 @@ const ARG_GPRS: [Reg; 6] = [RSI, RDX, RCX, R8, R9, R10];
 /// Allocatable GPRs, popped from the back: caller-saved first so leaf functions dont require a
 /// prologue, `rcx`/`rdx` last since `idiv` clobbers them.
 const GPR_POOL: &[u8] = &[
-    RBX.0, R12.0, R13.0, R14.0, R15.0, RDX.0, RCX.0, R11.0, R10.0, R9.0, R8.0, RSI.0,
+    RBP.0, R12.0, R13.0, R14.0, R15.0, RDI.0, RDX.0, RCX.0, R11.0, R10.0, R9.0, R8.0, RSI.0,
 ];
-const GPR_CALLEE_SAVED: &[Reg] = &[RBX, R12, R13, R14, R15];
+/// No frame pointer is kept, `rbp` is just another callee saved register.
+const GPR_CALLEE_SAVED: &[Reg] = &[RBP, R12, R13, R14, R15];
 /// Allocatable registers a SysV helper call clobbers.
-const GPR_CALLER_SAVED: &[Reg] = &[RCX, RDX, RSI, R8, R9, R10, R11];
+const GPR_CALLER_SAVED: &[Reg] = &[RCX, RDX, RSI, RDI, R8, R9, R10, R11];
 /// A helper call clobbers every xmm on top: SysV has no callee-saved fpr.
 const CALL_CLOBBERS: Clobbers = Clobbers {
     gprs: GPR_CALLER_SAVED,
     fprs: true,
 };
-/// Stack a helper call reserves for the VM base; keeps rsp 16-byte aligned
-/// since the prologue aligns it for functions with calls.
-const CALL_STACK: i32 = 16;
 
 /// Allocatable XMM regs, also popped from the back; none are callee saved
 const XMM_POOL: &[u8] = &[14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
@@ -1587,7 +1586,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     }
 
     /// Call the native function `callee`: argument i in `ARG_GPRS[i]` or `xmm{i}` by its class, the
-    /// result in `rax` or `xmm0`, no memory in between. Natives keep `rdi` and the callee saved
+    /// result in `rax` or `xmm0`, no memory in between. Natives keep `rbx` and the callee saved
     /// registers, so only values live across the call in the others are copied away. More
     /// arguments than registers would need the stack and stay bytecode.
     fn call_native(&mut self, callee: Callee, args: &[ir::Id], dst: &ir::TypeId<'ir>) {
@@ -1674,7 +1673,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     }
 
     /// Calls a builtin's native entry: arguments and result in registers, without `vm.r` and
-    /// `jit_sys`. Rust may clobber `rdi`, so the vm is kept on the stack across the call.
+    /// `jit_sys`. The vm goes into `rdi` last, an argument may still have been there.
     fn call_native_entry(
         &mut self,
         native: ir::NativeFn,
@@ -1683,29 +1682,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     ) {
         let saves = self.move_args_and_save(moves, CALL_CLOBBERS);
         self.calls = true;
-        self.emit(Insn::SubImm {
-            dst: RSP,
-            imm: CALL_STACK,
-        });
-        self.emit(Insn::StoreMem {
-            base: RSP,
-            offset: 0,
-            src: VM,
-        });
+        self.emit(Insn::Mov { dst: RDI, src: VM });
         self.emit(Insn::MovAbs {
             dst: GPR_SCRATCH,
             imm: native as usize as u64,
         });
         self.emit(Insn::CallReg { reg: GPR_SCRATCH });
-        self.emit(Insn::LoadMem {
-            dst: VM,
-            base: RSP,
-            offset: 0,
-        });
-        self.emit(Insn::AddImm {
-            dst: RSP,
-            imm: CALL_STACK,
-        });
         self.restore(saves);
         self.take_result(dst);
     }
@@ -1720,22 +1702,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         );
     }
 
-    /// SysV call to the helper at `addr`. The VM base lives in caller-saved
-    /// `rdi`, so it is kept on the stack across the call. Arguments are moved in order, which
-    /// is only safe because callers pass the VM base and immediates.
+    /// SysV call to the helper at `addr`. The VM base lives in callee saved `rbx`, so it survives
+    /// the call. Arguments are moved in order, which is only safe because callers pass the VM base
+    /// and immediates.
     fn call(&mut self, addr: u64, args: &[AbiArg], result: Option<Reg>) {
         const ARGS: [Reg; 6] = [RDI, RSI, RDX, RCX, R8, R9];
         debug_assert!(args.len() <= ARGS.len());
         self.calls = true;
-        self.emit(Insn::SubImm {
-            dst: RSP,
-            imm: CALL_STACK,
-        });
-        self.emit(Insn::StoreMem {
-            base: RSP,
-            offset: 0,
-            src: VM,
-        });
         for (&dst, arg) in ARGS.iter().zip(args) {
             match *arg {
                 AbiArg::Reg(src) if src != dst => self.emit(Insn::Mov { dst, src }),
@@ -1748,15 +1721,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             imm: addr,
         });
         self.emit(Insn::CallReg { reg: GPR_SCRATCH });
-        self.emit(Insn::LoadMem {
-            dst: VM,
-            base: RSP,
-            offset: 0,
-        });
-        self.emit(Insn::AddImm {
-            dst: RSP,
-            imm: CALL_STACK,
-        });
         if let Some(dst) = result.filter(|&dst| dst != RAX) {
             self.emit(Insn::Mov { dst, src: RAX });
         }

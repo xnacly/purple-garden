@@ -29,6 +29,8 @@ macro_rules! enter_native {
                 "sub rsp, 8",
                 "lea rax, [rsp - 8]",
                 "mov [rdi + {entry_rsp}], rax",
+                // native code keeps the vm in rbx, rdi is free for it
+                "mov rbx, rdi",
                 "mov r11, rsi",
                 // argument i arrives in the i-th gpr and the i-th xmm register, the callee uses
                 // the one its type needs
@@ -80,12 +82,12 @@ enter_native! {
     /// Saves every callee saved register and records the slot of the call's return address in
     /// [`Vm::native_entry_rsp`], so [`jit_abort`] can leave native code from any depth and both
     /// paths restore the registers.
-    enter_native, "mov [rdi], rax"
+    enter_native, "mov [rbx], rax"
 }
 
 enter_native! {
     /// [`enter_native`] for a native function returning a Double in `xmm0`.
-    enter_native_double, "movq [rdi], xmm0"
+    enter_native_double, "movq [rbx], xmm0"
 }
 
 /// Leaves native code from any depth, as if the outermost native function entered through
@@ -99,6 +101,8 @@ enter_native! {
 #[unsafe(naked)]
 pub unsafe extern "C" fn jit_abort(vm: *mut c_void) -> ! {
     std::arch::naked_asm!(
+        // a Rust helper calling this may have rbx in use, enter_native stores through it
+        "mov rbx, rdi",
         "mov rsp, [rdi + {entry_rsp}]",
         "ret",
         entry_rsp = const crate::NATIVE_ENTRY_RSP_OFFSET,
@@ -252,11 +256,11 @@ mod tests {
         )
     }
 
-    /// Native code that clobbers every callee saved register and returns normally.
+    /// Native code that clobbers every callee saved register but rbx, which holds the vm, and
+    /// returns normally.
     #[unsafe(naked)]
     unsafe extern "C" fn clobbers_and_returns(_vm: *mut c_void) {
         std::arch::naked_asm!(
-            "mov rbx, -1",
             "mov rbp, -1",
             "mov r12, -1",
             "mov r13, -1",
@@ -266,8 +270,8 @@ mod tests {
         )
     }
 
-    /// Native code that clobbers every callee saved register and aborts two calls deep,
-    /// with stack in between.
+    /// Native code that clobbers every callee saved register, the vm in rbx too as a Rust helper
+    /// might, and aborts two calls deep, with stack in between.
     #[unsafe(naked)]
     unsafe extern "C" fn clobbers_and_aborts(_vm: *mut c_void) {
         std::arch::naked_asm!(
