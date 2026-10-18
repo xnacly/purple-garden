@@ -13,8 +13,6 @@
   - [x] allocs
   - [x] used
   - [ ] type(T)->Str
-- [ ] unsafe/syscall
-    - [x] uname
 - [ ] str
   - [x] contains
   - [x] get
