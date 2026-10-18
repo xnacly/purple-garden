@@ -147,6 +147,7 @@ mod tests_x86 {
         BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId,
         ptype::{Field, Type},
     };
+    use std::collections::HashMap;
 
     fn record(fields: Vec<(&'static str, Type<'static>)>) -> Type<'static> {
         Type::Record(
@@ -854,6 +855,138 @@ mod tests_x86 {
         assert_eq!(run(jit.code(), [5, 0, 0])[0], 11);
     }
 
+    /// Compile `func` with `natives` callable, the way the bytecode backend does.
+    fn compile_with(func: &Func<'static>, natives: &super::Natives<std::alloc::Global>) -> Vec<u8> {
+        let mut liveness = Vec::new();
+        func.live_set_into(&mut liveness);
+        let mut jit = Jit::new();
+        jit.compile_func_with_liveness(func, &liveness, &HashMap::new(), &[], natives)
+            .expect("jit function");
+        jit.code().to_vec()
+    }
+
+    /// `fn callee(a:<ty>) <ty> { a <op> rhs }` with the constant `rhs`.
+    fn unary_func(id: u32, ty: Type<'static>, op: BinOp, rhs: Const<'static>) -> Func<'static> {
+        let mut func = Func::new(
+            "callee",
+            Id(id),
+            vec![TypeId {
+                id: Id(0),
+                ty: ty.clone(),
+            }],
+            Some(ty.clone()),
+        );
+        let params = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::LoadConst {
+                    dst: TypeId {
+                        id: Id(1),
+                        ty: ty.clone(),
+                    },
+                    value: rhs,
+                    span: 0,
+                },
+                Instr::Bin {
+                    op,
+                    dst: TypeId { id: Id(2), ty },
+                    lhs: Id(0),
+                    rhs: Id(1),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+        func
+    }
+
+    /// `fn f(x:Int) Int { inc(x * 2) }` as a tail call, inc returning straight to f's caller.
+    #[test]
+    fn tail_calls_another_native() {
+        let int = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let inc = compile_with(
+            &unary_func(1, Type::Int, BinOp::IAdd, Const::Int(1)),
+            &HashMap::new(),
+        );
+        let mut arena = CodeArena::new().expect("code arena");
+        let inc = arena.push(&inc).expect("code fits the arena");
+        arena.seal().expect("seal the code arena");
+
+        let mut func = Func::new("f", Id(2), vec![int(0)], Some(Type::Int));
+        let params = func.intern_params([Id(0)]);
+        let args = func.intern_params([Id(2)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::LoadConst {
+                    dst: int(1),
+                    value: Const::Int(2),
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::IMul,
+                    dst: int(2),
+                    lhs: Id(0),
+                    rhs: Id(1),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Tail {
+                func: Id(1),
+                args,
+                span: 0,
+            }),
+        });
+
+        let code = compile_with(&func, &HashMap::from_iter([(Id(1), inc)]));
+        assert_eq!(run(&code, [5])[0], 11);
+    }
+
+    /// `fn g(x:Double y:Double) Double { half(y) }` as a tail call, y moving into xmm0.
+    #[test]
+    fn tail_calls_move_arguments_into_place() {
+        let double = |id| TypeId {
+            id: Id(id),
+            ty: Type::Double,
+        };
+        let half = compile_with(
+            &unary_func(1, Type::Double, BinOp::DDiv, Const::Double(2f64.to_bits())),
+            &HashMap::new(),
+        );
+        let mut arena = CodeArena::new().expect("code arena");
+        let half = arena.push(&half).expect("code fits the arena");
+        arena.seal().expect("seal the code arena");
+
+        let mut func = Func::new("g", Id(2), vec![double(0), double(1)], Some(Type::Double));
+        let params = func.intern_params([Id(0), Id(1)]);
+        let args = func.intern_params([Id(1)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![],
+            term: Some(Terminator::Tail {
+                func: Id(1),
+                args,
+                span: 0,
+            }),
+        });
+
+        let code = compile_with(&func, &HashMap::from_iter([(Id(1), half)]));
+        assert_eq!(run_double(&code, [1f64.to_bits(), 9f64.to_bits()]), 4.5);
+    }
+
     /// `fn f(a, b) int { a <op> b }` with a register divisor.
     fn reg_div_func(op: BinOp) -> Func<'static> {
         let mut func = Func::new(
@@ -1158,7 +1291,7 @@ mod tests_x86 {
         assert_eq!(run_double(jit.code(), [0, 0, 0]), 3.1415);
     }
 
-    /// Tail calls to other functions aren't lowered yet, so a function using them stays bytecode.
+    /// A tail call to a function that isn't native stays bytecode.
     #[test]
     fn skips_unsupported_functions() {
         let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Int));

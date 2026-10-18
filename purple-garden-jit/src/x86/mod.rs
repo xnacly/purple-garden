@@ -158,13 +158,27 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     for &rel in &buffers.self_refs {
         patch_rel32(out, body_at + rel, body_at + rel + 4, start).expect("within the function");
     }
-    if pad {
-        Insn::AddImm { dst: RSP, imm: 8 }.encode(out);
-    }
-    for reg in saved.rev() {
-        Insn::Pop { reg }.encode(out);
-    }
+    let epilogue = |out: &mut Vec<u8, S>| {
+        if pad {
+            Insn::AddImm { dst: RSP, imm: 8 }.encode(out);
+        }
+        for reg in saved.clone().rev() {
+            Insn::Pop { reg }.encode(out);
+        }
+    };
+    epilogue(out);
     Insn::Ret.encode(out);
+    // A tail call leaves the frame like a return, then jumps to the callee in rax, which returns
+    // to this function's caller.
+    if !buffers.tail_refs.is_empty() {
+        let tail_at = out.len();
+        epilogue(out);
+        Insn::JmpReg { reg: GPR_SCRATCH }.encode(out);
+        for &rel in &buffers.tail_refs {
+            patch_rel32(out, body_at + rel, body_at + rel + 4, tail_at)
+                .expect("within the function");
+        }
+    }
 
     purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
     Some(())
@@ -175,6 +189,8 @@ enum Target {
     Block(ir::Id),
     /// The shared epilogue appended after the body.
     Epilogue,
+    /// The epilogue of tail calls, appended after [`Target::Epilogue`] once the frame is known.
+    TailEpilogue,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -198,6 +214,8 @@ pub struct Scratch<S: Allocator> {
     saves: Vec<(Preg, Preg), S>,
     /// Body offsets of the rel32s (self calls) that address the function's own start.
     self_refs: Vec<usize, S>,
+    /// Body offsets of the rel32s (tail calls) that jump to the tail epilogue.
+    tail_refs: Vec<usize, S>,
 }
 
 impl<S: Allocator + Clone> Scratch<S> {
@@ -208,7 +226,8 @@ impl<S: Allocator + Clone> Scratch<S> {
             patches: Vec::new_in(scratch.clone()),
             move_pairs: Vec::new_in(scratch.clone()),
             saves: Vec::new_in(scratch.clone()),
-            self_refs: Vec::new_in(scratch),
+            self_refs: Vec::new_in(scratch.clone()),
+            tail_refs: Vec::new_in(scratch),
         }
     }
 }
@@ -316,6 +335,7 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     /// Reusable `(reg, copy)` buffer of [`Lowering::save_clobbered`].
     saves: &'a mut Vec<(Preg, Preg), S>,
     self_refs: &'a mut Vec<usize, S>,
+    tail_refs: &'a mut Vec<usize, S>,
 }
 
 impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, F, S, N> {
@@ -336,12 +356,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             move_pairs,
             saves,
             self_refs,
+            tail_refs,
         } = buffers;
         body.clear();
         block_offsets.clear();
         block_offsets.resize(func.blocks.len(), usize::MAX);
         patches.clear();
         self_refs.clear();
+        tail_refs.clear();
         Self {
             func,
             liveness,
@@ -360,6 +382,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             move_pairs,
             saves,
             self_refs,
+            tail_refs,
         }
     }
 
@@ -1174,6 +1197,43 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 self.edge_moves(func.params(*args), entry_params, pos);
                 self.jump(Cond::Always, Target::Block(self.entry));
             }
+            ir::Terminator::Tail {
+                func: callee, args, ..
+            } => {
+                if self.func.id == ir::Id(0) {
+                    // the entry returns in rax, a Double callee would return in xmm0 instead
+                    bail!(self, "the entry tail calls f{}", callee.0);
+                    return;
+                }
+                let Some(&f) = self.natives.get(callee) else {
+                    bail!(self, "f{} is not compiled natively", callee.0);
+                    return;
+                };
+                let args = func.params(*args);
+                if args.len() > ARG_GPRS.len() {
+                    bail!(self, "{} args, more than argument registers", args.len());
+                    return;
+                }
+                // nothing outlives a tail call, the arguments are all that is left to move
+                let mut moves = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
+                moves.clear();
+                for (i, &arg) in args.iter().enumerate() {
+                    let src = self.ensure_register(arg);
+                    let dst = match src {
+                        Preg::Gpr(_) => Preg::Gpr(ARG_GPRS[i].0),
+                        Preg::Fpr(_) => Preg::Fpr(i as u8),
+                    };
+                    if src != dst {
+                        moves.push((src, dst));
+                    }
+                }
+                self.parallel_move(moves);
+                self.emit(Insn::MovAbs {
+                    dst: GPR_SCRATCH,
+                    imm: f as usize as u64,
+                });
+                self.jump(Cond::Always, Target::TailEpilogue);
+            }
             ir::Terminator::Switch {
                 subject,
                 cases,
@@ -1706,6 +1766,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         for i in 0..self.patches.len() {
             let Patch { rel, target, from } = self.patches[i];
             let offset = match target {
+                Target::TailEpilogue => {
+                    self.tail_refs.push(rel);
+                    continue;
+                }
                 Target::Epilogue => end,
                 // A block that started at the dropped jump now starts at the epilogue.
                 Target::Block(id) => self.block_offsets[id.0 as usize].min(end),
