@@ -84,6 +84,9 @@ pub const SPILL_STACK: usize = 256 << 10;
 /// Where JIT code reads [`Vm::native_stack_limit`] from the vm pointer.
 pub const NATIVE_STACK_LIMIT_OFFSET: usize = std::mem::offset_of!(Vm, native_stack_limit);
 
+/// Where [`crate::enter_native`] and [`crate::jit_abort`] keep [`Vm::native_entry_rsp`].
+pub const NATIVE_ENTRY_RSP_OFFSET: usize = std::mem::offset_of!(Vm, native_entry_rsp);
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct Vm<'vm> {
@@ -117,6 +120,10 @@ pub struct Vm<'vm> {
     /// Native code traps instead of growing its stack below this, see
     /// [`NATIVE_STACK_LIMIT_OFFSET`]. 0 disables the check.
     pub native_stack_limit: usize,
+    /// The stack slot holding the return address of [`crate::enter_native`]'s call into native
+    /// code, [`crate::jit_abort`] returns through it. Native code is never reentered, so one slot
+    /// suffices.
+    pub native_entry_rsp: usize,
     /// The box every None points to, see [`crate::Type::Option`]. Singleton so the vm doesnt
     /// allocate useless Option::None boxes for all none(d?) optionals
     pub none: Value,
@@ -227,6 +234,7 @@ impl<'vm> Vm<'vm> {
             backtrace: Vec::new(),
             pending_trap: None,
             native_stack_limit: 0,
+            native_entry_rsp: 0,
             none: Value::UNDEF,
             config,
             collect_fn: collect,
