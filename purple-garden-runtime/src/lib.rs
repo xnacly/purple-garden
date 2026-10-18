@@ -37,7 +37,6 @@ pub use crate::value::{
 };
 pub use crate::vm::{
     CallFrame, DebugInfo, NATIVE_ENTRY_RSP_OFFSET, NATIVE_STACK_LIMIT_OFFSET, Vm, VmConfig,
-    syscall_unimplemented,
 };
 
 /// Compatibility namespace used by embedding macros.

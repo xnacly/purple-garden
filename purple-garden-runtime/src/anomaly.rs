@@ -5,11 +5,9 @@
 #[derive(Debug)]
 pub enum Anomaly {
     DivisionByZero { pc: usize },
-    InvalidSyscall { pc: usize },
     AllocationFailed { pc: usize },
     StackOverflow { pc: usize },
     AssertionFailed { pc: usize },
-    Msg { msg: &'static str, pc: usize },
 }
 
 impl std::fmt::Display for Anomaly {
@@ -25,11 +23,9 @@ impl Anomaly {
     pub fn as_str(&self) -> &str {
         match self {
             Anomaly::DivisionByZero { .. } => "Division by zero",
-            Anomaly::InvalidSyscall { .. } => "Invalid syscall",
             Anomaly::AllocationFailed { .. } => "Allocation failed",
             Anomaly::StackOverflow { .. } => "Stack space exhausted",
             Anomaly::AssertionFailed { .. } => "Assertion failed",
-            Anomaly::Msg { msg, .. } => msg,
         }
     }
 
@@ -40,10 +36,8 @@ impl Anomaly {
         match self {
             Anomaly::DivisionByZero { pc }
             | Anomaly::StackOverflow { pc }
-            | Anomaly::InvalidSyscall { pc }
             | Anomaly::AllocationFailed { pc }
-            | Anomaly::AssertionFailed { pc }
-            | Anomaly::Msg { pc, .. } => *pc,
+            | Anomaly::AssertionFailed { pc } => *pc,
         }
     }
 }

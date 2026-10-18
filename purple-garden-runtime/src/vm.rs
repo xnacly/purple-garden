@@ -7,7 +7,6 @@ use crate::{
 use purple_garden_allocators::{page::PageAlloc, stack::StackAlloc};
 use std::{
     alloc::{AllocError, Allocator, Layout},
-    ffi::c_void,
     mem::MaybeUninit,
     ptr::NonNull,
 };
@@ -68,14 +67,6 @@ impl DebugInfo {
     pub fn span_at(&self, pc: usize) -> u32 {
         self.pc_to_span.get(pc).copied().unwrap_or(0)
     }
-}
-
-/// # Safety
-///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
-pub unsafe extern "C" fn syscall_unimplemented(vm: *mut c_void) {
-    let vm = unsafe { &mut *vm.cast::<Vm>() };
-    vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
 }
 
 /// Bytes of spill stack [`Vm::run`] keeps on its own stack frame.
@@ -645,10 +636,6 @@ impl<'vm> Vm<'vm> {
                             argc.max(1) - 1
                         );
                     }
-
-                    if std::hint::unlikely(self.pending_trap.is_some()) {
-                        return Err(self.pending_trap.take().unwrap());
-                    }
                 },
                 Op::Native {
                     idx,
@@ -688,9 +675,6 @@ impl<'vm> Vm<'vm> {
                         frame.spilled_depth,
                         spilled.depth(),
                     );
-                    if std::hint::unlikely(self.pending_trap.is_some()) {
-                        return Err(self.pending_trap.take().unwrap());
-                    }
                     pc = frame.return_to;
                 }
                 Op::Push { src } => unsafe {
@@ -769,7 +753,8 @@ impl<'vm> Vm<'vm> {
         Ok(())
     }
 
-    /// Raise a trap from a syscall body. Checked at the next [`Op::Ret`].
+    /// Record a trap for a jit helper to leave native code with through `jit_abort`, read back once
+    /// `enter_native` returns.
     #[inline(always)]
     pub fn trap(&mut self, anomaly: Anomaly) {
         self.pending_trap = Some(anomaly);
@@ -797,7 +782,6 @@ impl<'vm> Vm<'vm> {
 #[cfg(test)]
 mod ops {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Every string created before the intern table rehashes must still be
     /// found after it.
@@ -808,20 +792,6 @@ mod ops {
         for (i, v) in first.iter().enumerate() {
             assert_eq!(vm.new_string_from_str(&i.to_string()), *v);
         }
-    }
-
-    static SIDE_EFFECTS: AtomicUsize = AtomicUsize::new(0);
-
-    unsafe extern "C" fn trap_syscall(vm: *mut std::ffi::c_void) {
-        let vm = unsafe { &mut *vm.cast::<Vm>() };
-        vm.trap(Anomaly::Msg {
-            msg: "trap_syscall",
-            pc: vm.pc,
-        });
-    }
-
-    unsafe extern "C" fn side_effect_syscall(_: *mut std::ffi::c_void) {
-        SIDE_EFFECTS.fetch_add(1, Ordering::SeqCst);
     }
 
     fn run(mut bytecode: Vec<Op>) -> Vm<'static> {
@@ -886,30 +856,6 @@ mod ops {
         vm.run::<false>(&[])
             .expect("invocation after a trap should succeed");
         assert_eq!(vm.r(0).as_int(), 7);
-    }
-
-    #[test]
-    fn syscall_trap_stops_before_next_side_effect() {
-        SIDE_EFFECTS.store(0, Ordering::SeqCst);
-
-        let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = vec![
-            Op::Sys { idx: 0, argc: 0 },
-            Op::Sys { idx: 1, argc: 0 },
-            Op::Halt,
-        ];
-        let err = vm
-            .run::<false>(&[trap_syscall, side_effect_syscall])
-            .expect_err("trapping syscall should stop execution");
-
-        assert!(matches!(
-            err,
-            Anomaly::Msg {
-                msg: "trap_syscall",
-                pc: 0
-            }
-        ));
-        assert_eq!(SIDE_EFFECTS.load(Ordering::SeqCst), 0);
     }
 
     #[test]
