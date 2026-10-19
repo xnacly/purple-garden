@@ -5,6 +5,7 @@ pub use self::str::PACKAGE;
 // This module is the public `str` package namespace; its file name matches it.
 #[allow(clippy::module_inception)]
 pub mod str {
+    use core::fmt::NumBuffer;
     use purple_garden_runtime::{PgType, Type, Value, Vm};
 
     pub struct RawString(Value);
@@ -133,7 +134,8 @@ pub mod str {
     /// ```
     #[pg_fn(pure, specialises = "from")]
     pub fn from_i64(i: i64) -> String {
-        i.to_string()
+        // skips core::fmt, which to_string goes through
+        String::from(i.format_into(&mut NumBuffer::new()))
     }
 
     /// Converts a `Double` to `Str`.
