@@ -22,35 +22,10 @@ pub mod r#unsafe {
         }
     }
 
-    #[cfg(target_os = "linux")]
-    syscalls! {
-        /// Returns system identity information from uname(2).
-        (uname, RawUtsName, (
-            sysname: [std::ffi::c_char; 65],
-            nodename: [std::ffi::c_char; 65],
-            release: [std::ffi::c_char; 65],
-            version: [std::ffi::c_char; 65],
-            machine: [std::ffi::c_char; 65],
-            domainname: [std::ffi::c_char; 65],
-        )),
-    }
-
-    #[cfg(target_os = "macos")]
-    syscalls! {
-        /// Returns system identity information from uname(2).
-        (uname, RawUtsName, (
-            sysname: [std::ffi::c_char; 256],
-            nodename: [std::ffi::c_char; 256],
-            release: [std::ffi::c_char; 256],
-            version: [std::ffi::c_char; 256],
-            machine: [std::ffi::c_char; 256],
-        )),
-    }
-
     pub const PACKAGE: Pkg = Pkg {
         name: "unsafe",
         doc: "Package unsafe provides inherently unsafe operations.",
-        pkgs: &[runtime::PACKAGE, syscall::PACKAGE],
+        pkgs: &[runtime::PACKAGE],
         fns: &[] as &[Fn<'static>],
     };
 }

@@ -14,11 +14,9 @@ pub mod testing {
     ///
     /// testing.assert(1 + 1 == 2)
     /// ```
-    pub fn assert(condition: bool) -> Result<(), &'static str> {
-        if condition {
-            Ok(())
-        } else {
-            Err("test.assert: assertion failed")
-        }
+    #[pg_fn(intrinsic = Assert)]
+    pub fn assert(condition: bool) {
+        let _ = condition;
+        unreachable!("lowered to Instr::Assert")
     }
 }

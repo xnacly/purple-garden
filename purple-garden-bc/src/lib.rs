@@ -30,6 +30,8 @@ pub enum CcFunc<'fun> {
     Native {
         name: &'fun str,
         idx: u16,
+        /// Returns in xmm0 instead of rax, see `Op::Native`
+        returns_double: bool,
     },
 }
 
@@ -53,14 +55,21 @@ impl<'fun> CcFunc<'fun> {
 #[derive(Clone, Copy, Debug)]
 pub enum CcCallTarget {
     Bc { pc: usize },
-    Native { idx: u16 },
+    Native { idx: u16, returns_double: bool },
 }
 
 impl From<&CcFunc<'_>> for CcCallTarget {
     fn from(func: &CcFunc<'_>) -> Self {
         match func {
             CcFunc::Bc { pc, .. } => Self::Bc { pc: *pc },
-            CcFunc::Native { idx, .. } => Self::Native { idx: *idx },
+            CcFunc::Native {
+                idx,
+                returns_double,
+                ..
+            } => Self::Native {
+                idx: *idx,
+                returns_double: *returns_double,
+            },
         }
     }
 }
@@ -605,16 +614,14 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         liveness: &[(u32, u32)],
         arena: &mut purple_garden_jit::CodeArena<impl Pages>,
     ) -> bool {
-        let Some(()) =
-            self.jit
-                .compile_func_with_liveness(
-                    fun,
-                    liveness,
-                    &self.globals.map,
-                    &self.str_values,
-                    &self.native_fns,
-                )
-        else {
+        let Some(()) = self.jit.compile_func_with_liveness(
+            fun,
+            liveness,
+            &self.globals.map,
+            &self.str_values,
+            &self.native_fns,
+            arena.next_entry(),
+        ) else {
             purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
             return false;
         };
@@ -637,6 +644,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             CcFunc::Native {
                 name: fun.name,
                 idx,
+                returns_double: fun.ret == Some(ptype::Type::Double),
             },
         );
         true
@@ -1030,9 +1038,12 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 if tail_clobbers_callee_saved {
                     match target {
                         CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
-                        CcCallTarget::Native { idx } => self.emit(Op::Sys {
+                        CcCallTarget::Native {
                             idx,
-                            argc: args.len() as u8,
+                            returns_double,
+                        } => self.emit(Op::Native {
+                            idx,
+                            returns_double,
                         }),
                     };
                     self.emit_epilogue(lo, max_reg);
@@ -1043,10 +1054,13 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                         CcCallTarget::Bc { pc } => {
                             self.emit(Op::Tail { func: pc as u32 });
                         }
-                        CcCallTarget::Native { idx } => {
-                            self.emit(Op::Sys {
+                        CcCallTarget::Native {
+                            idx,
+                            returns_double,
+                        } => {
+                            self.emit(Op::Native {
                                 idx,
-                                argc: args.len() as u8,
+                                returns_double,
                             });
                             self.emit(Op::Ret);
                         }
@@ -1192,6 +1206,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                         let value = matches!(value, Const::True) as i32;
                         self.emit(Op::LoadI { dst, value });
                     }
+                    // a Void value is never read, whatever the register holds will do
+                    Const::Undefined => {}
                     _ => {
                         let idx = self.intern(value);
                         self.emit(Op::LoadG { dst, idx });
@@ -1246,9 +1262,12 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let dst = self.ensure_register(dst.id);
                 match target {
                     CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
-                    CcCallTarget::Native { idx } => self.emit(Op::Sys {
+                    CcCallTarget::Native {
                         idx,
-                        argc: args.len() as u8,
+                        returns_double,
+                    } => self.emit(Op::Native {
+                        idx,
+                        returns_double,
                     }),
                 };
                 self.emit(Op::Mov { dst, src: 0 });
@@ -1309,6 +1328,12 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     &self.scratch,
                 );
             }
+            ir::Instr::Assert { dst, cond, .. } => {
+                let cond = self.ensure_register(*cond);
+                self.emit(Op::Assert { cond });
+                // a Void value is never read, whatever the register holds will do
+                self.ensure_register(dst.id);
+            }
             ir::Instr::Noop {} => {}
             ir::Instr::Bin {
                 op, dst, lhs, rhs, ..
@@ -1334,7 +1359,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 }
 
                 self.emit(emit_bins! {
-                    IAdd, ISub, IMul, IDiv, IMod, ILt, IGt, IEq,
+                    IAdd, ISub, IMul, IDiv, IMod, IAnd, ILt, IGt, IEq,
                     DAdd, DSub, DMul, DDiv, DLt, DGt,
                     BEq, SEq
                 });
@@ -1361,6 +1386,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     IMul => IMulI,
                     IDiv => IDivI,
                     IMod => IModI,
+                    IAnd => IAndI,
                     IEq  => IEqI,
                     IGt  => IGtI,
                     ILt  => ILtI,
@@ -1712,6 +1738,30 @@ mod tests {
             )),
             "expected int-to-double cast to lower to CastToDouble: {:?}",
             ops
+        );
+    }
+
+    #[test]
+    fn lowers_assert_to_op_assert() {
+        let ops = compile_one(entry_fun(
+            vec![
+                Instr::LoadConst {
+                    dst: type_id(0, Type::Bool),
+                    value: Const::True,
+                    span: 0,
+                },
+                Instr::Assert {
+                    dst: type_id(1, Type::Void),
+                    cond: Id(0),
+                    span: 0,
+                },
+            ],
+            None,
+        ));
+
+        assert!(
+            has_op(&ops, |op| matches!(op, Op::Assert { cond: 0 })),
+            "expected Instr::Assert to lower to Op::Assert: {ops:?}"
         );
     }
 

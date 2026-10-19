@@ -20,14 +20,15 @@ struct PgFunction {
     pure: bool,
     specialises: Option<String>,
     with_slots: bool,
+    intrinsic: Option<Ident>,
     args: Vec<FunctionArg>,
     ret: Type,
-    result: bool,
     raw: bool,
 }
 
 struct ExpandedFunction {
     wrapper: TokenStream2,
+    native: Option<TokenStream2>,
     const_eval: Option<TokenStream2>,
     metadata: TokenStream2,
 }
@@ -58,6 +59,9 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             Item::Fn(fun) => match expand_function(&api, fun) {
                 Ok(expanded) => {
                     generated_items.push(Item::Verbatim(expanded.wrapper));
+                    if let Some(native) = expanded.native {
+                        generated_items.push(Item::Verbatim(native));
+                    }
                     if let Some(const_eval) = expanded.const_eval {
                         generated_items.push(Item::Verbatim(const_eval));
                     }
@@ -144,6 +148,7 @@ fn expand_function(api: &Path, fun: &mut ItemFn) -> syn::Result<ExpandedFunction
 
     Ok(ExpandedFunction {
         wrapper: function.wrapper(api),
+        native: function.native(api),
         metadata: function.metadata(api, const_eval.is_some()),
         const_eval,
     })
@@ -152,13 +157,20 @@ fn expand_function(api: &Path, fun: &mut ItemFn) -> syn::Result<ExpandedFunction
 impl PgFunction {
     fn parse(fun: &mut ItemFn) -> syn::Result<Self> {
         let ident = fun.sig.ident.clone();
-        let (ret, result) = return_type(&fun.sig.output);
+        let ret = return_type(&fun.sig.output)?;
         let attrs = take_pg_fn_attrs(&mut fun.attrs)?;
 
         if attrs.raw && attrs.pure {
             return Err(syn::Error::new(
                 ident.span(),
                 "pg_fn(unsafe) functions cannot be marked pure",
+            ));
+        }
+
+        if attrs.intrinsic.is_some() && (attrs.pure || attrs.specialises.is_some()) {
+            return Err(syn::Error::new(
+                ident.span(),
+                "pg_fn(intrinsic) functions are lowered instead of called, they cannot be pure or specialise an overload group",
             ));
         }
 
@@ -183,8 +195,8 @@ impl PgFunction {
             specialises: attrs.specialises,
             args,
             with_slots: attrs.with_slots,
+            intrinsic: attrs.intrinsic,
             ret,
-            result,
             raw: attrs.raw,
             ident,
         })
@@ -228,11 +240,10 @@ impl PgFunction {
     }
 
     fn wrapper_call(&self, api: &Path) -> TokenStream2 {
-        match (self.result, returns_unit(&self.ret)) {
-            (false, true) => self.call_unit_function(),
-            (false, false) => self.call_value_function(api),
-            (true, true) => self.call_unit_result_function(api),
-            (true, false) => self.call_value_result_function(api),
+        if returns_unit(&self.ret) {
+            self.call_unit_function()
+        } else {
+            self.call_value_function(api)
         }
     }
 
@@ -247,11 +258,10 @@ impl PgFunction {
     }
 
     fn unsafe_wrapper_call(&self, api: &Path) -> TokenStream2 {
-        match (self.result, returns_unit(&self.ret)) {
-            (false, true) => self.call_unsafe_unit_function(),
-            (false, false) => self.call_unsafe_value_function(api),
-            (true, true) => self.call_unsafe_unit_result_function(api),
-            (true, false) => self.call_unsafe_value_result_function(api),
+        if returns_unit(&self.ret) {
+            self.call_unsafe_unit_function()
+        } else {
+            self.call_unsafe_value_function(api)
         }
     }
 
@@ -276,33 +286,6 @@ impl PgFunction {
         }
     }
 
-    fn call_unit_result_function(&self, api: &Path) -> TokenStream2 {
-        let fn_name = &self.ident;
-        let args = self.arg_bindings();
-
-        quote! {
-            if let Err(msg) = #fn_name(#(#args),*) {
-                vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc });
-            }
-        }
-    }
-
-    fn call_value_result_function(&self, api: &Path) -> TokenStream2 {
-        let fn_name = &self.ident;
-        let args = self.arg_bindings();
-        let ret_ty = &self.ret;
-
-        quote! {
-            match #fn_name(#(#args),*) {
-                Ok(ret) => {
-                    let ret = <#ret_ty as #api::embed::IntoVm>::into_vm(ret, vm);
-                    *vm.r_mut(0) = ret;
-                }
-                Err(msg) => vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc }),
-            }
-        }
-    }
-
     fn call_unsafe_unit_function(&self) -> TokenStream2 {
         let fn_name = &self.ident;
         let args = self.unsafe_arg_bindings();
@@ -324,31 +307,51 @@ impl PgFunction {
         }
     }
 
-    fn call_unsafe_unit_result_function(&self, api: &Path) -> TokenStream2 {
-        let fn_name = &self.ident;
-        let args = self.unsafe_arg_bindings();
-
-        quote! {
-            if let Err(msg) = #fn_name(#(#args),*) {
-                vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc });
-            }
+    /// The entry native code calls directly, see `NativeFn`: Rust `f64` arguments and result stay
+    /// `f64`, everything else crosses as a `Value` word and is decoded like in the wrapper.
+    fn native(&self, api: &Path) -> Option<TokenStream2> {
+        if self.intrinsic.is_some() {
+            return None;
         }
-    }
-
-    fn call_unsafe_value_result_function(&self, api: &Path) -> TokenStream2 {
+        let name = format_ident!("__pg_native_{}", self.ident);
         let fn_name = &self.ident;
-        let args = self.unsafe_arg_bindings();
+        let params = self.args.iter().map(|arg| {
+            let binding = &arg.binding;
+            let ty = native_ty(&arg.ty, api);
+            quote!(#binding: #ty)
+        });
+        let decoders = self.args.iter().filter(|arg| !is_f64(&arg.ty)).map(|arg| {
+            let binding = &arg.binding;
+            let ty = &arg.ty;
+            quote!(let #binding = <#ty as #api::embed::FromVm>::from_vm(vm, #binding);)
+        });
+        let call_args: Vec<TokenStream2> = if self.raw {
+            self.unsafe_arg_bindings()
+        } else {
+            self.arg_bindings()
+                .map(|binding| quote!(#binding))
+                .collect()
+        };
         let ret_ty = &self.ret;
-
-        quote! {
-            match #fn_name(#(#args),*) {
-                Ok(ret) => {
-                    let ret = <#ret_ty as #api::embed::IntoVm>::into_vm(ret, vm);
-                    *vm.r_mut(0) = ret;
-                }
-                Err(msg) => vm.trap(#api::embed::Anomaly::Msg { msg, pc: vm.pc }),
+        let ret_sig = native_ret_sig(ret_ty, api);
+        let call = if returns_unit(ret_ty) || is_f64(ret_ty) {
+            quote!(#fn_name(#(#call_args),*))
+        } else {
+            quote! {
+                let ret = #fn_name(#(#call_args),*);
+                <#ret_ty as #api::embed::IntoVm>::into_vm(ret, vm)
             }
-        }
+        };
+
+        Some(quote! {
+            #[doc(hidden)]
+            #[allow(unused_variables)]
+            unsafe extern "C" fn #name(vm: *mut std::ffi::c_void, #(#params),*) #ret_sig {
+                let vm = unsafe { &mut *vm.cast::<#api::embed::Vm>() };
+                #(#decoders)*
+                #call
+            }
+        })
     }
 
     fn arg_bindings(&self) -> impl Iterator<Item = &Ident> {
@@ -417,7 +420,26 @@ impl PgFunction {
             None => quote!(None),
         };
         let with_slots = self.with_slots;
+        let intrinsic = match &self.intrinsic {
+            Some(intrinsic) => quote!(Some(#api::embed::Intrinsic::#intrinsic)),
+            None => quote!(None),
+        };
         let ret_ty = &self.ret;
+        let native = if self.intrinsic.is_some() {
+            quote!(None)
+        } else {
+            let name = format_ident!("__pg_native_{}", self.ident);
+            let arg_tys = self.args.iter().map(|arg| native_ty(&arg.ty, api));
+            let ret_sig = native_ret_sig(ret_ty, api);
+            quote! {
+                Some(unsafe {
+                    ::core::mem::transmute::<
+                        unsafe extern "C" fn(*mut ::std::ffi::c_void, #(#arg_tys),*) #ret_sig,
+                        #api::embed::NativeFn,
+                    >(#name)
+                })
+            }
+        };
         let arg_names = self
             .args
             .iter()
@@ -436,6 +458,8 @@ impl PgFunction {
                 ret: <#ret_ty as #api::embed::PgType>::TYPE,
                 specialises: #specialises,
                 with_slots: #with_slots,
+                intrinsic: #intrinsic,
+                native: #native,
             }
         }
     }
@@ -503,34 +527,53 @@ fn parse_garden_args<'a>(
     .collect()
 }
 
-fn return_type(output: &ReturnType) -> (Type, bool) {
+/// Builtins can't fail: a failure the caller can handle is an `Option`, the rest are traps the
+/// runtime raises itself.
+fn return_type(output: &ReturnType) -> syn::Result<Type> {
     match output {
-        ReturnType::Default => (syn::parse_quote!(()), false),
-        ReturnType::Type(_, ty) => result_ok_type(ty)
-            .map(|ok| (ok, true))
-            .unwrap_or_else(|| (ty.as_ref().clone(), false)),
+        ReturnType::Default => Ok(syn::parse_quote!(())),
+        ReturnType::Type(_, ty) => match ty.as_ref() {
+            Type::Path(path)
+                if path
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|s| s.ident == "Result") =>
+            {
+                Err(syn::Error::new_spanned(
+                    ty,
+                    "pg_fn functions cannot return Result, return an Option instead",
+                ))
+            }
+            ty => Ok(ty.clone()),
+        },
     }
-}
-
-fn result_ok_type(ty: &Type) -> Option<Type> {
-    let Type::Path(type_path) = ty else {
-        return None;
-    };
-    let segment = type_path.path.segments.last()?;
-    if segment.ident != "Result" {
-        return None;
-    }
-    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
-        return None;
-    };
-    let Some(syn::GenericArgument::Type(ok)) = args.args.first() else {
-        return None;
-    };
-    Some(ok.clone())
 }
 
 fn returns_unit(ty: &Type) -> bool {
     matches!(ty, Type::Tuple(tuple) if tuple.elems.is_empty())
+}
+
+/// Double crosses native entries as `f64` so SysV passes it in an xmm register.
+fn is_f64(ty: &Type) -> bool {
+    matches!(ty, Type::Path(path) if path.qself.is_none() && path.path.is_ident("f64"))
+}
+
+fn native_ty(ty: &Type, api: &Path) -> TokenStream2 {
+    if is_f64(ty) {
+        quote!(f64)
+    } else {
+        quote!(#api::embed::Value)
+    }
+}
+
+fn native_ret_sig(ty: &Type, api: &Path) -> TokenStream2 {
+    if returns_unit(ty) {
+        quote!()
+    } else {
+        let ty = native_ty(ty, api);
+        quote!(-> #ty)
+    }
 }
 
 #[derive(Default)]
@@ -546,6 +589,9 @@ struct PgFnAttrs {
     /// `#[pg_fn(with_slots)]`: the signature uses `embed::Slot<"T">` generics, bound per call
     /// by the typechecker
     with_slots: bool,
+    /// `#[pg_fn(intrinsic = Name)]`: lowered by the frontend to IR instead of being called, see
+    /// `Intrinsic`
+    intrinsic: Option<Ident>,
 }
 
 impl PgFnAttrs {
@@ -565,6 +611,7 @@ impl PgFnAttrs {
         self.raw |= other.raw;
         self.specialises = other.specialises.or_else(|| self.specialises.take());
         self.with_slots |= other.with_slots;
+        self.intrinsic = other.intrinsic.or_else(|| self.intrinsic.take());
     }
 
     fn parse_option(&mut self, meta: Meta) -> syn::Result<()> {
@@ -588,12 +635,17 @@ impl PgFnAttrs {
             return Ok(());
         }
 
+        if meta.path().is_ident("intrinsic") {
+            self.intrinsic = Some(parse_intrinsic_option(meta)?);
+            return Ok(());
+        }
+
         Err(syn::Error::new(meta.span(), "unknown pg_fn option"))
     }
 }
 
 /// Strip and parse the `#[pg_fn(..)]` marker off a stdlib fn, leaving its other
-/// attributes intact. Accepts `pure`, `unsafe`, `with_slots` and
+/// attributes intact. Accepts `pure`, `unsafe`, `with_slots`, `intrinsic = Name` and
 /// `specialises = "group"` in any order.
 fn take_pg_fn_attrs(attrs: &mut Vec<Attribute>) -> syn::Result<PgFnAttrs> {
     let mut pg_fn_attrs = PgFnAttrs::default();
@@ -610,6 +662,28 @@ fn take_pg_fn_attrs(attrs: &mut Vec<Attribute>) -> syn::Result<PgFnAttrs> {
 
     *attrs = out;
     Ok(pg_fn_attrs)
+}
+
+fn parse_intrinsic_option(meta: Meta) -> syn::Result<Ident> {
+    let Meta::NameValue(name_value) = meta else {
+        return Err(syn::Error::new(
+            meta.span(),
+            "`intrinsic` must be `intrinsic = Name`",
+        ));
+    };
+
+    let syn::Expr::Path(path) = &name_value.value else {
+        return Err(syn::Error::new(
+            name_value.value.span(),
+            "`intrinsic` must name an `Intrinsic` variant",
+        ));
+    };
+    path.path.get_ident().cloned().ok_or_else(|| {
+        syn::Error::new(
+            name_value.value.span(),
+            "`intrinsic` must name an `Intrinsic` variant",
+        )
+    })
 }
 
 fn parse_specialises_option(meta: Meta) -> syn::Result<String> {

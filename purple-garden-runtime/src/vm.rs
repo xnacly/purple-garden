@@ -1,5 +1,5 @@
 use crate::{
-    Anomaly, BuiltinFn, DEFAULT_STACK_SIZE, MIB, REGISTER_COUNT, Value,
+    Anomaly, BuiltinFn, DEFAULT_STACK_SIZE, IntoVm, MIB, REGISTER_COUNT, Value,
     gc::{AllocType, Gc},
     op::{LookupTable, Op, SwitchKind, SwitchTable},
     string,
@@ -7,7 +7,6 @@ use crate::{
 use purple_garden_allocators::{page::PageAlloc, stack::StackAlloc};
 use std::{
     alloc::{AllocError, Allocator, Layout},
-    ffi::c_void,
     mem::MaybeUninit,
     ptr::NonNull,
 };
@@ -70,19 +69,14 @@ impl DebugInfo {
     }
 }
 
-/// # Safety
-///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
-pub unsafe extern "C" fn syscall_unimplemented(vm: *mut c_void) {
-    let vm = unsafe { &mut *vm.cast::<Vm>() };
-    vm.trap(Anomaly::InvalidSyscall { pc: vm.pc });
-}
-
 /// Bytes of spill stack [`Vm::run`] keeps on its own stack frame.
 pub const SPILL_STACK: usize = 256 << 10;
 
 /// Where JIT code reads [`Vm::native_stack_limit`] from the vm pointer.
 pub const NATIVE_STACK_LIMIT_OFFSET: usize = std::mem::offset_of!(Vm, native_stack_limit);
+
+/// Where [`crate::enter_native`] and [`crate::jit_abort`] keep [`Vm::native_entry_rsp`].
+pub const NATIVE_ENTRY_RSP_OFFSET: usize = std::mem::offset_of!(Vm, native_entry_rsp);
 
 #[repr(C)]
 #[derive(Debug)]
@@ -117,6 +111,13 @@ pub struct Vm<'vm> {
     /// Native code traps instead of growing its stack below this, see
     /// [`NATIVE_STACK_LIMIT_OFFSET`]. 0 disables the check.
     pub native_stack_limit: usize,
+    /// The stack slot holding the return address of [`crate::enter_native`]'s call into native
+    /// code, [`crate::jit_abort`] returns through it. Native code is never reentered, so one slot
+    /// suffices.
+    pub native_entry_rsp: usize,
+    /// The box every None points to, see [`crate::Type::Option`]. Singleton so the vm doesnt
+    /// allocate useless Option::None boxes for all none(d?) optionals
+    pub none: Value,
 
     pub config: VmConfig,
     /// Called when allocation wants to run a collection pass.
@@ -209,7 +210,7 @@ impl<'vm> Vm<'vm> {
             Self::collect
         };
 
-        Self {
+        let mut vm = Self {
             r: [const { Value(0) }; REGISTER_COUNT],
             frames,
             frame_depth: 1,
@@ -224,9 +225,13 @@ impl<'vm> Vm<'vm> {
             backtrace: Vec::new(),
             pending_trap: None,
             native_stack_limit: 0,
+            native_entry_rsp: 0,
+            none: Value::UNDEF,
             config,
             collect_fn: collect,
-        }
+        };
+        vm.none = vm.option_box(0, Value::UNDEF);
+        vm
     }
 
     fn root_frame() -> CallFrame {
@@ -298,6 +303,23 @@ impl<'vm> Vm<'vm> {
     pub fn alloc(&mut self, alloc_type: AllocType, layout: Layout) -> std::ptr::NonNull<u8> {
         self.try_alloc(alloc_type, layout)
             .expect("GC allocation failed")
+    }
+
+    /// Boxes `value` as an Option, see [`crate::Type::Option`]. Every None is [`Vm::none`].
+    pub fn new_option<T: IntoVm>(&mut self, value: Option<T>) -> Value {
+        let Some(value) = value else {
+            return self.none;
+        };
+        let payload = value.into_vm(self);
+        self.option_box(1, payload)
+    }
+
+    fn option_box(&mut self, tag: u64, payload: Value) -> Value {
+        let block = self
+            .alloc(AllocType::Option, Layout::new::<[u64; 2]>())
+            .cast::<[u64; 2]>();
+        unsafe { block.write([tag, payload.0]) };
+        Value(block.as_ptr() as u64)
     }
 
     pub fn new_string(&mut self, s: String) -> Value {
@@ -415,6 +437,15 @@ impl<'vm> Vm<'vm> {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l % imm);
                 },
+                Op::IAnd { dst, lhs, rhs } => unsafe {
+                    let l = r!(lhs).as_int();
+                    let r = r!(rhs).as_int();
+                    r_mut!(dst) = Value::from(l & r);
+                },
+                Op::IAndI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l & imm as i64);
+                },
                 Op::IEq { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
@@ -505,6 +536,9 @@ impl<'vm> Vm<'vm> {
                         pc = target as usize;
                         continue;
                     }
+                },
+                Op::Assert { cond } => unsafe {
+                    trap_if!(!r!(cond).as_bool(), Anomaly::AssertionFailed { pc });
                 },
                 Op::JmpEqI { lhs, imm, target } => unsafe {
                     if r!(lhs).as_int() == imm as i64 {
@@ -611,7 +645,18 @@ impl<'vm> Vm<'vm> {
                             argc.max(1) - 1
                         );
                     }
-
+                },
+                Op::Native {
+                    idx,
+                    returns_double,
+                } => unsafe {
+                    self.pc = pc;
+                    let enter = if returns_double {
+                        crate::enter_native_double
+                    } else {
+                        crate::enter_native
+                    };
+                    enter((self as *mut Vm).cast(), *syscalls.add(idx as usize));
                     if std::hint::unlikely(self.pending_trap.is_some()) {
                         return Err(self.pending_trap.take().unwrap());
                     }
@@ -639,9 +684,6 @@ impl<'vm> Vm<'vm> {
                         frame.spilled_depth,
                         spilled.depth(),
                     );
-                    if std::hint::unlikely(self.pending_trap.is_some()) {
-                        return Err(self.pending_trap.take().unwrap());
-                    }
                     pc = frame.return_to;
                 }
                 Op::Push { src } => unsafe {
@@ -720,7 +762,8 @@ impl<'vm> Vm<'vm> {
         Ok(())
     }
 
-    /// Raise a trap from a syscall body. Checked at the next [`Op::Ret`].
+    /// Record a trap for a jit helper to leave native code with through `jit_abort`, read back once
+    /// `enter_native` returns.
     #[inline(always)]
     pub fn trap(&mut self, anomaly: Anomaly) {
         self.pending_trap = Some(anomaly);
@@ -748,7 +791,6 @@ impl<'vm> Vm<'vm> {
 #[cfg(test)]
 mod ops {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Every string created before the intern table rehashes must still be
     /// found after it.
@@ -759,20 +801,6 @@ mod ops {
         for (i, v) in first.iter().enumerate() {
             assert_eq!(vm.new_string_from_str(&i.to_string()), *v);
         }
-    }
-
-    static SIDE_EFFECTS: AtomicUsize = AtomicUsize::new(0);
-
-    unsafe extern "C" fn trap_syscall(vm: *mut std::ffi::c_void) {
-        let vm = unsafe { &mut *vm.cast::<Vm>() };
-        vm.trap(Anomaly::Msg {
-            msg: "trap_syscall",
-            pc: vm.pc,
-        });
-    }
-
-    unsafe extern "C" fn side_effect_syscall(_: *mut std::ffi::c_void) {
-        SIDE_EFFECTS.fetch_add(1, Ordering::SeqCst);
     }
 
     fn run(mut bytecode: Vec<Op>) -> Vm<'static> {
@@ -840,30 +868,6 @@ mod ops {
     }
 
     #[test]
-    fn syscall_trap_stops_before_next_side_effect() {
-        SIDE_EFFECTS.store(0, Ordering::SeqCst);
-
-        let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = vec![
-            Op::Sys { idx: 0, argc: 0 },
-            Op::Sys { idx: 1, argc: 0 },
-            Op::Halt,
-        ];
-        let err = vm
-            .run::<false>(&[trap_syscall, side_effect_syscall])
-            .expect_err("trapping syscall should stop execution");
-
-        assert!(matches!(
-            err,
-            Anomaly::Msg {
-                msg: "trap_syscall",
-                pc: 0
-            }
-        ));
-        assert_eq!(SIDE_EFFECTS.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
     fn iadd() {
         let vm = run(vec![
             Op::LoadI { dst: 0, value: 7 },
@@ -920,6 +924,13 @@ mod ops {
     }
 
     #[test]
+    fn assert_traps_on_false_only() {
+        run(vec![Op::LoadI { dst: 0, value: 1 }, Op::Assert { cond: 0 }]);
+        let err = run_err(vec![Op::LoadI { dst: 0, value: 0 }, Op::Assert { cond: 0 }]);
+        assert!(matches!(err, Anomaly::AssertionFailed { pc: 1 }));
+    }
+
+    #[test]
     fn idiv_by_zero_traps() {
         let err = run_err(vec![
             Op::LoadI { dst: 0, value: 1 },
@@ -958,6 +969,34 @@ mod ops {
             },
         ]);
         assert_eq!(vm.r(1).as_int(), -3);
+    }
+
+    #[test]
+    fn iand() {
+        let vm = run(vec![
+            Op::LoadI { dst: 0, value: 13 },
+            Op::LoadI { dst: 1, value: 6 },
+            Op::IAnd {
+                dst: 2,
+                lhs: 0,
+                rhs: 1,
+            },
+        ]);
+        assert_eq!(vm.r(2).as_int(), 4);
+    }
+
+    /// The immediate sign extends, like the jit's `and r64, imm32`.
+    #[test]
+    fn iand_i() {
+        let vm = run(vec![
+            Op::LoadI { dst: 0, value: -3 },
+            Op::IAndI {
+                dst: 1,
+                lhs: 0,
+                imm: -4,
+            },
+        ]);
+        assert_eq!(vm.r(1).as_int(), -4);
     }
 
     #[test]

@@ -97,6 +97,28 @@ mod t {
 }
 
 #[pg_pkg]
+mod native {
+    use purple_garden::embed::Slot;
+
+    pub fn add(a: i64, b: i64) -> i64 {
+        a + b
+    }
+
+    pub fn scale(x: f64, by: i64, y: f64) -> f64 {
+        x * by as f64 + y
+    }
+
+    pub fn greet(name: &str) -> String {
+        format!("hi {name}")
+    }
+
+    #[purple_garden::pg_fn(with_slots)]
+    pub fn id(x: Slot<"T">) -> Slot<"T"> {
+        x
+    }
+}
+
+#[pg_pkg]
 mod tools {
     pub fn root() -> i64 {
         1
@@ -311,4 +333,85 @@ fn with_slots_identity_round_trips_word_sized_values() {
         .expect("compiles");
     let out: String = program.run_take().expect("runs");
     assert_eq!(out, "3hello1");
+}
+
+/// The native entries take the vm first, `f64` for Double and a `Value` word for everything else,
+/// SysV placing them in registers, see `NativeFn`.
+#[test]
+fn pg_fn_native_entries_take_and_return_hardware_values() {
+    use purple_garden::embed::NativeFn;
+
+    fn native(name: &str) -> Option<NativeFn> {
+        native::PACKAGE
+            .fns
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap()
+            .native
+    }
+    let mut vm = Vm::new(VmConfig::default());
+    let vm_ptr = (&mut vm as *mut Vm).cast::<std::ffi::c_void>();
+
+    let add = unsafe {
+        std::mem::transmute::<
+            NativeFn,
+            unsafe extern "C" fn(*mut std::ffi::c_void, Value, Value) -> Value,
+        >(native("add").unwrap())
+    };
+    assert_eq!(
+        unsafe { add(vm_ptr, Value::from(40_i64), Value::from(2_i64)) }.as_int(),
+        42
+    );
+
+    let scale = unsafe {
+        std::mem::transmute::<
+            NativeFn,
+            unsafe extern "C" fn(*mut std::ffi::c_void, f64, Value, f64) -> f64,
+        >(native("scale").unwrap())
+    };
+    assert_eq!(
+        unsafe { scale(vm_ptr, 1.5, Value::from(2_i64), 0.25) },
+        3.25
+    );
+
+    let greet = unsafe {
+        std::mem::transmute::<NativeFn, unsafe extern "C" fn(*mut std::ffi::c_void, Value) -> Value>(
+            native("greet").unwrap(),
+        )
+    };
+    let name = vm.new_string("garden".to_owned());
+    let greeting = unsafe { greet(vm_ptr, name) };
+    assert_eq!(<&str as FromVm>::from_vm(&vm, greeting), "hi garden");
+
+    let id = unsafe {
+        std::mem::transmute::<NativeFn, unsafe extern "C" fn(*mut std::ffi::c_void, Value) -> Value>(
+            native("id").unwrap(),
+        )
+    };
+    assert_eq!(unsafe { id(vm_ptr, Value::from(7_i64)) }.as_int(), 7);
+}
+
+/// `wide` has more params than argument registers and stays bytecode, its tail call to the native
+/// Double function `square` reads the result from xmm0.
+#[test]
+fn bytecode_reads_double_results_of_native_calls() {
+    let mut program = purple_garden::Pg::new()
+        .compile(
+            b"fn square(x:Double) Double { x * x }
+fn wide(x:Double a:Int b:Int c:Int d:Int e:Int f:Int) Double { square(x) }
+wide(1.5 1 2 3 4 5 6)",
+        )
+        .expect("compiles");
+    let squared: f64 = program.run_take().expect("runs");
+    assert_eq!(squared, 2.25);
+}
+
+/// A native entry hands its last value to the vm in rax, Doubles too.
+#[test]
+fn native_entry_returns_doubles_to_the_vm() {
+    let mut program = purple_garden::Pg::new()
+        .compile(b"fn half(x:Double) Double { x / 2.0 }\nlet h = half(5.0)\nh * 2.0")
+        .expect("compiles");
+    let value: f64 = program.run_take().expect("runs");
+    assert_eq!(value, 5.0);
 }

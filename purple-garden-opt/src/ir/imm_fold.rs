@@ -91,7 +91,7 @@ fn try_fold<'scratch, F: Allocator, S: Allocator>(
     let rhs_c = scratch.single_use_const(*rhs);
 
     let (new_op, new_lhs, def) = match op {
-        BinOp::IEq | BinOp::IAdd | BinOp::IMul => match (rhs_c, lhs_c) {
+        BinOp::IEq | BinOp::IAdd | BinOp::IMul | BinOp::IAnd => match (rhs_c, lhs_c) {
             (Some(d), _) => (*op, *lhs, d),
             (None, Some(d)) => (*op, *rhs, d),
             _ => return None,

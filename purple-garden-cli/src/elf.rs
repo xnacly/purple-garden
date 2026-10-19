@@ -4,8 +4,8 @@ use std::{
     io::{self, Write},
 };
 
-use purple_garden_bc::{Cc, CcFunc, dis::Disassembler};
-use purple_garden_runtime::BuiltinFn;
+use purple_garden_bc::{Cc, CcFunc};
+use purple_garden_runtime::{BuiltinFn, Pkg};
 
 // INFO: this sucks to look at but encoding elf64 requires the layout, it is what it is.
 
@@ -36,21 +36,27 @@ const SECTIONS: usize = 6;
 
 const R_X86_64_64: u64 = 1;
 
-/// Names of the runtime addresses the jit embeds as `movabs` immediates: the helpers, builtins
-/// and the entries of native functions.
+/// Names of the runtime addresses the jit embeds as `movabs` immediates: the helpers, the native
+/// entries of builtins and the entries of native functions.
 pub(crate) fn addresses<S: Allocator + Clone, A: Allocator + Clone>(
     cc: &Cc<'_, S, A>,
     syscalls: &[BuiltinFn],
 ) -> HashMap<u64, String> {
-    let mut names: HashMap<u64, String> = Disassembler::<S, A>::build_fn_map()
-        .into_iter()
-        .map(|(f, name)| (f as usize as u64, name))
-        .collect();
+    fn builtins(pkgs: &[Pkg], path: &str, names: &mut HashMap<u64, String>) {
+        for pkg in pkgs {
+            let path = format!("{path}{}.", pkg.name);
+            for f in pkg.fns {
+                if let Some(native) = f.native {
+                    names.insert(native as usize as u64, format!("{path}{}", f.name));
+                }
+            }
+            builtins(pkg.pkgs, &path, names);
+        }
+    }
+
+    let mut names = HashMap::new();
+    builtins(purple_garden_std::STD, "", &mut names);
     for (f, name) in [
-        (
-            purple_garden_runtime::jit_sys as *const () as usize,
-            "jit_sys",
-        ),
         (
             purple_garden_runtime::jit_alloc as *const () as usize,
             "jit_alloc",
@@ -63,11 +69,15 @@ pub(crate) fn addresses<S: Allocator + Clone, A: Allocator + Clone>(
             purple_garden_runtime::jit_trap_stack_overflow as *const () as usize,
             "jit_trap_stack_overflow",
         ),
+        (
+            purple_garden_runtime::jit_trap_assert as *const () as usize,
+            "jit_trap_assert",
+        ),
     ] {
         names.insert(f as u64, name.to_string());
     }
     for f in cc.functions.values() {
-        if let CcFunc::Native { name, idx } = f {
+        if let CcFunc::Native { name, idx, .. } = f {
             names.insert(
                 syscalls[*idx as usize] as usize as u64,
                 format!("jit_{name}"),
@@ -90,11 +100,13 @@ pub(crate) fn write(
     let text_off = buf.len();
     let mut funcs = Vec::with_capacity(native_code.len());
     for (name, code) in native_code {
+        // laid out like the code arena, so `call rel32`s between functions resolve
+        pad(&mut buf, 16);
         let off = buf.len() - text_off;
         buf.extend_from_slice(code);
         funcs.push((format!("jit_{name}"), off, code.len()));
     }
-    let text_size: usize = funcs.iter().map(|f| f.2).sum();
+    let text_size = buf.len() - text_off;
 
     // symbol 0 is the null symbol, the functions follow in order
     let mut symbols: HashMap<&str, u32> = funcs

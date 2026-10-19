@@ -1431,6 +1431,10 @@ mod tests {
         );
     }
 
+    unsafe extern "C" fn never_called(_: *mut std::ffi::c_void) {
+        unreachable!("only typechecked")
+    }
+
     /// Test-only generic package from NRFC/generics.md: `t.id(x: T) T`.
     static T: Pkg = Pkg {
         name: "t",
@@ -1439,10 +1443,12 @@ mod tests {
         fns: &[purple_garden_runtime::embed::Fn {
             name: "id",
             doc: "lx.x",
-            ptr: purple_garden_runtime::syscall_unimplemented,
+            ptr: never_called,
             pure: false,
             eval: None,
             with_slots: true,
+            intrinsic: None,
+            native: None,
             arg_names: &["x"],
             args: &[Type::Slot("T")],
             ret: Type::Slot("T"),

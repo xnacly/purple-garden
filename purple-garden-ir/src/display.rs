@@ -57,6 +57,7 @@ impl Display for Instr<'_> {
             Instr::Store {
                 src, base, offset, ..
             } => write!(f, "Store %v{}+{}, %v{}", base, offset, src)?,
+            Instr::Assert { dst, cond, .. } => write!(f, "%v{dst} = Assert %v{cond}")?,
             Instr::Load {
                 dst, base, offset, ..
             } => write!(f, "%v{dst} = Load %v{}+{}", base, offset)?,
@@ -525,7 +526,7 @@ impl Display for Const<'_> {
             Const::Int(int) => write!(f, "{int}"),
             Const::Double(bits) => write!(f, "{}", f64::from_bits(*bits)),
             Const::Str(str) => write!(f, "`{}`", truncated_string_display(str)),
-            Const::Undefined => unreachable!(),
+            Const::Undefined => write!(f, "undefined"),
         }
     }
 }

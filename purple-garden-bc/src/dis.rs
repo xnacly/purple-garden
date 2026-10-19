@@ -234,6 +234,8 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                 Op::IDivI { dst, lhs, imm } => format!("idiv_imm r{dst}, r{lhs}, #{imm}"),
                 Op::IMod { dst, lhs, rhs } => format!("imod r{dst}, r{lhs}, r{rhs}"),
                 Op::IModI { dst, lhs, imm } => format!("imod_imm r{dst}, r{lhs}, #{imm}"),
+                Op::IAnd { dst, lhs, rhs } => format!("iand r{dst}, r{lhs}, r{rhs}"),
+                Op::IAndI { dst, lhs, imm } => format!("iand_imm r{dst}, r{lhs}, #{imm}"),
                 Op::IEq { dst, lhs, rhs } => format!("ieq r{dst}, r{lhs}, r{rhs}"),
                 Op::IEqI { dst, lhs, imm } => format!("ieq_imm r{dst}, r{lhs}, #{imm}"),
                 Op::ILt { dst, lhs, rhs } => format!("ilt r{dst}, r{lhs}, r{rhs}"),
@@ -264,6 +266,7 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                     "jmpt r{cond}, {target:04x} <{}>",
                     target_label(*target, cur_func)
                 ),
+                Op::Assert { cond } => format!("assert r{cond}"),
                 Op::JmpF { cond, target } => format!(
                     "jmpf r{cond}, {target:04x} <{}>",
                     target_label(*target, cur_func)
@@ -312,6 +315,10 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                 Op::Call { func } => format!(
                     "call {func:04x} <{}>",
                     funcs_by_pc.get(func).unwrap().name()
+                ),
+                Op::Native { idx, .. } => format!(
+                    "native {idx} <{}>",
+                    native_names.get(idx).map_or("???", String::as_str),
                 ),
                 Op::Sys { idx, .. } => format!(
                     "sys {idx} <{}>",

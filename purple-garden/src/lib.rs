@@ -36,7 +36,8 @@ pub use purple_garden_macros::{GardenOpaque, GardenValue, pg_fn, pg_pkg};
 /// value conversion.
 pub mod embed {
     pub use purple_garden_runtime::{
-        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, Slot, Type, Value, Vm, VmConfig,
+        Anomaly, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Slot, Type, Value,
+        Vm, VmConfig,
     };
 
     #[doc(hidden)]
@@ -432,7 +433,7 @@ impl<'p> Program<'p> {
     pub fn run(&mut self) -> Result<(), Anomaly> {
         self.vm.reset();
         if let Some(entry) = self.entry_native {
-            unsafe { entry((&mut self.vm as *mut Vm).cast()) };
+            unsafe { purple_garden_runtime::enter_native((&mut self.vm as *mut Vm).cast(), entry) };
             if let Some(anomaly) = self.vm.take_trap() {
                 return Err(anomaly);
             }
@@ -579,8 +580,24 @@ impl<'p> Program<'p> {
                     self.vm.run::<false>(&self.syscalls)?;
                 }
             }
-            CcCallTarget::Native { idx } => {
-                unsafe { self.syscalls[idx as usize]((&mut self.vm as *mut Vm).cast()) };
+            CcCallTarget::Native {
+                idx,
+                returns_double,
+            } => {
+                let enter = if returns_double {
+                    purple_garden_runtime::enter_native_double
+                } else {
+                    purple_garden_runtime::enter_native
+                };
+                unsafe {
+                    enter(
+                        (&mut self.vm as *mut Vm).cast(),
+                        self.syscalls[idx as usize],
+                    )
+                };
+                if let Some(anomaly) = self.vm.take_trap() {
+                    return Err(anomaly);
+                }
             }
         };
 

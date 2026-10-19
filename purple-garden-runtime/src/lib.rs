@@ -6,7 +6,7 @@
 use std::fmt::{self, Write as _};
 
 pub use purple_garden_ir::{
-    Fn,
+    Fn, Intrinsic, NativeFn,
     ptype::{Field, Type},
 };
 pub use purple_garden_shared::BuiltinFn;
@@ -25,21 +25,26 @@ pub const REGISTER_COUNT: usize = 64;
 
 pub use crate::anomaly::Anomaly;
 pub use crate::gc::{AllocType, Gc, Metadata};
-pub use crate::jit_helpers::{jit_alloc, jit_sys, jit_trap_div_zero, jit_trap_stack_overflow};
+#[cfg(target_arch = "x86_64")]
+pub use crate::jit_helpers::jit_abort;
+pub use crate::jit_helpers::{
+    enter_native, enter_native_double, jit_alloc, jit_trap_assert, jit_trap_div_zero,
+    jit_trap_stack_overflow,
+};
 pub use crate::value::{
     FromVm, IntoVm, PgType, Slot, Value, alloc_record, copy_record, decode_record_field,
     encode_record_field,
 };
 pub use crate::vm::{
-    CallFrame, DebugInfo, NATIVE_STACK_LIMIT_OFFSET, Vm, VmConfig, syscall_unimplemented,
+    CallFrame, DebugInfo, NATIVE_ENTRY_RSP_OFFSET, NATIVE_STACK_LIMIT_OFFSET, Vm, VmConfig,
 };
 
 /// Compatibility namespace used by embedding macros.
 #[doc(hidden)]
 pub mod embed {
     pub use super::{
-        Anomaly, Field, Fn, FromVm, IntoVm, PgType, Pkg, Slot, Type, Value, Vm, VmConfig,
-        alloc_record, copy_record, decode_record_field, encode_record_field,
+        Anomaly, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Slot, Type, Value,
+        Vm, VmConfig, alloc_record, copy_record, decode_record_field, encode_record_field,
     };
 }
 

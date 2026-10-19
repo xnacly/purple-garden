@@ -56,6 +56,13 @@ impl<P: Pages> CodeArena<P> {
         })
     }
 
+    /// The address the next [`CodeArena::push`] places its code at, so code can be compiled for
+    /// it before.
+    #[must_use]
+    pub fn next_entry(&self) -> usize {
+        self.ptr.as_ptr() as usize + self.len.next_multiple_of(Self::ALIGN)
+    }
+
     /// Copy `code` into the arena and return its entry, `None` once full.
     pub fn push(&mut self, code: &[u8]) -> Option<BuiltinFn> {
         debug_assert!(!self.sealed, "push into a sealed code arena");

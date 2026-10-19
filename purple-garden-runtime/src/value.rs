@@ -94,6 +94,7 @@ impl<'c> From<Const<'c>> for Value {
             Const::True => 1u64,
             Const::Int(i) => i as u64,
             Const::Double(bits) => bits,
+            Const::Undefined => Value::UNDEF.0,
             _ => unimplemented!("0xDEADAFFE"),
         })
     }
@@ -294,6 +295,20 @@ impl<T: PgType> PgType for Option<T> {
     const TYPE: Type<'static> = Type::Option(&T::TYPE);
 }
 
+impl<'vm, T: FromVm<'vm>> FromVm<'vm> for Option<T> {
+    fn from_vm(vm: &'vm Vm, value: Value) -> Self {
+        let [tag, payload] = unsafe { *(value.0 as *const [u64; 2]) };
+        debug_assert!(tag <= 1, "option tag {tag}");
+        (tag == 1).then(|| T::from_vm(vm, Value(payload)))
+    }
+}
+
+impl<T: IntoVm> IntoVm for Option<T> {
+    fn into_vm(self, vm: &mut Vm) -> Value {
+        vm.new_option(self)
+    }
+}
+
 /// Generic slot `NAME` of a `#[pg_fn(with_slots)]` function, `Slot<"T">` is `Type::Slot("T")`
 /// to the typechecker, which binds it per call. The body only ever sees the erased register
 /// word, the compiler sizes and converts the concrete value at the call site
@@ -360,5 +375,68 @@ mod tests {
         *vm.r_mut(0) = false.into_vm(&mut vm);
         assert!(!vm.r(0).as_bool());
         assert_eq!(().into_vm(&mut vm), Value::UNDEF);
+    }
+
+    /// The tag and payload words of the box `value` points to, see [`Type::Option`].
+    fn option_box(value: Value) -> [u64; 2] {
+        unsafe { *(value.0 as *const [u64; 2]) }
+    }
+
+    #[test]
+    fn some_boxes_the_tag_and_the_payload_inline() {
+        let mut vm = Vm::new(VmConfig::default());
+        let hi = vm.new_string_from_str("hi");
+        let boxes = [
+            (Some(42_i64).into_vm(&mut vm), 42),
+            (Some(1.5_f64).into_vm(&mut vm), 1.5_f64.to_bits()),
+            (Some(true).into_vm(&mut vm), 1),
+            (Some("hi").into_vm(&mut vm), hi.0),
+        ];
+        for (value, payload) in boxes {
+            assert_eq!(option_box(value), [1, payload]);
+
+            let metadata = unsafe {
+                crate::gc::Metadata::from_payload(
+                    std::ptr::NonNull::new(value.0 as *mut u8).unwrap(),
+                )
+            };
+            assert_eq!(metadata.alloc_type(), Some(crate::gc::AllocType::Option));
+            assert_eq!(metadata.size(), 16);
+        }
+    }
+
+    #[test]
+    fn nones_share_one_box_with_tag_zero() {
+        let mut vm = Vm::new(VmConfig::default());
+        let int = None::<i64>.into_vm(&mut vm);
+        let str = None::<&str>.into_vm(&mut vm);
+        let nested = None::<Option<i64>>.into_vm(&mut vm);
+
+        assert_eq!(int, str);
+        assert_eq!(int, nested);
+        assert_eq!(option_box(int)[0], 0);
+    }
+
+    #[test]
+    fn options_round_trip() {
+        let mut vm = Vm::new(VmConfig::default());
+        for opt in [Some(-7_i64), None] {
+            let value = opt.into_vm(&mut vm);
+            assert_eq!(<Option<i64>>::from_vm(&vm, value), opt);
+        }
+        for opt in [Some(f64::NAN.to_bits()), Some(0)] {
+            let value = opt.map(f64::from_bits).into_vm(&mut vm);
+            assert_eq!(
+                <Option<f64>>::from_vm(&vm, value).map(f64::to_bits),
+                opt,
+                "doubles keep their bits"
+            );
+        }
+        for opt in [Some(Some(3_i64)), Some(None), None] {
+            let value = opt.into_vm(&mut vm);
+            assert_eq!(<Option<Option<i64>>>::from_vm(&vm, value), opt);
+        }
+        let value = Some(false).into_vm(&mut vm);
+        assert_eq!(<Option<bool>>::from_vm(&vm, value), Some(false));
     }
 }

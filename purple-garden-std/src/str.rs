@@ -84,7 +84,7 @@ pub mod str {
         s.len() as i64
     }
 
-    /// Returns the byte at `index` as an `Int`.
+    /// Returns the byte at `index` as an `Int`, None if `index` is out of bounds.
     ///
     /// ## Examples
     ///
@@ -93,15 +93,13 @@ pub mod str {
     ///
     /// str.get("garden" 0)
     /// ```
-    pub fn get(s: &str, index: i64) -> Result<i64, &'static str> {
-        let index = usize::try_from(index).map_err(|_| "str.get: negative index")?;
-        s.as_bytes()
-            .get(index)
-            .map(|&byte| i64::from(byte))
-            .ok_or("str.get: index out of bounds")
+    pub fn get(s: &str, index: i64) -> Option<i64> {
+        let index = usize::try_from(index).ok()?;
+        s.as_bytes().get(index).map(|&byte| i64::from(byte))
     }
 
-    /// Returns the substring from byte offset `start` up to but not including `end`.
+    /// Returns the substring from byte offset `start` up to but not including `end`, None if the
+    /// range is out of bounds or not on utf-8 boundaries.
     ///
     /// ## Examples
     ///
@@ -116,18 +114,12 @@ pub mod str {
         s: RawString,
         start: i64,
         end: i64,
-    ) -> Result<RawString, &'static str> {
+    ) -> Option<RawString> {
         let s = s.0.as_str();
-        let start = usize::try_from(start).map_err(|_| "str.slice: negative start")?;
-        let end = usize::try_from(end).map_err(|_| "str.slice: negative end")?;
-        if start > end || end > s.len() {
-            return Err("str.slice: range out of bounds");
-        }
-        if !s.is_char_boundary(start) || !s.is_char_boundary(end) {
-            return Err("str.slice: range is not on utf-8 boundaries");
-        }
-
-        Ok(RawString(vm.new_string_from_str(&s[start..end])))
+        let start = usize::try_from(start).ok()?;
+        let end = usize::try_from(end).ok()?;
+        let slice = s.get(start..end)?;
+        Some(RawString(vm.new_string_from_str(slice)))
     }
 
     /// Converts an `Int` to `Str`.

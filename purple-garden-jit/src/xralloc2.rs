@@ -122,6 +122,17 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         Some(reg)
     }
 
+    /// Assign `id` the free register `reg`, where a parameter arrives. `None` if `reg` isn't free.
+    pub fn alloc_at(&mut self, id: Id, reg: Reg, last_use: u32) -> Option<Reg> {
+        let free = &mut self.free[reg.class() as usize];
+        let i = free.iter().position(|&num| num == reg.num())?;
+        free.remove(i);
+        self.active.push((last_use, reg));
+        *self.map.get_mut(id.0 as usize)? = Some(reg);
+        self.mark_used(reg);
+        Some(reg)
+    }
+
     /// Free the registers of values whose last use is at or before `at`.
     pub fn expire(&mut self, at: u32) {
         let Self { active, free, .. } = self;

@@ -13,6 +13,7 @@ mod dce;
 mod dce_functions;
 mod imm_fold;
 mod indirect_jump;
+mod inline;
 mod is_const_call;
 mod load_store_fold;
 mod ret_inline;
@@ -228,6 +229,9 @@ pub use dce::dce;
 pub use dce_functions::dce_functions;
 pub use imm_fold::imm_fold;
 pub use indirect_jump::indirect_jump;
+#[cfg(test)]
+pub use inline::MAX_INSTRUCTIONS;
+pub use inline::{inlinable, inline};
 pub use is_const_call::is_const_call;
 pub use load_store_fold::load_store_fold;
 pub use ret_inline::ret_inline;

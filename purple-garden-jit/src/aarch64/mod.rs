@@ -18,6 +18,7 @@ pub fn compile_func<F: Allocator, S: std::alloc::Allocator, N: std::alloc::Alloc
     _: &std::collections::HashMap<ir::Const<'_>, u32>,
     _: &[purple_garden_runtime::Value],
     _: &crate::Natives<N>,
+    _: usize,
     _: &mut crate::xralloc2::Xralloc2<S>,
     _: &mut Scratch<S>,
 ) -> Option<()> {

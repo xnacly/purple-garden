@@ -32,6 +32,10 @@ use purple_garden_shared::BuiltinFn;
 
 pub type ConstEvalFn = for<'args, 'c> fn(&'args [Const<'c>]) -> Option<Const<'c>>;
 
+/// A builtin's entry for native code, erased: SysV `extern "C"` taking the vm first, Double
+/// arguments and result as `f64` and everything else as one `Value` word
+pub type NativeFn = unsafe extern "C" fn();
+
 #[derive(Debug, Clone)]
 pub struct Fn<'f> {
     pub name: &'f str,
@@ -46,6 +50,17 @@ pub struct Fn<'f> {
     /// `println`. `Some` => callable only via the group name
     pub specialises: Option<&'f str>,
     pub with_slots: bool,
+    /// Lowered by the frontend instead of being called
+    pub intrinsic: Option<Intrinsic>,
+    /// Called by native code without going through `vm.r`, `None` for intrinsics
+    pub native: Option<NativeFn>,
+}
+
+/// Builtins the frontend lowers to IR instead of an [`Instr::Sys`] call, their Rust body never runs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Intrinsic {
+    /// [`Instr::Assert`] on the Bool argument
+    Assert,
 }
 
 impl<'f> Fn<'f> {
@@ -119,6 +134,8 @@ pub enum BinOp {
     IMul,
     IDiv,
     IMod,
+    /// Bitwise and, only produced by the optimiser
+    IAnd,
     ILt,
     IGt,
     IEq,
@@ -185,6 +202,12 @@ pub enum Instr<'i> {
         offset: u32,
         span: u32,
     },
+    /// Traps with an assertion failure if the Bool `cond` is false, `dst` is the call's Void value.
+    Assert {
+        dst: TypeId<'i>,
+        cond: Id,
+        span: u32,
+    },
     Load {
         dst: TypeId<'i>,
         base: Id,
@@ -210,12 +233,55 @@ pub enum Instr<'i> {
 }
 
 impl Instr<'_> {
+    /// Calls `f` with the defined id and every operand id of `self`, for renaming. The args of
+    /// `Call` and `Sys` are a [`ParamsId`] into their function's pool and aren't visited, renaming
+    /// them means interning the renamed ids into the target function's pool.
+    pub fn for_each_id_mut(&mut self, mut f: impl FnMut(&mut Id)) {
+        match self {
+            Instr::Bin { dst, lhs, rhs, .. } => {
+                f(&mut dst.id);
+                f(lhs);
+                f(rhs);
+            }
+            Instr::BinImm { dst, lhs, .. } => {
+                f(&mut dst.id);
+                f(lhs);
+            }
+            Instr::Cast { dst, from, .. } => {
+                f(&mut dst.id);
+                f(&mut from.id);
+            }
+            Instr::Lookup { dst, subject, .. } => {
+                f(&mut dst.id);
+                f(subject);
+            }
+            Instr::Assert { dst, cond, .. } => {
+                f(&mut dst.id);
+                f(cond);
+            }
+            Instr::Load { dst, base, .. } | Instr::AddrOf { dst, base, .. } => {
+                f(&mut dst.id);
+                f(base);
+            }
+            Instr::Store { src, base, .. } => {
+                f(src);
+                f(base);
+            }
+            Instr::LoadConst { dst, .. }
+            | Instr::Alloc { dst, .. }
+            | Instr::Call { dst, .. }
+            | Instr::Sys { dst, .. } => f(&mut dst.id),
+            Instr::Noop => {}
+        }
+    }
+
     /// Source byte offset for this instruction, or 0 for synthetic Noops
     /// (which never trap, so the missing span doesn't matter).
     #[must_use]
     pub fn span(&self) -> u32 {
         match self {
             Instr::Store { span, .. }
+            | Instr::Assert { span, .. }
             | Instr::Load { span, .. }
             | Instr::AddrOf { span, .. }
             | Instr::Bin { span, .. }
@@ -501,7 +567,8 @@ impl Func<'_> {
             | Instr::Call { dst, .. }
             | Instr::Sys { dst, .. }
             | Instr::Cast { dst, .. }
-            | Instr::Lookup { dst, .. } => Some(dst.id),
+            | Instr::Lookup { dst, .. }
+            | Instr::Assert { dst, .. } => Some(dst.id),
             Instr::Store { .. } | Instr::Noop => None,
         }
     }
@@ -526,6 +593,7 @@ impl<A: Allocator> Func<'_, A> {
                 f(*src);
                 f(*base);
             }
+            Instr::Assert { cond, .. } => f(*cond),
             Instr::Load { base, .. } | Instr::AddrOf { base, .. } => f(*base),
             Instr::LoadConst { .. } | Instr::Noop | Instr::Alloc { .. } => {}
         }
@@ -631,6 +699,7 @@ impl<A: Allocator> Func<'_, A> {
                         replace(src);
                         replace(base);
                     }
+                    Instr::Assert { cond, .. } => replace(cond),
                     Instr::Load { base, .. } | Instr::AddrOf { base, .. } => replace(base),
                     Instr::Call { .. }
                     | Instr::Sys { .. }
@@ -954,6 +1023,100 @@ mod tests {
         }
     }
 
+    /// [`Instr::for_each_id_mut`] visits exactly what [`Func::def_of`] and
+    /// [`Func::for_each_use_of_instr`] report, minus the pooled args of calls, so an operand added
+    /// to one but not the other fails here.
+    #[test]
+    fn for_each_id_mut_visits_the_definition_and_every_use() {
+        let mut fun = Func::new("f", Id(0), vec![], None);
+        let id = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let instructions = [
+            Instr::Bin {
+                op: BinOp::IAdd,
+                dst: id(1),
+                lhs: Id(2),
+                rhs: Id(3),
+                span: 0,
+            },
+            Instr::BinImm {
+                op: BinOp::IAdd,
+                dst: id(4),
+                lhs: Id(5),
+                imm: 1,
+                span: 0,
+            },
+            Instr::LoadConst {
+                dst: id(6),
+                value: Const::Int(0),
+                span: 0,
+            },
+            Instr::Call {
+                dst: id(7),
+                func: Id(0),
+                args: fun.intern_params([Id(8)]),
+                span: 0,
+            },
+            Instr::Cast {
+                dst: id(9),
+                from: id(10),
+                span: 0,
+            },
+            Instr::Alloc {
+                dst: id(11),
+                layout: Layout::new::<u64>(),
+                span: 0,
+            },
+            Instr::Store {
+                src: Id(12),
+                base: Id(13),
+                offset: 0,
+                span: 0,
+            },
+            Instr::Assert {
+                dst: id(14),
+                cond: Id(15),
+                span: 0,
+            },
+            Instr::Load {
+                dst: id(16),
+                base: Id(17),
+                offset: 0,
+                span: 0,
+            },
+            Instr::AddrOf {
+                dst: id(18),
+                base: Id(19),
+                offset: 0,
+                span: 0,
+            },
+            Instr::Lookup {
+                dst: id(20),
+                subject: Id(21),
+                entries: fun.intern_entries([]),
+                default: Const::Int(0),
+                span: 0,
+            },
+            Instr::Noop,
+        ];
+        for instr in instructions {
+            let mut expected: Vec<u32> = Func::<Global>::def_of(&instr)
+                .map(|d| d.0)
+                .into_iter()
+                .collect();
+            if !matches!(instr, Instr::Call { .. } | Instr::Sys { .. }) {
+                fun.for_each_use_of_instr(&instr, |id| expected.push(id.0));
+            }
+            let mut visited = vec![];
+            instr.clone().for_each_id_mut(|id| visited.push(id.0));
+            expected.sort_unstable();
+            visited.sort_unstable();
+            assert_eq!(visited, expected, "{instr:?}");
+        }
+    }
+
     /// Every use the visitors report is rewritten by [`Func::replace_uses`], so an operand added
     /// to one but not the other fails here.
     #[test]
@@ -1003,6 +1166,11 @@ mod tests {
                 src: v(),
                 base: v(),
                 offset: 0,
+                span: 0,
+            },
+            Instr::Assert {
+                dst: type_id(206),
+                cond: v(),
                 span: 0,
             },
             Instr::Load {

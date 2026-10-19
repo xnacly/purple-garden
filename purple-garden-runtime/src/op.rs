@@ -95,6 +95,17 @@ pub enum Op {
         lhs: u8,
         imm: i32,
     },
+    IAnd {
+        dst: u8,
+        lhs: u8,
+        rhs: u8,
+    },
+    /// `r[dst] = r[lhs] & imm`. Lowered from IR `BinImm` (commutative).
+    IAndI {
+        dst: u8,
+        lhs: u8,
+        imm: i32,
+    },
     ILt {
         dst: u8,
         lhs: u8,
@@ -273,6 +284,13 @@ pub enum Op {
         idx: u16,
         argc: u8,
     },
+    /// Enter the native function at [`Vm::syscalls`] index `idx` through
+    /// [`crate::enter_native`], or [`crate::enter_native_double`] if it returns a Double. A trap
+    /// inside it leaves through [`crate::jit_abort`] back to here.
+    Native {
+        idx: u16,
+        returns_double: bool,
+    },
     /// Push `src` onto [`Vm::spilled`]. Used both for caller-save spill
     /// around [`Op::Call`] / [`Op::Sys`] and for cycle-breaking inside
     /// `bc::Cc::emit_arg_shuffle`.
@@ -344,6 +362,10 @@ pub enum Op {
         offset: u32,
     },
     Ret,
+    /// Trap with [`crate::Anomaly::AssertionFailed`] when `cond` is falsy.
+    Assert {
+        cond: u8,
+    },
     /// Stop the dispatch loop
     Halt,
     Nop,

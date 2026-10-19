@@ -2,16 +2,16 @@
 //!
 //! IR is lowered to native code in a single pass, uses xralloc2 to map SSA values to x86 GPRs while emitting.
 //!
-//! The native ABI passes `*mut Vm` in `rdi`. `Vm::r` being the first field, `rdi` is the base of the VM
+//! The native ABI keeps `*mut Vm` in `rbx`. `Vm::r` being the first field, `rbx` is the base of the VM
 //! register file. Arguments arrive in `vm.r[0..n]`; return register is `vm.r[0]`. All
 //! computation happen in GPRs. The jit moves arguments from `vm.r[0..n]` to GPRs in a jitted
 //! functions prologue.
 //!
-//! On return `rax` holds the trap flag: zero, or nonzero once a trap is pending
-//! and every native frame must unwind to the interpreter. Native functions
-//! preserve `rdi` and clobber only the SysV caller-saved registers, so native
+//! A trap records its anomaly in a runtime helper, which leaves every native frame through
+//! `jit_abort` back to the interpreter, so calls need no trap check. Native functions
+//! preserve `rbx` and clobber only the SysV caller-saved registers, so native
 //! to native calls are plain `call`s: no trampoline, no spill of the VM base.
-//! The interpreter calls natives as a [`BuiltinFn`] and ignores `rax`.
+//! The interpreter enters natives through `enter_native` and ignores `rax`.
 
 mod encode;
 
@@ -22,7 +22,7 @@ use crate::{
     xralloc2::{Class, Reg as Preg, Xralloc2},
 };
 use encode::{
-    Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBX, RCX, RDI, RDX, RSI, RSP, Reg,
+    Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBP, RBX, RCX, RDI, RDX, RSI, RSP, Reg,
     patch_rel32,
 };
 use purple_garden_ir::{self as ir, BinOp};
@@ -42,27 +42,29 @@ macro_rules! skip {
     }};
 }
 
-/// `rdi` holds `*mut Vm` == `&vm.r[0]`, base for slot loads/stores.
-const VM: Reg = RDI;
+/// `rbx` holds `*mut Vm` == `&vm.r[0]`, base for slot loads/stores. Callee saved, so Rust keeps
+/// it across calls, `enter_native` sets it.
+const VM: Reg = RBX;
 /// Never holds a value: breaks edge-move cycles and holds helper addresses.
 const GPR_SCRATCH: Reg = RAX;
+/// Native functions take argument i in `ARG_GPRS[i]`, or in `xmm{i}` if it is a Double, and
+/// return in `rax` or `xmm0`, see `enter_native`.
+const ARG_GPRS: [Reg; 6] = [RSI, RDX, RCX, R8, R9, R10];
 
 /// Allocatable GPRs, popped from the back: caller-saved first so leaf functions dont require a
 /// prologue, `rcx`/`rdx` last since `idiv` clobbers them.
 const GPR_POOL: &[u8] = &[
-    RBX.0, R12.0, R13.0, R14.0, R15.0, RDX.0, RCX.0, R11.0, R10.0, R9.0, R8.0, RSI.0,
+    RBP.0, R12.0, R13.0, R14.0, R15.0, RDI.0, RDX.0, RCX.0, R11.0, R10.0, R9.0, R8.0, RSI.0,
 ];
-const GPR_CALLEE_SAVED: &[Reg] = &[RBX, R12, R13, R14, R15];
+/// No frame pointer is kept, `rbp` is just another callee saved register.
+const GPR_CALLEE_SAVED: &[Reg] = &[RBP, R12, R13, R14, R15];
 /// Allocatable registers a SysV helper call clobbers.
-const GPR_CALLER_SAVED: &[Reg] = &[RCX, RDX, RSI, R8, R9, R10, R11];
+const GPR_CALLER_SAVED: &[Reg] = &[RCX, RDX, RSI, RDI, R8, R9, R10, R11];
 /// A helper call clobbers every xmm on top: SysV has no callee-saved fpr.
 const CALL_CLOBBERS: Clobbers = Clobbers {
     gprs: GPR_CALLER_SAVED,
     fprs: true,
 };
-/// Stack a helper call reserves for the VM base; keeps rsp 16-byte aligned
-/// since the prologue aligns it for functions with calls.
-const CALL_STACK: i32 = 16;
 
 /// Allocatable XMM regs, also popped from the back; none are callee saved
 const XMM_POOL: &[u8] = &[14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
@@ -78,13 +80,14 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     globals: &HashMap<ir::Const<'ir>, u32>,
     strings: &[Value],
     natives: &crate::Natives<N>,
+    at: usize,
     ra: &mut Xralloc2<S>,
     buffers: &mut Scratch<S>,
 ) -> Option<()> {
-    if func.params.len() > 32 {
+    if func.params.len() > ARG_GPRS.len() {
         skip!(
             func,
-            "too many params for disp8 slot loads: {}",
+            "more params than argument registers: {}",
             func.params.len()
         );
     }
@@ -92,17 +95,6 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     let Some(entry) = func.blocks.iter().find(|b| !b.tombstone).map(|b| b.id) else {
         skip!(func, "empty function");
     };
-
-    if is_result_slot_identity(func, entry) {
-        // Native calls receive arg0 in vm.r[0] and must return through vm.r[0]
-        //
-        // When a function returns that parameter unchanged, the VM register file already holds the
-        // required boundary state, nothing to do here other than return without a trap
-        Insn::Zero { reg: GPR_SCRATCH }.encode(out);
-        Insn::Ret.encode(out);
-        purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
-        return Some(());
-    }
 
     ra.reset(liveness.len(), GPR_POOL, XMM_POOL);
     let calls = Lowering::new(
@@ -130,8 +122,9 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     // an even number of pushes leaves it misaligned. Only matters if the body
     // calls helpers.
     let pad = calls && saved.clone().count() % 2 == 0;
+    let frameless = !pad && saved.clone().next().is_none();
 
-    if !pad && saved.clone().next().is_none() {
+    if frameless {
         // The epilogue is a bare `ret`, so each `jmp epilogue` (e9 + rel32) in
         // the body becomes `ret` (c3). The rel32 bytes become int3 (cc): nothing
         // executes past a ret and nothing jumps into them, and rewriting in
@@ -166,31 +159,50 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     for &rel in &buffers.self_refs {
         patch_rel32(out, body_at + rel, body_at + rel + 4, start).expect("within the function");
     }
-    if pad {
-        Insn::AddImm { dst: RSP, imm: 8 }.encode(out);
+    // Calls to other natives, as distances from where this function lands at `at`.
+    let patch_native = |out: &mut Vec<u8, S>, rel: usize, target: usize| {
+        let from = at + (rel + 4 - start);
+        let disp = i32::try_from(target as isize - from as isize).expect("natives share an arena");
+        out[rel..rel + 4].copy_from_slice(&disp.to_le_bytes());
+    };
+    for &(rel, target) in &buffers.native_refs {
+        patch_native(out, body_at + rel, target);
     }
-    for reg in saved.rev() {
-        Insn::Pop { reg }.encode(out);
-    }
+    let epilogue = |out: &mut Vec<u8, S>| {
+        if pad {
+            Insn::AddImm { dst: RSP, imm: 8 }.encode(out);
+        }
+        for reg in saved.clone().rev() {
+            Insn::Pop { reg }.encode(out);
+        }
+    };
+    epilogue(out);
     Insn::Ret.encode(out);
+    // A tail call leaves the frame like a return, then jumps to the callee, which returns to this
+    // function's caller. Without a frame that is the jump itself, otherwise each callee gets an
+    // epilogue ending in the jump.
+    buffers
+        .tail_refs
+        .sort_unstable_by_key(|&(_, target)| target);
+    for refs in buffers.tail_refs.chunk_by(|a, b| a.1 == b.1) {
+        let target = refs[0].1;
+        if frameless {
+            for &(rel, _) in refs {
+                patch_native(out, body_at + rel, target);
+            }
+            continue;
+        }
+        let stub = out.len();
+        epilogue(out);
+        let rel = encode::jump(out, Cond::Always);
+        patch_native(out, rel, target);
+        for &(rel, _) in refs {
+            patch_rel32(out, body_at + rel, body_at + rel + 4, stub).expect("within the function");
+        }
+    }
 
     purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
     Some(())
-}
-
-fn is_result_slot_identity<F: Allocator>(func: &ir::Func<'_, F>, entry: ir::Id) -> bool {
-    let Some(result_param) = func.params.first().map(|p| p.id) else {
-        return false;
-    };
-    let block = &func.blocks[entry.0 as usize];
-    block.instructions.is_empty()
-        && matches!(
-            block.term,
-            Some(ir::Terminator::Return {
-                value: Some(value),
-                ..
-            }) if value == result_param
-        )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,6 +210,8 @@ enum Target {
     Block(ir::Id),
     /// The shared epilogue appended after the body.
     Epilogue,
+    /// A tail call to the native function at this address, resolved once the frame is known.
+    Tail(usize),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -221,6 +235,10 @@ pub struct Scratch<S: Allocator> {
     saves: Vec<(Preg, Preg), S>,
     /// Body offsets of the rel32s (self calls) that address the function's own start.
     self_refs: Vec<usize, S>,
+    /// Body offsets of the rel32s (tail calls) and the native function each jumps to.
+    tail_refs: Vec<(usize, usize), S>,
+    /// Body offsets of the rel32s (native calls) and the native function each calls.
+    native_refs: Vec<(usize, usize), S>,
 }
 
 impl<S: Allocator + Clone> Scratch<S> {
@@ -231,17 +249,17 @@ impl<S: Allocator + Clone> Scratch<S> {
             patches: Vec::new_in(scratch.clone()),
             move_pairs: Vec::new_in(scratch.clone()),
             saves: Vec::new_in(scratch.clone()),
-            self_refs: Vec::new_in(scratch),
+            self_refs: Vec::new_in(scratch.clone()),
+            tail_refs: Vec::new_in(scratch.clone()),
+            native_refs: Vec::new_in(scratch),
         }
     }
 }
 
-/// Target of a call that passes its arguments through `vm.r`.
+/// Target of a native to native call, see [`Lowering::call_native`].
 #[derive(Clone, Copy)]
 enum Callee {
-    /// A builtin: called through `jit_sys`, which reports whether it trapped.
-    Sys(BuiltinFn),
-    /// A natively compiled function: called directly, returns the trap flag.
+    /// A natively compiled function.
     Native(BuiltinFn),
     /// The function being compiled, whose address isn't known yet.
     This,
@@ -288,7 +306,8 @@ fn arith(op: BinOp, dst: Reg, src: Reg) -> Insn {
         BinOp::IAdd => Insn::Add { dst, src },
         BinOp::ISub => Insn::Sub { dst, src },
         BinOp::IMul => Insn::Imul { dst, src },
-        _ => unreachable!("only IAdd, ISub and IMul lower to two-operand arithmetic"),
+        BinOp::IAnd => Insn::And { dst, src },
+        _ => unreachable!("only IAdd, ISub, IMul and IAnd lower to two-operand arithmetic"),
     }
 }
 
@@ -341,6 +360,8 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     /// Reusable `(reg, copy)` buffer of [`Lowering::save_clobbered`].
     saves: &'a mut Vec<(Preg, Preg), S>,
     self_refs: &'a mut Vec<usize, S>,
+    tail_refs: &'a mut Vec<(usize, usize), S>,
+    native_refs: &'a mut Vec<(usize, usize), S>,
 }
 
 impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, F, S, N> {
@@ -361,12 +382,16 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             move_pairs,
             saves,
             self_refs,
+            tail_refs,
+            native_refs,
         } = buffers;
         body.clear();
         block_offsets.clear();
         block_offsets.resize(func.blocks.len(), usize::MAX);
         patches.clear();
         self_refs.clear();
+        tail_refs.clear();
+        native_refs.clear();
         Self {
             func,
             liveness,
@@ -385,6 +410,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             move_pairs,
             saves,
             self_refs,
+            tail_refs,
+            native_refs,
         }
     }
 
@@ -397,14 +424,16 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     fn lower(mut self) -> Option<bool> {
         // Native calls recurse on the machine stack: trap like the interpreter
         // before running off its end.
-        let calls_native = self
+        // Functions are defined before use, so only a function calling itself
+        // can recurse, a tail call to itself is a loop.
+        let recurses = self
             .func
             .blocks
             .iter()
             .filter(|b| !b.tombstone)
             .flat_map(|b| &b.instructions)
-            .any(|i| matches!(i, ir::Instr::Call { .. }));
-        if calls_native {
+            .any(|i| matches!(i, ir::Instr::Call { func, .. } if *func == self.func.id));
+        if recurses {
             self.emit(Insn::CmpMem {
                 reg: RSP,
                 base: VM,
@@ -416,29 +445,24 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 &[AbiArg::Reg(VM)],
                 None,
             );
-            self.jump(Cond::Always, Target::Epilogue);
             let resume = self.out.len();
             patch_rel32(self.out, fine, fine + 4, resume).expect("short forward jump");
         }
 
-        // Args arrive in the VM register file: param i in vm.r[i].
-        for (slot, param) in self.func.params.iter().enumerate() {
-            let used = self
+        for (i, param) in self.func.params.iter().enumerate() {
+            let Some(&(_, last_use)) = self
                 .liveness
                 .get(param.id.0 as usize)
-                .is_some_and(|&(start, _)| start != u32::MAX);
-            if used {
-                let slot = slot as u8;
-                match self.def(param, 0) {
-                    Preg::Gpr(dst) => self.emit(Insn::LoadSlot {
-                        dst: Reg(dst),
-                        slot,
-                    }),
-                    Preg::Fpr(dst) => self.emit(Insn::LoadSlotSd {
-                        dst: Xmm(dst),
-                        slot,
-                    }),
-                }
+                .filter(|&&(start, _)| start != u32::MAX)
+            else {
+                continue;
+            };
+            let reg = match Class::from(&param.ty) {
+                Class::Gpr => Preg::Gpr(ARG_GPRS[i].0),
+                Class::Fpr => Preg::Fpr(i as u8),
+            };
+            if self.ra.alloc_at(param.id, reg, last_use).is_none() {
+                bail!(self, "param register {reg:?} is taken");
             }
         }
 
@@ -539,26 +563,58 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 src, base, offset, ..
             } if *offset <= i32::MAX as u32 => {
                 let src = self.ensure_register(*src);
-                let src = self.gpr(src);
                 let base = self.ensure_register(*base);
                 let base = self.gpr(base);
-                self.emit(Insn::StoreMem {
-                    base,
-                    offset: *offset,
-                    src,
+                let offset = *offset;
+                self.emit(match src {
+                    Preg::Gpr(src) => Insn::StoreMem {
+                        base,
+                        offset,
+                        src: Reg(src),
+                    },
+                    Preg::Fpr(src) => Insn::StoreMemSd {
+                        base,
+                        offset,
+                        src: Xmm(src),
+                    },
                 });
+            }
+            ir::Instr::Assert { dst, cond, .. } => {
+                let cond = self.ensure_register(*cond);
+                let cond = self.gpr(cond);
+                self.emit(Insn::Test {
+                    lhs: cond,
+                    rhs: cond,
+                });
+                let holds = encode::jump(self.out, Cond::NotZero);
+                self.call(
+                    purple_garden_runtime::jit_trap_assert as *const () as u64,
+                    &[AbiArg::Reg(VM)],
+                    None,
+                );
+                let resume = self.out.len();
+                patch_rel32(self.out, holds, holds + 4, resume).expect("short forward jump");
+                // a Void value is never read, whatever the register holds will do
+                self.def(dst, self.pos + 1);
             }
             ir::Instr::Load {
                 dst, base, offset, ..
             } if *offset <= i32::MAX as u32 => {
                 let base = self.ensure_register(*base);
                 let base = self.gpr(base);
+                let offset = *offset;
                 let dst = self.def(dst, self.pos + 1);
-                let dst = self.gpr(dst);
-                self.emit(Insn::LoadMem {
-                    dst,
-                    base,
-                    offset: *offset,
+                self.emit(match dst {
+                    Preg::Gpr(dst) => Insn::LoadMem {
+                        dst: Reg(dst),
+                        base,
+                        offset,
+                    },
+                    Preg::Fpr(dst) => Insn::LoadMemSd {
+                        dst: Xmm(dst),
+                        base,
+                        offset,
+                    },
                 });
             }
             ir::Instr::AddrOf {
@@ -633,6 +689,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     src: GPR_SCRATCH,
                 });
             }
+            // a Void value is never read, whatever the register holds will do
+            ir::Instr::LoadConst {
+                dst,
+                value: ir::Const::Undefined,
+                ..
+            } => {
+                self.def(dst, self.pos + 1);
+            }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let Some(imm) = (match value {
                     ir::Const::False => Some(0),
@@ -679,13 +743,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let dst = self.gpr(dst);
 
                 match op {
-                    BinOp::IAdd | BinOp::ISub => {
+                    BinOp::IAdd | BinOp::ISub | BinOp::IAnd => {
                         if dst != lhs {
                             self.emit(Insn::Mov { dst, src: lhs });
                         }
                         self.emit(match op {
                             BinOp::IAdd => Insn::AddImm { dst, imm },
-                            _ => Insn::SubImm { dst, imm },
+                            BinOp::ISub => Insn::SubImm { dst, imm },
+                            _ => Insn::AndImm { dst, imm },
                         });
                     }
                     BinOp::IEq => {
@@ -825,7 +890,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let rhs = self.ensure_register(*rhs);
                 let rhs = self.gpr(rhs);
                 match op {
-                    BinOp::IAdd | BinOp::ISub | BinOp::IMul => {
+                    BinOp::IAdd | BinOp::ISub | BinOp::IMul | BinOp::IAnd => {
                         let dst = self.def(dst, self.pos + 1);
                         let dst = self.gpr(dst);
 
@@ -841,7 +906,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                             self.emit(Insn::Sub { dst, src: lhs });
                             self.emit(Insn::Neg { reg: dst });
                         } else {
-                            // add and mul commute.
+                            // add, mul and and commute.
                             self.emit(arith(*op, dst, lhs));
                         }
                     }
@@ -1040,7 +1105,15 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             }
             ir::Instr::Sys { dst, fun, args, .. } => {
                 let func = self.func;
-                self.call_builtin(Callee::Sys(fun.ptr), func.params(*args), dst);
+                let args = func.params(*args);
+                let Some(native) = fun.native else {
+                    bail!(self, "{} has no native entry", fun.name);
+                    return;
+                };
+                let Some(moves) = self.native_entry_moves(fun, args) else {
+                    return;
+                };
+                self.call_native_entry(native, moves, fun, dst);
             }
             ir::Instr::Call {
                 dst,
@@ -1057,7 +1130,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     return;
                 };
                 let func = self.func;
-                self.call_builtin(callee, func.params(*args), dst);
+                self.call_native(callee, func.params(*args), dst);
             }
             _ => bail!(self, "unsupported instruction {i:?}"),
         }
@@ -1073,22 +1146,21 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         match term {
             ir::Terminator::Return { value, .. } => {
                 if let Some(value) = value {
-                    let src = self.ensure_register(*value);
-                    match src {
-                        Preg::Gpr(gpr) => {
-                            self.emit(Insn::StoreSlot {
-                                src: Reg(gpr),
-                                slot: 0,
+                    match self.ensure_register(*value) {
+                        // only enter_native calls the entry, it reads the result from rax
+                        Preg::Fpr(fpr) if self.func.id == ir::Id(0) => {
+                            self.emit(Insn::MovqFromXmm {
+                                dst: RAX,
+                                src: Xmm(fpr),
                             });
                         }
-                        Preg::Fpr(fpr) => self.emit(Insn::StoreSlotSd {
-                            src: Xmm(fpr),
-                            slot: 0,
-                        }),
+                        Preg::Fpr(fpr) if fpr != 0 => self.mov(Preg::Fpr(0), Preg::Fpr(fpr)),
+                        Preg::Gpr(gpr) if gpr != RAX.0 => {
+                            self.mov(Preg::Gpr(RAX.0), Preg::Gpr(gpr))
+                        }
+                        _ => {}
                     }
                 }
-
-                self.emit(Insn::Zero { reg: GPR_SCRATCH });
                 self.jump(Cond::Always, Target::Epilogue);
             }
             ir::Terminator::Jump { id, params, .. } => {
@@ -1174,6 +1246,34 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let entry_params = func.params(func.blocks[self.entry.0 as usize].params);
                 self.edge_moves(func.params(*args), entry_params, pos);
                 self.jump(Cond::Always, Target::Block(self.entry));
+            }
+            ir::Terminator::Tail {
+                func: callee, args, ..
+            } => {
+                let Some(&f) = self.natives.get(callee) else {
+                    bail!(self, "f{} is not compiled natively", callee.0);
+                    return;
+                };
+                let args = func.params(*args);
+                if args.len() > ARG_GPRS.len() {
+                    bail!(self, "{} args, more than argument registers", args.len());
+                    return;
+                }
+                // nothing outlives a tail call, the arguments are all that is left to move
+                let mut moves = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
+                moves.clear();
+                for (i, &arg) in args.iter().enumerate() {
+                    let src = self.ensure_register(arg);
+                    let dst = match src {
+                        Preg::Gpr(_) => Preg::Gpr(ARG_GPRS[i].0),
+                        Preg::Fpr(_) => Preg::Fpr(i as u8),
+                    };
+                    if src != dst {
+                        moves.push((src, dst));
+                    }
+                }
+                self.parallel_move(moves);
+                self.jump(Cond::Always, Target::Tail(f as usize));
             }
             ir::Terminator::Switch {
                 subject,
@@ -1331,7 +1431,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 todo.push((s, d));
             }
         }
+        self.parallel_move(todo);
+    }
 
+    /// Performs the `(src, dst)` moves as if all at once, a cycle goes through the scratch
+    /// register of its class.
+    fn parallel_move(&mut self, mut todo: Vec<(Preg, Preg), S>) {
         'outer: loop {
             if todo.is_empty() {
                 break;
@@ -1373,7 +1478,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 dst: Xmm(dst),
                 src: Xmm(src),
             }),
-            _ => bail!(self, "move between {src:?} and {dst:?}"),
+            (Preg::Gpr(dst), Preg::Fpr(src)) => self.emit(Insn::MovqFromXmm {
+                dst: Reg(dst),
+                src: Xmm(src),
+            }),
+            (Preg::Fpr(dst), Preg::Gpr(src)) => self.emit(Insn::MovqToXmm {
+                dst: Xmm(dst),
+                src: Reg(src),
+            }),
         }
     }
 
@@ -1382,6 +1494,15 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// instruction's dst is assigned, so neither a copy nor dst can take an
     /// operand register the instruction still reads.
     fn save_clobbered(&mut self, clobbers: Clobbers) -> Vec<(Preg, Preg), S> {
+        let saves = self.reserve_copies(clobbers);
+        for &(reg, copy) in &saves {
+            self.mov(copy, reg);
+        }
+        saves
+    }
+
+    /// The `(reg, copy)` pairs [`Lowering::save_clobbered`] would copy, without emitting them.
+    fn reserve_copies(&mut self, clobbers: Clobbers) -> Vec<(Preg, Preg), S> {
         let mut saves = std::mem::replace(self.saves, Vec::new_in(self.scratch()));
         saves.clear();
         saves.extend(
@@ -1391,12 +1512,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 .map(|reg| (reg, reg)),
         );
         for save in &mut saves {
-            // A helper call clobbers every fpr, so a live double finds no
-            // copy and the function falls back until fprs can be spilled.
+            // A call clobbers every fpr, so a live double moves into a callee saved gpr instead.
             let class = save.0.class();
+            let free = |class| move |free| !clobbers.contains(Preg::new(class, free));
             match self
                 .ra
-                .take_free(class, |free| !clobbers.contains(Preg::new(class, free)))
+                .take_free(class, free(class))
+                .or_else(|| self.ra.take_free(Class::Gpr, free(Class::Gpr)))
             {
                 Some(free) => save.1 = free,
                 None => bail!(
@@ -1406,19 +1528,27 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 ),
             }
         }
-        for &(reg, copy) in &saves {
-            let dst = self.gpr(copy);
-            let src = self.gpr(reg);
-            self.emit(Insn::Mov { dst, src });
-        }
+        saves
+    }
+
+    /// Moves the arguments of a call into place and copies the values live across it out of the
+    /// registers it clobbers, as one parallel move: the registers of arguments dying at the call
+    /// can hold the copies, the resolver reads them first.
+    fn move_args_and_save(
+        &mut self,
+        mut moves: Vec<(Preg, Preg), S>,
+        clobbers: Clobbers,
+    ) -> Vec<(Preg, Preg), S> {
+        self.ra.expire(self.pos);
+        let saves = self.reserve_copies(clobbers);
+        moves.extend_from_slice(&saves);
+        self.parallel_move(moves);
         saves
     }
 
     fn restore(&mut self, saves: Vec<(Preg, Preg), S>) {
         for &(reg, copy) in &saves {
-            let dst = self.gpr(reg);
-            let src = self.gpr(copy);
-            self.emit(Insn::Mov { dst, src });
+            self.mov(reg, copy);
             self.ra.give_back(copy);
         }
         *self.saves = saves;
@@ -1460,71 +1590,127 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.restore(saves);
     }
 
-    /// Call `callee` the way the interpreter calls a builtin: arguments in
-    /// `vm.r[0..]`, the result in `vm.r[0]`, a trap leaves this function so
-    /// the interpreter surfaces it. The callee may write its argument
-    /// registers, but this function's caller only spilled those up to this
-    /// function's own arity; only `entry`, which nothing calls with live
-    /// registers, may pass more.
-    ///
-    /// Builtins go through `jit_sys` for the trap flag. Native functions return
-    /// it themselves and keep `rdi`, so they are called directly: a trampoline
-    /// in between doubles the `call`/`ret` pairs per frame, and deep recursion
-    /// then mispredicts most returns once the return stack buffer wraps.
-    fn call_builtin(&mut self, callee: Callee, args: &[ir::Id], dst: &ir::TypeId<'ir>) {
-        if args.len() > self.func.params.len().max(1) && self.func.id != ir::Id(0) {
-            bail!(
-                self,
-                "{} args would clobber registers the caller kept",
-                args.len()
-            );
+    /// Call the native function `callee`: argument i in `ARG_GPRS[i]` or `xmm{i}` by its class, the
+    /// result in `rax` or `xmm0`, no memory in between. Natives keep `rbx` and the callee saved
+    /// registers, so only values live across the call in the others are copied away. More
+    /// arguments than registers would need the stack and stay bytecode.
+    fn call_native(&mut self, callee: Callee, args: &[ir::Id], dst: &ir::TypeId<'ir>) {
+        if args.len() > ARG_GPRS.len() {
+            bail!(self, "{} args, more than argument registers", args.len());
             return;
         }
-        if args.len() > 15 {
-            bail!(self, "too many args for disp8 slot stores: {}", args.len());
-            return;
-        }
-        for (slot, &arg) in args.iter().enumerate() {
+        let mut moves = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
+        moves.clear();
+        for (i, &arg) in args.iter().enumerate() {
             let src = self.ensure_register(arg);
-            let src = self.gpr(src);
-            self.emit(Insn::StoreSlot {
-                src,
-                slot: slot as u8,
-            });
+            let dst = match src {
+                Preg::Gpr(_) => Preg::Gpr(ARG_GPRS[i].0),
+                Preg::Fpr(_) => Preg::Fpr(i as u8),
+            };
+            if src != dst {
+                moves.push((src, dst));
+            }
         }
-        // The args are in their slots, so values they were the last use of free their registers
-        // for the copies.
-        self.ra.expire(self.pos);
-        let saves = self.save_clobbered(CALL_CLOBBERS);
+        let saves = self.move_args_and_save(moves, CALL_CLOBBERS);
+        self.calls = true;
         match callee {
-            Callee::Sys(f) => self.call(
-                purple_garden_runtime::jit_sys as *const () as u64,
-                &[AbiArg::Reg(VM), AbiArg::Imm(f as usize as u64)],
-                None,
-            ),
             Callee::Native(f) => {
-                self.calls = true;
-                self.emit(Insn::MovAbs {
-                    dst: GPR_SCRATCH,
-                    imm: f as usize as u64,
-                });
-                self.emit(Insn::CallReg { reg: GPR_SCRATCH });
+                self.emit(Insn::CallRel { disp: 0 });
+                self.native_refs.push((self.out.len() - 4, f as usize));
             }
             Callee::This => {
-                self.calls = true;
                 self.emit(Insn::CallRel { disp: 0 });
                 self.self_refs.push(self.out.len() - 4);
             }
         }
-        self.emit(Insn::Test { lhs: RAX, rhs: RAX });
-        self.jump(Cond::NotZero, Target::Epilogue);
-        self.restore(saves);
-        let dst = self.def(dst, self.pos + 1);
-        let dst = self.gpr(dst);
-        self.emit(Insn::LoadSlot { dst, slot: 0 });
+        let ret = match Class::from(&dst.ty) {
+            Class::Gpr => Preg::Gpr(RAX.0),
+            Class::Fpr => Preg::Fpr(0),
+        };
+        self.take_result(dst, ret, saves);
     }
 
-    /// Raise the trap and leave with the flag the helper returns in `rax`:
+    /// Restores `saves` and moves a call's result from `ret` into `dst`. `dst` may take the
+    /// register of a value dying right after the call, so the restores go first; a double restored
+    /// into xmm0 would overwrite a result there, it waits in the scratch register then.
+    fn take_result(&mut self, dst: &ir::TypeId<'ir>, mut ret: Preg, saves: Vec<(Preg, Preg), S>) {
+        if saves.iter().any(|&(reg, _)| reg == ret) {
+            self.mov(Preg::Fpr(XMM_SCRATCH.0), ret);
+            ret = Preg::Fpr(XMM_SCRATCH.0);
+        }
+        self.restore(saves);
+        if dst.ty == ir::ptype::Type::Void {
+            return;
+        }
+        let dst = self.def(dst, self.pos + 1);
+        if dst != ret {
+            self.mov(dst, ret);
+        }
+    }
+
+    /// The moves placing `args` where SysV wants them for `fun`'s native entry, after the vm in
+    /// `rdi`: Doubles in xmm registers, everything else in gprs. A slot crosses as a `Value` word,
+    /// so a Double bound to it moves over into a gpr. More arguments than registers would need the
+    /// stack and bail.
+    fn native_entry_moves(
+        &mut self,
+        fun: &ir::Fn<'_>,
+        args: &[ir::Id],
+    ) -> Option<Vec<(Preg, Preg), S>> {
+        const GPR_ARGS: [Reg; 5] = [RSI, RDX, RCX, R8, R9];
+        const XMM_ARGS: u8 = 8;
+
+        let mut moves = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
+        moves.clear();
+        let (mut gprs, mut xmms) = (GPR_ARGS.iter(), 0..XMM_ARGS);
+        for (&arg, ty) in args.iter().zip(fun.args) {
+            let src = self.ensure_register(arg);
+            let dst = match Class::from(ty) {
+                Class::Gpr => gprs.next().map(|r| Preg::Gpr(r.0)),
+                Class::Fpr => xmms.next().map(Preg::Fpr),
+            };
+            let Some(dst) = dst else {
+                bail!(self, "{} args, more than argument registers", args.len());
+                return None;
+            };
+            assert!(
+                src.class() == dst.class() || matches!(ty, ir::ptype::Type::Slot(_)),
+                "typecheck lets a {:?} through as {ty:?}",
+                src.class()
+            );
+            if src != dst {
+                moves.push((src, dst));
+            }
+        }
+        Some(moves)
+    }
+
+    /// Calls a builtin's native entry: arguments and result in registers, without `vm.r`. The vm
+    /// goes into `rdi` last, an argument may still have been there.
+    fn call_native_entry(
+        &mut self,
+        native: ir::NativeFn,
+        moves: Vec<(Preg, Preg), S>,
+        fun: &ir::Fn<'_>,
+        dst: &ir::TypeId<'ir>,
+    ) {
+        let saves = self.move_args_and_save(moves, CALL_CLOBBERS);
+        self.calls = true;
+        self.emit(Insn::Mov { dst: RDI, src: VM });
+        self.emit(Insn::MovAbs {
+            dst: GPR_SCRATCH,
+            imm: native as usize as u64,
+        });
+        self.emit(Insn::CallReg { reg: GPR_SCRATCH });
+        // a slot result is a Value word, also when bound to a Double
+        let ret = match Class::from(&fun.ret) {
+            Class::Gpr => Preg::Gpr(RAX.0),
+            Class::Fpr => Preg::Fpr(0),
+        };
+        self.take_result(dst, ret, saves);
+    }
+
+    /// Raise the trap, the helper leaves native code through `jit_abort`:
     /// nothing live needs to survive the call.
     fn trap_div_zero(&mut self) {
         self.call(
@@ -1532,25 +1718,15 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             &[AbiArg::Reg(VM)],
             None,
         );
-        self.jump(Cond::Always, Target::Epilogue);
     }
 
-    /// SysV call to the helper at `addr`. The VM base lives in caller-saved
-    /// `rdi`, so it is kept on the stack across the call. Arguments are moved in order, which
-    /// is only safe because callers pass the VM base and immediates.
+    /// SysV call to the helper at `addr`. The VM base lives in callee saved `rbx`, so it survives
+    /// the call. Arguments are moved in order, which is only safe because callers pass the VM base
+    /// and immediates.
     fn call(&mut self, addr: u64, args: &[AbiArg], result: Option<Reg>) {
         const ARGS: [Reg; 6] = [RDI, RSI, RDX, RCX, R8, R9];
         debug_assert!(args.len() <= ARGS.len());
         self.calls = true;
-        self.emit(Insn::SubImm {
-            dst: RSP,
-            imm: CALL_STACK,
-        });
-        self.emit(Insn::StoreMem {
-            base: RSP,
-            offset: 0,
-            src: VM,
-        });
         for (&dst, arg) in ARGS.iter().zip(args) {
             match *arg {
                 AbiArg::Reg(src) if src != dst => self.emit(Insn::Mov { dst, src }),
@@ -1563,15 +1739,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             imm: addr,
         });
         self.emit(Insn::CallReg { reg: GPR_SCRATCH });
-        self.emit(Insn::LoadMem {
-            dst: VM,
-            base: RSP,
-            offset: 0,
-        });
-        self.emit(Insn::AddImm {
-            dst: RSP,
-            imm: CALL_STACK,
-        });
         if let Some(dst) = result.filter(|&dst| dst != RAX) {
             self.emit(Insn::Mov { dst, src: RAX });
         }
@@ -1600,6 +1767,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         for i in 0..self.patches.len() {
             let Patch { rel, target, from } = self.patches[i];
             let offset = match target {
+                Target::Tail(f) => {
+                    self.tail_refs.push((rel, f));
+                    continue;
+                }
                 Target::Epilogue => end,
                 // A block that started at the dropped jump now starts at the epilogue.
                 Target::Block(id) => self.block_offsets[id.0 as usize].min(end),

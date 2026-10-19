@@ -10,8 +10,8 @@
 //! opportunistic function based fast path: if the target-specific backend returns
 //! `None`, the bytecode compiler lowers the same IR function normally. A
 //! successful native function is retained as executable memory and injected into
-//! the VM as a syscall entry, so the VM can dispatch native and Rust builtins
-//! through the same `Op::Sys` mechanism.
+//! the VM as a syscall entry, the VM enters it through `Op::Native` while Rust
+//! builtins stay on `Op::Sys`.
 //!
 //! The high-level pipeline is:
 //!
@@ -93,8 +93,14 @@ impl<S: Allocator + Clone> Jit<S> {
         func.live_set_into(&mut self.liveness);
         let scratch = self.liveness.allocator().clone();
         let liveness = std::mem::replace(&mut self.liveness, Vec::new_in(scratch));
-        let result =
-            self.compile_func_with_liveness(func, &liveness, &HashMap::new(), &[], &HashMap::new());
+        let result = self.compile_func_with_liveness(
+            func,
+            &liveness,
+            &HashMap::new(),
+            &[],
+            &HashMap::new(),
+            0,
+        );
         self.liveness = liveness;
         result
     }
@@ -110,6 +116,7 @@ impl<S: Allocator + Clone> Jit<S> {
         globals: &HashMap<ir::Const<'ir>, u32>,
         strings: &[Value],
         natives: &Natives<impl Allocator>,
+        at: usize,
     ) -> Option<()> {
         self.code.clear();
         let result = arch::compile_func(
@@ -119,6 +126,7 @@ impl<S: Allocator + Clone> Jit<S> {
             globals,
             strings,
             natives,
+            at,
             &mut self.regalloc,
             &mut self.scratch,
         );
@@ -147,6 +155,7 @@ mod tests_x86 {
         BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId,
         ptype::{Field, Type},
     };
+    use std::collections::HashMap;
 
     fn record(fields: Vec<(&'static str, Type<'static>)>) -> Type<'static> {
         Type::Record(
@@ -158,26 +167,69 @@ mod tests_x86 {
         )
     }
 
-    /// `code` made executable, the arena has to outlive every call.
-    fn exec(code: &[u8]) -> (CodeArena, unsafe extern "C" fn(*mut u64)) {
-        let mut arena = CodeArena::new().expect("code arena");
+    /// Enter native code from a real `vm` the way the interpreter does, so a trap
+    /// can leave through `jit_abort`. `enter` stores the result into `vm.r[0]`.
+    fn enter_with(
+        code: &[u8],
+        vm: &mut purple_garden_runtime::Vm,
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+    ) {
+        enter_in(CodeArena::new().expect("code arena"), code, vm, enter);
+    }
+
+    /// Enter `code` placed after the natives already in `arena`.
+    fn enter_in(
+        mut arena: CodeArena,
+        code: &[u8],
+        vm: &mut purple_garden_runtime::Vm,
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+    ) {
         let entry = arena.push(code).expect("code fits the arena");
         arena.seal().expect("seal the code arena");
-        let f = unsafe {
-            std::mem::transmute::<super::BuiltinFn, unsafe extern "C" fn(*mut u64)>(entry)
-        };
-        (arena, f)
+        unsafe { enter((vm as *mut purple_garden_runtime::Vm).cast(), entry) };
     }
 
-    /// Run native code that takes `*mut u64` (the VM register file) and return
-    /// the resulting register slots.
-    fn run(code: &[u8], mut regs: [u64; 3]) -> [u64; 3] {
-        let (_arena, f) = exec(code);
-        unsafe { f(regs.as_mut_ptr()) };
-        regs
+    fn enter(code: &[u8], vm: &mut purple_garden_runtime::Vm) {
+        enter_with(code, vm, purple_garden_runtime::enter_native);
     }
 
-    /// `fn identity(a) int { a }`: load the arg, store it back as the result.
+    /// Enter native code with `args` in the first vm registers, returning the
+    /// first registers afterwards: the result in the first one.
+    fn run<const N: usize>(code: &[u8], args: [u64; N]) -> [u64; N] {
+        run_with(code, args, purple_garden_runtime::enter_native)
+    }
+
+    /// [`run`] for code returning a Double.
+    fn run_double<const N: usize>(code: &[u8], args: [u64; N]) -> f64 {
+        f64::from_bits(run_with(code, args, purple_garden_runtime::enter_native_double)[0])
+    }
+
+    fn run_with<const N: usize>(
+        code: &[u8],
+        args: [u64; N],
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+    ) -> [u64; N] {
+        run_in(CodeArena::new().expect("code arena"), code, args, enter)
+    }
+
+    /// [`run_with`] for `code` placed after the natives already in `arena`.
+    fn run_in<const N: usize>(
+        arena: CodeArena,
+        code: &[u8],
+        args: [u64; N],
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+    ) -> [u64; N] {
+        use purple_garden_runtime::{Value, Vm, VmConfig};
+
+        let mut vm = Vm::new(VmConfig::default());
+        for (i, &arg) in args.iter().enumerate() {
+            *vm.r_mut(i) = Value(arg);
+        }
+        enter_in(arena, code, &mut vm, enter);
+        std::array::from_fn(|i| vm.r(i).0)
+    }
+
+    /// `fn identity(a) int { a }`: the argument arrives in rsi, the result leaves in rax.
     #[test]
     fn identity_returns_arg() {
         let mut func = Func::new(
@@ -203,11 +255,11 @@ mod tests_x86 {
 
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
-        assert_eq!(jit.code(), [0x31, 0xc0, 0xc3]); // xor eax,eax; ret
+        assert_eq!(jit.code(), [0x48, 0x89, 0xf0, 0xc3]); // mov rax,rsi; ret
         assert_eq!(run(jit.code(), [42, 0xdead, 0xaffe]), [42, 0xdead, 0xaffe]);
     }
 
-    /// `fn second(a b) int { b }`: the result is the second arg (vm.r[1]).
+    /// `fn second(a b) int { b }`: the result is the second argument, in rdx.
     #[test]
     fn returns_second_arg() {
         let mut func = Func::new(
@@ -242,10 +294,7 @@ mod tests_x86 {
         assert_eq!(
             jit.code(),
             [
-                0x48, 0x8b, 0x77, 0x00, // mov rsi,[rdi+0]
-                0x48, 0x8b, 0x77, 0x08, // mov rsi,[rdi+8]
-                0x48, 0x89, 0x77, 0x00, // mov [rdi+0],rsi
-                0x31, 0xc0, // xor eax,eax: no trap
+                0x48, 0x89, 0xd0, // mov rax,rdx
                 0xc3,
             ]
         );
@@ -373,11 +422,11 @@ mod tests_x86 {
             no_gc: true,
             ..VmConfig::default()
         });
-        let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
-        slots[0..3].copy_from_slice(&[1, 2, 3]);
-        let (_arena, f) = exec(jit.code());
-        unsafe { f(&mut vm as *mut Vm as *mut u64) };
-        let payload = unsafe { std::slice::from_raw_parts(slots[0] as *const u64, 4) };
+        for (i, arg) in [1, 2, 3].into_iter().enumerate() {
+            *vm.r_mut(i) = purple_garden_runtime::Value(arg);
+        }
+        enter(jit.code(), &mut vm);
+        let payload = unsafe { std::slice::from_raw_parts(vm.r(0).0 as *const u64, 4) };
         assert_eq!(payload, &[1, 2, 3, 255]);
     }
 
@@ -591,10 +640,10 @@ mod tests_x86 {
 
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
-        let (_arena, f) = exec(jit.code());
-        let mut regs = [30, 1, 2, 3, 4, 5];
-        unsafe { f(regs.as_mut_ptr()) };
-        assert_eq!(regs[0], 10 + 30 + 1 + 2 + 3 + 4 + 5);
+        assert_eq!(
+            run(jit.code(), [30, 1, 2, 3, 4, 5])[0],
+            10 + 30 + 1 + 2 + 3 + 4 + 5
+        );
     }
 
     /// Power of two divisors lower to shifts, which have to truncate toward zero like the VM.
@@ -684,6 +733,400 @@ mod tests_x86 {
                 "{a} == {b}"
             );
         }
+    }
+
+    unsafe extern "C" fn no_wrapper(_: *mut std::ffi::c_void) {
+        unreachable!("native code calls the native entry")
+    }
+
+    unsafe extern "C" fn mix(_: *mut std::ffi::c_void, a: u64, b: f64) -> f64 {
+        a as i64 as f64 * b
+    }
+
+    unsafe extern "C" fn add_one(_: *mut std::ffi::c_void, a: u64) -> u64 {
+        a + 1
+    }
+
+    static MIX: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
+        name: "mix",
+        doc: "",
+        ptr: no_wrapper,
+        pure: false,
+        eval: None,
+        arg_names: &["a", "b"],
+        args: &[Type::Int, Type::Double],
+        ret: Type::Double,
+        specialises: None,
+        with_slots: false,
+        intrinsic: None,
+        native: Some(unsafe {
+            std::mem::transmute::<
+                unsafe extern "C" fn(*mut std::ffi::c_void, u64, f64) -> f64,
+                purple_garden_ir::NativeFn,
+            >(mix)
+        }),
+    };
+
+    static ADD_ONE: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
+        name: "add_one",
+        doc: "",
+        ptr: no_wrapper,
+        pure: false,
+        eval: None,
+        arg_names: &["a"],
+        args: &[Type::Int],
+        ret: Type::Int,
+        specialises: None,
+        with_slots: false,
+        intrinsic: None,
+        native: Some(unsafe {
+            std::mem::transmute::<
+                unsafe extern "C" fn(*mut std::ffi::c_void, u64) -> u64,
+                purple_garden_ir::NativeFn,
+            >(add_one)
+        }),
+    };
+
+    /// `fn f(x:Int y:Double) Double { mix(x y) }`: the Int in a gpr, the Double in an xmm
+    /// register, the result back in xmm0.
+    #[test]
+    fn calls_native_entries_with_hardware_args_and_result() {
+        let mut func = Func::new(
+            "f",
+            Id(1),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Double,
+                },
+            ],
+            Some(Type::Double),
+        );
+        let params = func.intern_params([Id(0), Id(1)]);
+        let args = func.intern_params([Id(0), Id(1)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Sys {
+                dst: TypeId {
+                    id: Id(2),
+                    ty: Type::Double,
+                },
+                path: "t",
+                fun: &MIX,
+                args,
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit native entry call");
+        assert_eq!(run_double(jit.code(), [3, 1.5f64.to_bits(), 0]), 4.5);
+    }
+
+    /// `fn g(x:Int) Int { add_one(x) + x }`: x survives the call in a register the callee keeps.
+    #[test]
+    fn native_entry_calls_keep_live_values() {
+        let int = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let mut func = Func::new("g", Id(0), vec![int(0)], Some(Type::Int));
+        let params = func.intern_params([Id(0)]);
+        let args = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Sys {
+                    dst: int(1),
+                    path: "t",
+                    fun: &ADD_ONE,
+                    args,
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::IAdd,
+                    dst: int(2),
+                    lhs: Id(1),
+                    rhs: Id(0),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit native entry call");
+        assert_eq!(run(jit.code(), [5, 0, 0])[0], 11);
+    }
+
+    /// `(x & y) + (x & -4)`: the register and the sign extended immediate form.
+    #[test]
+    fn ands_registers_and_immediates() {
+        let int = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let mut func = Func::new("and", Id(0), vec![int(0), int(1)], Some(Type::Int));
+        let params = func.intern_params([Id(0), Id(1)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Bin {
+                    op: BinOp::IAnd,
+                    dst: int(2),
+                    lhs: Id(0),
+                    rhs: Id(1),
+                    span: 0,
+                },
+                Instr::BinImm {
+                    op: BinOp::IAnd,
+                    dst: int(3),
+                    lhs: Id(0),
+                    imm: -4,
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::IAdd,
+                    dst: int(4),
+                    lhs: Id(2),
+                    rhs: Id(3),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(4)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(run(jit.code(), [13, 6])[0], 4 + 12);
+        assert_eq!(run(jit.code(), [(-3i64) as u64, 6])[0] as i64, 4 - 4);
+    }
+
+    /// Compile `func` with `natives` callable for placement at `at`, the way the bytecode backend
+    /// does.
+    fn compile_with(
+        func: &Func<'static>,
+        natives: &super::Natives<std::alloc::Global>,
+        at: usize,
+    ) -> Vec<u8> {
+        let mut liveness = Vec::new();
+        func.live_set_into(&mut liveness);
+        let mut jit = Jit::new();
+        jit.compile_func_with_liveness(func, &liveness, &HashMap::new(), &[], natives, at)
+            .expect("jit function");
+        jit.code().to_vec()
+    }
+
+    /// `fn callee(a:<ty>) <ty> { a <op> rhs }` with the constant `rhs`.
+    fn unary_func(id: u32, ty: Type<'static>, op: BinOp, rhs: Const<'static>) -> Func<'static> {
+        let mut func = Func::new(
+            "callee",
+            Id(id),
+            vec![TypeId {
+                id: Id(0),
+                ty: ty.clone(),
+            }],
+            Some(ty.clone()),
+        );
+        let params = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::LoadConst {
+                    dst: TypeId {
+                        id: Id(1),
+                        ty: ty.clone(),
+                    },
+                    value: rhs,
+                    span: 0,
+                },
+                Instr::Bin {
+                    op,
+                    dst: TypeId { id: Id(2), ty },
+                    lhs: Id(0),
+                    rhs: Id(1),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+        func
+    }
+
+    /// `fn f(x:Int) Int { inc(x * 2) }` as a tail call, inc returning straight to f's caller.
+    #[test]
+    fn tail_calls_another_native() {
+        let int = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let inc = compile_with(
+            &unary_func(1, Type::Int, BinOp::IAdd, Const::Int(1)),
+            &HashMap::new(),
+            0,
+        );
+        let mut arena = CodeArena::new().expect("code arena");
+        let inc = arena.push(&inc).expect("code fits the arena");
+
+        let mut func = Func::new("f", Id(2), vec![int(0)], Some(Type::Int));
+        let params = func.intern_params([Id(0)]);
+        let args = func.intern_params([Id(2)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::LoadConst {
+                    dst: int(1),
+                    value: Const::Int(2),
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::IMul,
+                    dst: int(2),
+                    lhs: Id(0),
+                    rhs: Id(1),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Tail {
+                func: Id(1),
+                args,
+                span: 0,
+            }),
+        });
+
+        let code = compile_with(
+            &func,
+            &HashMap::from_iter([(Id(1), inc)]),
+            arena.next_entry(),
+        );
+        let ret = run_in(arena, &code, [5], purple_garden_runtime::enter_native);
+        assert_eq!(ret[0], 11);
+    }
+
+    /// `fn f(x:Int) Int { inc(x) * 2 }`: a direct `call rel32` to inc, both in one arena.
+    #[test]
+    fn calls_other_natives_directly() {
+        let int = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let mut arena = CodeArena::new().expect("code arena");
+        let inc = compile_with(
+            &unary_func(1, Type::Int, BinOp::IAdd, Const::Int(1)),
+            &HashMap::new(),
+            arena.next_entry(),
+        );
+        let inc = arena.push(&inc).expect("code fits the arena");
+
+        let mut func = Func::new("f", Id(2), vec![int(0)], Some(Type::Int));
+        let params = func.intern_params([Id(0)]);
+        let args = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Call {
+                    dst: int(1),
+                    func: Id(1),
+                    args,
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::IAdd,
+                    dst: int(2),
+                    lhs: Id(1),
+                    rhs: Id(1),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+        let natives = HashMap::from_iter([(Id(1), inc)]);
+        let code = compile_with(&func, &natives, arena.next_entry());
+        assert!(
+            !code
+                .windows(8)
+                .any(|w| w == (inc as usize as u64).to_le_bytes()),
+            "no movabs of inc's address"
+        );
+        let ret = run_in(arena, &code, [20], purple_garden_runtime::enter_native);
+        assert_eq!(ret[0], 42);
+    }
+
+    /// `fn g(x:Double y:Double) Double { half(y) }` as a tail call, y moving into xmm0.
+    #[test]
+    fn tail_calls_move_arguments_into_place() {
+        let double = |id| TypeId {
+            id: Id(id),
+            ty: Type::Double,
+        };
+        let half = compile_with(
+            &unary_func(1, Type::Double, BinOp::DDiv, Const::Double(2f64.to_bits())),
+            &HashMap::new(),
+            0,
+        );
+        let mut arena = CodeArena::new().expect("code arena");
+        let half = arena.push(&half).expect("code fits the arena");
+
+        let mut func = Func::new("g", Id(2), vec![double(0), double(1)], Some(Type::Double));
+        let params = func.intern_params([Id(0), Id(1)]);
+        let args = func.intern_params([Id(1)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![],
+            term: Some(Terminator::Tail {
+                func: Id(1),
+                args,
+                span: 0,
+            }),
+        });
+
+        let code = compile_with(
+            &func,
+            &HashMap::from_iter([(Id(1), half)]),
+            arena.next_entry(),
+        );
+        let args = [1f64.to_bits(), 9f64.to_bits()];
+        let ret = run_in(
+            arena,
+            &code,
+            args,
+            purple_garden_runtime::enter_native_double,
+        );
+        assert_eq!(f64::from_bits(ret[0]), 4.5);
     }
 
     /// `fn f(a, b) int { a <op> b }` with a register divisor.
@@ -812,13 +1255,59 @@ mod tests_x86 {
         let mut vm = Vm::new(VmConfig::default());
         let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
         slots[0..2].copy_from_slice(&[20, 0]);
-        let (_arena, f) = exec(jit.code());
-        unsafe { f(&mut vm as *mut Vm as *mut u64) };
+        enter(jit.code(), &mut vm);
 
         assert!(matches!(
             vm.take_trap(),
             Some(Anomaly::DivisionByZero { .. })
         ));
+    }
+
+    /// `fn f(c:Bool) Bool { testing.assert(c) c }`, a false `c` leaves through `jit_abort`.
+    #[test]
+    fn assert_traps_on_false() {
+        use purple_garden_runtime::{Anomaly, Vm, VmConfig};
+
+        let mut func = Func::new(
+            "assert",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Bool,
+            }],
+            Some(Type::Bool),
+        );
+        let params = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Assert {
+                dst: TypeId {
+                    id: Id(1),
+                    ty: Type::Void,
+                },
+                cond: Id(0),
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(0)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit assert");
+        for (cond, traps) in [(1, false), (0, true)] {
+            let mut vm = Vm::new(VmConfig::default());
+            *vm.r_mut(0) = purple_garden_runtime::Value(cond);
+            enter(jit.code(), &mut vm);
+            assert_eq!(
+                matches!(vm.take_trap(), Some(Anomaly::AssertionFailed { .. })),
+                traps,
+                "assert({cond})"
+            );
+        }
     }
 
     #[test]
@@ -858,6 +1347,113 @@ mod tests_x86 {
         jit.compile_func(&func).expect("jit function");
         assert_eq!(run(jit.code(), [record.as_mut_ptr() as u64, 0, 0])[0], 42);
         let _ = record_ty;
+    }
+
+    /// `fn g(x:Double) Double { half(x) + x }`: x survives the call in a callee saved gpr, no xmm
+    /// register is.
+    #[test]
+    fn doubles_live_across_calls_in_gprs() {
+        let double = |id| TypeId {
+            id: Id(id),
+            ty: Type::Double,
+        };
+        let half = compile_with(
+            &unary_func(1, Type::Double, BinOp::DDiv, Const::Double(2f64.to_bits())),
+            &HashMap::new(),
+            0,
+        );
+        let mut arena = CodeArena::new().expect("code arena");
+        let half = arena.push(&half).expect("code fits the arena");
+
+        let mut func = Func::new("g", Id(2), vec![double(0)], Some(Type::Double));
+        let params = func.intern_params([Id(0)]);
+        let args = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Call {
+                    dst: double(1),
+                    func: Id(1),
+                    args,
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::DAdd,
+                    dst: double(2),
+                    lhs: Id(1),
+                    rhs: Id(0),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(2)),
+                span: 0,
+            }),
+        });
+
+        let code = compile_with(
+            &func,
+            &HashMap::from_iter([(Id(1), half)]),
+            arena.next_entry(),
+        );
+        let ret = run_in(
+            arena,
+            &code,
+            [3f64.to_bits()],
+            purple_garden_runtime::enter_native_double,
+        );
+        assert_eq!(f64::from_bits(ret[0]), 4.5);
+    }
+
+    /// `p.x = p.y` on a `Record<x:Double y:Double>`, returning `p.y`: Double fields go through xmm
+    /// registers.
+    #[test]
+    fn loads_and_stores_double_record_fields() {
+        let record_ty = record(vec![("x", Type::Double), ("y", Type::Double)]);
+        let mut func = Func::new(
+            "copy_y",
+            Id(1),
+            vec![TypeId {
+                id: Id(0),
+                ty: record_ty,
+            }],
+            Some(Type::Double),
+        );
+        let params = func.intern_params(vec![Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Load {
+                    dst: TypeId {
+                        id: Id(1),
+                        ty: Type::Double,
+                    },
+                    base: Id(0),
+                    offset: 8,
+                    span: 0,
+                },
+                Instr::Store {
+                    src: Id(1),
+                    base: Id(0),
+                    offset: 0,
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(1)),
+                span: 0,
+            }),
+        });
+
+        let mut record = [1.5f64.to_bits(), 2.25f64.to_bits()];
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(run_double(jit.code(), [record.as_mut_ptr() as u64]), 2.25);
+        assert_eq!(f64::from_bits(record[0]), 2.25);
     }
 
     #[test]
@@ -913,11 +1509,11 @@ mod tests_x86 {
         let _ = record_ty;
     }
 
-    /// `fn f() Double { 3.1415 }`: the bits are staged through rax into an
-    /// xmm, which the return stores to vm.r[0] as the raw double.
+    /// `fn f() Double { 3.1415 }`: the bits are staged through rax into xmm0,
+    /// where the double is returned.
     #[test]
     fn compiles_double_const_returning_function() {
-        let mut func = Func::new("double_ret", Id(0), vec![], Some(Type::Double));
+        let mut func = Func::new("double_ret", Id(1), vec![], Some(Type::Double));
         func.blocks.push(Block {
             tombstone: false,
             id: Id(0),
@@ -942,15 +1538,13 @@ mod tests_x86 {
         expected.extend_from_slice(&3.1415f64.to_bits().to_le_bytes());
         expected.extend_from_slice(&[
             0x66, 0x48, 0x0f, 0x6e, 0xc0, // movq xmm0, rax
-            0xf2, 0x0f, 0x11, 0x47, 0x00, // movsd [rdi+0], xmm0
-            0x31, 0xc0, // xor eax, eax: no trap
             0xc3,
         ]);
         assert_eq!(jit.code(), expected);
-        assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), 3.1415);
+        assert_eq!(run_double(jit.code(), [0, 0, 0]), 3.1415);
     }
 
-    /// Tail calls to other functions aren't lowered yet, so a function using them stays bytecode.
+    /// A tail call to a function that isn't native stays bytecode.
     #[test]
     fn skips_unsupported_functions() {
         let mut func = Func::new("unsupported", Id(0), vec![], Some(Type::Int));
@@ -969,14 +1563,13 @@ mod tests_x86 {
         assert!(Jit::new().compile_func(&func).is_none());
     }
 
-    /// `fn f() Double { lhs <op> rhs }`, the operands loaded as constants since
-    /// double params aren't lowered yet.
+    /// `fn f() Double { lhs <op> rhs }`, the operands loaded as constants.
     fn double_bin_func(op: BinOp, lhs: f64, rhs: f64) -> Func<'static> {
         let double = |id| TypeId {
             id: Id(id),
             ty: Type::Double,
         };
-        let mut func = Func::new("double_bin", Id(0), vec![], Some(Type::Double));
+        let mut func = Func::new("double_bin", Id(1), vec![], Some(Type::Double));
         func.blocks.push(Block {
             tombstone: false,
             id: Id(0),
@@ -1022,7 +1615,7 @@ mod tests_x86 {
             let mut jit = Jit::new();
             jit.compile_func(&double_bin_func(op, 7.0, 2.0))
                 .expect("jit double bin op");
-            assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), expected);
+            assert_eq!(run_double(jit.code(), [0, 0, 0]), expected);
         }
     }
 
@@ -1066,7 +1659,7 @@ mod tests_x86 {
     fn cast_func(from: Type<'static>, to: Type<'static>) -> Func<'static> {
         let mut func = Func::new(
             "cast",
-            Id(0),
+            Id(1),
             vec![TypeId {
                 id: Id(0),
                 ty: from.clone(),
@@ -1185,10 +1778,7 @@ mod tests_x86 {
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit cast");
         for n in [0i64, -7, 1 << 53] {
-            assert_eq!(
-                f64::from_bits(run(jit.code(), [n as u64, 0, 0])[0]),
-                n as f64
-            );
+            assert_eq!(run_double(jit.code(), [n as u64, 0, 0]), n as f64);
         }
     }
 
@@ -1200,7 +1790,7 @@ mod tests_x86 {
         let ty = |id, ty| TypeId { id: Id(id), ty };
         let mut func = Func::new(
             "swap",
-            Id(0),
+            Id(1),
             vec![ty(0, Type::Int), ty(1, Type::Double), ty(2, Type::Double)],
             Some(Type::Double),
         );
@@ -1255,7 +1845,7 @@ mod tests_x86 {
                     span: 0,
                 }],
                 term: Some(Terminator::Tail {
-                    func: Id(0),
+                    func: Id(1),
                     args: swapped,
                     span: 0,
                 }),
@@ -1267,7 +1857,7 @@ mod tests_x86 {
         }
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit double loop");
-        let run = |n: u64| f64::from_bits(run(jit.code(), [n, 5f64.to_bits(), 2f64.to_bits()])[0]);
+        let run = |n: u64| run_double(jit.code(), [n, 5f64.to_bits(), 2f64.to_bits()]);
         assert_eq!(run(0), 3.0);
         assert_eq!(run(3), -3.0);
         assert_eq!(run(4), 3.0);
@@ -1283,30 +1873,36 @@ mod tests_x86 {
             let mut jit = Jit::new();
             jit.compile_func(&double_bin_func(BinOp::DDiv, 1.0, zero))
                 .expect("jit ddiv");
-            assert_eq!(f64::from_bits(run(jit.code(), [0, 0, 0])[0]), expected);
+            assert_eq!(run_double(jit.code(), [0, 0, 0]), expected);
         }
     }
 
     /// Full dispatch path: JIT page injected into syscalls, Call replaced by
-    /// Sys, result readable from r0 after vm.run().
+    /// Native, result readable from r0 after vm.run().
     ///
     /// Vm is repr(C) with r as its first field and Value is repr(transparent)
     /// over u64, so rdi is &vm.r[0] the native fn receives &mut Vm. The page
-    /// pointer transmutes directly to BuiltinFn, so we need no second native
-    /// call mechanism. A bare `ret` leaves r0 untouched.
+    /// pointer transmutes directly to BuiltinFn, entered through
+    /// `enter_native`, which loads r0 into rsi and stores rax back into r0.
     #[test]
     fn jit_fn_injected_as_syscall_and_dispatched() {
         use purple_garden_runtime::{Vm, VmConfig, op::Op};
 
         let mut arena = super::CodeArena::new().expect("code arena");
-        let entry = arena.push(&[0xc3]).expect("arena has room");
+        // mov rax,rsi; ret: returns its first argument
+        let entry = arena
+            .push(&[0x48, 0x89, 0xf0, 0xc3])
+            .expect("arena has room");
         arena.seal().expect("seal arena");
 
         let syscalls = vec![entry];
         let mut vm = Vm::new(VmConfig::default());
         vm.bytecode = vec![
             Op::LoadI { dst: 0, value: 187 },
-            Op::Sys { idx: 0, argc: 1 },
+            Op::Native {
+                idx: 0,
+                returns_double: false,
+            },
             Op::Halt,
         ];
         vm.run::<false>(&syscalls).expect("vm run");
