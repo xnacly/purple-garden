@@ -233,6 +233,48 @@ pub enum Instr<'i> {
 }
 
 impl Instr<'_> {
+    /// Calls `f` with the defined id and every operand id of `self`, for renaming. The args of
+    /// `Call` and `Sys` are a [`ParamsId`] into their function's pool and aren't visited, renaming
+    /// them means interning the renamed ids into the target function's pool.
+    pub fn for_each_id_mut(&mut self, mut f: impl FnMut(&mut Id)) {
+        match self {
+            Instr::Bin { dst, lhs, rhs, .. } => {
+                f(&mut dst.id);
+                f(lhs);
+                f(rhs);
+            }
+            Instr::BinImm { dst, lhs, .. } => {
+                f(&mut dst.id);
+                f(lhs);
+            }
+            Instr::Cast { dst, from, .. } => {
+                f(&mut dst.id);
+                f(&mut from.id);
+            }
+            Instr::Lookup { dst, subject, .. } => {
+                f(&mut dst.id);
+                f(subject);
+            }
+            Instr::Assert { dst, cond, .. } => {
+                f(&mut dst.id);
+                f(cond);
+            }
+            Instr::Load { dst, base, .. } | Instr::AddrOf { dst, base, .. } => {
+                f(&mut dst.id);
+                f(base);
+            }
+            Instr::Store { src, base, .. } => {
+                f(src);
+                f(base);
+            }
+            Instr::LoadConst { dst, .. }
+            | Instr::Alloc { dst, .. }
+            | Instr::Call { dst, .. }
+            | Instr::Sys { dst, .. } => f(&mut dst.id),
+            Instr::Noop => {}
+        }
+    }
+
     /// Source byte offset for this instruction, or 0 for synthetic Noops
     /// (which never trap, so the missing span doesn't matter).
     #[must_use]
@@ -978,6 +1020,100 @@ mod tests {
         TypeId {
             id: Id(id),
             ty: Type::Int,
+        }
+    }
+
+    /// [`Instr::for_each_id_mut`] visits exactly what [`Func::def_of`] and
+    /// [`Func::for_each_use_of_instr`] report, minus the pooled args of calls, so an operand added
+    /// to one but not the other fails here.
+    #[test]
+    fn for_each_id_mut_visits_the_definition_and_every_use() {
+        let mut fun = Func::new("f", Id(0), vec![], None);
+        let id = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let instructions = [
+            Instr::Bin {
+                op: BinOp::IAdd,
+                dst: id(1),
+                lhs: Id(2),
+                rhs: Id(3),
+                span: 0,
+            },
+            Instr::BinImm {
+                op: BinOp::IAdd,
+                dst: id(4),
+                lhs: Id(5),
+                imm: 1,
+                span: 0,
+            },
+            Instr::LoadConst {
+                dst: id(6),
+                value: Const::Int(0),
+                span: 0,
+            },
+            Instr::Call {
+                dst: id(7),
+                func: Id(0),
+                args: fun.intern_params([Id(8)]),
+                span: 0,
+            },
+            Instr::Cast {
+                dst: id(9),
+                from: id(10),
+                span: 0,
+            },
+            Instr::Alloc {
+                dst: id(11),
+                layout: Layout::new::<u64>(),
+                span: 0,
+            },
+            Instr::Store {
+                src: Id(12),
+                base: Id(13),
+                offset: 0,
+                span: 0,
+            },
+            Instr::Assert {
+                dst: id(14),
+                cond: Id(15),
+                span: 0,
+            },
+            Instr::Load {
+                dst: id(16),
+                base: Id(17),
+                offset: 0,
+                span: 0,
+            },
+            Instr::AddrOf {
+                dst: id(18),
+                base: Id(19),
+                offset: 0,
+                span: 0,
+            },
+            Instr::Lookup {
+                dst: id(20),
+                subject: Id(21),
+                entries: fun.intern_entries([]),
+                default: Const::Int(0),
+                span: 0,
+            },
+            Instr::Noop,
+        ];
+        for instr in instructions {
+            let mut expected: Vec<u32> = Func::<Global>::def_of(&instr)
+                .map(|d| d.0)
+                .into_iter()
+                .collect();
+            if !matches!(instr, Instr::Call { .. } | Instr::Sys { .. }) {
+                fun.for_each_use_of_instr(&instr, |id| expected.push(id.0));
+            }
+            let mut visited = vec![];
+            instr.clone().for_each_id_mut(|id| visited.push(id.0));
+            expected.sort_unstable();
+            visited.sort_unstable();
+            assert_eq!(visited, expected, "{instr:?}");
         }
     }
 
