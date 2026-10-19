@@ -6,25 +6,7 @@ pub use self::str::PACKAGE;
 #[allow(clippy::module_inception)]
 pub mod str {
     use core::fmt::NumBuffer;
-    use purple_garden_runtime::{PgType, Type, Value, Vm};
-
-    pub struct RawString(Value);
-
-    impl PgType for RawString {
-        const TYPE: Type<'static> = Type::Str;
-    }
-
-    impl purple_garden_runtime::FromVm<'_> for RawString {
-        fn from_vm(_: &Vm, value: Value) -> Self {
-            Self(value)
-        }
-    }
-
-    impl purple_garden_runtime::IntoVm for RawString {
-        fn into_vm(self, _: &mut Vm) -> Value {
-            self.0
-        }
-    }
+    use purple_garden_runtime::RawString;
 
     /// Reports whether `needle` appears in `hay`.
     ///
