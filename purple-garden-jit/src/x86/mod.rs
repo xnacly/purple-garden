@@ -1117,6 +1117,23 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 patch_rel32(self.out, to_done, to_done + 4, done)
                     .expect("lookup ends after the default");
             }
+            ir::Instr::Sys {
+                dst,
+                fun:
+                    ir::Fn {
+                        intrinsic: Some(ir::Intrinsic::Sqrt),
+                        ..
+                    },
+                args,
+                ..
+            } => {
+                let src = self.func.params(*args)[0];
+                let src = self.ensure_register(src);
+                let src = self.xmm(src);
+                let dst = self.def(dst, self.pos + 1);
+                let dst = self.xmm(dst);
+                self.emit(Insn::VSqrtSd { dst, src });
+            }
             ir::Instr::Sys { dst, fun, args, .. } => {
                 let func = self.func;
                 let args = func.params(*args);

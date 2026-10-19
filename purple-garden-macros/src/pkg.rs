@@ -167,10 +167,10 @@ impl PgFunction {
             ));
         }
 
-        if attrs.intrinsic.is_some() && (attrs.pure || attrs.specialises.is_some()) {
+        if attrs.intrinsic.is_some() && attrs.specialises.is_some() {
             return Err(syn::Error::new(
                 ident.span(),
-                "pg_fn(intrinsic) functions are lowered instead of called, they cannot be pure or specialise an overload group",
+                "pg_fn(intrinsic) functions are lowered instead of called, they cannot specialise an overload group",
             ));
         }
 
@@ -589,8 +589,8 @@ struct PgFnAttrs {
     /// `#[pg_fn(with_slots)]`: the signature uses `embed::Slot<"T">` generics, bound per call
     /// by the typechecker
     with_slots: bool,
-    /// `#[pg_fn(intrinsic = Name)]`: lowered by the frontend to IR instead of being called, see
-    /// `Intrinsic`
+    /// `#[pg_fn(intrinsic = Name)]`: lowered instead of being called, by the frontend or the jit,
+    /// see `Intrinsic`
     intrinsic: Option<Ident>,
 }
 

@@ -52,17 +52,20 @@ pub struct Fn<'f> {
     /// `println`. `Some` => callable only via the group name
     pub specialises: Option<&'f str>,
     pub with_slots: bool,
-    /// Lowered by the frontend instead of being called
+    /// Lowered instead of being called, see [`Intrinsic`]
     pub intrinsic: Option<Intrinsic>,
     /// Called by native code without going through `vm.r`, `None` for intrinsics
     pub native: Option<NativeFn>,
 }
 
-/// Builtins the frontend lowers to IR instead of an [`Instr::Sys`] call, their Rust body never runs
+/// Builtins with a lowering of their own instead of a call: the frontend lowers some to IR, the jit
+/// lowers others to instructions while the interpreter still calls them through [`Instr::Sys`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intrinsic {
-    /// [`Instr::Assert`] on the Bool argument
+    /// [`Instr::Assert`] on the Bool argument, lowered by the frontend
     Assert,
+    /// `vsqrtsd` in the jit, still an [`Instr::Sys`] call in the IR and the interpreter
+    Sqrt,
 }
 
 impl<'f> Fn<'f> {

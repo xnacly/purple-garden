@@ -598,7 +598,8 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                                     span,
                                 });
                             }
-                            None => {
+                            // lowered by the jit, a call everywhere else
+                            Some(purple_garden_ir::Intrinsic::Sqrt) | None => {
                                 let args = self.ctx.func.intern_params(a);
                                 self.emit(Instr::Sys {
                                     dst,

@@ -154,7 +154,7 @@ pub mod math {
     ///
     /// math.sqrt(2.0)
     /// ```
-    #[pg_fn(pure)]
+    #[pg_fn(pure, intrinsic = Sqrt)]
     pub fn sqrt(n: f64) -> f64 {
         n.sqrt()
     }

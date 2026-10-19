@@ -318,6 +318,12 @@ pub enum Insn {
         lhs: Xmm,
         rhs: Xmm,
     },
+    /// `vsqrtsd xmm{dst}, xmm{src}, xmm{src}`: correctly rounded like `f64::sqrt`, the high lane
+    /// from src.
+    VSqrtSd {
+        dst: Xmm,
+        src: Xmm,
+    },
     /// `ucomisd xmm{lhs}, xmm{rhs}`: compares the low doubles into the flags
     /// like an unsigned compare. Unordered (a NaN) sets ZF, PF and CF.
     Ucomisd {
@@ -522,6 +528,8 @@ impl Insn {
             Insn::VSubSd { dst, lhs, rhs } => vex_sd(code, 0x5c, dst.0, lhs.0, rhs.0),
             Insn::VMulSd { dst, lhs, rhs } => vex_sd(code, 0x59, dst.0, lhs.0, rhs.0),
             Insn::VDivSd { dst, lhs, rhs } => vex_sd(code, 0x5e, dst.0, lhs.0, rhs.0),
+            // VEX.LIG.F2.0F 51 /r = `vsqrtsd xmm1, xmm2, xmm3/m64`
+            Insn::VSqrtSd { dst, src } => vex_sd(code, 0x51, dst.0, src.0, src.0),
             // 66 0F 2E /r = `ucomisd xmm1, xmm2/m64`, ModRM.reg is lhs.
             Insn::Ucomisd { lhs, rhs } => sse(code, 0x66, 0x2e, lhs.0, rhs.0),
             // 0F 28 /r = `movaps xmm1, xmm2/m128`, ModRM.reg is dst.
@@ -816,6 +824,27 @@ mod tests {
             }),
             [0xc5, 0xfb, 0x58, 0xc0]
         ); // vaddsd xmm0,xmm0,xmm0
+        assert_eq!(
+            enc(Insn::VSqrtSd {
+                dst: Xmm(0),
+                src: Xmm(1)
+            }),
+            [0xc5, 0xf3, 0x51, 0xc1]
+        ); // vsqrtsd xmm0,xmm1,xmm1
+        assert_eq!(
+            enc(Insn::VSqrtSd {
+                dst: Xmm(9),
+                src: Xmm(3)
+            }),
+            [0xc5, 0x63, 0x51, 0xcb]
+        ); // vsqrtsd xmm9,xmm3,xmm3
+        assert_eq!(
+            enc(Insn::VSqrtSd {
+                dst: Xmm(2),
+                src: Xmm(12)
+            }),
+            [0xc4, 0xc1, 0x1b, 0x51, 0xd4]
+        ); // vsqrtsd xmm2,xmm12,xmm12
     }
 
     #[test]

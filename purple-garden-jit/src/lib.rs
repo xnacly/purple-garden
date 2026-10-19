@@ -747,6 +747,64 @@ mod tests_x86 {
         a + 1
     }
 
+    static SQRT: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
+        name: "sqrt",
+        doc: "",
+        ptr: no_wrapper,
+        pure: true,
+        eval: None,
+        arg_names: &["n"],
+        args: &[Type::Double],
+        ret: Type::Double,
+        specialises: None,
+        with_slots: false,
+        intrinsic: Some(purple_garden_ir::Intrinsic::Sqrt),
+        native: None,
+    };
+
+    /// `fn f(x:Double) Double { math.sqrt(x) }`: one vsqrtsd, no call, rounded like `f64::sqrt`.
+    #[test]
+    fn lowers_the_sqrt_intrinsic_to_vsqrtsd() {
+        let double = |id| TypeId {
+            id: Id(id),
+            ty: Type::Double,
+        };
+        let mut func = Func::new("f", Id(1), vec![double(0)], Some(Type::Double));
+        let params = func.intern_params([Id(0)]);
+        let args = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Sys {
+                dst: double(1),
+                path: "math",
+                fun: &SQRT,
+                args,
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(1)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit sqrt");
+        let code = jit.code();
+        assert!(
+            code.windows(2)
+                .any(|w| w == [0xf3, 0x51] || w == [0xfb, 0x51]),
+            "{code:x?}"
+        );
+        // builtins are called through `call rax`
+        assert!(!code.windows(2).any(|w| w == [0xff, 0xd0]), "{code:x?}");
+        for x in [0.0, 2.0, 16.0, 1e-300, 1.7976931348623157e308, -1.0] {
+            let got = run_double(code, [f64::to_bits(x)]);
+            assert_eq!(got.to_bits(), x.sqrt().to_bits(), "sqrt({x})");
+        }
+    }
+
     static MIX: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
         name: "mix",
         doc: "",
