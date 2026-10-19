@@ -1639,11 +1639,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ret = Preg::Fpr(XMM_SCRATCH.0);
         }
         self.restore(saves);
-        if dst.ty == ir::ptype::Type::Void {
-            return;
-        }
+        let void = dst.ty == ir::ptype::Type::Void;
         let dst = self.def(dst, self.pos + 1);
-        if dst != ret {
+        // a Void value is never read, whatever the register holds will do
+        if !void && dst != ret {
             self.mov(dst, ret);
         }
     }

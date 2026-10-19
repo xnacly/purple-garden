@@ -833,6 +833,67 @@ mod tests_x86 {
         assert_eq!(run_double(jit.code(), [3, 1.5f64.to_bits(), 0]), 4.5);
     }
 
+    unsafe extern "C" fn touch(_: *mut std::ffi::c_void, _: u64) {}
+
+    static TOUCH: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
+        name: "touch",
+        doc: "",
+        ptr: no_wrapper,
+        pure: false,
+        eval: None,
+        arg_names: &["a"],
+        args: &[Type::Int],
+        ret: Type::Void,
+        specialises: None,
+        with_slots: false,
+        intrinsic: None,
+        native: Some(unsafe {
+            std::mem::transmute::<
+                unsafe extern "C" fn(*mut std::ffi::c_void, u64),
+                purple_garden_ir::NativeFn,
+            >(touch)
+        }),
+    };
+
+    /// An entry ending in `io.println(x)` returns the call's Void value, which has to be defined.
+    #[test]
+    fn returns_the_void_value_of_a_builtin_call() {
+        let mut func = Func::new(
+            "entry",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            None,
+        );
+        let params = func.intern_params([Id(0)]);
+        let args = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![Instr::Sys {
+                dst: TypeId {
+                    id: Id(1),
+                    ty: Type::Void,
+                },
+                path: "t",
+                fun: &TOUCH,
+                args,
+                span: 0,
+            }],
+            term: Some(Terminator::Return {
+                value: Some(Id(1)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func)
+            .expect("jit an entry returning a Void call");
+    }
+
     /// `fn g(x:Int) Int { add_one(x) + x }`: x survives the call in a register the callee keeps.
     #[test]
     fn native_entry_calls_keep_live_values() {
