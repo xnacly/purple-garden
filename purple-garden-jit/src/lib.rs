@@ -1242,8 +1242,7 @@ mod tests_x86 {
         assert!(calls_trap(jit.code()));
 
         let mut func = reg_div_func(BinOp::IMod);
-        func.facts
-            .add_param(Id(0), 1, purple_garden_ir::Fact::NONZERO);
+        func.facts.set_nonzero(Id(0), 1);
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit imod");
         assert!(!calls_trap(jit.code()));

@@ -1,7 +1,7 @@
 use std::alloc::Allocator;
 
 use crate::ir::Scratch;
-use purple_garden_ir::{self as ir, BinOp, Fact};
+use purple_garden_ir::{self as ir, BinOp};
 
 /// Records what holds for the params of `fun`'s blocks in [`ir::Func::facts`], from the branches
 /// leading to them. The last pass, nothing changes the IR after it, so the facts stay valid for the
@@ -22,8 +22,15 @@ pub fn facts<F: Allocator, S: Allocator>(fun: &mut ir::Func<'_, F>, scratch: &mu
     };
     let predecessors = super::predecessor_counts(fun, scratch.alloc());
 
-    let mut nonzero = Vec::new_in(scratch.alloc());
-    for block in fun.blocks.iter().filter(|b| !b.tombstone) {
+    #[cfg(feature = "trace")]
+    let name = fun.name;
+    let ir::Func {
+        blocks,
+        params_pool,
+        facts,
+        ..
+    } = fun;
+    for block in blocks.iter().filter(|b| !b.tombstone) {
         let Some(ir::Terminator::BranchCmpImm {
             op: BinOp::IEq,
             lhs,
@@ -37,21 +44,18 @@ pub fn facts<F: Allocator, S: Allocator>(fun: &mut ir::Func<'_, F>, scratch: &mu
         if target == entry || predecessors[target.0 as usize] != 1 {
             continue;
         }
-        for (i, &arg) in fun.params(args).iter().enumerate() {
-            if arg == lhs {
-                nonzero.push((target, i));
-            }
+        for (i, _) in params_pool
+            .get(args.0)
+            .iter()
+            .enumerate()
+            .filter(|&(_, &arg)| arg == lhs)
+        {
+            purple_garden_shared::trace!(
+                "[opt::ir::facts] {name}: param {i} of b{} is nonzero",
+                target.0
+            );
+            facts.set_nonzero(target, i);
         }
-    }
-
-    for (block, i) in nonzero {
-        purple_garden_shared::trace!(
-            "[opt::ir::facts] {}: param {} of b{} is nonzero",
-            fun.name,
-            i,
-            block.0
-        );
-        fun.facts.add_param(block, i, Fact::NONZERO);
     }
 }
 
@@ -59,150 +63,105 @@ pub fn facts<F: Allocator, S: Allocator>(fun: &mut ir::Func<'_, F>, scratch: &mu
 mod tests {
     use super::facts;
     use crate::ir::Scratch;
-    use purple_garden_ir::{
-        self as ir, BinOp, Block, Fact, Id, Instr, Terminator, TypeId, ptype::Type,
-    };
+    use purple_garden_ir::{self as ir, BinOp, Block, Id, Terminator, TypeId, ptype::Type};
 
-    fn int(id: u32) -> TypeId<'static> {
-        TypeId {
+    /// `fn f(%v0 %v1)` with blocks `b0..b2` ending in `terms`, every block taking `%v0, %v1`.
+    fn run(terms: [fn(ir::ParamsId) -> Terminator; 3]) -> ir::Func<'static> {
+        let int = |id| TypeId {
             id: Id(id),
             ty: Type::Int,
-        }
-    }
-
-    fn ret(id: u32) -> Option<Terminator> {
-        Some(Terminator::Return {
-            value: Some(Id(id)),
-            span: 0,
-        })
-    }
-
-    /// `gcd(a b)`: `b0` branches on `b == 0`, `b2` is only reached when it isn't and divides by it.
-    /// With `shared`, `b2` also gets a jump from `b1`, so `b` may be zero there.
-    fn gcd(shared: bool) -> ir::Func<'static> {
-        let mut fun = ir::Func::new("gcd", Id(1), vec![int(0), int(1)], Some(Type::Int));
-        let params = fun.intern_params([Id(0), Id(1)]);
-        let b1_term = if shared {
-            Some(Terminator::Jump {
-                id: Id(2),
-                params,
-                span: 0,
-            })
-        } else {
-            ret(0)
         };
-        fun.blocks = vec![
-            Block {
+        let mut fun = ir::Func::new("f", Id(1), vec![int(0), int(1)], Some(Type::Int));
+        let params = fun.intern_params([Id(0), Id(1)]);
+        fun.blocks = terms
+            .iter()
+            .enumerate()
+            .map(|(i, term)| Block {
                 tombstone: false,
-                id: Id(0),
+                id: Id(i as u32),
                 params,
                 instructions: vec![],
-                term: Some(Terminator::BranchCmpImm {
-                    op: BinOp::IEq,
-                    lhs: Id(1),
-                    imm: 0,
-                    yes: (Id(1), params),
-                    no: (Id(2), params),
-                    span: 0,
-                }),
-            },
-            Block {
-                tombstone: false,
-                id: Id(1),
-                params,
-                instructions: vec![],
-                term: b1_term,
-            },
-            Block {
-                tombstone: false,
-                id: Id(2),
-                params,
-                instructions: vec![Instr::Bin {
-                    op: BinOp::IMod,
-                    dst: int(5),
-                    lhs: Id(0),
-                    rhs: Id(1),
-                    span: 0,
-                }],
-                term: ret(5),
-            },
-        ];
+                term: Some(term(params)),
+            })
+            .collect();
+        facts(&mut fun, &mut Scratch::default());
         fun
     }
 
+    /// `br_imm IEq %v1, 0, b1(..), b2(..)`
+    fn to_b2(params: ir::ParamsId) -> Terminator {
+        branch(params, Id(2))
+    }
+
+    /// `br_imm IEq %v1, 0, b2(..), b0(..)`
+    fn to_b0(params: ir::ParamsId) -> Terminator {
+        branch(params, Id(0))
+    }
+
+    fn branch(params: ir::ParamsId, no: Id) -> Terminator {
+        Terminator::BranchCmpImm {
+            op: BinOp::IEq,
+            lhs: Id(1),
+            imm: 0,
+            yes: (Id(if no == Id(2) { 1 } else { 2 }), params),
+            no: (no, params),
+            span: 0,
+        }
+    }
+
+    fn jmp_b1(params: ir::ParamsId) -> Terminator {
+        Terminator::Jump {
+            id: Id(1),
+            params,
+            span: 0,
+        }
+    }
+
+    fn jmp_b2(params: ir::ParamsId) -> Terminator {
+        Terminator::Jump {
+            id: Id(2),
+            params,
+            span: 0,
+        }
+    }
+
+    fn ret(_: ir::ParamsId) -> Terminator {
+        Terminator::Return {
+            value: Some(Id(0)),
+            span: 0,
+        }
+    }
+
+    /// gcd's shape: below `b == 0`'s no edge `b` is non-zero, nowhere else.
     #[test]
     fn a_branch_proves_its_no_block_nonzero() {
-        let mut fun = gcd(false);
-        facts(&mut fun, &mut Scratch::default());
-        assert!(fun.fact_holds(Id(2), Id(1), Fact::NONZERO));
-        assert!(!fun.fact_holds(Id(1), Id(1), Fact::NONZERO));
-        assert!(!fun.fact_holds(Id(0), Id(1), Fact::NONZERO));
+        let fun = run([to_b2, ret, ret]);
+        assert!(fun.nonzero(Id(2), Id(1)));
+        assert!(!fun.nonzero(Id(1), Id(1)));
+        assert!(!fun.nonzero(Id(0), Id(1)));
+        assert!(!fun.nonzero(Id(2), Id(0)));
     }
 
-    /// `b2` is also reached from `b1`, where `b` is zero.
+    /// `b1` also jumps to `b2`, with `b` zero.
     #[test]
     fn a_block_with_other_predecessors_proves_nothing() {
-        let mut fun = gcd(true);
-        facts(&mut fun, &mut Scratch::default());
-        assert!(!fun.fact_holds(Id(2), Id(1), Fact::NONZERO));
+        let fun = run([to_b2, jmp_b2, ret]);
+        assert!(!fun.nonzero(Id(2), Id(1)));
     }
 
-    /// `b1` loops back into the entry `b0` when `%v1` isn't zero, but the entry is also where the
-    /// function starts, with any `%v1`.
+    /// The entry is also where the function starts, with any `b`.
     #[test]
     fn a_branch_into_the_entry_proves_nothing() {
-        let mut fun = ir::Func::new("f", Id(1), vec![int(0), int(1)], Some(Type::Int));
-        let params = fun.intern_params([Id(0), Id(1)]);
-        fun.blocks = vec![
-            Block {
-                tombstone: false,
-                id: Id(0),
-                params,
-                instructions: vec![Instr::Bin {
-                    op: BinOp::IMod,
-                    dst: int(2),
-                    lhs: Id(0),
-                    rhs: Id(1),
-                    span: 0,
-                }],
-                term: Some(Terminator::Jump {
-                    id: Id(1),
-                    params,
-                    span: 0,
-                }),
-            },
-            Block {
-                tombstone: false,
-                id: Id(1),
-                params,
-                instructions: vec![],
-                term: Some(Terminator::BranchCmpImm {
-                    op: BinOp::IEq,
-                    lhs: Id(1),
-                    imm: 0,
-                    yes: (Id(2), params),
-                    no: (Id(0), params),
-                    span: 0,
-                }),
-            },
-            Block {
-                tombstone: false,
-                id: Id(2),
-                params,
-                instructions: vec![],
-                term: ret(0),
-            },
-        ];
-        facts(&mut fun, &mut Scratch::default());
-        assert!(!fun.fact_holds(Id(0), Id(1), Fact::NONZERO));
+        let fun = run([jmp_b1, to_b0, ret]);
+        assert!(!fun.nonzero(Id(0), Id(1)));
     }
 
     /// The pass starts over, facts from an earlier run don't survive.
     #[test]
     fn clears_earlier_facts() {
-        let mut fun = gcd(true);
-        fun.facts.add_param(Id(2), 1, Fact::NONZERO);
+        let mut fun = run([to_b2, jmp_b2, ret]);
+        fun.facts.set_nonzero(Id(2), 1);
         facts(&mut fun, &mut Scratch::default());
-        assert!(!fun.fact_holds(Id(2), Id(1), Fact::NONZERO));
+        assert!(!fun.nonzero(Id(2), Id(1)));
     }
 }

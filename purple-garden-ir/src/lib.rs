@@ -28,7 +28,7 @@ pub mod ptype;
 use std::alloc::{Allocator, Global, Layout};
 
 pub use crate::constant::Const;
-pub use crate::facts::{Fact, Facts};
+pub use crate::facts::Facts;
 use crate::ptype::Type;
 use purple_garden_shared::BuiltinFn;
 
@@ -537,14 +537,13 @@ impl<'f, A: Allocator> Func<'f, A> {
         self.params_pool.get(id.0)
     }
 
-    /// Whether `fact` holds for `value` used inside `block`, as one of the block's params, see
-    /// [`Facts`].
+    /// Whether `value` is non-zero inside `block`, as one of its params, see [`Facts`].
     #[must_use]
-    pub fn fact_holds(&self, block: Id, value: Id, fact: Fact) -> bool {
+    pub fn nonzero(&self, block: Id, value: Id) -> bool {
         self.params(self.blocks[block.0 as usize].params)
             .iter()
             .position(|&p| p == value)
-            .is_some_and(|i| self.facts.of_param(block, i).contains(fact))
+            .is_some_and(|i| self.facts.nonzero(block, i))
     }
 
     pub fn intern_cases(&mut self, cases: impl IntoIterator<Item = Case<'f>>) -> CasesId {

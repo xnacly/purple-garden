@@ -221,9 +221,9 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                 .params(block.params)
                 .iter()
                 .enumerate()
-                .map(|(i, value)| match self.facts.of_param(block.id, i) {
-                    fact if fact.is_empty() => format!("%v{}", value.0),
-                    fact => format!("%v{}[{fact}]", value.0),
+                .map(|(i, value)| match self.facts.nonzero(block.id, i) {
+                    true => format!("%v{}[nonzero]", value.0),
+                    false => format!("%v{}", value.0),
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
