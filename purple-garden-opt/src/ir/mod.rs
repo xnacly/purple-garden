@@ -229,7 +229,9 @@ pub use dce::dce;
 pub use dce_functions::dce_functions;
 pub use imm_fold::imm_fold;
 pub use indirect_jump::indirect_jump;
-pub use inline::inline;
+#[cfg(test)]
+pub use inline::MAX_INSTRUCTIONS;
+pub use inline::{inlinable, inline};
 pub use is_const_call::is_const_call;
 pub use load_store_fold::load_store_fold;
 pub use ret_inline::ret_inline;

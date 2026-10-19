@@ -17,7 +17,7 @@ pub const MAX_INSTRUCTIONS: usize = 8;
 /// - at most [`MAX_INSTRUCTIONS`] instructions, to reduce register pressure
 ///
 /// `callee` resolves a function id to its body, `None` for functions not optimised yet, the caller
-/// itself included.
+/// itself included, and for functions [`inlinable`] doesn't hold for.
 ///
 /// ```text
 /// // is_even
@@ -66,7 +66,9 @@ pub fn inline<'c, 'f: 'c, F: Allocator + 'c, S: Allocator>(
                 ii += 1;
                 continue;
             };
-            let Some((target, block, ret)) = callee(*func).and_then(inlinable) else {
+            let Some((target, (block, ret))) =
+                callee(*func).and_then(|f| Some((f, single_block(f)?)))
+            else {
                 ii += 1;
                 continue;
             };
@@ -122,11 +124,29 @@ pub fn inline<'c, 'f: 'c, F: Allocator + 'c, S: Allocator>(
     }
 }
 
-/// `callee`, its block and the value it returns if it satisfies the heuristics of [`inline`].
-fn inlinable<'c, 'f, F: Allocator>(
-    callee: &'c ir::Func<'f, F>,
-) -> Option<(&'c ir::Func<'f, F>, &'c Block<'f, F>, Id)> {
-    let mut live = callee.blocks.iter().filter(|b| !b.tombstone);
+/// Whether `fun` satisfies the heuristics of [`inline`]. Decided once per function after its own
+/// pipeline, so [`inline`]'s `callee` only resolves functions this holds for and call sites don't
+/// check again.
+pub fn inlinable<F: Allocator>(fun: &ir::Func<'_, F>) -> bool {
+    let Some((block, _)) = single_block(fun) else {
+        return false;
+    };
+    let mut instructions = block
+        .instructions
+        .iter()
+        .filter(|instr| !matches!(instr, Instr::Noop));
+    instructions.clone().count() <= MAX_INSTRUCTIONS
+        && !instructions.any(|instr| {
+            matches!(
+                instr,
+                Instr::Call { .. } | Instr::Sys { .. } | Instr::Lookup { .. }
+            )
+        })
+}
+
+/// `fun`'s single live block and the value it returns.
+fn single_block<'c, 'f, F: Allocator>(fun: &'c ir::Func<'f, F>) -> Option<(&'c Block<'f, F>, Id)> {
+    let mut live = fun.blocks.iter().filter(|b| !b.tombstone);
     let (Some(block), None) = (live.next(), live.next()) else {
         return None;
     };
@@ -136,21 +156,7 @@ fn inlinable<'c, 'f, F: Allocator>(
     else {
         return None;
     };
-    let mut body = block
-        .instructions
-        .iter()
-        .filter(|instr| !matches!(instr, Instr::Noop));
-    if body.clone().count() > MAX_INSTRUCTIONS
-        || body.any(|instr| {
-            matches!(
-                instr,
-                Instr::Call { .. } | Instr::Sys { .. } | Instr::Lookup { .. }
-            )
-        })
-    {
-        return None;
-    }
-    Some((callee, block, ret))
+    Some((block, ret))
 }
 
 /// One past the highest id `fun` takes as a param or defines.
@@ -176,7 +182,7 @@ fn next_id<F: Allocator>(fun: &ir::Func<'_, F>) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_INSTRUCTIONS, inline};
+    use super::{MAX_INSTRUCTIONS, inlinable, inline};
     use crate::ir::Scratch;
     use purple_garden_ir::{
         self as ir, BinOp, Block, Id, Instr, ParamsId, Terminator, TypeId, constant::Const,
@@ -270,10 +276,11 @@ mod tests {
         }
     }
 
+    /// Resolves only the inlinable `callees`, like the driver.
     fn run(fun: &mut ir::Func<'static>, callees: &[ir::Func<'static>]) {
         inline(
             fun,
-            |id| callees.iter().find(|f| f.id == id),
+            |id| callees.iter().find(|f| f.id == id && inlinable(f)),
             &mut Scratch::default(),
         );
     }
