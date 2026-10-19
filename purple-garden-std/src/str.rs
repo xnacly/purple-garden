@@ -6,7 +6,7 @@ pub use self::str::PACKAGE;
 #[allow(clippy::module_inception)]
 pub mod str {
     use core::fmt::NumBuffer;
-    use purple_garden_runtime::RawString;
+    use purple_garden_runtime::Str;
 
     /// Reports whether `needle` appears in `hay`.
     ///
@@ -92,17 +92,12 @@ pub mod str {
     /// str.slice("garden" 0 3)
     /// ```
     #[purple_garden_macros::pg_fn(unsafe)]
-    pub fn slice(
-        vm: &mut purple_garden_runtime::Vm,
-        s: RawString,
-        start: i64,
-        end: i64,
-    ) -> Option<RawString> {
-        let s = s.0.as_str();
+    pub fn slice(vm: &mut purple_garden_runtime::Vm, s: Str, start: i64, end: i64) -> Option<Str> {
+        let s = s.as_str();
         let start = usize::try_from(start).ok()?;
         let end = usize::try_from(end).ok()?;
         let slice = s.get(start..end)?;
-        Some(RawString(vm.new_string_from_str(slice)))
+        Some(Str::new(vm, slice))
     }
 
     /// Converts an `Int` to `Str`.

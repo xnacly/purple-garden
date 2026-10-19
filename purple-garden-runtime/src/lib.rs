@@ -32,7 +32,7 @@ pub use crate::jit_helpers::{
     jit_trap_stack_overflow,
 };
 pub use crate::value::{
-    FromVm, IntoVm, PgType, RawString, Slot, Value, alloc_record, copy_record, decode_record_field,
+    FromVm, IntoVm, PgType, Slot, Str, Value, alloc_record, copy_record, decode_record_field,
     encode_record_field,
 };
 pub use crate::vm::{

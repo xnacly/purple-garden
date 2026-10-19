@@ -2,18 +2,16 @@ use std::fmt::Debug;
 
 use purple_garden_ir::constant::Const;
 
-use crate::string;
-
 mod conversion;
 mod record;
-mod stringview;
+mod string;
 
 pub use conversion::{FromVm, IntoVm, PgType, Slot};
 pub use record::{
     alloc_record, copy_record, decode_record_field, encode_record_field, record_field_ptr,
     record_field_ty,
 };
-pub use stringview::RawString;
+pub use string::Str;
 
 /// Raw VM word.
 ///
@@ -49,18 +47,18 @@ impl Value {
     #[must_use]
     pub fn as_str<'t>(&self) -> &'t str {
         let ptr = self.as_ptr::<u8>();
-        let len = unsafe { (*(ptr as *const string::StrHeader)).len } as usize;
-        let bytes = unsafe { std::slice::from_raw_parts(ptr.add(string::HEADER_SIZE), len) };
+        let len = unsafe { (*(ptr as *const crate::string::StrHeader)).len } as usize;
+        let bytes = unsafe { std::slice::from_raw_parts(ptr.add(crate::string::HEADER_SIZE), len) };
         unsafe { std::str::from_utf8_unchecked(bytes) }
     }
 
     #[inline(always)]
     #[must_use]
     pub fn str_hash(&self) -> u32 {
-        unsafe { (*self.as_ptr::<string::StrHeader>()).hash }
+        unsafe { (*self.as_ptr::<crate::string::StrHeader>()).hash }
     }
 
-    /// Strings are interned, see [`string::StrTable`], so equal contents
+    /// Strings are interned, see [`crate::string::StrTable`], so equal contents
     /// share one payload.
     #[inline(always)]
     #[must_use]
