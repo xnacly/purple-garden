@@ -11,6 +11,7 @@ mod const_fold_const_calls;
 mod const_fold_syscalls;
 mod dce;
 mod dce_functions;
+mod facts;
 mod imm_fold;
 mod indirect_jump;
 mod inline;
@@ -227,6 +228,7 @@ pub use const_fold_const_calls::const_fold_const_calls;
 pub use const_fold_syscalls::const_fold_syscalls;
 pub use dce::dce;
 pub use dce_functions::dce_functions;
+pub use facts::facts;
 pub use imm_fold::imm_fold;
 pub use indirect_jump::indirect_jump;
 #[cfg(test)]

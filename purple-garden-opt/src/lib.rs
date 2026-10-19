@@ -84,6 +84,9 @@ pub fn ir<'f, F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'f, F
         // allocator)
         ir::dce(fun, &mut scratch);
 
+        // Order: after every rewrite, nothing may change the IR once its facts are recorded
+        ir::facts(fun);
+
         // Order: after the whole pipeline of a function, check if the return value of the function
         // it processed is constant
         function_consts[fun.id.0 as usize] = ir::is_const_call(fun);

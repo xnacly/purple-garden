@@ -217,11 +217,17 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
 
         let mut pos = 0;
         for block in &self.blocks {
-            let label = format!(
+            let mut label = format!(
                 "b{}({}):",
                 block.id.0,
                 format_ids(self.params(block.params))
             );
+            for (i, value) in self.params(block.params).iter().enumerate() {
+                let fact = self.facts.of_param(block.id, i);
+                if !fact.is_empty() {
+                    label.push_str(&format!(" [%v{} {fact}]", value.0));
+                }
+            }
             if block.tombstone {
                 push(None, 1, label);
                 push(None, 2, "<tombstone>".to_string());

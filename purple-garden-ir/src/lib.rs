@@ -22,11 +22,13 @@
 
 pub mod constant;
 mod display;
+mod facts;
 pub mod ptype;
 
 use std::alloc::{Allocator, Global, Layout};
 
 pub use crate::constant::Const;
+pub use crate::facts::{Fact, Facts};
 use crate::ptype::Type;
 use purple_garden_shared::BuiltinFn;
 
@@ -428,6 +430,8 @@ pub struct Func<'f, A: Allocator = Global> {
     pub cases_pool: Pool<Case<'f>, A>,
     /// Owning storage for [`Instr::Lookup`] entries, see [`EntriesId`].
     pub entries_pool: Pool<(Const<'f>, Const<'f>), A>,
+    /// Set by `opt::facts`, the last pass.
+    pub facts: Facts<A>,
 }
 
 /// The lists of one kind of a function, back to back in one allocation and
@@ -506,6 +510,7 @@ impl<'f, A: Allocator + Clone> Func<'f, A> {
             blocks: Vec::new_in(alloc.clone()),
             params_pool,
             cases_pool: Pool::new_in(alloc.clone()),
+            facts: Facts::new_in(alloc.clone()),
             entries_pool: Pool::new_in(alloc),
         }
     }
@@ -530,6 +535,16 @@ impl<'f, A: Allocator> Func<'f, A> {
     #[must_use]
     pub fn params(&self, id: ParamsId) -> &[Id] {
         self.params_pool.get(id.0)
+    }
+
+    /// Whether `fact` holds for `value` used inside `block`, as one of the block's params, see
+    /// [`Facts`].
+    #[must_use]
+    pub fn fact_holds(&self, block: Id, value: Id, fact: Fact) -> bool {
+        self.params(self.blocks[block.0 as usize].params)
+            .iter()
+            .position(|&p| p == value)
+            .is_some_and(|i| self.facts.of_param(block, i).contains(fact))
     }
 
     pub fn intern_cases(&mut self, cases: impl IntoIterator<Item = Case<'f>>) -> CasesId {

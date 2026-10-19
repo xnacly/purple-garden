@@ -1230,6 +1230,26 @@ mod tests_x86 {
         func
     }
 
+    /// A divisor `opt::facts` proved non-zero needs no check, and the trap helper is never called.
+    #[test]
+    fn skips_the_zero_check_of_proven_divisors() {
+        let trap = (purple_garden_runtime::jit_trap_div_zero as *const () as u64).to_le_bytes();
+        let calls_trap = |code: &[u8]| code.windows(8).any(|w| w == trap);
+
+        let mut jit = Jit::new();
+        jit.compile_func(&reg_div_func(BinOp::IMod))
+            .expect("jit imod");
+        assert!(calls_trap(jit.code()));
+
+        let mut func = reg_div_func(BinOp::IMod);
+        func.facts
+            .add_param(Id(0), 1, purple_garden_ir::Fact::NONZERO);
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit imod");
+        assert!(!calls_trap(jit.code()));
+        assert_eq!(run(jit.code(), [20, 7, 0])[0], 6);
+    }
+
     #[test]
     fn reg_divisor_imod_and_idiv() {
         let mut jit = Jit::new();

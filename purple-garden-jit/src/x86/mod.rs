@@ -342,6 +342,8 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     ra: &'a mut Xralloc2<S>,
     out: &'a mut Vec<u8, S>,
     entry: ir::Id,
+    /// The block being lowered, for the facts that only hold inside it.
+    block: ir::Id,
     /// Walks in lockstep with [`ir::Func::live_set_into`]: two units per block
     /// header, instruction and terminator, uses on `pos`, defs on `pos + 1`.
     pos: u32,
@@ -401,6 +403,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ra,
             out: body,
             entry,
+            block: entry,
             pos: 0,
             calls: false,
             unsupported: false,
@@ -472,6 +475,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 continue;
             }
             self.block_offsets[block.id.0 as usize] = self.out.len();
+            self.block = block.id;
             for &param in self.func.params(block.params) {
                 self.def_class(param, self.pos, Class::Gpr);
             }
@@ -885,6 +889,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ir::Instr::Bin {
                 op, dst, lhs, rhs, ..
             } => {
+                let divisor = *rhs;
                 let lhs = self.ensure_register(*lhs);
                 let lhs = self.gpr(lhs);
                 let rhs = self.ensure_register(*rhs);
@@ -924,12 +929,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                     BinOp::IDiv | BinOp::IMod => {
                         // A register divisor can't be checked at compile time.
-                        self.emit(Insn::Test { lhs: rhs, rhs });
-                        let nonzero = encode::jump(self.out, Cond::NotZero);
-                        self.trap_div_zero();
-                        let resume = self.out.len();
-                        patch_rel32(self.out, nonzero, nonzero + 4, resume)
-                            .expect("short forward jump");
+                        if !self.func.fact_holds(self.block, divisor, ir::Fact::NONZERO) {
+                            self.emit(Insn::Test { lhs: rhs, rhs });
+                            let nonzero = encode::jump(self.out, Cond::NotZero);
+                            self.trap_div_zero();
+                            let resume = self.out.len();
+                            patch_rel32(self.out, nonzero, nonzero + 4, resume)
+                                .expect("short forward jump");
+                        }
                         self.div(*op, dst.id, lhs, Divisor::Reg(rhs));
                     }
                     _ => bail!(self, "unsupported bin op {op:?}"),
