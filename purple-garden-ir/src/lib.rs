@@ -134,6 +134,8 @@ pub enum BinOp {
     IMul,
     IDiv,
     IMod,
+    /// Bitwise and, only produced by the optimiser
+    IAnd,
     ILt,
     IGt,
     IEq,

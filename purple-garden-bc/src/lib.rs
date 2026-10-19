@@ -1357,7 +1357,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 }
 
                 self.emit(emit_bins! {
-                    IAdd, ISub, IMul, IDiv, IMod, ILt, IGt, IEq,
+                    IAdd, ISub, IMul, IDiv, IMod, IAnd, ILt, IGt, IEq,
                     DAdd, DSub, DMul, DDiv, DLt, DGt,
                     BEq, SEq
                 });
@@ -1384,6 +1384,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     IMul => IMulI,
                     IDiv => IDivI,
                     IMod => IModI,
+                    IAnd => IAndI,
                     IEq  => IEqI,
                     IGt  => IGtI,
                     ILt  => ILtI,

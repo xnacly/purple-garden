@@ -143,6 +143,11 @@ pub enum Insn {
         dst: Reg,
         src: Reg,
     },
+    /// `and r{dst}, r{src}`
+    And {
+        dst: Reg,
+        src: Reg,
+    },
     /// `sub r{dst}, r{src}`
     Sub {
         dst: Reg,
@@ -389,6 +394,7 @@ impl Insn {
             // Same direction as mov: reg is src, r/m is dst.
             Insn::Add { dst, src } => reg_reg(code, 0x01, src.0, dst.0),
             Insn::Sub { dst, src } => reg_reg(code, 0x29, src.0, dst.0),
+            Insn::And { dst, src } => reg_reg(code, 0x21, src.0, dst.0),
             // 0x0f 0xaf = `imul r64, r/m64`.
             // Here ModRM.reg is dst and ModRM.r/m is src, opposite of add/sub.
             Insn::Imul { dst, src } => {
@@ -1165,6 +1171,20 @@ mod tests {
             }),
             [0x48, 0x29, 0xd0]
         ); // sub rax,rdx
+        assert_eq!(
+            enc(Insn::And {
+                dst: Reg(0),
+                src: Reg(2)
+            }),
+            [0x48, 0x21, 0xd0]
+        ); // and rax,rdx
+        assert_eq!(
+            enc(Insn::And {
+                dst: Reg(9),
+                src: Reg(12)
+            }),
+            [0x4d, 0x21, 0xe1]
+        ); // and r9,r12
         assert_eq!(
             enc(Insn::Cmp {
                 lhs: Reg(0),

@@ -306,7 +306,8 @@ fn arith(op: BinOp, dst: Reg, src: Reg) -> Insn {
         BinOp::IAdd => Insn::Add { dst, src },
         BinOp::ISub => Insn::Sub { dst, src },
         BinOp::IMul => Insn::Imul { dst, src },
-        _ => unreachable!("only IAdd, ISub and IMul lower to two-operand arithmetic"),
+        BinOp::IAnd => Insn::And { dst, src },
+        _ => unreachable!("only IAdd, ISub, IMul and IAnd lower to two-operand arithmetic"),
     }
 }
 
@@ -740,13 +741,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let dst = self.gpr(dst);
 
                 match op {
-                    BinOp::IAdd | BinOp::ISub => {
+                    BinOp::IAdd | BinOp::ISub | BinOp::IAnd => {
                         if dst != lhs {
                             self.emit(Insn::Mov { dst, src: lhs });
                         }
                         self.emit(match op {
                             BinOp::IAdd => Insn::AddImm { dst, imm },
-                            _ => Insn::SubImm { dst, imm },
+                            BinOp::ISub => Insn::SubImm { dst, imm },
+                            _ => Insn::AndImm { dst, imm },
                         });
                     }
                     BinOp::IEq => {
@@ -886,7 +888,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let rhs = self.ensure_register(*rhs);
                 let rhs = self.gpr(rhs);
                 match op {
-                    BinOp::IAdd | BinOp::ISub | BinOp::IMul => {
+                    BinOp::IAdd | BinOp::ISub | BinOp::IMul | BinOp::IAnd => {
                         let dst = self.def(dst, self.pos + 1);
                         let dst = self.gpr(dst);
 
@@ -902,7 +904,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                             self.emit(Insn::Sub { dst, src: lhs });
                             self.emit(Insn::Neg { reg: dst });
                         } else {
-                            // add and mul commute.
+                            // add, mul and and commute.
                             self.emit(arith(*op, dst, lhs));
                         }
                     }

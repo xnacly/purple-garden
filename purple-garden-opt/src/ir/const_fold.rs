@@ -198,6 +198,12 @@ fn try_const_fold<S: Allocator>(
                     }
                     (*lhs % *rhs).into()
                 }
+                BinOp::IAnd => {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
+                        unreachable!();
+                    };
+                    (lhs & rhs).into()
+                }
                 BinOp::ILt => {
                     let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();

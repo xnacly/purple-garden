@@ -874,6 +874,54 @@ mod tests_x86 {
         assert_eq!(run(jit.code(), [5, 0, 0])[0], 11);
     }
 
+    /// `(x & y) + (x & -4)`: the register and the sign extended immediate form.
+    #[test]
+    fn ands_registers_and_immediates() {
+        let int = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let mut func = Func::new("and", Id(0), vec![int(0), int(1)], Some(Type::Int));
+        let params = func.intern_params([Id(0), Id(1)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Bin {
+                    op: BinOp::IAnd,
+                    dst: int(2),
+                    lhs: Id(0),
+                    rhs: Id(1),
+                    span: 0,
+                },
+                Instr::BinImm {
+                    op: BinOp::IAnd,
+                    dst: int(3),
+                    lhs: Id(0),
+                    imm: -4,
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::IAdd,
+                    dst: int(4),
+                    lhs: Id(2),
+                    rhs: Id(3),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(4)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit function");
+        assert_eq!(run(jit.code(), [13, 6])[0], 4 + 12);
+        assert_eq!(run(jit.code(), [(-3i64) as u64, 6])[0] as i64, 4 - 4);
+    }
+
     /// Compile `func` with `natives` callable for placement at `at`, the way the bytecode backend
     /// does.
     fn compile_with(

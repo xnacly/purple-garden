@@ -437,6 +437,15 @@ impl<'vm> Vm<'vm> {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l % imm);
                 },
+                Op::IAnd { dst, lhs, rhs } => unsafe {
+                    let l = r!(lhs).as_int();
+                    let r = r!(rhs).as_int();
+                    r_mut!(dst) = Value::from(l & r);
+                },
+                Op::IAndI { dst, lhs, imm } => unsafe {
+                    let l = r!(lhs).as_int();
+                    r_mut!(dst) = Value::from(l & imm as i64);
+                },
                 Op::IEq { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
@@ -960,6 +969,34 @@ mod ops {
             },
         ]);
         assert_eq!(vm.r(1).as_int(), -3);
+    }
+
+    #[test]
+    fn iand() {
+        let vm = run(vec![
+            Op::LoadI { dst: 0, value: 13 },
+            Op::LoadI { dst: 1, value: 6 },
+            Op::IAnd {
+                dst: 2,
+                lhs: 0,
+                rhs: 1,
+            },
+        ]);
+        assert_eq!(vm.r(2).as_int(), 4);
+    }
+
+    /// The immediate sign extends, like the jit's `and r64, imm32`.
+    #[test]
+    fn iand_i() {
+        let vm = run(vec![
+            Op::LoadI { dst: 0, value: -3 },
+            Op::IAndI {
+                dst: 1,
+                lhs: 0,
+                imm: -4,
+            },
+        ]);
+        assert_eq!(vm.r(1).as_int(), -4);
     }
 
     #[test]
