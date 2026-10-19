@@ -18,8 +18,17 @@ pub fn ir<'f, F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'f, F
     let mut function_consts = Vec::with_capacity_in(ir.len(), scratch.alloc());
     // since its of size ir.len
     function_consts.resize(ir.len(), None::<Const<'f>>);
+    // the slice index of each function, indexed with [ir::Func::id]
+    let mut index_of = Vec::with_capacity_in(ir.len(), scratch.alloc());
+    index_of.resize(ir.len(), usize::MAX);
+    for (i, fun) in ir.iter().enumerate() {
+        index_of[fun.id.0 as usize] = i;
+    }
 
-    for fun in ir {
+    for i in 0..ir.len() {
+        // callees come before their callers, `done` holds the functions already optimised
+        let (done, rest) = ir.split_at_mut(i);
+        let fun = &mut rest[0];
         // so all other blocks.last() are valid
         if fun.blocks.is_empty() {
             continue;
@@ -30,6 +39,14 @@ pub fn ir<'f, F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'f, F
         //
         // Since callees are defined before use, so their entries are already recorded
         ir::const_fold_const_calls(fun, &function_consts);
+
+        // Order: after const_fold_const_calls, which already replaced calls to constant functions,
+        // and before const_fold, so it folds through the inlined bodies
+        ir::inline(
+            fun,
+            |id| done.get(*index_of.get(id.0 as usize)?),
+            &mut scratch,
+        );
 
         // Order: we constant fold before imm_folding, otherwise we have fragmented half optimised
         // constant operations, we could have fully merged together at compiletime
