@@ -462,6 +462,12 @@ fn colorize(text: &str) -> String {
                     .unwrap_or(rest.len() - 1);
             out.push_str(&paint(true, REG, &text[i..end]));
             i = end;
+            // a param's facts, `%v1[nonzero]`
+            if text[i..].starts_with('[') {
+                let end = text[i..].find(']').map_or(text.len(), |j| i + j + 1);
+                out.push_str(&paint(true, COMMENT, &text[i..end]));
+                i = end;
+            }
             if text[i..].starts_with(':') {
                 let end = text[i..].find(' ').map_or(text.len(), |j| i + j);
                 out.push(':');
