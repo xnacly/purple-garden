@@ -217,17 +217,17 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
 
         let mut pos = 0;
         for block in &self.blocks {
-            let mut label = format!(
-                "b{}({}):",
-                block.id.0,
-                format_ids(self.params(block.params))
-            );
-            for (i, value) in self.params(block.params).iter().enumerate() {
-                let fact = self.facts.of_param(block.id, i);
-                if !fact.is_empty() {
-                    label.push_str(&format!(" [%v{} {fact}]", value.0));
-                }
-            }
+            let params = self
+                .params(block.params)
+                .iter()
+                .enumerate()
+                .map(|(i, value)| match self.facts.of_param(block.id, i) {
+                    fact if fact.is_empty() => format!("%v{}", value.0),
+                    fact => format!("%v{}[{fact}]", value.0),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let label = format!("b{}({params}):", block.id.0);
             if block.tombstone {
                 push(None, 1, label);
                 push(None, 2, "<tombstone>".to_string());
