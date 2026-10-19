@@ -202,8 +202,9 @@ pub enum Instr<'i> {
         offset: u32,
         span: u32,
     },
-    /// Traps with an assertion failure if the Bool `cond` is false.
+    /// Traps with an assertion failure if the Bool `cond` is false, `dst` is the call's Void value.
     Assert {
+        dst: TypeId<'i>,
         cond: Id,
         span: u32,
     },
@@ -524,8 +525,9 @@ impl Func<'_> {
             | Instr::Call { dst, .. }
             | Instr::Sys { dst, .. }
             | Instr::Cast { dst, .. }
-            | Instr::Lookup { dst, .. } => Some(dst.id),
-            Instr::Store { .. } | Instr::Assert { .. } | Instr::Noop => None,
+            | Instr::Lookup { dst, .. }
+            | Instr::Assert { dst, .. } => Some(dst.id),
+            Instr::Store { .. } | Instr::Noop => None,
         }
     }
 }
@@ -1030,7 +1032,11 @@ mod tests {
                 offset: 0,
                 span: 0,
             },
-            Instr::Assert { cond: v(), span: 0 },
+            Instr::Assert {
+                dst: type_id(206),
+                cond: v(),
+                span: 0,
+            },
             Instr::Load {
                 dst: type_id(205),
                 base: v(),

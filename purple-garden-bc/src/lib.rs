@@ -1328,9 +1328,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     &self.scratch,
                 );
             }
-            ir::Instr::Assert { cond, .. } => {
+            ir::Instr::Assert { dst, cond, .. } => {
                 let cond = self.ensure_register(*cond);
                 self.emit(Op::Assert { cond });
+                // a Void value is never read, whatever the register holds will do
+                self.ensure_register(dst.id);
             }
             ir::Instr::Noop {} => {}
             ir::Instr::Bin {
@@ -1749,6 +1751,7 @@ mod tests {
                     span: 0,
                 },
                 Instr::Assert {
+                    dst: type_id(1, Type::Void),
                     cond: Id(0),
                     span: 0,
                 },

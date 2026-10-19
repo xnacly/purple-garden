@@ -1283,6 +1283,10 @@ mod tests_x86 {
             id: Id(0),
             params,
             instructions: vec![Instr::Assert {
+                dst: TypeId {
+                    id: Id(1),
+                    ty: Type::Void,
+                },
                 cond: Id(0),
                 span: 0,
             }],

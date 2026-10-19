@@ -592,11 +592,9 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                         let span = name.start as u32;
                         match fun.intrinsic {
                             Some(purple_garden_ir::Intrinsic::Assert) => {
-                                self.emit(Instr::Assert { cond: a[0], span });
-                                // the call still produces its Void value
-                                self.emit(Instr::LoadConst {
+                                self.emit(Instr::Assert {
                                     dst,
-                                    value: Const::Undefined,
+                                    cond: a[0],
                                     span,
                                 });
                             }
