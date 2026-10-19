@@ -1,4 +1,9 @@
 import "testing"
+import "math"
+import "str"
+import "opt"
+
+# Everything in here compiles to native code, see NRFC/jit.md for the progress table.
 
 #! Exercise several dependent integer arithmetic operations in one expression chain.
 fn arithmetics(a:Int b:Int c:Int d:Int) Int {
@@ -12,6 +17,11 @@ fn arithmetics(a:Int b:Int c:Int d:Int) Int {
 #! Exercise integer division and modulo code generation.
 fn divs(a:Int b:Int) Int {
     a / 7 + b % 3
+}
+
+#! Divide by a register, the divisor is checked for zero at runtime.
+fn reg_divs(a:Int b:Int) Int {
+    a / b + a % b
 }
 
 #! Return one value for zero and another for any non-zero input.
@@ -30,11 +40,117 @@ fn factorial(n:Int a:Int) Int {
     }
 }
 
+#! Constants outside of i32.
+fn plus_big(n:Int) Int {
+    n + 9000000000000000000
+}
+
 testing.assert(arithmetics(2 3 4 5) == 114)
 testing.assert(divs(42 17) == 8)
+testing.assert(reg_divs(17 5) == 5)
 testing.assert(absish(0) == 1)
 testing.assert(absish(5) == 2)
 testing.assert(factorial(20 1) == 2432902008176640000)
+testing.assert(plus_big(1) == 9000000000000000001)
+
+#! `n % 2 == 0` becomes `n & 1 == 0`, a single block callee inlined into its callers.
+fn is_even(n:Int) Bool {
+    n % 2 == 0
+}
+
+#! Count the even numbers in [0, n), calling the inlined is_even.
+fn evens(n:Int acc:Int) Int {
+    match {
+        n == 0 { acc }
+        is_even(n - 1) { evens(n - 1 acc + 1) }
+        { evens(n - 1 acc) }
+    }
+}
+
+testing.assert(evens(10 0) == 5)
+
+#! Non-tail recursion, guarded against native stack overflow.
+fn fib(n:Int) Int {
+    match {
+        n < 2 { n }
+        { fib(n - 1) + fib(n - 2) }
+    }
+}
+
+#! A tail call to another native function.
+fn fib_of_double(n:Int) Int {
+    fib(n * 2)
+}
+
+testing.assert(fib(20) == 6765)
+testing.assert(fib_of_double(10) == 6765)
+
+#! Double arithmetic with an xmm argument and result.
+fn lerp(a:Double b:Double t:Double) Double {
+    a + (b - a) * t
+}
+
+#! Double compares.
+fn clamp01(x:Double) Double {
+    match {
+        x < 0.0 { 0.0 }
+        x > 1.0 { 1.0 }
+        { x }
+    }
+}
+
+#! A builtin through its native entry, Double in and out.
+fn hypot(x:Double y:Double) Double {
+    math.sqrt(x * x + y * y)
+}
+
+testing.assert(lerp(0.0 10.0 0.25) as Int == 2)
+testing.assert(clamp01(0.0 - 3.5) as Int == 0)
+testing.assert(clamp01(7.0) as Int == 1)
+testing.assert(hypot(3.0 4.0) as Int == 5)
+testing.assert((7 as Double) / 2.0 > 3.4)
+testing.assert(3 as Bool)
+testing.assert(true as Int == 1)
+
+#! Constant arms on a string become one table lookup.
+fn color(name:Str) Int {
+    match {
+        name == "red" { 1 }
+        name == "green" { 2 }
+        name == "blue" { 3 }
+        name == "black" { 4 }
+        { 0 }
+    }
+}
+
+#! Arms doing work on an integer become a jump table.
+fn score(n:Int) Int {
+    match {
+        n == 1 { n * 10 }
+        n == 2 { n * 20 }
+        n == 3 { n * 30 }
+        n == 4 { n + 1 }
+        { 0 }
+    }
+}
+
+#! Builtins building and inspecting strings.
+fn shout(name:Str) Int {
+    str.len(str.concat(name "!"))
+}
+
+testing.assert(color("blue") == 3)
+testing.assert(color("pink") == 0)
+testing.assert(score(3) == 90)
+testing.assert(score(9) == 0)
+testing.assert(shout("garden") == 7)
+
+#! A builtin taking and returning slot generics.
+fn or_zero(n:Int) Int {
+    opt.or(opt.some(n) 0)
+}
+
+testing.assert(or_zero(42) == 42)
 
 #! create a color record from rgb
 fn C(r:Int g:Int b:Int) Record<r:Int g:Int b:Int a:Int> {
@@ -46,3 +162,15 @@ testing.assert(c.r == 1)
 testing.assert(c.g == 2)
 testing.assert(c.b == 3)
 testing.assert(c.a == 255)
+
+#! A record with Double fields, kept across the allocation.
+fn point(x:Double y:Double) Record<x:Double y:Double> {
+    {x: x y: y}
+}
+
+#! Double fields loaded through xmm registers.
+fn norm2(p:Record<x:Double y:Double>) Double {
+    p.x * p.x + p.y * p.y
+}
+
+testing.assert(norm2(point(3.0 4.0)) as Int == 25)
