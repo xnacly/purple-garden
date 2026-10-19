@@ -34,10 +34,17 @@ pub fn hash(bytes: &[u8]) -> u32 {
     if !tail.is_empty() {
         // Assembled in a register: copying into a stack buffer and loading it
         // as one u64 stalls on store forwarding.
-        let tail = tail
-            .iter()
-            .enumerate()
-            .fold(0u64, |acc, (i, &b)| acc | u64::from(b) << (8 * i));
+        let len = tail.len();
+        // the bytes little endian like a u64 load would give them, from overlapping reads
+        let tail = if len >= 4 {
+            let lo = u32::from_le_bytes(tail[..4].try_into().unwrap());
+            let hi = u32::from_le_bytes(tail[len - 4..].try_into().unwrap());
+            u64::from(lo) | (u64::from(hi) >> (8 * (8 - len))) << 32
+        } else {
+            u64::from(tail[0])
+                | u64::from(tail[len / 2]) << (8 * (len / 2))
+                | u64::from(tail[len - 1]) << (8 * (len - 1))
+        };
         h = (h.rotate_left(5) ^ tail).wrapping_mul(K);
     }
     (h ^ (h >> 32)) as u32
@@ -175,6 +182,44 @@ mod tests {
     fn hash_separates_zero_padded_tails() {
         assert_ne!(hash(b""), hash(b"\0"));
         assert_ne!(hash(b"garden"), hash(b"garden\0"));
+    }
+
+    /// The tail's overlapping reads assemble the same value as one byte at a time.
+    #[test]
+    fn hash_matches_a_bytewise_tail() {
+        fn bytewise(bytes: &[u8]) -> u32 {
+            const K: u64 = 0x517c_c1b7_2722_0a95;
+            let mut h = bytes.len() as u64;
+            let (chunks, tail) = bytes.as_chunks::<8>();
+            for c in chunks {
+                h = (h.rotate_left(5) ^ u64::from_le_bytes(*c)).wrapping_mul(K);
+            }
+            if !tail.is_empty() {
+                let tail = tail
+                    .iter()
+                    .enumerate()
+                    .fold(0u64, |acc, (i, &b)| acc | u64::from(b) << (8 * i));
+                h = (h.rotate_left(5) ^ tail).wrapping_mul(K);
+            }
+            (h ^ (h >> 32)) as u32
+        }
+        for len in 0..=17 {
+            let bytes: Vec<u8> = (0..len as u8).map(|i| 0xa0 ^ i.wrapping_mul(37)).collect();
+            assert_eq!(hash(&bytes), bytewise(&bytes), "len {len}");
+        }
+    }
+
+    /// The tail is read with overlapping loads, every byte still has to count.
+    #[test]
+    fn hash_sees_every_byte() {
+        for len in 1..=17 {
+            let base: Vec<u8> = (0..len as u8).map(|i| b'a' + i).collect();
+            for i in 0..len {
+                let mut flipped = base.clone();
+                flipped[i] ^= 1;
+                assert_ne!(hash(&base), hash(&flipped), "len {len}, byte {i}");
+            }
+        }
     }
 
     #[test]
