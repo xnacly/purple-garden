@@ -614,17 +614,14 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         liveness: &[(u32, u32)],
         arena: &mut purple_garden_jit::CodeArena<impl Pages>,
     ) -> bool {
-        let Some(()) =
-            self.jit
-                .compile_func_with_liveness(
-                    fun,
-                    liveness,
-                    &self.globals.map,
-                    &self.str_values,
-                    &self.native_fns,
-                    arena.next_entry(),
-                )
-        else {
+        let Some(()) = self.jit.compile_func_with_liveness(
+            fun,
+            liveness,
+            &self.globals.map,
+            &self.str_values,
+            &self.native_fns,
+            arena.next_entry(),
+        ) else {
             purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
             return false;
         };
