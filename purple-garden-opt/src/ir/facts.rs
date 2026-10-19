@@ -45,7 +45,12 @@ pub fn facts<F: Allocator, S: Allocator>(fun: &mut ir::Func<'_, F>, scratch: &mu
     }
 
     for (block, i) in nonzero {
-        purple_garden_shared::trace!("[opt::ir::facts] param {} of b{} is nonzero", i, block.0);
+        purple_garden_shared::trace!(
+            "[opt::ir::facts] {}: param {} of b{} is nonzero",
+            fun.name,
+            i,
+            block.0
+        );
         fun.facts.add_param(block, i, Fact::NONZERO);
     }
 }

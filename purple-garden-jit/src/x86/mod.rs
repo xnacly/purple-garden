@@ -929,7 +929,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                     BinOp::IDiv | BinOp::IMod => {
                         // A register divisor can't be checked at compile time.
-                        if !self.func.fact_holds(self.block, divisor, ir::Fact::NONZERO) {
+                        if self.func.fact_holds(self.block, divisor, ir::Fact::NONZERO) {
+                            purple_garden_shared::trace!(
+                                "[jit::x86] {}: %v{} is nonzero in b{}, dropped its zero check",
+                                self.func.name,
+                                divisor.0,
+                                self.block.0
+                            );
+                        } else {
                             self.emit(Insn::Test { lhs: rhs, rhs });
                             let nonzero = encode::jump(self.out, Cond::NotZero);
                             self.trap_div_zero();
