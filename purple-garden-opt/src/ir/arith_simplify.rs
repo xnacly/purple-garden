@@ -19,6 +19,7 @@ const NEG_ZERO: u64 = (-0.0f64).to_bits();
 /// - `x + 0`, `0 + x`, `x - 0` to `x` for Int; for Double only `x + -0.0`, `-0.0 + x` and
 ///   `x - 0.0`, since `-0.0 + 0.0` is `0.0`
 /// - `x % 1` to `0`, Int only
+/// - `x % 2^k == 0` to `x & (2^k - 1) == 0`, Int only, see [`mod_pow2_eq_zero`]
 ///
 /// ```text
 /// %v16:Double = 2
@@ -38,7 +39,7 @@ pub fn arith_simplify<F: Allocator, S: Allocator>(
     fun: &mut ir::Func<'_, F>,
     scratch: &mut Scratch<'_, S>,
 ) {
-    scratch.reset();
+    super::record_uses(fun, scratch);
 
     for (bi, block) in fun.blocks.iter().enumerate() {
         if block.tombstone {
@@ -50,6 +51,8 @@ pub fn arith_simplify<F: Allocator, S: Allocator>(
             }
         }
     }
+
+    mod_pow2_eq_zero(fun, scratch);
 
     for bi in 0..fun.blocks.len() {
         if fun.blocks[bi].tombstone {
@@ -76,6 +79,106 @@ pub fn arith_simplify<F: Allocator, S: Allocator>(
 
     if !scratch.remap().is_empty() {
         fun.replace_uses(scratch.remap());
+    }
+}
+
+/// `x % 2^k == 0` to `x & (2^k - 1) == 0`: both ask whether the low k bits are zero, the and
+/// without the fixup a signed remainder needs. Only for a remainder whose single use is the test,
+/// since it differs from the and for negative x, and whose divisor constant has no other use, since
+/// that becomes `2^k - 1`.
+fn mod_pow2_eq_zero<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &Scratch<'_, S>,
+) {
+    let int = |fun: &ir::Func<'_, F>, id| {
+        let def = scratch.const_def(id)?;
+        match &fun.blocks[def.block as usize].instructions[def.instr as usize] {
+            Instr::LoadConst {
+                value: Const::Int(v),
+                ..
+            } => Some(*v),
+            _ => None,
+        }
+    };
+
+    // where each candidate remainder is defined, by its id
+    let mut rems = Vec::new_in(scratch.alloc());
+    for (bi, block) in fun.blocks.iter().enumerate() {
+        if block.tombstone {
+            continue;
+        }
+        for (ii, instr) in block.instructions.iter().enumerate() {
+            let Instr::Bin {
+                op: BinOp::IMod,
+                dst,
+                rhs,
+                ..
+            } = instr
+            else {
+                continue;
+            };
+            let Some(divisor) = int(fun, *rhs) else {
+                continue;
+            };
+            if divisor < 2
+                || !(divisor as u64).is_power_of_two()
+                || scratch.use_count(*rhs) != 1
+                || scratch.use_count(dst.id) != 1
+            {
+                continue;
+            }
+            let id = dst.id.0 as usize;
+            if rems.len() <= id {
+                rems.resize(id + 1, None);
+            }
+            rems[id] = Some((bi, ii));
+        }
+    }
+
+    for bi in 0..fun.blocks.len() {
+        if fun.blocks[bi].tombstone {
+            continue;
+        }
+        for ii in 0..fun.blocks[bi].instructions.len() {
+            let Instr::Bin {
+                op: BinOp::IEq,
+                lhs,
+                rhs,
+                ..
+            } = fun.blocks[bi].instructions[ii]
+            else {
+                continue;
+            };
+            let rem = match (int(fun, lhs), int(fun, rhs)) {
+                (_, Some(0)) => lhs,
+                (Some(0), _) => rhs,
+                _ => continue,
+            };
+            let Some(&Some((rb, ri))) = rems.get(rem.0 as usize) else {
+                continue;
+            };
+            let Instr::Bin { op, rhs, .. } = &mut fun.blocks[rb].instructions[ri] else {
+                unreachable!("rems only holds IMods");
+            };
+            *op = BinOp::IAnd;
+            let divisor = scratch
+                .const_def(*rhs)
+                .expect("rems only holds constant divisors");
+            let Instr::LoadConst {
+                value: Const::Int(mask),
+                ..
+            } = &mut fun.blocks[divisor.block as usize].instructions[divisor.instr as usize]
+            else {
+                unreachable!("rems only holds Int divisors");
+            };
+            purple_garden_shared::trace!(
+                "[opt::ir::arith_simplify] %v{} % {} == 0 to & {}",
+                rem.0,
+                *mask,
+                *mask - 1
+            );
+            *mask -= 1;
+        }
     }
 }
 
@@ -351,6 +454,95 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// `x % divisor == 0` with the zero on `zero_lhs` side, `reuse` adds another use of the
+    /// remainder. Returns the remainder's op and divisor constant.
+    fn mod_eq_zero(divisor: i64, zero_lhs: bool, reuse: bool) -> (BinOp, Const<'static>) {
+        let ty = |id, ty| TypeId { id: Id(id), ty };
+        let mut fun = ir::Func::new("f", Id(0), vec![ty(0, Type::Int)], Some(Type::Bool));
+        let params = fun.intern_params(vec![Id(0)]);
+        let (lhs, rhs) = if zero_lhs {
+            (Id(3), Id(2))
+        } else {
+            (Id(2), Id(3))
+        };
+        let mut instructions = vec![
+            Instr::LoadConst {
+                dst: ty(1, Type::Int),
+                value: Const::Int(divisor),
+                span: 0,
+            },
+            Instr::Bin {
+                op: BinOp::IMod,
+                dst: ty(2, Type::Int),
+                lhs: Id(0),
+                rhs: Id(1),
+                span: 0,
+            },
+            Instr::LoadConst {
+                dst: ty(3, Type::Int),
+                value: Const::Int(0),
+                span: 0,
+            },
+            Instr::Bin {
+                op: BinOp::IEq,
+                dst: ty(4, Type::Bool),
+                lhs,
+                rhs,
+                span: 0,
+            },
+        ];
+        if reuse {
+            instructions.push(Instr::Bin {
+                op: BinOp::IAdd,
+                dst: ty(5, Type::Int),
+                lhs: Id(2),
+                rhs: Id(2),
+                span: 0,
+            });
+        }
+        fun.blocks = vec![Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions,
+            term: Some(Terminator::Return {
+                value: Some(Id(4)),
+                span: 0,
+            }),
+        }];
+
+        arith_simplify(&mut fun, &mut Scratch::default());
+        let (Instr::LoadConst { value, .. }, Instr::Bin { op, .. }) = (
+            &fun.blocks[0].instructions[0],
+            &fun.blocks[0].instructions[1],
+        ) else {
+            unreachable!()
+        };
+        (*op, value.clone())
+    }
+
+    #[test]
+    fn mod_pow2_eq_zero_becomes_and() {
+        for zero_lhs in [false, true] {
+            assert!(matches!(
+                mod_eq_zero(4, zero_lhs, false),
+                (BinOp::IAnd, Const::Int(3))
+            ));
+        }
+    }
+
+    /// `x % 3` has no mask, and `-3 % 2` is -1 where `-3 & 1` is 1, so a remainder used for more
+    /// than the zero test stays.
+    #[test]
+    fn leaves_other_remainders_alone() {
+        for (divisor, reuse) in [(3, false), (2, true)] {
+            assert!(matches!(
+                mod_eq_zero(divisor, false, reuse),
+                (BinOp::IMod, Const::Int(d)) if d == divisor
+            ));
+        }
     }
 
     /// `-0.0 + 0.0` is `0.0` and `-0.0 - -0.0` is `0.0`, so neither returns x.
