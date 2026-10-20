@@ -79,6 +79,9 @@ pub enum Type<'t> {
     /// just an identifier denoting the slot to be replaced with a concrete type, for instance an
     /// optional over a generic is represented as Option(Slot("T"))
     Slot(&'t str),
+    /// The type of a record field whose value failed to typecheck, the error is already reported.
+    /// Only the typechecker produces it, a program containing it never reaches lowering
+    Unknown,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
@@ -179,6 +182,17 @@ impl<'t> Type<'t> {
         }
     }
 
+    /// An error was already reported for a value of this type, comparing it would report again
+    #[must_use]
+    pub fn contains_unknown(&self) -> bool {
+        match self {
+            Self::Unknown => true,
+            Self::Option(inner) | Self::Array(inner) => inner.contains_unknown(),
+            Self::Record(fields) => fields.iter().any(|f| f.ty.contains_unknown()),
+            _ => false,
+        }
+    }
+
     /// Recursively replaces every slot with its binding from `bindings`, the inverse of
     /// [`Type::bind_slots`]. Slots without a binding are left in place, types without slots are
     /// returned as is, so only substituted compound types allocate in `arena`.
@@ -239,6 +253,7 @@ impl<'t> Type<'t> {
             Type::Slot(_) => {
                 unreachable!("slots size asked, this is not supposed to happen")
             }
+            Type::Unknown => unreachable!("unknown size asked, its program never reaches lowering"),
             Type::Record(fields) => record_size(fields),
             Type::Bool
             | Type::Int
@@ -299,6 +314,7 @@ impl Display for Type<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Type::Slot(slot_name) => write!(f, "{slot_name}"),
+            Type::Unknown => write!(f, "unknown"),
             Type::Void => write!(f, "Void"),
             Type::Bool => write!(f, "Bool"),
             Type::Int => write!(f, "Int"),

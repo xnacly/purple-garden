@@ -93,7 +93,7 @@ fn collect_node(
     // signature instead
     if !matches!(
         node,
-        Node::Fn { .. } | Node::Import { .. } | Node::Extern { .. }
+        Node::Fn { .. } | Node::Import { .. } | Node::Extern { .. } | Node::Let { .. }
     ) && let (Some(span), Some(ty)) = (
         node_span(ast, node_id),
         type_for_node(ast, typecheck, node_id),
@@ -130,15 +130,10 @@ fn collect_node(
         Node::Let {
             docs, name, rhs, ..
         } => {
-            if let Some(ty) = type_for_node(ast, typecheck, *rhs) {
-                let detail = format!("{}: {}", name.t.as_str(), ty);
-                add_decl_hover(analysis, token_span(name), detail.clone(), docs);
-                analysis.add_completion(
-                    name.t.as_str(),
-                    CompletionItemKind::VARIABLE,
-                    Some(detail),
-                );
-            }
+            let ty = type_for_node(ast, typecheck, *rhs).unwrap_or_else(|| "unknown".to_owned());
+            let detail = format!("{}: {}", name.t.as_str(), ty);
+            add_decl_hover(analysis, token_span(name), detail.clone(), docs);
+            analysis.add_completion(name.t.as_str(), CompletionItemKind::VARIABLE, Some(detail));
             if let Some(ty) = ty_for_node(ast, typecheck, *rhs) {
                 analysis.add_record_completion(name.t.as_str(), ty);
             }

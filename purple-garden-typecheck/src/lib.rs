@@ -34,8 +34,9 @@ pub struct Typechecker<'a, 't, B: Arena, S: Allocator> {
     map: TypeMap<'t, &'t B>,
     void: usize,
     /// scope stack; innermost frame last; lookups walk from top to bottom. Bindings point at
-    /// the arena entry of the expression that produced them
-    env: Vec<Map<&'t str, TypeRef, &'a S>, &'a S>,
+    /// the arena entry of the expression that produced them, `None` for a poisoned binding, its
+    /// uses stay silent
+    env: Vec<Map<&'t str, Option<TypeRef>, &'a S>, &'a S>,
     /// map a function name to its type(s)
     functions: Map<&'t str, FunctionType<'t>, &'t B>,
     /// map a pkg name to a map of its public method names to overload groups
@@ -89,7 +90,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
         self
     }
 
-    fn env_get(&self, k: &str) -> Option<TypeRef> {
+    fn env_get(&self, k: &str) -> Option<Option<TypeRef>> {
         self.env
             .iter()
             .rev()
@@ -97,7 +98,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             .copied()
     }
 
-    fn env_insert(&mut self, k: &'t str, v: TypeRef) {
+    fn env_insert(&mut self, k: &'t str, v: Option<TypeRef>) {
         self.env.last_mut().unwrap().insert(k, v);
     }
 
@@ -233,7 +234,10 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
 
     fn already_checked(&self, node: NodeId) -> Option<TcType> {
         let id = self.ast.value_id(node);
-        self.map.get(id).is_some().then_some(TcType::Known(id))
+        match self.map.get(id)? {
+            Type::Unknown => Some(TcType::Poison),
+            _ => Some(TcType::Known(id)),
+        }
     }
 
     /// Type already assigned to `node`, by reference. Callers must have typed
@@ -595,7 +599,10 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
         let mut slot_to_type_bindings = Map::new_in(scratch);
 
         for (i, &provided_node) in args.iter().enumerate() {
-            let Some(provided_type) = map.get(ast.value_id(provided_node)) else {
+            let Some(provided_type) = map
+                .get(ast.value_id(provided_node))
+                .filter(|ty| !ty.contains_unknown())
+            else {
                 continue;
             };
 
@@ -679,6 +686,10 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                         poisoned = true;
                         continue;
                     };
+                    if self.ty(ty).contains_unknown() || self.ty(first).contains_unknown() {
+                        poisoned = true;
+                        continue;
+                    }
                     if self.ty(ty) != self.ty(first) {
                         let span = self
                             .ast
@@ -709,24 +720,20 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             }
             Node::Record { id, fields, .. } => {
                 let mut typed_fields = Vec::with_capacity_in(fields.len(), self.scratch);
-                let mut poisoned = false;
 
                 for (key, value) in *fields {
                     let lex::Type::Ident(inner_name) = key.t else {
                         unreachable!()
                     };
 
-                    match self.node(*value).known() {
-                        Some(ty) => typed_fields.push(Field {
-                            name: inner_name,
-                            ty: *self.ty(ty),
-                        }),
-                        None => poisoned = true,
-                    }
-                }
-
-                if poisoned {
-                    return TcType::Poison;
+                    let ty = match self.node(*value).known() {
+                        Some(ty) => *self.ty(ty),
+                        None => Type::Unknown,
+                    };
+                    typed_fields.push(Field {
+                        name: inner_name,
+                        ty,
+                    });
                 }
 
                 self.set_known(*id, Type::Record(self.arena.alloc_slice(typed_fields)))
@@ -749,6 +756,9 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                         format!("binding `{inner_name}` not found"),
                         name,
                     ));
+                    return TcType::Poison;
+                };
+                let Some(binding) = binding else {
                     return TcType::Poison;
                 };
 
@@ -800,20 +810,25 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                     unreachable!()
                 };
 
-                let Some(inner) = self.node(*rhs).known() else {
-                    return TcType::Poison;
+                let binding = 'rhs: {
+                    let Some(inner) = self.node(*rhs).known() else {
+                        break 'rhs None;
+                    };
+
+                    if matches!(self.ty(inner), Type::Void) {
+                        self.report(Diagnostic::at_token(
+                            "RHS of let has to return a value, but it didnt",
+                            name,
+                        ));
+                        break 'rhs None;
+                    };
+
+                    Some(
+                        self.map
+                            .ref_of(inner)
+                            .expect("known ids always have a type"),
+                    )
                 };
-                if matches!(self.ty(inner), Type::Void) {
-                    self.report(Diagnostic::at_token(
-                        "RHS of let has to return a value, but it didnt",
-                        name,
-                    ));
-                    return TcType::Poison;
-                }
-                let binding = self
-                    .map
-                    .ref_of(inner)
-                    .expect("known ids always have a type");
 
                 self.env_insert(inner_name, binding);
                 // This was previously binding let to have the type of its rhs; thus enabling things
@@ -863,7 +878,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                     );
                     let binding = self.map.alloc(t);
                     self.map.bind(*id + 1 + i, binding);
-                    self.env_insert(inner_name, binding);
+                    self.env_insert(inner_name, Some(binding));
                     typed_arguments.push((inner_name, t));
                 }
 
@@ -936,6 +951,11 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                     self.report(err);
                     return TcType::Poison;
                 };
+
+                if field.ty == Type::Unknown {
+                    self.set_known(*id, Type::Unknown);
+                    return TcType::Poison;
+                }
 
                 let t = field.ty;
                 self.set_known(*id, t)
@@ -1653,7 +1673,10 @@ mod tests {
     fn record_with_poisoned_field_reports_once() {
         let (ast, out) = check(b"{ a: nope b: 1 }");
         assert_eq!(messages(&out), vec!["binding `nope` not found"]);
-        assert_eq!(root_type(&ast, &out, 0), None);
+        assert_eq!(
+            root_type(&ast, &out, 0).map(|ty| ty.to_string()).as_deref(),
+            Some("Record<a: unknown b: Int>")
+        );
     }
 
     #[test]

@@ -58,7 +58,7 @@ impl<'t, A: Allocator> TypecheckOutput<'t, A> {
     fn type_at(&self, id: usize) -> String {
         self.types
             .get(id)
-            .map_or_else(|| "<unknown>".to_owned(), ToString::to_string)
+            .map_or_else(|| "unknown".to_owned(), ToString::to_string)
     }
 
     fn render_value(&self, indent: usize, label: impl Display, ty: String, out: &mut String) {
