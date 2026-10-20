@@ -584,7 +584,12 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                 ),
                 tok,
             ));
-            return Self::store_known(map, call_id, fun.ret);
+
+            return if fun.with_slots {
+                TcType::Poison
+            } else {
+                Self::store_known(map, call_id, fun.ret)
+            };
         }
 
         let mut slot_to_type_bindings = Map::new_in(scratch);
