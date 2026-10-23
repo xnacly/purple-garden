@@ -418,7 +418,7 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
         let color = purple_garden_shared::ansi::enabled();
         let mut base = 0usize;
 
-        for (name, code) in self.cc.native_code.as_deref().unwrap_or_default() {
+        for (name, _, code) in self.cc.native_code.as_deref().unwrap_or_default() {
             println!(
                 "\n{base:08x} {}:",
                 paint(color, FUNC, &format!("<jit_{name}>"))

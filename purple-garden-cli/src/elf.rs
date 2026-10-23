@@ -90,7 +90,7 @@ pub(crate) fn addresses<S: Allocator + Clone, A: Allocator + Clone>(
 /// Writes `native_code` as a relocatable object, every embedded address `addresses` names as a
 /// relocation against that name, so `objdump -dr` shows it below its `movabs`.
 pub(crate) fn write(
-    native_code: &[(&str, Vec<u8>)],
+    native_code: &[(&str, usize, Vec<u8>)],
     addresses: &HashMap<u64, String>,
     mut out: impl Write,
 ) -> io::Result<()> {
@@ -99,7 +99,7 @@ pub(crate) fn write(
     pad(&mut buf, 16);
     let text_off = buf.len();
     let mut funcs = Vec::with_capacity(native_code.len());
-    for (name, code) in native_code {
+    for (name, _, code) in native_code {
         // laid out like the code arena, so `call rel32`s between functions resolve
         pad(&mut buf, 16);
         let off = buf.len() - text_off;

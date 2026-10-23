@@ -82,8 +82,8 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     pub globals: Interner<Const<'cc>>,
     pub std_fns: Interner<BuiltinFn>,
     pub functions: HashMap<Id, CcFunc<'cc>, RandomState, A>,
-    /// Native code retained only for diagnostic dumps.
-    pub native_code: Option<Vec<(&'cc str, Vec<u8>)>>,
+    /// Native code and its entry address, retained only for diagnostic dumps and perf maps.
+    pub native_code: Option<Vec<(&'cc str, usize, Vec<u8>)>>,
     /// Syscall slot of the native entry function (`Id(0)`), if it compiled to
     /// JIT. When present, `Program::run` can jump directly into the native page
     /// instead of starting from the bytecode trampoline.
@@ -352,7 +352,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         } else {
             Some(purple_garden_jit::CodeArena::new_in(code)?)
         };
-        self.native_code = (config.disassemble > 0).then(|| Vec::with_capacity(ir.len()));
+        self.native_code =
+            (config.disassemble > 0 || config.perf_map).then(|| Vec::with_capacity(ir.len()));
         self.functions.reserve(ir.len());
 
         // Native code embeds string constants by address, so the pool is laid
@@ -635,7 +636,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
         // Retain a copy only when diagnostics need it.
         if let Some(native_code) = &mut self.native_code {
-            native_code.push((fun.name, self.jit.code().to_vec()));
+            native_code.push((fun.name, entry as usize, self.jit.code().to_vec()));
         }
         self.native_fns.insert(fun.id, entry);
         let idx = self.std_fns.intern(entry) as u16;
