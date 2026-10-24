@@ -38,6 +38,14 @@ pub fn hash(bytes: &[u8]) -> u32 {
     (h ^ (h >> 32)) as u32
 }
 
+/// [`hash`] of the at most 8 bytes [`small_word`] packed into `word`.
+#[inline]
+pub fn small_hash(len: usize, word: u64) -> u32 {
+    debug_assert!(len <= 8);
+    let h = ((len as u64).rotate_left(5) ^ word).wrapping_mul(FXHASH_MULTIPLIER);
+    (h ^ (h >> 32)) as u32
+}
+
 /// At most 8 bytes little endian like a u64 load would give them, zero above, from overlapping
 /// reads. Assembled in a register: copying into a stack buffer and loading it as one u64 stalls
 /// on store forwarding.
@@ -147,6 +155,28 @@ impl StrTable {
         }
     }
 
+    /// [`StrTable::get`] for the at most 8 bytes [`small_word`] packed into `word`.
+    pub fn get_small(&self, len: usize, word: u64, hash: u32) -> Option<Value> {
+        if self.slots.is_empty() {
+            return None;
+        }
+        let header = header_word(len as u32, hash);
+        let mask = self.slots.len() - 1;
+        let mut i = hash as usize & mask;
+        loop {
+            let v = self.slots[i];
+            if v == Value::UNDEF {
+                return None;
+            }
+            if unsafe { header_bits(v.as_ptr()) } == header
+                && small_word(v.as_str().as_bytes()) == word
+            {
+                return Some(v);
+            }
+            i = (i + 1) & mask;
+        }
+    }
+
     /// `v` must not be in the table yet.
     pub fn insert(&mut self, v: Value) {
         if (self.len + 1) * 2 > self.slots.len() {
@@ -173,6 +203,15 @@ impl StrTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_hash_matches_hash() {
+        let s = b"purple g";
+        for len in 0..=8 {
+            let bytes = &s[..len];
+            assert_eq!(small_hash(len, small_word(bytes)), hash(bytes), "len {len}");
+        }
+    }
 
     #[test]
     fn same_bytes_sees_every_byte() {
