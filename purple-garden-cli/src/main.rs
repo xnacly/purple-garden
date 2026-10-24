@@ -241,6 +241,10 @@ fn pipeline<A: Pages + Clone>(
 
     purple_garden_shared::trace!("[main] Lowered IR to bytecode");
 
+    if conf.perf_map {
+        write_perf_map(cc.native_code.as_deref().unwrap_or_default())?;
+    }
+
     if conf.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);
         cc.compact_nops();
@@ -331,6 +335,18 @@ fn pipeline<A: Pages + Clone>(
 
     purple_garden_shared::trace!("[main] Executed bytecode");
     Ok(())
+}
+
+/// perf's symbol format for jitted code, see tools/perf/Documentation/jit-interface.txt
+fn write_perf_map(native_code: &[(&str, usize, Vec<u8>)]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let path = format!("/tmp/perf-{}.map", std::process::id());
+    let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+    for (name, entry, code) in native_code {
+        writeln!(out, "{entry:x} {:x} jit_{name}", code.len())?;
+    }
+    out.flush()
 }
 
 fn check_frontend(

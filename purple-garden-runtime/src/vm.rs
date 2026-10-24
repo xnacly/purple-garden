@@ -340,6 +340,24 @@ impl<'vm> Vm<'vm> {
         v
     }
 
+    /// [`Vm::new_string_from_str`] for the at most 8 bytes [`string::small_word`] packed into
+    /// `word`, hashed and compared without them ever being in memory.
+    pub fn new_string_from_small(&mut self, len: usize, word: u64) -> Value {
+        let hash = string::small_hash(len, word);
+        if let Some(v) = self.strings.get_small(len, word, hash) {
+            return v;
+        }
+        let bytes = word.to_le_bytes();
+        // SAFETY: Str only packs whole strs
+        let s = unsafe { std::str::from_utf8_unchecked(&bytes[..len]) };
+        let layout = Layout::from_size_align(string::payload_size(len), string::ALIGN)
+            .expect("string allocation layout");
+        let payload = self.alloc(AllocType::String, layout).as_ptr();
+        let v = unsafe { string::write_payload(payload, s, hash) };
+        self.strings.insert(v);
+        v
+    }
+
     pub fn run<const BACKTRACE: bool>(&mut self, syscalls: &[BuiltinFn]) -> Result<(), Anomaly> {
         let Some(last) = self.bytecode.last() else {
             return Ok(());

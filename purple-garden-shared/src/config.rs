@@ -47,6 +47,12 @@ pub struct Config {
     #[cfg_attr(feature = "cli", arg(long))]
     pub no_jit: bool,
 
+    /// Write /tmp/perf-<pid>.map, naming jitted functions for perf.
+    ///
+    ///    perf record --call-graph lbr -- purple-garden --perf-map examples/fib.garden
+    #[cfg_attr(feature = "cli", arg(long))]
+    pub perf_map: bool,
+
     /// Size of the vm call stack in MiB, exceeding it raises a stack overflow.
     #[cfg_attr(feature = "cli", arg(long, default_value_t = DEFAULT_STACK_SIZE))]
     pub stack_size: usize,
@@ -61,6 +67,7 @@ impl Config {
             backtrace: false,
             no_gc: false,
             no_jit: false,
+            perf_map: false,
             stack_size: DEFAULT_STACK_SIZE,
         }
     }

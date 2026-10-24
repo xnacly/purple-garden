@@ -784,6 +784,9 @@ fn const_ret_expr(ty: &Type) -> Option<TokenStream2> {
         Type::Path(path) if path_is_ident(path, "String") => Some(quote! {
             ::purple_garden_ir::Const::from(ret)
         }),
+        Type::Path(path) if path_is_ident(path, "Str") => Some(quote! {
+            ::purple_garden_ir::Const::from(ret.as_str().to_owned())
+        }),
         Type::Reference(reference) if is_str_ref(reference) => Some(quote! {
             ::purple_garden_ir::Const::from(ret)
         }),
