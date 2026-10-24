@@ -22,32 +22,42 @@ pub const fn padded_size(len: usize) -> usize {
     payload_size(len).next_multiple_of(ALIGN)
 }
 
+const FXHASH_MULTIPLIER: u64 = 0x517c_c1b7_2722_0a95;
+
 /// FxHash over 8-byte chunks, length seed & folded to 32 bits.
 #[inline]
 pub fn hash(bytes: &[u8]) -> u32 {
-    const K: u64 = 0x517c_c1b7_2722_0a95;
     let mut h = bytes.len() as u64;
     let (chunks, tail) = bytes.as_chunks::<8>();
     for c in chunks {
-        h = (h.rotate_left(5) ^ u64::from_le_bytes(*c)).wrapping_mul(K);
+        h = (h.rotate_left(5) ^ u64::from_le_bytes(*c)).wrapping_mul(FXHASH_MULTIPLIER);
     }
     if !tail.is_empty() {
-        // Assembled in a register: copying into a stack buffer and loading it
-        // as one u64 stalls on store forwarding.
-        let len = tail.len();
-        // the bytes little endian like a u64 load would give them, from overlapping reads
-        let tail = if len >= 4 {
-            let lo = u32::from_le_bytes(tail[..4].try_into().unwrap());
-            let hi = u32::from_le_bytes(tail[len - 4..].try_into().unwrap());
-            u64::from(lo) | (u64::from(hi) >> (8 * (8 - len))) << 32
-        } else {
-            u64::from(tail[0])
-                | u64::from(tail[len / 2]) << (8 * (len / 2))
-                | u64::from(tail[len - 1]) << (8 * (len - 1))
-        };
-        h = (h.rotate_left(5) ^ tail).wrapping_mul(K);
+        h = (h.rotate_left(5) ^ small_word(tail)).wrapping_mul(FXHASH_MULTIPLIER);
     }
     (h ^ (h >> 32)) as u32
+}
+
+/// At most 8 bytes little endian like a u64 load would give them, zero above, from overlapping
+/// reads. Assembled in a register: copying into a stack buffer and loading it as one u64 stalls
+/// on store forwarding.
+#[inline]
+pub fn small_word(bytes: &[u8]) -> u64 {
+    let len = bytes.len();
+    debug_assert!(len <= 8);
+    match len {
+        0 => 0,
+        1..=3 => {
+            u64::from(bytes[0])
+                | u64::from(bytes[len / 2]) << (8 * (len / 2))
+                | u64::from(bytes[len - 1]) << (8 * (len - 1))
+        }
+        _ => {
+            let lo = u32::from_le_bytes(bytes[..4].try_into().unwrap());
+            let hi = u32::from_le_bytes(bytes[len - 4..].try_into().unwrap());
+            u64::from(lo) | (u64::from(hi) >> (8 * (8 - len))) << 32
+        }
+    }
 }
 
 /// # Safety
@@ -188,18 +198,17 @@ mod tests {
     #[test]
     fn hash_matches_a_bytewise_tail() {
         fn bytewise(bytes: &[u8]) -> u32 {
-            const K: u64 = 0x517c_c1b7_2722_0a95;
             let mut h = bytes.len() as u64;
             let (chunks, tail) = bytes.as_chunks::<8>();
             for c in chunks {
-                h = (h.rotate_left(5) ^ u64::from_le_bytes(*c)).wrapping_mul(K);
+                h = (h.rotate_left(5) ^ u64::from_le_bytes(*c)).wrapping_mul(FXHASH_MULTIPLIER);
             }
             if !tail.is_empty() {
                 let tail = tail
                     .iter()
                     .enumerate()
                     .fold(0u64, |acc, (i, &b)| acc | u64::from(b) << (8 * i));
-                h = (h.rotate_left(5) ^ tail).wrapping_mul(K);
+                h = (h.rotate_left(5) ^ tail).wrapping_mul(FXHASH_MULTIPLIER);
             }
             (h ^ (h >> 32)) as u32
         }
