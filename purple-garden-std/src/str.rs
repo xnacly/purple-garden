@@ -107,9 +107,28 @@ pub mod str {
     /// str.from(42)
     /// ```
     #[pg_fn(pure, specialises = "from")]
-    pub fn from_i64(i: i64) -> String {
+    pub fn from_i64(i: i64) -> Str {
+        // up to Str::SMALL bytes the digits are assembled in a register, last digit first
+        if (-9_999_999..=99_999_999).contains(&i) {
+            let mut n = i.unsigned_abs();
+            let (mut word, mut len) = (0u64, 0);
+            loop {
+                word = word << 8 | u64::from(b'0' + (n % 10) as u8);
+                len += 1;
+                n /= 10;
+                if n == 0 {
+                    break;
+                }
+            }
+            if i < 0 {
+                word = word << 8 | u64::from(b'-');
+                len += 1;
+            }
+            // SAFETY: ascii digits and sign, at most 8
+            return unsafe { Str::from_small(len, word) };
+        }
         // skips core::fmt, which to_string goes through
-        String::from(i.format_into(&mut NumBuffer::new()))
+        Str::from(i.format_into(&mut NumBuffer::new()))
     }
 
     /// Converts a `Double` to `Str`.
