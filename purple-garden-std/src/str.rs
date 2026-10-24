@@ -46,11 +46,8 @@ pub mod str {
     /// let greeting = str.concat("hello " "garden")
     /// ```
     #[purple_garden_macros::pg_fn(pure)]
-    pub fn concat(a: &str, b: &str) -> String {
-        let mut out = String::with_capacity(a.len() + b.len());
-        out.push_str(a);
-        out.push_str(b);
-        out
+    pub fn concat(a: &str, b: &str) -> Str {
+        Str::concat(&[a, b])
     }
 
     /// Returns the length of `s` in bytes.
