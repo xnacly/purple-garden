@@ -78,6 +78,9 @@ pub const NATIVE_STACK_LIMIT_OFFSET: usize = std::mem::offset_of!(Vm, native_sta
 /// Where [`crate::enter_native`] and [`crate::jit_abort`] keep [`Vm::native_entry_rsp`].
 pub const NATIVE_ENTRY_RSP_OFFSET: usize = std::mem::offset_of!(Vm, native_entry_rsp);
 
+// Native code addresses register i at `[vm + 8 * i]`.
+const _: () = assert!(std::mem::offset_of!(Vm, r) == 0 && size_of::<Value>() == 8);
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct Vm<'vm> {

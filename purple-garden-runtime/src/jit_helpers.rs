@@ -120,12 +120,13 @@ pub unsafe extern "C" fn jit_abort(vm: *mut c_void) -> ! {
 ///
 /// # Safety
 ///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`], called from native code
+/// entered through [`enter_native`].
 pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) -> ! {
     // SAFETY: caller upholds # Safety
     let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
     vm_ref.trap(Anomaly::DivisionByZero { pc: vm_ref.pc });
-    // SAFETY: jit traps are only called from entered native code
+    // SAFETY: caller upholds # Safety
     unsafe { abort(vm) }
 }
 
@@ -133,12 +134,13 @@ pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) -> ! {
 ///
 /// # Safety
 ///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`], called from native code
+/// entered through [`enter_native`].
 pub unsafe extern "C" fn jit_trap_assert(vm: *mut c_void) -> ! {
     // SAFETY: caller upholds # Safety
     let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
     vm_ref.trap(Anomaly::AssertionFailed { pc: vm_ref.pc });
-    // SAFETY: jit traps are only called from entered native code
+    // SAFETY: caller upholds # Safety
     unsafe { abort(vm) }
 }
 
@@ -147,12 +149,13 @@ pub unsafe extern "C" fn jit_trap_assert(vm: *mut c_void) -> ! {
 ///
 /// # Safety
 ///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`], called from native code
+/// entered through [`enter_native`].
 pub unsafe extern "C" fn jit_trap_stack_overflow(vm: *mut c_void) -> ! {
     // SAFETY: caller upholds # Safety
     let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
     vm_ref.trap(Anomaly::StackOverflow { pc: vm_ref.pc });
-    // SAFETY: jit traps are only called from entered native code
+    // SAFETY: caller upholds # Safety
     unsafe { abort(vm) }
 }
 
@@ -166,7 +169,8 @@ pub unsafe extern "C" fn jit_trap_stack_overflow(vm: *mut c_void) -> ! {
 ///
 /// # Safety
 ///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`], called from native code
+/// entered through [`enter_native`].
 pub unsafe extern "C" fn jit_alloc(
     vm: *mut c_void,
     alloc_type: u8,
@@ -183,16 +187,20 @@ pub unsafe extern "C" fn jit_alloc(
         Some(ptr) => ptr.as_ptr(),
         None => {
             vm_ref.trap(Anomaly::AllocationFailed { pc: vm_ref.pc });
-            // SAFETY: jit_alloc is only called from entered native code
+            // SAFETY: caller upholds # Safety
             unsafe { abort(vm) }
         }
     }
 }
 
 /// Leaves native code with the trap `vm` holds, see [`jit_abort`].
+///
+/// # Safety
+///
+/// Same as [`jit_abort`].
 unsafe fn abort(vm: *mut c_void) -> ! {
     #[cfg(target_arch = "x86_64")]
-    // SAFETY: callers are native code entered through enter_native
+    // SAFETY: caller upholds # Safety
     unsafe {
         jit_abort(vm)
     }
