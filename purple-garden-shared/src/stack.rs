@@ -32,6 +32,7 @@ unsafe extern "C" {
 #[must_use]
 pub fn thread_stack_low() -> Option<usize> {
     let mut attr = PthreadAttr([0; 64]);
+    // SAFETY: PthreadAttr has room for glibc's pthread_attr_t
     unsafe {
         if pthread_getattr_np(pthread_self(), &mut attr) != 0 {
             return None;
@@ -47,6 +48,7 @@ pub fn thread_stack_low() -> Option<usize> {
 #[cfg(target_os = "macos")]
 #[must_use]
 pub fn thread_stack_low() -> Option<usize> {
+    // SAFETY: pthread_self is always the live calling thread
     unsafe {
         let thread = pthread_self();
         Some(pthread_get_stackaddr_np(thread) as usize - pthread_get_stacksize_np(thread))
