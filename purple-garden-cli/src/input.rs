@@ -43,6 +43,7 @@ impl Input {
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             Input::Str(s) => s.as_bytes(),
+            // SAFETY: ptr maps len bytes until drop, the slice borrows self
             Input::MmapedFile { file, len, ptr } => unsafe {
                 let _keep_file_alive = file;
                 std::slice::from_raw_parts(ptr.as_ptr(), *len)
