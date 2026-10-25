@@ -164,6 +164,7 @@ fn pg_pkg_wrapper_decodes_args_and_encodes_return() {
     // SAFETY: r0 exists
     *unsafe { vm.r_mut(0) } = s;
 
+    // SAFETY: valid vm, r0 holds the Str len expects
     unsafe { (str::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
 
     // SAFETY: r0 exists
@@ -179,6 +180,7 @@ fn pg_pkg_wrapper_allocates_return_strings() {
     // SAFETY: r1 exists
     *unsafe { vm.r_mut(1) } = Value::from(3_i64);
 
+    // SAFETY: valid vm, r0 and r1 hold repeat's Str and Int
     unsafe { (str::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
     // SAFETY: r0 exists and holds a Str
@@ -200,6 +202,7 @@ fn pg_pkg_supports_garden_opaque_types() {
     // SAFETY: r0 exists
     *unsafe { vm.r_mut(0) } = Value::from(7_i64);
 
+    // SAFETY: valid vm, r0 holds new_counter's Int, then its Counter
     unsafe { (counters::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
     unsafe { (counters::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
@@ -229,6 +232,7 @@ fn pg_fn_unsafe_passes_vm_and_exposes_remaining_signature() {
     // SAFETY: r0 exists
     *unsafe { vm.r_mut(0) } = Value::from(40_i64);
 
+    // SAFETY: valid vm, r0 holds add_register_zero's Int
     unsafe { (fun.ptr)((&mut vm as *mut Vm).cast()) };
 
     // SAFETY: r0 exists
@@ -268,6 +272,7 @@ fn pg_pkg_wrapper_decodes_record_arg() {
     // SAFETY: r0 exists
     *unsafe { vm.r_mut(0) } = record;
 
+    // SAFETY: valid vm, r0 holds a User record
     unsafe { (users::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
 
     // SAFETY: r0 exists and holds a Str
@@ -283,6 +288,7 @@ fn pg_pkg_wrapper_encodes_record_return() {
     // SAFETY: r1 exists
     *unsafe { vm.r_mut(1) } = Value::from(37_i64);
 
+    // SAFETY: valid vm, r0 and r1 hold make_user's Str and Int
     unsafe { (users::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
     // SAFETY: r0 exists
@@ -304,6 +310,7 @@ fn pg_pkg_supports_nested_records() {
     // SAFETY: r0 exists
     *unsafe { vm.r_mut(0) } = account;
 
+    // SAFETY: valid vm, r0 holds an Account record
     unsafe { (users::PACKAGE.fns[2].ptr)((&mut vm as *mut Vm).cast()) };
 
     // SAFETY: r0 exists and holds a Str
@@ -373,44 +380,52 @@ fn pg_fn_native_entries_take_and_return_hardware_values() {
             .native
     }
     let mut vm = Vm::new(VmConfig::default());
+    let name = vm.new_string("garden".to_owned());
     let vm_ptr = (&mut vm as *mut Vm).cast::<std::ffi::c_void>();
 
+    // SAFETY: add's native entry has this signature
     let add = unsafe {
         std::mem::transmute::<
             NativeFn,
             unsafe extern "C" fn(*mut std::ffi::c_void, Value, Value) -> Value,
         >(native("add").unwrap())
     };
+    // SAFETY: vm_ptr is the live vm, args match add
     assert_eq!(
         unsafe { add(vm_ptr, Value::from(40_i64), Value::from(2_i64)) }.as_int(),
         42
     );
 
+    // SAFETY: scale's native entry has this signature
     let scale = unsafe {
         std::mem::transmute::<
             NativeFn,
             unsafe extern "C" fn(*mut std::ffi::c_void, f64, Value, f64) -> f64,
         >(native("scale").unwrap())
     };
+    // SAFETY: vm_ptr is the live vm, args match scale
     assert_eq!(
         unsafe { scale(vm_ptr, 1.5, Value::from(2_i64), 0.25) },
         3.25
     );
 
+    // SAFETY: greet's native entry has this signature
     let greet = unsafe {
         std::mem::transmute::<NativeFn, unsafe extern "C" fn(*mut std::ffi::c_void, Value) -> Value>(
             native("greet").unwrap(),
         )
     };
-    let name = vm.new_string("garden".to_owned());
+    // SAFETY: vm_ptr is the live vm, name is a Str
     let greeting = unsafe { greet(vm_ptr, name) };
     assert_eq!(<&str as FromVm>::from_vm(&vm, greeting), "hi garden");
 
+    // SAFETY: id's native entry has this signature
     let id = unsafe {
         std::mem::transmute::<NativeFn, unsafe extern "C" fn(*mut std::ffi::c_void, Value) -> Value>(
             native("id").unwrap(),
         )
     };
+    // SAFETY: vm_ptr is the live vm, args match id
     assert_eq!(unsafe { id(vm_ptr, Value::from(7_i64)) }.as_int(), 7);
 }
 

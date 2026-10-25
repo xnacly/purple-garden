@@ -433,6 +433,7 @@ impl<'p> Program<'p> {
     pub fn run(&mut self) -> Result<(), Anomaly> {
         self.vm.reset();
         if let Some(entry) = self.entry_native {
+            // SAFETY: vm is uniquely borrowed, entry is the jit'd entry
             unsafe { purple_garden_runtime::enter_native((&mut self.vm as *mut Vm).cast(), entry) };
             if let Some(anomaly) = self.vm.take_trap() {
                 return Err(anomaly);
@@ -540,6 +541,7 @@ impl<'p> Program<'p> {
     ///     .expect("function exists");
     ///
     /// let args: [Value; 2] = [40i64.into(), 2i64.into()];
+    /// // SAFETY: args match add's signature
     /// let ret = unsafe { program.call_unchecked(&add, &args)? };
     /// assert_eq!(ret.as_int(), 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -556,6 +558,7 @@ impl<'p> Program<'p> {
     ///     .function::<(i64,), i64>("identity")
     ///     .expect("function exists");
     ///
+    /// // SAFETY: args match identity's signature
     /// let ret = unsafe { program.call_unchecked(&identity, &[42i64.into()])? };
     /// assert_eq!(ret.as_int(), 42);
     /// assert_ne!(ret.as_f64(), 42.0);
@@ -591,6 +594,7 @@ impl<'p> Program<'p> {
                 } else {
                     purple_garden_runtime::enter_native
                 };
+                // SAFETY: vm is uniquely borrowed, idx names a native entry
                 unsafe {
                     enter(
                         (&mut self.vm as *mut Vm).cast(),
@@ -675,6 +679,7 @@ impl<'p> Program<'p> {
         function.verify_signature()?;
 
         let args = args.inner(&mut self.vm);
+        // SAFETY: verify_signature checked args and return type
         let ret =
             unsafe { self.call_unchecked(function, args.as_ref()) }.map_err(CallError::Runtime)?;
         let result = Ret::from_vm(&self.vm, ret);
