@@ -186,6 +186,7 @@ mod tests_x86 {
     ) {
         let entry = arena.push(code).expect("code fits the arena");
         arena.seal().expect("seal the code arena");
+        // SAFETY: vm is uniquely borrowed, entry is sealed native code
         unsafe { enter((vm as *mut purple_garden_runtime::Vm).cast(), entry) };
     }
 
@@ -429,6 +430,7 @@ mod tests_x86 {
             *unsafe { vm.r_mut(i) } = purple_garden_runtime::Value(arg);
         }
         enter(jit.code(), &mut vm);
+        // SAFETY: r0 points at the 4 word alloc, no_gc keeps it alive
         let payload = unsafe { std::slice::from_raw_parts(vm.r(0).0 as *const u64, 4) };
         assert_eq!(payload, &[1, 2, 3, 255]);
     }
@@ -820,6 +822,7 @@ mod tests_x86 {
         specialises: None,
         with_slots: false,
         intrinsic: None,
+        // SAFETY: same size fn ptr, the jit calls it as mix's signature
         native: Some(unsafe {
             std::mem::transmute::<
                 unsafe extern "C" fn(*mut std::ffi::c_void, u64, f64) -> f64,
@@ -840,6 +843,7 @@ mod tests_x86 {
         specialises: None,
         with_slots: false,
         intrinsic: None,
+        // SAFETY: same size fn ptr, the jit calls it as add_one's signature
         native: Some(unsafe {
             std::mem::transmute::<
                 unsafe extern "C" fn(*mut std::ffi::c_void, u64) -> u64,
@@ -908,6 +912,7 @@ mod tests_x86 {
         specialises: None,
         with_slots: false,
         intrinsic: None,
+        // SAFETY: same size fn ptr, the jit calls it as touch's signature
         native: Some(unsafe {
             std::mem::transmute::<
                 unsafe extern "C" fn(*mut std::ffi::c_void, u64),
@@ -1394,6 +1399,7 @@ mod tests_x86 {
             .expect("jit imod");
 
         let mut vm = Vm::new(VmConfig::default());
+        // SAFETY: Vm is repr(C) and starts with its 64 registers
         let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
         slots[0..2].copy_from_slice(&[20, 0]);
         enter(jit.code(), &mut vm);
