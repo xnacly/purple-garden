@@ -69,14 +69,19 @@ impl<'buf> StackAlloc<'buf> {
     /// Push `value`, `false` if it doesn't fit. Pushes take exactly
     /// `size_of::<T>()`, so `top` stays aligned while everything pushed shares
     /// one alignment; don't interleave them with [`Allocator`] allocations.
+    ///
+    /// # Safety
+    ///
+    /// The top is aligned for `T`.
     #[inline(always)]
-    pub fn push<T: Copy>(&self, value: T) -> bool {
+    pub unsafe fn push<T: Copy>(&self, value: T) -> bool {
         let top = self.top.get();
         debug_assert!(top.is_multiple_of(align_of::<T>()));
         let end = top + size_of::<T>();
         if std::hint::unlikely(end > self.cap) {
             return false;
         }
+        // SAFETY: end <= cap, caller upholds # Safety
         unsafe { self.block.add(top).cast::<T>().write(value) };
         self.top.set(end);
         true
@@ -91,21 +96,28 @@ impl<'buf> StackAlloc<'buf> {
     pub unsafe fn pop<T: Copy>(&self) -> T {
         let top = self.top.get() - size_of::<T>();
         self.top.set(top);
+        // SAFETY: caller upholds # Safety
         unsafe { self.block.add(top).cast::<T>().read() }
     }
 
     /// Push `values` with one capacity check, each written on its own: a
     /// differently split read of a wide write stalls on store forwarding.
+    ///
+    /// # Safety
+    ///
+    /// The top is aligned for `T`.
     #[inline(always)]
-    pub fn push_all<T: Copy, const N: usize>(&self, values: [T; N]) -> bool {
+    pub unsafe fn push_all<T: Copy, const N: usize>(&self, values: [T; N]) -> bool {
         let top = self.top.get();
         debug_assert!(top.is_multiple_of(align_of::<T>()));
         let end = top + N * size_of::<T>();
         if std::hint::unlikely(end > self.cap) {
             return false;
         }
+        // SAFETY: end <= cap checked above
         let dst = unsafe { self.block.add(top).cast::<T>() };
         for (i, value) in values.into_iter().enumerate() {
+            // SAFETY: i < N inside the checked range, caller upholds # Safety
             unsafe { dst.add(i).write(value) };
         }
         self.top.set(end);
@@ -121,7 +133,9 @@ impl<'buf> StackAlloc<'buf> {
     pub unsafe fn pop_all<T: Copy, const N: usize>(&self) -> [T; N] {
         let top = self.top.get() - N * size_of::<T>();
         self.top.set(top);
+        // SAFETY: caller upholds # Safety
         let src = unsafe { self.block.add(top).cast::<T>() };
+        // SAFETY: caller upholds # Safety
         std::array::from_fn(|i| unsafe { src.add(i).read() })
     }
 
@@ -145,6 +159,7 @@ unsafe impl Allocator for StackAlloc<'_> {
             .filter(|&end| end <= self.cap)
             .ok_or(AllocError)?;
         self.top.set(end);
+        // SAFETY: start <= end <= cap, inside the buffer
         let ptr = unsafe { self.block.add(start) };
         Ok(NonNull::slice_from_raw_parts(ptr, layout.size()))
     }
@@ -172,6 +187,7 @@ unsafe impl Allocator for StackAlloc<'_> {
             return Ok(NonNull::slice_from_raw_parts(ptr, new.size()));
         }
         let moved = self.allocate(new)?;
+        // SAFETY: moved is fresh and disjoint, ptr is ours with old
         unsafe {
             ptr.copy_to_nonoverlapping(moved.cast(), old.size());
             self.deallocate(ptr, old);
@@ -186,7 +202,9 @@ unsafe impl Allocator for StackAlloc<'_> {
         old: Layout,
         new: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
+        // SAFETY: forwarded from caller
         let block = unsafe { self.grow(ptr, old, new)? };
+        // SAFETY: block spans new.size() >= old.size()
         unsafe {
             block
                 .cast::<u8>()
@@ -204,6 +222,7 @@ unsafe impl Allocator for StackAlloc<'_> {
     ) -> Result<NonNull<[u8]>, AllocError> {
         if !(ptr.as_ptr() as usize).is_multiple_of(new.align()) {
             let moved = self.allocate(new)?;
+            // SAFETY: moved is fresh and disjoint, ptr is ours with old
             unsafe {
                 ptr.copy_to_nonoverlapping(moved.cast(), new.size());
                 self.deallocate(ptr, old);
@@ -239,8 +258,10 @@ mod tests {
         let b = stack.allocate(layout(8, 8)).unwrap();
         assert_eq!(b.cast::<u8>().as_ptr() as usize % 8, 0);
         assert_eq!(stack.depth(), 32);
+        // SAFETY: b came from stack with this layout
         unsafe { stack.deallocate(b.cast(), layout(8, 8)) };
         assert_eq!(stack.depth(), 16);
+        // SAFETY: a came from stack with this layout
         unsafe { stack.deallocate(a.cast(), layout(3, 1)) };
         assert_eq!(stack.depth(), 0);
     }
@@ -251,8 +272,10 @@ mod tests {
         let stack = StackAlloc::new(&mut buf);
         let a = stack.allocate(layout(16, 8)).unwrap();
         let b = stack.allocate(layout(16, 8)).unwrap();
+        // SAFETY: a came from stack with this layout
         unsafe { stack.deallocate(a.cast(), layout(16, 8)) };
         assert_eq!(stack.depth(), 32);
+        // SAFETY: b came from stack with this layout
         unsafe { stack.deallocate(b.cast(), layout(16, 8)) };
         assert_eq!(stack.depth(), 16);
     }
@@ -283,13 +306,16 @@ mod tests {
         let mut buf = buffer::<4096>();
         let stack = StackAlloc::new(&mut buf);
         let dirty = stack.allocate(layout(64, 8)).unwrap();
+        // SAFETY: dirty spans 64 bytes, freed with its layout
         unsafe {
             dirty.cast::<u8>().write_bytes(0xff, 64);
             stack.deallocate(dirty.cast(), layout(64, 8));
         }
         let small = stack.allocate(layout(8, 8)).unwrap();
         let grown =
+            // SAFETY: small came from stack with layout(8, 8)
             unsafe { stack.grow_zeroed(small.cast(), layout(8, 8), layout(64, 8)) }.unwrap();
+        // SAFETY: grown is live, every byte written or zeroed
         assert!(unsafe { grown.as_ref() }[8..].iter().all(|&b| b == 0));
     }
 
@@ -320,11 +346,17 @@ mod tests {
     fn push_and_pop_are_lifo_until_full() {
         let mut buf = buffer::<4096>();
         let mut stack = StackAlloc::new(&mut buf);
-        assert!(stack.push(1u64));
-        assert!(stack.push_all([2u64, 3]));
+        // SAFETY: only u64s are pushed
+        unsafe {
+            assert!(stack.push(1u64));
+            assert!(stack.push_all([2u64, 3]));
+        }
+        // SAFETY: two u64s were pushed last
         assert_eq!(unsafe { stack.pop_all::<u64, 2>() }, [2, 3]);
+        // SAFETY: a u64 was pushed first
         assert_eq!(unsafe { stack.pop::<u64>() }, 1);
-        while stack.push(0u64) {}
+        // SAFETY: only u64s are pushed
+        while unsafe { stack.push(0u64) } {}
         assert_eq!(stack.depth(), 4096);
         stack.reset();
         assert_eq!(stack.depth(), 0);

@@ -74,6 +74,7 @@ pub fn small_word(bytes: &[u8]) -> u64 {
 #[inline(always)]
 pub unsafe fn header_bits(ptr: *const u8) -> u64 {
     const _: () = assert!(HEADER_SIZE == std::mem::size_of::<u64>());
+    // SAFETY: caller upholds # Safety
     unsafe { (ptr as *const u64).read_unaligned() }
 }
 
@@ -95,6 +96,7 @@ pub fn header_word(len: u32, hash: u32) -> u64 {
 pub unsafe fn write_payload(dst: *mut u8, s: &str, hash: u32) -> Value {
     let bytes = s.as_bytes();
     let len: u32 = bytes.len().try_into().expect("string length exceeds 4 GiB");
+    // SAFETY: caller upholds # Safety
     unsafe {
         (dst as *mut StrHeader).write(StrHeader { len, hash });
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst.add(HEADER_SIZE), bytes.len());
@@ -146,8 +148,10 @@ impl StrTable {
             if v == Value::UNDEF {
                 return None;
             }
+            // SAFETY: the table only holds string payloads
             if unsafe { header_bits(v.as_ptr()) } == word
-                && same_bytes(v.as_str().as_bytes(), s.as_bytes())
+                // SAFETY: the table only holds string payloads
+                && same_bytes(unsafe { v.as_str() }.as_bytes(), s.as_bytes())
             {
                 return Some(v);
             }
@@ -168,8 +172,10 @@ impl StrTable {
             if v == Value::UNDEF {
                 return None;
             }
+            // SAFETY: the table only holds string payloads
             if unsafe { header_bits(v.as_ptr()) } == header
-                && small_word(v.as_str().as_bytes()) == word
+                // SAFETY: the table only holds string payloads
+                && small_word(unsafe { v.as_str() }.as_bytes()) == word
             {
                 return Some(v);
             }
@@ -177,22 +183,27 @@ impl StrTable {
         }
     }
 
-    /// `v` must not be in the table yet.
-    pub fn insert(&mut self, v: Value) {
+    /// # Safety
+    ///
+    /// `v` is a string value not in the table yet.
+    pub unsafe fn insert(&mut self, v: Value) {
         if (self.len + 1) * 2 > self.slots.len() {
             let cap = (self.slots.len() * 2).max(64);
             let old = std::mem::replace(&mut self.slots, vec![Value::UNDEF; cap]);
             for v in old.into_iter().filter(|&v| v != Value::UNDEF) {
-                self.place(v);
+                // SAFETY: the table only holds string payloads
+                unsafe { self.place(v) };
             }
         }
-        self.place(v);
+        // SAFETY: caller upholds # Safety
+        unsafe { self.place(v) };
         self.len += 1;
     }
 
-    fn place(&mut self, v: Value) {
+    unsafe fn place(&mut self, v: Value) {
         let mask = self.slots.len() - 1;
-        let mut i = v.str_hash() as usize & mask;
+        // SAFETY: caller passes a string value
+        let mut i = unsafe { v.str_hash() } as usize & mask;
         while self.slots[i] != Value::UNDEF {
             i = (i + 1) & mask;
         }
@@ -272,9 +283,12 @@ mod tests {
 
     #[test]
     fn payload_roundtrip() {
-        let mut buf = vec![0u8; padded_size(5)];
-        let v = unsafe { write_payload(buf.as_mut_ptr(), "hello", hash(b"hello")) };
-        assert_eq!(v.as_str(), "hello");
-        assert_eq!(v.str_hash(), hash(b"hello"));
+        let mut buf = vec![0u32; padded_size(5) / ALIGN];
+        // SAFETY: buf holds padded_size(5) bytes, u32 aligns it to ALIGN
+        let v = unsafe { write_payload(buf.as_mut_ptr().cast(), "hello", hash(b"hello")) };
+        // SAFETY: v is the string just written
+        assert_eq!(unsafe { v.as_str() }, "hello");
+        // SAFETY: v is the string just written
+        assert_eq!(unsafe { v.str_hash() }, hash(b"hello"));
     }
 }

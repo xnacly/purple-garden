@@ -78,6 +78,9 @@ pub const NATIVE_STACK_LIMIT_OFFSET: usize = std::mem::offset_of!(Vm, native_sta
 /// Where [`crate::enter_native`] and [`crate::jit_abort`] keep [`Vm::native_entry_rsp`].
 pub const NATIVE_ENTRY_RSP_OFFSET: usize = std::mem::offset_of!(Vm, native_entry_rsp);
 
+// Native code addresses register i at `[vm + 8 * i]`.
+const _: () = assert!(std::mem::offset_of!(Vm, r) == 0 && size_of::<Value>() == 8);
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct Vm<'vm> {
@@ -96,7 +99,7 @@ pub struct Vm<'vm> {
     pub gc: Gc<VmAlloc<'vm>>,
 
     /// Backing storage for string constants emitted by the compiler.
-    pub const_pool: Box<[u8]>,
+    pub const_pool: Box<[u32]>,
     /// Every string, constants included, see [`Vm::new_string_from_str`].
     pub strings: string::StrTable,
 
@@ -155,6 +158,7 @@ unsafe impl Allocator for VmAlloc<'_> {
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: caller upholds the Allocator contract
         unsafe { self.0.deallocate(ptr, layout) }
     }
 
@@ -164,6 +168,7 @@ unsafe impl Allocator for VmAlloc<'_> {
         old: Layout,
         new: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
+        // SAFETY: caller upholds the Allocator contract
         unsafe { self.0.grow(ptr, old, new) }
     }
 
@@ -173,6 +178,7 @@ unsafe impl Allocator for VmAlloc<'_> {
         old: Layout,
         new: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
+        // SAFETY: caller upholds the Allocator contract
         unsafe { self.0.grow_zeroed(ptr, old, new) }
     }
 
@@ -182,6 +188,7 @@ unsafe impl Allocator for VmAlloc<'_> {
         old: Layout,
         new: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
+        // SAFETY: caller upholds the Allocator contract
         unsafe { self.0.shrink(ptr, old, new) }
     }
 }
@@ -318,6 +325,7 @@ impl<'vm> Vm<'vm> {
         let block = self
             .alloc(AllocType::Option, Layout::new::<[u64; 2]>())
             .cast::<[u64; 2]>();
+        // SAFETY: fresh allocation sized and aligned for [u64; 2]
         unsafe { block.write([tag, payload.0]) };
         Value(block.as_ptr() as u64)
     }
@@ -335,26 +343,34 @@ impl<'vm> Vm<'vm> {
         let layout = Layout::from_size_align(string::payload_size(s.len()), string::ALIGN)
             .expect("string allocation layout");
         let payload = self.alloc(AllocType::String, layout).as_ptr();
+        // SAFETY: payload allocated as payload_size(s.len()) at ALIGN
         let v = unsafe { string::write_payload(payload, s, hash) };
-        self.strings.insert(v);
+        // SAFETY: fresh string, get missed it
+        unsafe { self.strings.insert(v) };
         v
     }
 
     /// [`Vm::new_string_from_str`] for the at most 8 bytes [`string::small_word`] packed into
     /// `word`, hashed and compared without them ever being in memory.
-    pub fn new_string_from_small(&mut self, len: usize, word: u64) -> Value {
+    ///
+    /// # Safety
+    ///
+    /// The low `len` bytes of `word` are utf-8.
+    pub unsafe fn new_string_from_small(&mut self, len: usize, word: u64) -> Value {
         let hash = string::small_hash(len, word);
         if let Some(v) = self.strings.get_small(len, word, hash) {
             return v;
         }
         let bytes = word.to_le_bytes();
-        // SAFETY: Str only packs whole strs
+        // SAFETY: caller upholds # Safety
         let s = unsafe { std::str::from_utf8_unchecked(&bytes[..len]) };
         let layout = Layout::from_size_align(string::payload_size(len), string::ALIGN)
             .expect("string allocation layout");
         let payload = self.alloc(AllocType::String, layout).as_ptr();
+        // SAFETY: payload allocated as payload_size(len) at ALIGN
         let v = unsafe { string::write_payload(payload, s, hash) };
-        self.strings.insert(v);
+        // SAFETY: fresh string, get_small missed it
+        unsafe { self.strings.insert(v) };
         v
     }
 
@@ -379,7 +395,8 @@ impl<'vm> Vm<'vm> {
             return Ok(());
         }
 
-        let regs = self.r.as_mut_ptr();
+        // A use of &mut self invalidates regs, so it is re-derived after each one.
+        let mut regs = self.r.as_mut_ptr();
         let instructions = self.bytecode.as_mut_ptr();
         let globals = self.globals.as_mut_ptr();
         let syscalls = syscalls.as_ptr();
@@ -397,138 +414,168 @@ impl<'vm> Vm<'vm> {
         }
 
         loop {
+            // SAFETY: bc ends in Halt and only jumps within bytecode
             let op = unsafe { *instructions.add(pc) };
 
             match op {
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::LoadI { dst, value } => unsafe {
                     r_mut!(dst) = Value::from(value as i64);
                 },
+                // SAFETY: bc only emits in-bounds registers and globals
                 Op::LoadG { dst, idx } => unsafe { r_mut!(dst) = *globals.add(idx as usize) },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IAdd { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l + r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IAddI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l + imm as i64);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::ISub { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l - r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::ISubI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l - imm as i64);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IMul { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l * r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IMulI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l * imm as i64);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     trap_if!(r == 0, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l / r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IDivI { dst, lhs, imm } => unsafe {
                     let imm = imm as i64;
                     trap_if!(imm == 0, Anomaly::DivisionByZero { pc });
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l / imm);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IMod { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     trap_if!(r == 0, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l % r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IModI { dst, lhs, imm } => unsafe {
                     let imm = imm as i64;
                     trap_if!(imm == 0, Anomaly::DivisionByZero { pc });
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l % imm);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IAnd { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l & r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IAndI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l & imm as i64);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IEq { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l == r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IEqI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l == imm as i64);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IGt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l > r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IGtI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l > imm as i64);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::ILt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l < r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::ILtI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l < imm as i64);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DAdd { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l + r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DSub { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l - r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DMul { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l * r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l / r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DGt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l > r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DLt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l < r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::BEq { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_bool();
                     let r = r!(rhs).as_bool();
                     r_mut!(dst) = Value::from(l == r);
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::SEq { dst, lhs, rhs } => unsafe {
                     r_mut!(dst) = Value::from(r!(lhs).str_eq(r!(rhs)));
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::Mov { dst, src } => unsafe {
                     r_mut!(dst) = *r!(src);
                 },
@@ -543,45 +590,53 @@ impl<'vm> Vm<'vm> {
                     pc = func as usize;
                     continue;
                 }
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpT { target, cond } => unsafe {
                     if r!(cond).as_bool() {
                         pc = target as usize;
                         continue;
                     }
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpF { target, cond } => unsafe {
                     if !r!(cond).as_bool() {
                         pc = target as usize;
                         continue;
                     }
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::Assert { cond } => unsafe {
                     trap_if!(!r!(cond).as_bool(), Anomaly::AssertionFailed { pc });
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpEqI { lhs, imm, target } => unsafe {
                     if r!(lhs).as_int() == imm as i64 {
                         pc = target as usize;
                         continue;
                     }
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpNeI { lhs, imm, target } => unsafe {
                     if r!(lhs).as_int() != imm as i64 {
                         pc = target as usize;
                         continue;
                     }
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpSEq { lhs, rhs, target } => unsafe {
                     if r!(lhs).str_eq(r!(rhs)) {
                         pc = target as usize;
                         continue;
                     }
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpSNe { lhs, rhs, target } => unsafe {
                     if !r!(lhs).str_eq(r!(rhs)) {
                         pc = target as usize;
                         continue;
                     }
                 },
+                // SAFETY: table lives in vm.switch_tables as long as the vm
                 Op::Switch {
                     kind,
                     subject,
@@ -605,6 +660,7 @@ impl<'vm> Vm<'vm> {
                         continue;
                     }
                 },
+                // SAFETY: table lives in vm.lookup_tables as long as the vm
                 Op::Lookup {
                     kind,
                     dst,
@@ -629,6 +685,7 @@ impl<'vm> Vm<'vm> {
                         return Err(Anomaly::StackOverflow { pc });
                     }
 
+                    // SAFETY: depth < frames.len() checked above
                     unsafe {
                         *self.frames.get_unchecked_mut(depth) = CallFrame {
                             return_to: pc,
@@ -641,6 +698,7 @@ impl<'vm> Vm<'vm> {
                     pc = func as usize;
                     continue;
                 }
+                // SAFETY: bc only emits Sys indices present in syscalls
                 Op::Sys { idx, argc } => unsafe {
                     #[cfg(not(debug_assertions))]
                     let _ = argc;
@@ -653,6 +711,7 @@ impl<'vm> Vm<'vm> {
                     // carry a stale pc and render at the wrong source span.
                     self.pc = pc;
                     (*syscalls.add(idx as usize))((self as *mut Vm).cast());
+                    regs = self.r.as_mut_ptr();
 
                     #[cfg(debug_assertions)]
                     for (i, pre) in pre_sys.iter().enumerate().skip(usize::from(argc.max(1))) {
@@ -664,6 +723,7 @@ impl<'vm> Vm<'vm> {
                         );
                     }
                 },
+                // SAFETY: idx present in syscalls, vm not otherwise borrowed
                 Op::Native {
                     idx,
                     returns_double,
@@ -675,6 +735,7 @@ impl<'vm> Vm<'vm> {
                         crate::enter_native
                     };
                     enter((self as *mut Vm).cast(), *syscalls.add(idx as usize));
+                    regs = self.r.as_mut_ptr();
                     if std::hint::unlikely(self.pending_trap.is_some()) {
                         return Err(self.pending_trap.take().unwrap());
                     }
@@ -704,31 +765,37 @@ impl<'vm> Vm<'vm> {
                     );
                     pc = frame.return_to;
                 }
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::Push { src } => unsafe {
                     if std::hint::unlikely(!spilled.push(*r!(src))) {
                         return Err(Anomaly::StackOverflow { pc });
                     }
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::Push2 { a, b } => unsafe {
                     if std::hint::unlikely(!spilled.push_all([*r!(a), *r!(b)])) {
                         return Err(Anomaly::StackOverflow { pc });
                     }
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::Push3 { a, b, c } => unsafe {
                     if std::hint::unlikely(!spilled.push_all([*r!(a), *r!(b), *r!(c)])) {
                         return Err(Anomaly::StackOverflow { pc });
                     }
                 },
+                // SAFETY: bc pairs every Pop with an earlier Push
                 Op::Pop { dst } => unsafe {
                     debug_assert!(spilled.depth() >= size_of::<Value>());
                     r_mut!(dst) = spilled.pop::<Value>();
                 },
+                // SAFETY: bc pairs every Pop with an earlier Push
                 Op::Pop2 { a, b } => unsafe {
                     debug_assert!(spilled.depth() >= 2 * size_of::<Value>());
                     let [below, top] = spilled.pop_all::<Value, 2>();
                     r_mut!(a) = top;
                     r_mut!(b) = below;
                 },
+                // SAFETY: bc pairs every Pop with an earlier Push
                 Op::Pop3 { a, b, c } => unsafe {
                     debug_assert!(spilled.depth() >= 3 * size_of::<Value>());
                     let [bottom, below, top] = spilled.pop_all::<Value, 3>();
@@ -736,35 +803,41 @@ impl<'vm> Vm<'vm> {
                     r_mut!(b) = below;
                     r_mut!(c) = bottom;
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::CastToDouble { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_f64();
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::CastToInt { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).f64_to_int();
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::CastToBool { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_bool();
                 },
+                // SAFETY: size and align come from a Layout in lowering
                 Op::Alloc {
                     dst,
                     kind,
                     size,
                     align,
                 } => unsafe {
-                    r_mut!(dst) = Value::from_ptr(
-                        self.alloc(
-                            kind,
-                            Layout::from_size_align_unchecked(size as usize, align as usize),
-                        )
-                        .as_ptr(),
+                    let ptr = self.alloc(
+                        kind,
+                        Layout::from_size_align_unchecked(size as usize, align as usize),
                     );
+                    regs = self.r.as_mut_ptr();
+                    r_mut!(dst) = Value::from_ptr(ptr.as_ptr());
                 },
+                // SAFETY: offset lies within the block base was allocated as
                 Op::Store { base, offset, src } => unsafe {
                     (r!(base).as_ptr::<u8>().add(offset as usize) as *mut Value).write(*r!(src));
                 },
+                // SAFETY: offset lies within the block base was allocated as
                 Op::Load { dst, base, offset } => unsafe {
                     r_mut!(dst) = *(r!(base).as_ptr::<u8>().add(offset as usize) as *const Value);
                 },
+                // SAFETY: offset lies within the block base was allocated as
                 Op::AddrOf { dst, base, offset } => unsafe {
                     r_mut!(dst) = Value::from_ptr(r!(base).as_ptr::<u8>().add(offset as usize));
                 },
@@ -792,16 +865,26 @@ impl<'vm> Vm<'vm> {
         self.pending_trap.take()
     }
 
-    #[inline(always)]
     /// access register [idx] by indexing [`vm::r`]
+    ///
+    /// # Safety
+    ///
+    /// `idx < REGISTER_COUNT`.
+    #[inline(always)]
     #[must_use]
-    pub fn r(&self, idx: usize) -> &Value {
+    pub unsafe fn r(&self, idx: usize) -> &Value {
+        // SAFETY: caller upholds # Safety
         unsafe { &*self.r.as_ptr().add(idx) }
     }
 
-    #[inline(always)]
     /// access register [idx] mutably by indexing [`vm::r`]
-    pub fn r_mut(&mut self, idx: usize) -> &mut Value {
+    ///
+    /// # Safety
+    ///
+    /// `idx < REGISTER_COUNT`.
+    #[inline(always)]
+    pub unsafe fn r_mut(&mut self, idx: usize) -> &mut Value {
+        // SAFETY: caller upholds # Safety
         unsafe { &mut *self.r.as_mut_ptr().add(idx) }
     }
 }
@@ -846,13 +929,13 @@ mod ops {
         vm.pc = 0;
         vm.run::<false>(&[])
             .expect("first invocation should succeed");
-        assert_eq!(vm.r(0).as_int(), 42);
+        assert_eq!(vm.r[0].as_int(), 42);
 
         vm.reset();
         vm.pc = 0;
         vm.run::<false>(&[])
             .expect("second invocation should succeed");
-        assert_eq!(vm.r(0).as_int(), 42);
+        assert_eq!(vm.r[0].as_int(), 42);
     }
 
     #[test]
@@ -882,7 +965,7 @@ mod ops {
         vm.pc = 0;
         vm.run::<false>(&[])
             .expect("invocation after a trap should succeed");
-        assert_eq!(vm.r(0).as_int(), 7);
+        assert_eq!(vm.r[0].as_int(), 7);
     }
 
     #[test]
@@ -896,7 +979,7 @@ mod ops {
                 rhs: 1,
             },
         ]);
-        assert_eq!(vm.r(2).as_int(), 42);
+        assert_eq!(vm.r[2].as_int(), 42);
     }
 
     #[test]
@@ -910,7 +993,7 @@ mod ops {
                 rhs: 1,
             },
         ]);
-        assert_eq!(vm.r(2).as_int(), 42);
+        assert_eq!(vm.r[2].as_int(), 42);
     }
 
     #[test]
@@ -924,7 +1007,7 @@ mod ops {
                 rhs: 1,
             },
         ]);
-        assert_eq!(vm.r(2).as_int(), 42);
+        assert_eq!(vm.r[2].as_int(), 42);
     }
 
     #[test]
@@ -938,7 +1021,7 @@ mod ops {
                 rhs: 1,
             },
         ]);
-        assert_eq!(vm.r(2).as_int(), 42);
+        assert_eq!(vm.r[2].as_int(), 42);
     }
 
     #[test]
@@ -973,7 +1056,7 @@ mod ops {
                 rhs: 1,
             },
         ]);
-        assert_eq!(vm.r(2).as_int(), 3);
+        assert_eq!(vm.r[2].as_int(), 3);
     }
 
     #[test]
@@ -986,7 +1069,7 @@ mod ops {
                 imm: 5,
             },
         ]);
-        assert_eq!(vm.r(1).as_int(), -3);
+        assert_eq!(vm.r[1].as_int(), -3);
     }
 
     #[test]
@@ -1000,7 +1083,7 @@ mod ops {
                 rhs: 1,
             },
         ]);
-        assert_eq!(vm.r(2).as_int(), 4);
+        assert_eq!(vm.r[2].as_int(), 4);
     }
 
     /// The immediate sign extends, like the jit's `and r64, imm32`.
@@ -1014,7 +1097,7 @@ mod ops {
                 imm: -4,
             },
         ]);
-        assert_eq!(vm.r(1).as_int(), -4);
+        assert_eq!(vm.r[1].as_int(), -4);
     }
 
     #[test]
@@ -1056,7 +1139,7 @@ mod ops {
             Op::Halt,
         ];
         vm.run::<false>(&[]).unwrap();
-        vm.r(1).as_int()
+        vm.r[1].as_int()
     }
 
     #[test]
@@ -1096,7 +1179,7 @@ mod ops {
                 Op::Halt,
             ];
             vm.run::<false>(&[]).unwrap();
-            vm.r(1).as_int()
+            vm.r[1].as_int()
         };
         assert_eq!(lookup(-1), 10);
         assert_eq!(lookup(1), 30);
@@ -1132,7 +1215,7 @@ mod ops {
             Op::Halt,
         ];
         vm.run::<false>(&[]).unwrap();
-        assert_eq!(vm.r(2).as_f64(), f64::NEG_INFINITY);
+        assert_eq!(vm.r[2].as_f64(), f64::NEG_INFINITY);
     }
 
     #[test]
@@ -1156,9 +1239,9 @@ mod ops {
                 rhs: 1,
             },
         ]);
-        assert!(!vm.r(2).as_bool());
-        assert!(vm.r(3).as_bool());
-        assert!(!vm.r(4).as_bool());
+        assert!(!vm.r[2].as_bool());
+        assert!(vm.r[3].as_bool());
+        assert!(!vm.r[4].as_bool());
     }
 
     #[test]
@@ -1176,8 +1259,8 @@ mod ops {
                 imm: 7,
             },
         ]);
-        assert!(vm.r(1).as_bool());
-        assert!(!vm.r(2).as_bool());
+        assert!(vm.r[1].as_bool());
+        assert!(!vm.r[2].as_bool());
     }
 
     #[test]
@@ -1211,10 +1294,10 @@ mod ops {
             Op::Halt,
         ];
         vm.run::<false>(&[]).unwrap();
-        assert_eq!(vm.r(2).as_f64(), 4.0);
-        assert_eq!(vm.r(3).as_f64(), 1.0);
-        assert_eq!(vm.r(4).as_f64(), 3.75);
-        assert_eq!(vm.r(5).as_f64(), 2.5 / 1.5);
+        assert_eq!(vm.r[2].as_f64(), 4.0);
+        assert_eq!(vm.r[3].as_f64(), 1.0);
+        assert_eq!(vm.r[4].as_f64(), 3.75);
+        assert_eq!(vm.r[5].as_f64(), 2.5 / 1.5);
     }
 
     #[test]
@@ -1223,8 +1306,8 @@ mod ops {
             Op::LoadI { dst: 5, value: 99 },
             Op::Mov { dst: 0, src: 5 },
         ]);
-        assert_eq!(vm.r(0).as_int(), 99);
-        assert_eq!(vm.r(5).as_int(), 99);
+        assert_eq!(vm.r[0].as_int(), 99);
+        assert_eq!(vm.r[5].as_int(), 99);
     }
 
     #[test]
@@ -1244,7 +1327,8 @@ mod ops {
             },
         ]);
 
-        let payload = vm.r(0).as_ptr::<u8>();
+        let payload = vm.r[0].as_ptr::<u8>();
+        // SAFETY: Alloc reserved 16 bytes, offset 8 is in bounds
         let stored = unsafe { *(payload.add(8) as *const Value) };
         assert_eq!(stored.as_int(), 42);
     }
@@ -1271,7 +1355,7 @@ mod ops {
             },
         ]);
 
-        assert_eq!(vm.r(2).as_int(), 42);
+        assert_eq!(vm.r[2].as_int(), 42);
     }
 
     #[test]
@@ -1301,7 +1385,7 @@ mod ops {
             },
         ]);
 
-        assert_eq!(vm.r(3).as_int(), 42);
+        assert_eq!(vm.r[3].as_int(), 42);
     }
 
     #[test]
@@ -1312,8 +1396,8 @@ mod ops {
             Op::LoadI { dst: 0, value: 999 }, // skipped
             Op::LoadI { dst: 1, value: 2 },
         ]);
-        assert_eq!(vm.r(0).as_int(), 1);
-        assert_eq!(vm.r(1).as_int(), 2);
+        assert_eq!(vm.r[0].as_int(), 1);
+        assert_eq!(vm.r[1].as_int(), 2);
     }
 
     #[test]
@@ -1324,8 +1408,8 @@ mod ops {
             Op::LoadI { dst: 1, value: 999 }, // skipped
             Op::LoadI { dst: 2, value: 7 },
         ]);
-        assert_eq!(vm.r(1).as_int(), 0);
-        assert_eq!(vm.r(2).as_int(), 7);
+        assert_eq!(vm.r[1].as_int(), 0);
+        assert_eq!(vm.r[2].as_int(), 7);
     }
 
     #[test]
@@ -1336,8 +1420,8 @@ mod ops {
             Op::LoadI { dst: 1, value: 11 },
             Op::LoadI { dst: 2, value: 22 },
         ]);
-        assert_eq!(vm.r(1).as_int(), 11);
-        assert_eq!(vm.r(2).as_int(), 22);
+        assert_eq!(vm.r[1].as_int(), 11);
+        assert_eq!(vm.r[2].as_int(), 22);
     }
 
     #[test]
@@ -1352,8 +1436,8 @@ mod ops {
             Op::Pop { dst: 1 },
             Op::Pop { dst: 0 },
         ]);
-        assert_eq!(vm.r(0).as_int(), 10);
-        assert_eq!(vm.r(1).as_int(), 20);
+        assert_eq!(vm.r[0].as_int(), 10);
+        assert_eq!(vm.r[1].as_int(), 20);
     }
 
     #[test]
@@ -1374,11 +1458,11 @@ mod ops {
             Op::Pop3 { a: 4, b: 3, c: 2 },
             Op::Pop2 { a: 1, b: 0 },
         ]);
-        assert_eq!(vm.r(0).as_int(), 10);
-        assert_eq!(vm.r(1).as_int(), 20);
-        assert_eq!(vm.r(2).as_int(), 30);
-        assert_eq!(vm.r(3).as_int(), 40);
-        assert_eq!(vm.r(4).as_int(), 50);
+        assert_eq!(vm.r[0].as_int(), 10);
+        assert_eq!(vm.r[1].as_int(), 20);
+        assert_eq!(vm.r[2].as_int(), 30);
+        assert_eq!(vm.r[3].as_int(), 40);
+        assert_eq!(vm.r[4].as_int(), 50);
     }
 
     #[test]
@@ -1396,10 +1480,10 @@ mod ops {
             Op::Halt,
         ];
         vm.run::<false>(&[]).unwrap();
-        assert_eq!(vm.r(1).as_f64(), 5.0);
-        assert_eq!(vm.r(3).as_int(), 3);
-        assert!(vm.r(4).as_bool());
-        assert!(!vm.r(6).as_bool());
+        assert_eq!(vm.r[1].as_f64(), 5.0);
+        assert_eq!(vm.r[3].as_int(), 3);
+        assert!(vm.r[4].as_bool());
+        assert!(!vm.r[6].as_bool());
     }
 
     #[test]
@@ -1414,8 +1498,8 @@ mod ops {
             Op::Ret,
             Op::Nop, // jump landing
         ]);
-        assert_eq!(vm.r(1).as_int(), 7);
-        assert_eq!(vm.r(2).as_int(), 99);
+        assert_eq!(vm.r[1].as_int(), 7);
+        assert_eq!(vm.r[2].as_int(), 99);
     }
 
     #[test]
@@ -1435,7 +1519,7 @@ mod ops {
                 rhs: 2,
             },
         ]);
-        assert!(vm.r(3).as_bool());
-        assert!(!vm.r(4).as_bool());
+        assert!(vm.r[3].as_bool());
+        assert!(!vm.r[4].as_bool());
     }
 }

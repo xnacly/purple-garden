@@ -186,6 +186,7 @@ mod tests_x86 {
     ) {
         let entry = arena.push(code).expect("code fits the arena");
         arena.seal().expect("seal the code arena");
+        // SAFETY: vm is uniquely borrowed, entry is sealed native code
         unsafe { enter((vm as *mut purple_garden_runtime::Vm).cast(), entry) };
     }
 
@@ -223,10 +224,12 @@ mod tests_x86 {
 
         let mut vm = Vm::new(VmConfig::default());
         for (i, &arg) in args.iter().enumerate() {
-            *vm.r_mut(i) = Value(arg);
+            // SAFETY: callers pass N < REGISTER_COUNT
+            *unsafe { vm.r_mut(i) } = Value(arg);
         }
         enter_in(arena, code, &mut vm, enter);
-        std::array::from_fn(|i| vm.r(i).0)
+        // SAFETY: callers pass N < REGISTER_COUNT
+        std::array::from_fn(|i| unsafe { vm.r(i) }.0)
     }
 
     /// `fn identity(a) int { a }`: the argument arrives in rsi, the result leaves in rax.
@@ -423,9 +426,11 @@ mod tests_x86 {
             ..VmConfig::default()
         });
         for (i, arg) in [1, 2, 3].into_iter().enumerate() {
-            *vm.r_mut(i) = purple_garden_runtime::Value(arg);
+            // SAFETY: i < 3
+            *unsafe { vm.r_mut(i) } = purple_garden_runtime::Value(arg);
         }
         enter(jit.code(), &mut vm);
+        // SAFETY: r0 points at the 4 word alloc, no_gc keeps it alive
         let payload = unsafe { std::slice::from_raw_parts(vm.r(0).0 as *const u64, 4) };
         assert_eq!(payload, &[1, 2, 3, 255]);
     }
@@ -817,6 +822,7 @@ mod tests_x86 {
         specialises: None,
         with_slots: false,
         intrinsic: None,
+        // SAFETY: same size fn ptr, the jit calls it as mix's signature
         native: Some(unsafe {
             std::mem::transmute::<
                 unsafe extern "C" fn(*mut std::ffi::c_void, u64, f64) -> f64,
@@ -837,6 +843,7 @@ mod tests_x86 {
         specialises: None,
         with_slots: false,
         intrinsic: None,
+        // SAFETY: same size fn ptr, the jit calls it as add_one's signature
         native: Some(unsafe {
             std::mem::transmute::<
                 unsafe extern "C" fn(*mut std::ffi::c_void, u64) -> u64,
@@ -905,6 +912,7 @@ mod tests_x86 {
         specialises: None,
         with_slots: false,
         intrinsic: None,
+        // SAFETY: same size fn ptr, the jit calls it as touch's signature
         native: Some(unsafe {
             std::mem::transmute::<
                 unsafe extern "C" fn(*mut std::ffi::c_void, u64),
@@ -1391,8 +1399,11 @@ mod tests_x86 {
             .expect("jit imod");
 
         let mut vm = Vm::new(VmConfig::default());
-        let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
-        slots[0..2].copy_from_slice(&[20, 0]);
+        // SAFETY: r0 and r1 exist
+        unsafe {
+            *vm.r_mut(0) = purple_garden_runtime::Value(20);
+            *vm.r_mut(1) = purple_garden_runtime::Value(0);
+        }
         enter(jit.code(), &mut vm);
 
         assert!(matches!(
@@ -1438,7 +1449,8 @@ mod tests_x86 {
         jit.compile_func(&func).expect("jit assert");
         for (cond, traps) in [(1, false), (0, true)] {
             let mut vm = Vm::new(VmConfig::default());
-            *vm.r_mut(0) = purple_garden_runtime::Value(cond);
+            // SAFETY: r0 exists
+            *unsafe { vm.r_mut(0) } = purple_garden_runtime::Value(cond);
             enter(jit.code(), &mut vm);
             assert_eq!(
                 matches!(vm.take_trap(), Some(Anomaly::AssertionFailed { .. })),
@@ -2044,7 +2056,8 @@ mod tests_x86 {
             Op::Halt,
         ];
         vm.run::<false>(&syscalls).expect("vm run");
-        assert_eq!(vm.r(0).as_int(), 187);
+        // SAFETY: r0 exists
+        assert_eq!(unsafe { vm.r(0) }.as_int(), 187);
     }
 }
 

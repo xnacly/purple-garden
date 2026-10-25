@@ -212,6 +212,7 @@ impl PgFunction {
 
         quote! {
             unsafe extern "C" fn #wrapper_name(vm: *mut std::ffi::c_void) {
+                // SAFETY: callers pass a valid, uniquely borrowed Vm
                 let vm = unsafe { &mut *vm.cast::<#api::embed::Vm>() };
                 #body
             }
@@ -234,7 +235,8 @@ impl PgFunction {
             let ty = &arg.ty;
 
             quote! {
-                let #binding = <#ty as #api::embed::FromVm>::from_vm(vm, *vm.r(#idx));
+                // SAFETY: idx < arity, args fit the registers
+                let #binding = <#ty as #api::embed::FromVm>::from_vm(vm, *unsafe { vm.r(#idx) });
             }
         })
     }
@@ -347,6 +349,7 @@ impl PgFunction {
             #[doc(hidden)]
             #[allow(unused_variables)]
             unsafe extern "C" fn #name(vm: *mut std::ffi::c_void, #(#params),*) #ret_sig {
+                // SAFETY: callers pass a valid, uniquely borrowed Vm
                 let vm = unsafe { &mut *vm.cast::<#api::embed::Vm>() };
                 #(#decoders)*
                 #call
@@ -432,6 +435,7 @@ impl PgFunction {
             let arg_tys = self.args.iter().map(|arg| native_ty(&arg.ty, api));
             let ret_sig = native_ret_sig(ret_ty, api);
             quote! {
+                // SAFETY: same size fn ptr, callers re-cast to this signature
                 Some(unsafe {
                     ::core::mem::transmute::<
                         unsafe extern "C" fn(*mut ::std::ffi::c_void, #(#arg_tys),*) #ret_sig,

@@ -131,6 +131,7 @@ pub fn mmap(
     fd: i32,
     offset: i64,
 ) -> Result<NonNull<u8>, String> {
+    // SAFETY: no MAP_FIXED, a hint never replaces existing mappings
     let ret = unsafe {
         sys_mmap(
             ptr.map_or(std::ptr::null_mut(), |ptr| ptr.as_ptr().cast()),
@@ -146,12 +147,18 @@ pub fn mmap(
         return Err(os_error("mmap"));
     }
 
-    Ok(unsafe { NonNull::new_unchecked(ret.cast()) })
+    NonNull::new(ret.cast()).ok_or_else(|| "mmap returned null".to_string())
 }
 
 #[inline(always)]
 /// Changes page permissions for an existing mapping.
-pub fn mprotect(ptr: NonNull<u8>, length: usize, prot: MmapProt) -> Result<(), String> {
+///
+/// # Safety
+///
+/// The caller owns the pages at `ptr..ptr + length` and nothing that relies on
+/// their old permissions still uses them.
+pub unsafe fn mprotect(ptr: NonNull<u8>, length: usize, prot: MmapProt) -> Result<(), String> {
+    // SAFETY: caller upholds # Safety
     if unsafe { sys_mprotect(ptr.as_ptr().cast(), length, prot.bits()) } == -1 {
         return Err(os_error("mprotect"));
     }
@@ -163,6 +170,7 @@ pub fn mprotect(ptr: NonNull<u8>, length: usize, prot: MmapProt) -> Result<(), S
 /// pages instead of whole 2 MiB ones. macOS has no transparent huge pages.
 pub fn no_huge_pages(ptr: NonNull<u8>, length: usize) -> Result<(), String> {
     #[cfg(target_os = "linux")]
+    // SAFETY: MADV_NOHUGEPAGE is only a hint, contents stay
     if unsafe { sys_madvise(ptr.as_ptr().cast(), length, MADV_NOHUGEPAGE) } == -1 {
         return Err(os_error("madvise"));
     }
@@ -174,13 +182,24 @@ pub fn no_huge_pages(ptr: NonNull<u8>, length: usize) -> Result<(), String> {
 /// Size of a page in bytes, mappings are made of whole pages.
 #[must_use]
 pub fn page_size() -> usize {
+    // SAFETY: getpagesize has no preconditions
     unsafe { sys_getpagesize() as usize }
 }
 
 /// Grows or shrinks the mapping at `ptr` to `new_len` bytes, moving it if it can't be resized in
 /// place. Pages keep their contents and stay resident, new ones are zeroed.
+///
+/// # Safety
+///
+/// `ptr` is a mapping of `old_len` bytes owned by the caller, nothing still
+/// points into it if it moves.
 #[cfg(target_os = "linux")]
-pub fn mremap(ptr: NonNull<u8>, old_len: usize, new_len: usize) -> Result<NonNull<u8>, String> {
+pub unsafe fn mremap(
+    ptr: NonNull<u8>,
+    old_len: usize,
+    new_len: usize,
+) -> Result<NonNull<u8>, String> {
+    // SAFETY: caller upholds # Safety
     let ptr = unsafe { sys_mremap(ptr.as_ptr().cast(), old_len, new_len, MREMAP_MAYMOVE) };
     if ptr == MAP_FAILED {
         return Err(os_error("mremap"));
@@ -190,7 +209,13 @@ pub fn mremap(ptr: NonNull<u8>, old_len: usize, new_len: usize) -> Result<NonNul
 
 #[inline(always)]
 /// Releases a memory mapping created by [`mmap`].
-pub fn munmap(ptr: NonNull<u8>, size: usize) -> Result<(), String> {
+///
+/// # Safety
+///
+/// The caller owns the pages at `ptr..ptr + size` and nothing points into them
+/// afterwards.
+pub unsafe fn munmap(ptr: NonNull<u8>, size: usize) -> Result<(), String> {
+    // SAFETY: caller upholds # Safety
     if unsafe { sys_munmap(ptr.as_ptr().cast(), size) } == -1 {
         return Err(os_error("munmap"));
     }
@@ -223,6 +248,7 @@ mod tests {
         )
         .expect("anonymous mmap");
 
+        // SAFETY: fresh rw mapping of len bytes, zero filled
         let bytes = unsafe { std::slice::from_raw_parts_mut(ptr.as_ptr(), len) };
         assert!(bytes.iter().all(|byte| *byte == 0));
 
@@ -231,7 +257,8 @@ mod tests {
         assert_eq!(bytes[0], 0xab);
         assert_eq!(bytes[len - 1], 0xcd);
 
-        munmap(ptr, len).expect("munmap");
+        // SAFETY: our mapping, bytes is dead
+        unsafe { munmap(ptr, len) }.expect("munmap");
     }
 
     #[test]
@@ -247,12 +274,18 @@ mod tests {
         )
         .expect("anonymous mmap");
 
-        mprotect(ptr, len, MmapProt::READ).expect("mprotect read-only");
-        mprotect(ptr, len, MmapProt::READ | MmapProt::WRITE).expect("mprotect read-write");
+        // SAFETY: our mapping, unused
+        unsafe { mprotect(ptr, len, MmapProt::READ) }.expect("mprotect read-only");
+        // SAFETY: our mapping, unused
+        unsafe { mprotect(ptr, len, MmapProt::READ | MmapProt::WRITE) }
+            .expect("mprotect read-write");
 
+        // SAFETY: mapping is rw again
         unsafe { ptr.as_ptr().write(0x7f) };
+        // SAFETY: mapping is rw again
         assert_eq!(unsafe { ptr.as_ptr().read() }, 0x7f);
 
-        munmap(ptr, len).expect("munmap");
+        // SAFETY: our mapping, unused afterwards
+        unsafe { munmap(ptr, len) }.expect("munmap");
     }
 }

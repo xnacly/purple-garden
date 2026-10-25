@@ -63,7 +63,8 @@ fn record_encoder(api: &Path, field: &syn::Field) -> TokenStream2 {
     let field_ident = field.ident.as_ref().unwrap();
     let field_name = field_ident.to_string();
     quote! {
-        #api::embed::encode_record_field(vm, record, &<Self as #api::embed::PgType>::TYPE, #field_name, self.#field_ident);
+        // SAFETY: record was just allocated as Self::TYPE
+        unsafe { #api::embed::encode_record_field(vm, record, &<Self as #api::embed::PgType>::TYPE, #field_name, self.#field_ident) };
     }
 }
 
@@ -93,6 +94,7 @@ fn record_decoders(api: &Path, fields: &FieldsNamed, record_ty: TokenStream2) ->
             let field_name = field_ident.to_string();
             let ty = &field.ty;
             quote! {
+                // SAFETY: base is a record of Self::TYPE, the typechecker ensures it
                 #field_ident: unsafe {
                     #api::embed::decode_record_field::<#ty>(vm, base, #record_ty, #field_name)
                 }
@@ -136,12 +138,14 @@ fn expand_garden_opaque(api: &Path, input: &DeriveInput) -> syn::Result<TokenStr
 
         impl #from_impl_generics #api::embed::FromVm<'vm> for &'vm #ident #ty_generics #from_where_clause {
             fn from_vm(_: &'vm #api::embed::Vm, value: #api::embed::Value) -> Self {
+                // SAFETY: Foreign values of this type always point at Self
                 unsafe { &*value.as_ptr::<#ident #ty_generics>() }
             }
         }
 
         impl #from_impl_generics #api::embed::FromVm<'vm> for &'vm mut #ident #ty_generics #from_where_clause {
             fn from_vm(_: &'vm #api::embed::Vm, value: #api::embed::Value) -> Self {
+                // SAFETY: Foreign values of this type always point at Self
                 unsafe { &mut *value.as_ptr::<#ident #ty_generics>() }
             }
         }

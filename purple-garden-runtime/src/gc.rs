@@ -95,6 +95,7 @@ impl Metadata {
     /// `payload` must point to the payload immediately following a valid,
     /// initialized [`Metadata`] allocation header.
     pub unsafe fn from_payload(payload: NonNull<u8>) -> Self {
+        // SAFETY: caller upholds # Safety
         unsafe { payload.as_ptr().sub(METADATA_SIZE).cast::<Self>().read() }
     }
 
@@ -159,6 +160,7 @@ impl Gc {
 impl<A: Allocator> Drop for Gc<A> {
     fn drop(&mut self) {
         for page in &self.pages {
+            // SAFETY: every page was allocated with this layout
             unsafe { self.alloc.deallocate(page.ptr, self.layout(page.cap)) };
         }
     }
@@ -210,6 +212,7 @@ impl<A: Allocator> Gc<A> {
         );
 
         let metadata = Metadata::new(alloc_type, false, layout.size() as u64);
+        // SAFETY: new_in pushes a page and pages never shrink
         let page = unsafe { self.pages.last_mut().unwrap_unchecked() };
         let base = page.ptr.as_ptr() as usize;
         let payload = align_up(base + page.len + METADATA_SIZE, PAYLOAD_ALIGN);
@@ -219,11 +222,13 @@ impl<A: Allocator> Gc<A> {
             return None;
         }
 
+        // SAFETY: end <= cap keeps the 8-aligned header inside the page
         unsafe {
             ((payload - METADATA_SIZE) as *mut Metadata).write(metadata);
         }
         page.len = end;
 
+        // SAFETY: payload is an offset into a non-null page
         let payload = unsafe { NonNull::new_unchecked(payload as *mut u8) };
 
         #[cfg(feature = "trace_gc")]
@@ -309,6 +314,7 @@ mod tests {
             requested.map(|(alloc_type, size)| alloc_fast(&mut gc, alloc_type, size, 8).unwrap());
 
         for ((alloc_type, size), payload) in requested.iter().zip(payloads) {
+            // SAFETY: alloc_fast wrote the header below every payload
             let metadata = unsafe { Metadata::from_payload(payload) };
             assert_eq!(metadata, Metadata::new(*alloc_type, false, *size as u64));
             assert_eq!(metadata.alloc_type(), Some(*alloc_type));
@@ -341,6 +347,7 @@ mod tests {
         let payload = alloc_fast(&mut gc, AllocType::Array, oversized, 8).expect("fresh page fits");
         assert_eq!(payload.as_ptr() as usize % PAYLOAD_ALIGN, 0);
         assert_eq!(
+            // SAFETY: alloc_fast wrote the header below every payload
             unsafe { Metadata::from_payload(payload) },
             Metadata::new(AllocType::Array, false, oversized as u64)
         );
