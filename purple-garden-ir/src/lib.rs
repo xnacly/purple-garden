@@ -593,6 +593,28 @@ impl Func<'_> {
 }
 
 impl<A: Allocator> Func<'_, A> {
+    /// One past the highest id defined in self
+    pub fn next_id(&self) -> u32 {
+        let params = self.params.iter().map(|p| p.id);
+        let block_params = self
+            .blocks
+            .iter()
+            .flat_map(|b| self.params(b.params))
+            .copied();
+        let defs = self
+            .blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .filter_map(Func::def_of);
+        params
+            .chain(block_params)
+            .chain(defs)
+            .map(|id| id.0 + 1)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Call f(id) with each value defined in an instr
     pub fn for_each_use_of_instr(&self, instr: &Instr<'_>, mut f: impl FnMut(Id)) {
         match instr {
             Instr::Bin { lhs, rhs, .. } => {
