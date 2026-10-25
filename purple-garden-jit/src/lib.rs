@@ -1399,9 +1399,11 @@ mod tests_x86 {
             .expect("jit imod");
 
         let mut vm = Vm::new(VmConfig::default());
-        // SAFETY: Vm is repr(C) and starts with its 64 registers
-        let slots = unsafe { &mut *(&mut vm as *mut Vm as *mut [u64; 64]) };
-        slots[0..2].copy_from_slice(&[20, 0]);
+        // SAFETY: r0 and r1 exist
+        unsafe {
+            *vm.r_mut(0) = purple_garden_runtime::Value(20);
+            *vm.r_mut(1) = purple_garden_runtime::Value(0);
+        }
         enter(jit.code(), &mut vm);
 
         assert!(matches!(
