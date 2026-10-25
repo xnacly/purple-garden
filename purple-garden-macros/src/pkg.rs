@@ -234,7 +234,8 @@ impl PgFunction {
             let ty = &arg.ty;
 
             quote! {
-                let #binding = <#ty as #api::embed::FromVm>::from_vm(vm, *vm.r(#idx));
+                // SAFETY: idx < arity, args fit the registers
+                let #binding = <#ty as #api::embed::FromVm>::from_vm(vm, *unsafe { vm.r(#idx) });
             }
         })
     }

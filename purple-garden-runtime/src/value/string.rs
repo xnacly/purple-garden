@@ -67,7 +67,8 @@ impl Str {
     pub fn as_str(&self) -> &str {
         const _: () = assert!(cfg!(target_endian = "little"));
         match &self.0 {
-            Repr::Interned(value) => value.as_str(),
+            // SAFETY: Interned only holds string values
+            Repr::Interned(value) => unsafe { value.as_str() },
             // SAFETY: the word holds whole strs back to back, little endian like memory
             Repr::Small { len, word } => unsafe {
                 std::str::from_utf8_unchecked(std::slice::from_raw_parts(
@@ -100,7 +101,10 @@ impl IntoVm for Str {
     fn into_vm(self, vm: &mut Vm) -> Value {
         match self.0 {
             Repr::Interned(value) => value,
-            Repr::Small { len, word } => vm.new_string_from_small(usize::from(len), word),
+            // SAFETY: Small only packs whole strs
+            Repr::Small { len, word } => unsafe {
+                vm.new_string_from_small(usize::from(len), word)
+            },
             Repr::Heap(s) => vm.new_string_from_str(&s),
         }
     }

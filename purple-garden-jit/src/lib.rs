@@ -223,10 +223,12 @@ mod tests_x86 {
 
         let mut vm = Vm::new(VmConfig::default());
         for (i, &arg) in args.iter().enumerate() {
-            *vm.r_mut(i) = Value(arg);
+            // SAFETY: callers pass N < REGISTER_COUNT
+            *unsafe { vm.r_mut(i) } = Value(arg);
         }
         enter_in(arena, code, &mut vm, enter);
-        std::array::from_fn(|i| vm.r(i).0)
+        // SAFETY: callers pass N < REGISTER_COUNT
+        std::array::from_fn(|i| unsafe { vm.r(i) }.0)
     }
 
     /// `fn identity(a) int { a }`: the argument arrives in rsi, the result leaves in rax.
@@ -423,7 +425,8 @@ mod tests_x86 {
             ..VmConfig::default()
         });
         for (i, arg) in [1, 2, 3].into_iter().enumerate() {
-            *vm.r_mut(i) = purple_garden_runtime::Value(arg);
+            // SAFETY: i < 3
+            *unsafe { vm.r_mut(i) } = purple_garden_runtime::Value(arg);
         }
         enter(jit.code(), &mut vm);
         let payload = unsafe { std::slice::from_raw_parts(vm.r(0).0 as *const u64, 4) };
@@ -1438,7 +1441,8 @@ mod tests_x86 {
         jit.compile_func(&func).expect("jit assert");
         for (cond, traps) in [(1, false), (0, true)] {
             let mut vm = Vm::new(VmConfig::default());
-            *vm.r_mut(0) = purple_garden_runtime::Value(cond);
+            // SAFETY: r0 exists
+            *unsafe { vm.r_mut(0) } = purple_garden_runtime::Value(cond);
             enter(jit.code(), &mut vm);
             assert_eq!(
                 matches!(vm.take_trap(), Some(Anomaly::AssertionFailed { .. })),
@@ -2044,7 +2048,8 @@ mod tests_x86 {
             Op::Halt,
         ];
         vm.run::<false>(&syscalls).expect("vm run");
-        assert_eq!(vm.r(0).as_int(), 187);
+        // SAFETY: r0 exists
+        assert_eq!(unsafe { vm.r(0) }.as_int(), 187);
     }
 }
 

@@ -63,7 +63,8 @@ fn record_encoder(api: &Path, field: &syn::Field) -> TokenStream2 {
     let field_ident = field.ident.as_ref().unwrap();
     let field_name = field_ident.to_string();
     quote! {
-        #api::embed::encode_record_field(vm, record, &<Self as #api::embed::PgType>::TYPE, #field_name, self.#field_ident);
+        // SAFETY: record was just allocated as Self::TYPE
+        unsafe { #api::embed::encode_record_field(vm, record, &<Self as #api::embed::PgType>::TYPE, #field_name, self.#field_ident) };
     }
 }
 

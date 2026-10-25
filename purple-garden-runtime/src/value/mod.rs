@@ -43,18 +43,28 @@ impl Value {
         f64::from_bits(self.0)
     }
 
+    /// # Safety
+    ///
+    /// `self` is a string value.
     #[inline(always)]
     #[must_use]
-    pub fn as_str<'t>(&self) -> &'t str {
+    pub unsafe fn as_str<'t>(&self) -> &'t str {
         let ptr = self.as_ptr::<u8>();
+        // SAFETY: caller upholds # Safety
         let len = unsafe { (*(ptr as *const crate::string::StrHeader)).len } as usize;
+        // SAFETY: len payload bytes follow the header
         let bytes = unsafe { std::slice::from_raw_parts(ptr.add(crate::string::HEADER_SIZE), len) };
+        // SAFETY: payloads are only written from strs
         unsafe { std::str::from_utf8_unchecked(bytes) }
     }
 
+    /// # Safety
+    ///
+    /// `self` is a string value.
     #[inline(always)]
     #[must_use]
-    pub fn str_hash(&self) -> u32 {
+    pub unsafe fn str_hash(&self) -> u32 {
+        // SAFETY: caller upholds # Safety
         unsafe { (*self.as_ptr::<crate::string::StrHeader>()).hash }
     }
 

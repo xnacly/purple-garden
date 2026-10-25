@@ -1523,7 +1523,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         for (slot, &value) in str_values.iter().enumerate() {
             if value != Value::UNDEF {
                 vm.globals[slot] = value;
-                vm.strings.insert(value);
+                // SAFETY: str_values are fresh strings from the const pool
+                unsafe { vm.strings.insert(value) };
             }
         }
         vm.const_pool = const_pool;

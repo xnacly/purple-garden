@@ -466,7 +466,8 @@ impl<'p> Program<'p> {
     /// ```
     pub fn run_take<'pg, T: FromVm<'pg>>(&'pg mut self) -> Result<T, Anomaly> {
         self.run()?;
-        Ok(T::from_vm(&self.vm, *self.vm.r(0)))
+        // SAFETY: r0 exists
+        Ok(T::from_vm(&self.vm, *unsafe { self.vm.r(0) }))
     }
 
     /// Looks up a named Garden function for later invocation with
@@ -568,7 +569,8 @@ impl<'p> Program<'p> {
         self.vm.reset();
 
         for (i, a) in args.iter().enumerate() {
-            *self.vm.r_mut(i) = *a;
+            // SAFETY: caller upholds # Safety, args fit the declared arity
+            *unsafe { self.vm.r_mut(i) } = *a;
         }
 
         match function.handle {
@@ -601,7 +603,8 @@ impl<'p> Program<'p> {
             }
         };
 
-        Ok(*self.vm.r(0))
+        // SAFETY: r0 exists
+        Ok(*unsafe { self.vm.r(0) })
     }
 
     /// Invokes a function from a handle returned by [`Program::function`] with arguments and
