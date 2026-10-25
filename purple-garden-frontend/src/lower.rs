@@ -18,7 +18,7 @@ use crate::{
     lex::{self, Token, Type},
 };
 use purple_garden_ir::{
-    BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, ptype,
+    BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, ParamsId, Terminator, TypeId, ptype,
 };
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
@@ -49,15 +49,19 @@ struct LowerCtx<'lower, S: Allocator, I: Allocator> {
     id_store: IdStore,
     /// maps ast variable names to ssa values
     env: Map<&'lower str, Id, S>,
+    /// `env` of every enclosing match arm, restored once the arm is lowered. Their values are still
+    /// needed after the arm, so blocks receive them as params too, see [`Lower::bound_values`].
+    scopes: Vec<Map<&'lower str, Id, S>, S>,
 }
 
-impl<S: Allocator, I: Allocator + Clone> LowerCtx<'_, S, I> {
+impl<S: Allocator + Clone, I: Allocator + Clone> LowerCtx<'_, S, I> {
     fn new_in(scratch: S, ir: I) -> Self {
         Self {
             func: Func::new_in("", Id(0), [], None, ir),
             block: Id::default(),
             id_store: IdStore::default(),
-            env: Map::new_in(scratch),
+            env: Map::new_in(scratch.clone()),
+            scopes: Vec::new_in(scratch),
         }
     }
 }
@@ -72,11 +76,11 @@ pub struct Lower<
     I: Allocator + Clone = Global,
 > {
     scratch: S,
-    /// Every function and block of the IR is allocated in it.
+    /// allocator every function and block of the IR is allocated in
     ir: I,
     ctx: LowerCtx<'lower, S, I>,
     /// AST nodes of the root being lowered. The parser numbers nodes in
-    /// post-order, so a root's subtree is the id range since the previous root.
+    /// post-order, so a root's subtree is the id range since the previous root
     root_nodes: usize,
     functions: Vec<Func<'lower, I>, I>,
     func_name_to_id: Map<&'lower str, (Id, Option<ptype::Type<'lower>>), S>,
@@ -160,12 +164,6 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
             .push(i);
     }
 
-    fn cur(&self) -> &Block<'lower, I> {
-        let Id(idx) = self.ctx.block;
-        self.ctx.func.blocks.get(idx as usize).unwrap()
-    }
-
-    /// Branch and match arms mostly hold one or two instructions.
     fn new_block(&mut self) -> Id {
         self.new_block_with(2)
     }
@@ -188,6 +186,71 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
 
     fn switch_to_block(&mut self, id: Id) {
         self.ctx.block = id;
+    }
+
+    /// Every value bound in `env` or in an enclosing arm's scope, sorted and deduplicated. A block
+    /// only uses its own params, so these are what an edge into a block of a match passes on.
+    fn bound_values(&self) -> Vec<Id, S> {
+        let mut values = Vec::new_in(self.scratch.clone());
+        values.extend(self.ctx.env.values().copied());
+        for scope in &self.ctx.scopes {
+            values.extend(scope.values().copied());
+        }
+        values.sort_unstable();
+        values.dedup();
+        values
+    }
+
+    /// Switches to `block`, giving it `result` (if any) and a fresh param for each of the sorted
+    /// `values`, then rebinds every binding of a value to its param. Fresh ids ascend, so the
+    /// params stay in the order of `values`.
+    fn enter_block(&mut self, block: Id, values: &[Id], result: Option<Id>) -> ParamsId {
+        let mut params = Vec::with_capacity_in(values.len(), self.scratch.clone());
+        params.extend(values.iter().map(|_| self.ctx.id_store.new_value()));
+
+        let rebind = |id: &mut Id| {
+            if let Ok(i) = values.binary_search(id) {
+                *id = params[i];
+            }
+        };
+        self.ctx.env.values_mut().for_each(rebind);
+        for scope in &mut self.ctx.scopes {
+            scope.values_mut().for_each(rebind);
+        }
+
+        let params = self
+            .ctx
+            .func
+            .intern_params(result.into_iter().chain(params.iter().copied()));
+        self.block_mut(block).params = params;
+        self.switch_to_block(block);
+        params
+    }
+
+    /// Lowers a match arm as its own scope: `let` bindings inside it (including ones that shadow
+    /// a param) must not leak into sibling arms, the default arm, or code after the match. env is
+    /// a flat map, so it is saved onto `scopes` and restored afterwards, a nested match in the arm
+    /// rebinds the saved copy too.
+    fn lower_arm(
+        &mut self,
+        ast: &'lower Ast<'lower, 'lower>,
+        body: &[NodeId],
+    ) -> Result<Id, Diagnostic> {
+        self.ctx.scopes.push(self.ctx.env.clone());
+        let mut last = None;
+        for &node in body {
+            last = self.lower_node(ast, node)?;
+        }
+        self.ctx.env = self.ctx.scopes.pop().unwrap();
+        Ok(last.expect("match arm must produce value"))
+    }
+
+    /// The args of an arm's jump into the join: its result, then every bound value.
+    fn join_args(&mut self, result: Id) -> ParamsId {
+        let values = self.bound_values();
+        self.ctx
+            .func
+            .intern_params(std::iter::once(result).chain(values.iter().copied()))
     }
 
     fn lower_node_into(
@@ -488,17 +551,23 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                     func.blocks.reserve(self.root_nodes / 2 + 1);
                 }
 
-                // TODO:deal with b0
-
                 self.ctx.func = func;
+
                 // At most three instructions per four nodes, the arms of matches
                 // and branches take theirs into blocks of their own.
                 let entry = self.new_block_with((self.root_nodes * 3 / 4).max(2));
+
+                // we dont need to care about setting params up here, since they come from the
+                // function def, which we treat as the IR root container:
+                //
+                // Fn(Blocks{params,term,[instr]})
                 let entry_params = self.ctx.func.intern_own_params();
                 self.block_mut(entry).params = entry_params;
 
                 let mut last = None;
                 for &node in *body {
+                    // we switch back to the entry block after lowering every node to make sure we
+                    // dont lower new nodes into "old" blocks
                     self.switch_to_block(entry);
                     last = self.lower_node(ast, node)?;
                 }
@@ -716,40 +785,35 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                     check_blocks.push(if i == 0 { entry } else { self.new_block() });
                     body_blocks.push(self.new_block());
                 }
-
-                // All check/body/default blocks of this match inherit the
-                // enclosing block's params
-                //
-                // Intern that list once and hand the same ParamsId to every sink; 4 * per case,
-                // plus the default block, plus the two Branch arms. Each assignment is a u32 copy,
-                // no allocation.
-                let case_params = {
-                    let entry_params = self.cur().params;
-                    let cloned: Vec<Id> = self.ctx.func.params(entry_params).to_vec();
-                    self.ctx.func.intern_params(cloned)
-                };
-
                 let default_block = self.new_block();
-                // Set before any arm is lowered: a nested match copies the
-                // params of the block it starts in.
-                for &block in check_blocks.iter().chain(&body_blocks) {
-                    self.block_mut(block).params = case_params;
-                }
-                self.block_mut(default_block).params = case_params;
+                // the single join block, merging all value results into a single branch
+                let join = self.new_block();
+
+                // A block only uses its own params, so every check, body and default block
+                // receives each bound value as a fresh param. A check passes its params on both
+                // edges and is restored before lowering the next check, so every block of the
+                // match takes the same number of params in the same order.
+                let mut check_values = self.bound_values();
+                let mut check_args = self.ctx.func.intern_params(check_values.iter().copied());
+                let mut check_env = self.ctx.env.clone();
+                let mut check_scopes = self.ctx.scopes.clone();
                 if cases.is_empty() {
                     self.block_mut(entry).term = Some(Terminator::Jump {
                         id: default_block,
-                        params: case_params,
+                        params: check_args,
                         span: default.0.start as u32,
                     });
                 }
 
-                // the single join block, merging all value results into a single branch
-                let join = self.new_block();
-
                 for (i, ((case_tok, condition), body)) in cases.iter().enumerate() {
                     let case_span = case_tok.start as u32;
-                    self.switch_to_block(check_blocks[i]);
+                    if i != 0 {
+                        check_args = self.enter_block(check_blocks[i], &check_values, None);
+                        check_values.clear();
+                        check_values.extend_from_slice(self.ctx.func.params(check_args));
+                        check_env = self.ctx.env.clone();
+                        check_scopes = self.ctx.scopes.clone();
+                    }
                     let Some(cond) = self.lower_node(ast, *condition)? else {
                         unreachable!(
                             "Compiler bug, match cases MUST have a condition returning a value"
@@ -767,58 +831,42 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                     // terminators go on the current block, never the entry.
                     self.block_mut(self.ctx.block).term = Some(Terminator::Branch {
                         cond,
-                        yes: (body_blocks[i], case_params),
-                        no: (no_target, case_params),
+                        yes: (body_blocks[i], check_args),
+                        no: (no_target, check_args),
                         span: case_span,
                     });
 
-                    self.switch_to_block(body_blocks[i]);
-
-                    // A match arm is its own scope: `let` bindings inside it
-                    // (including ones that shadow a param) must not leak into
-                    // sibling arms, the default arm, or code after the match.
-                    // env is a flat map, so snapshot it and restore afterwards.
-                    let saved_env = self.ctx.env.clone();
-                    let mut last = None;
-                    for &node in *body {
-                        last = self.lower_node(ast, node)?;
-                    }
-                    let value = last.expect("match body must produce value");
-                    self.ctx.env = saved_env;
-
-                    let body_jump_params = self.ctx.func.intern_params(vec![value]);
+                    self.enter_block(body_blocks[i], &check_values, None);
+                    let value = self.lower_arm(ast, body)?;
+                    let args = self.join_args(value);
                     self.block_mut(self.ctx.block).term = Some(Terminator::Jump {
                         id: join,
-                        params: body_jump_params,
+                        params: args,
                         span: case_span,
                     });
+
+                    self.ctx.env.clone_from(&check_env);
+                    self.ctx.scopes.clone_from(&check_scopes);
                 }
 
                 // the typechecker checked we have a default case, so this is safe
                 let (default_tok, body) = default;
                 let default_span = default_tok.start as u32;
-                self.switch_to_block(default_block);
-                // Same scoping as the case arms above: the default body's
-                // `let` bindings stay local to it.
-                let saved_env = self.ctx.env.clone();
-                let mut last = None;
-                for &node in *body {
-                    last = self.lower_node(ast, node)?;
-                }
-
-                let last = last.expect("match default must produce value");
-                self.ctx.env = saved_env;
-                let default_jump_params = self.ctx.func.intern_params(vec![last]);
-                let join_params = self.ctx.func.intern_params(vec![last]);
+                self.enter_block(default_block, &check_values, None);
+                let last = self.lower_arm(ast, body)?;
+                let args = self.join_args(last);
                 self.block_mut(self.ctx.block).term = Some(Terminator::Jump {
                     id: join,
-                    params: default_jump_params,
+                    params: args,
                     span: default_span,
                 });
 
-                self.switch_to_block(join);
-                self.block_mut(join).params = join_params;
-                Some(last)
+                // Every arm passes its result and then its bound values in the order of the
+                // default's, so the join's params line up with every arm's args.
+                let result = self.ctx.id_store.new_value();
+                let values = self.bound_values();
+                self.enter_block(join, &values, Some(result));
+                Some(result)
             }
             Node::Array { id, src, members } => {
                 let Some(ty) = self.types.get(*id).cloned() else {
