@@ -69,7 +69,8 @@ impl Drop for Input {
         if let Input::MmapedFile { file, len, ptr } = self {
             let _keep_file_alive = file;
             let cpy = *ptr;
-            mmap::munmap(cpy, *len).expect("Failed to unmap file");
+            // SAFETY: our mapping, dropped with self
+            unsafe { mmap::munmap(cpy, *len) }.expect("Failed to unmap file");
         }
     }
 }

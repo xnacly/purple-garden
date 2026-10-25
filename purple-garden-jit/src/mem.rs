@@ -88,7 +88,8 @@ impl<P: Pages> CodeArena<P> {
         if self.len == 0 {
             return Ok(());
         }
-        mmap::mprotect(self.ptr, self.len, MmapProt::READ | MmapProt::EXEC)
+        // SAFETY: our pages, sealed refuses further writes
+        unsafe { mmap::mprotect(self.ptr, self.len, MmapProt::READ | MmapProt::EXEC) }
     }
 }
 
