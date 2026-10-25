@@ -96,7 +96,7 @@ pub struct Vm<'vm> {
     pub gc: Gc<VmAlloc<'vm>>,
 
     /// Backing storage for string constants emitted by the compiler.
-    pub const_pool: Box<[u8]>,
+    pub const_pool: Box<[u32]>,
     /// Every string, constants included, see [`Vm::new_string_from_str`].
     pub strings: string::StrTable,
 

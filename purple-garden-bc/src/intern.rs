@@ -51,10 +51,12 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
     {
         let len = self.next_id as usize;
         let mut vec: Vec<MaybeUninit<T>> = Vec::with_capacity(len);
+        // SAFETY: MaybeUninit needs no init, len == capacity
         unsafe { vec.set_len(len) };
         for (v, &i) in &self.map {
             vec[i as usize].write(v.clone());
         }
+        // SAFETY: ids are dense in 0..next_id, every slot is written
         unsafe { std::mem::transmute::<Vec<MaybeUninit<T>>, Vec<T>>(vec) }
     }
 
@@ -62,6 +64,7 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
         let len = self.next_id as usize;
         let mut vec: Vec<MaybeUninit<T>> = Vec::with_capacity(len);
 
+        // SAFETY: MaybeUninit needs no init, len == capacity
         unsafe {
             vec.set_len(len);
         }
@@ -70,6 +73,7 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
             vec[i as usize].write(v);
         }
 
+        // SAFETY: ids are dense in 0..next_id, every slot is written
         unsafe { std::mem::transmute::<Vec<MaybeUninit<T>>, Vec<T>>(vec) }
     }
 
@@ -81,6 +85,7 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
         let len = self.next_id as usize;
         let mut vec: Vec<MaybeUninit<O>> = Vec::with_capacity(len);
 
+        // SAFETY: MaybeUninit needs no init, len == capacity
         unsafe {
             vec.set_len(len);
         }
@@ -89,6 +94,7 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
             vec[i as usize].write(modify(v));
         }
 
+        // SAFETY: ids are dense in 0..next_id, every slot is written
         unsafe { std::mem::transmute::<Vec<MaybeUninit<O>>, Vec<O>>(vec) }
     }
 }
