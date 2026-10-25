@@ -566,9 +566,6 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
 
                 let mut last = None;
                 for &node in *body {
-                    // we switch back to the entry block after lowering every node to make sure we
-                    // dont lower new nodes into "old" blocks
-                    self.switch_to_block(entry);
                     last = self.lower_node(ast, node)?;
                 }
 
