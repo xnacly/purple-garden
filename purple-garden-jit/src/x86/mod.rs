@@ -344,8 +344,8 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     entry: ir::Id,
     /// The block being lowered, for the facts that only hold inside it.
     block: ir::Id,
-    /// Walks in lockstep with [`ir::Func::live_set_into`]: two units per block
-    /// header, instruction and terminator, uses on `pos`, defs on `pos + 1`.
+    /// Walks in lockstep with [`ir::Func::live_set_into`]: one unit per block
+    /// header, instruction and terminator, uses and defs both on `pos`.
     pos: u32,
     /// Set once a helper or native function is called; the prologue then aligns the stack.
     calls: bool,
@@ -479,14 +479,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             for &param in self.func.params(block.params) {
                 self.def_class(param, self.pos, Class::Gpr);
             }
-            self.pos += 2;
+            self.pos += 1;
 
             for instruction in &block.instructions {
                 self.instr(instruction);
                 if self.unsupported {
                     return None;
                 }
-                self.pos += 2;
+                self.pos += 1;
             }
 
             let next = blocks[idx + 1..]
@@ -497,7 +497,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             if self.unsupported {
                 return None;
             }
-            self.pos += 2;
+            self.pos += 1;
         }
 
         self.patch_jumps();
@@ -599,7 +599,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let resume = self.out.len();
                 patch_rel32(self.out, holds, holds + 4, resume).expect("short forward jump");
                 // a Void value is never read, whatever the register holds will do
-                self.def(dst, self.pos + 1);
+                self.def(dst, self.pos);
             }
             ir::Instr::Load {
                 dst, base, offset, ..
@@ -607,7 +607,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let base = self.ensure_register(*base);
                 let base = self.gpr(base);
                 let offset = *offset;
-                let dst = self.def(dst, self.pos + 1);
+                let dst = self.def(dst, self.pos);
                 self.emit(match dst {
                     Preg::Gpr(dst) => Insn::LoadMem {
                         dst: Reg(dst),
@@ -626,7 +626,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             } if *offset <= i32::MAX as u32 => {
                 let base = self.ensure_register(*base);
                 let base = self.gpr(base);
-                let dst = self.def(dst, self.pos + 1);
+                let dst = self.def(dst, self.pos);
                 let dst = self.gpr(dst);
                 self.emit(Insn::LeaMem {
                     dst,
@@ -644,7 +644,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     return;
                 };
                 let saves = self.save_clobbered(CALL_CLOBBERS);
-                let dst = self.def_class(*id, self.pos + 1, ty.into());
+                let dst = self.def_class(*id, self.pos, ty.into());
                 let dst = self.gpr(dst);
                 self.call(
                     purple_garden_runtime::jit_alloc as *const () as u64,
@@ -671,7 +671,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     bail!(self, "string constant missing from the const pool");
                     return;
                 };
-                let dst = self.def(dst, self.pos + 1);
+                let dst = self.def(dst, self.pos);
                 let dst = self.gpr(dst);
                 self.emit(Insn::MovAbs { dst, imm: value.0 });
             }
@@ -682,7 +682,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             } => {
                 // xmm doesnt have an immediate form:
                 // so we move the bits in the GPR scratch.
-                let dst = self.def(dst, self.pos + 1);
+                let dst = self.def(dst, self.pos);
                 let dst = self.xmm(dst);
                 self.emit(Insn::MovAbs {
                     dst: GPR_SCRATCH,
@@ -699,7 +699,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 value: ir::Const::Undefined,
                 ..
             } => {
-                self.def(dst, self.pos + 1);
+                self.def(dst, self.pos);
             }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let Some(imm) = (match value {
@@ -712,7 +712,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     return;
                 };
 
-                let dst = self.def(dst, self.pos + 1);
+                let dst = self.def(dst, self.pos);
                 let dst = self.gpr(dst);
                 if imm > i32::MAX as i64 || imm < i32::MIN as i64 {
                     let imm = imm.cast_unsigned();
@@ -743,7 +743,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let lhs = self.ensure_register(*lhs);
                 let lhs = self.gpr(lhs);
                 let imm = *imm;
-                let dst = self.def(dst, self.pos + 1);
+                let dst = self.def(dst, self.pos);
                 let dst = self.gpr(dst);
 
                 match op {
@@ -848,7 +848,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let rhs = self.ensure_register(*rhs);
                 let rhs = self.xmm(rhs);
 
-                let dst = self.def(dst, self.pos + 1);
+                let dst = self.def(dst, self.pos);
                 let dst = self.xmm(dst);
 
                 self.emit(match op {
@@ -871,7 +871,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let rhs = self.ensure_register(*rhs);
                 let rhs = self.xmm(rhs);
 
-                let dst = self.def(dst, self.pos + 1);
+                let dst = self.def(dst, self.pos);
                 let dst = self.gpr(dst);
 
                 // ucomisd reports `<` like a NaN, via CF, but `>` only when
@@ -896,7 +896,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let rhs = self.gpr(rhs);
                 match op {
                     BinOp::IAdd | BinOp::ISub | BinOp::IMul | BinOp::IAnd => {
-                        let dst = self.def(dst, self.pos + 1);
+                        let dst = self.def(dst, self.pos);
                         let dst = self.gpr(dst);
 
                         // x86 arithmetic is `dst <op>= src`, so dst has to
@@ -917,7 +917,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                     // Strings are interned: equal contents share one pointer.
                     BinOp::IEq | BinOp::BEq | BinOp::SEq | BinOp::ILt | BinOp::IGt => {
-                        let dst = self.def(dst, self.pos + 1);
+                        let dst = self.def(dst, self.pos);
                         let dst = self.gpr(dst);
                         self.emit(Insn::Cmp { lhs, rhs });
                         self.emit(Insn::MovImm { dst, imm: 0 });
@@ -952,7 +952,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ir::Instr::Cast { dst, from, .. } => {
                 use ir::ptype::Type::{Bool, Double, Int};
                 let src = self.ensure_register(from.id);
-                let to = self.def(dst, self.pos + 1);
+                let to = self.def(dst, self.pos);
                 match (&from.ty, &dst.ty) {
                     (Int, Double) => {
                         let src = self.gpr(src);
@@ -1060,7 +1060,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
 
                 let subject = self.ensure_register(*subject);
                 let subject = self.gpr(subject);
-                let dst = self.def(dst, self.pos + 1);
+                let dst = self.def(dst, self.pos);
                 let dst = self.gpr(dst);
 
                 // rax = the subject's slot, everything outside the table wraps
@@ -1130,7 +1130,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let src = self.func.params(*args)[0];
                 let src = self.ensure_register(src);
                 let src = self.xmm(src);
-                let dst = self.def(dst, self.pos + 1);
+                let dst = self.def(dst, self.pos);
                 let dst = self.xmm(dst);
                 self.emit(Insn::VSqrtSd { dst, src });
             }
@@ -1598,7 +1598,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             fprs: false,
         };
         let saves = self.save_clobbered(clobbers);
-        let dst = self.def_class(dst, self.pos + 1, Class::Gpr);
+        let dst = self.def_class(dst, self.pos, Class::Gpr);
         let dst = self.gpr(dst);
 
         self.emit(Insn::Mov { dst: RAX, src: lhs });
@@ -1671,7 +1671,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         }
         self.restore(saves);
         let void = dst.ty == ir::ptype::Type::Void;
-        let dst = self.def(dst, self.pos + 1);
+        let dst = self.def(dst, self.pos);
         // a Void value is never read, whatever the register holds will do
         if !void && dst != ret {
             self.mov(dst, ret);
