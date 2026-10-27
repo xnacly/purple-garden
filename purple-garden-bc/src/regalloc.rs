@@ -137,9 +137,8 @@ impl<S: Allocator + Clone> Ralloc<S> {
 
         for interval in intervals.iter_mut() {
             active.retain(|&(end, reg)| {
-                // end-inclusive (<=, not <): live_set encodes each pos as
-                // early + late, so a dying source and a newborn dst at the
-                // same logical pos can share a register.
+                // end-inclusive (<=, not <): a dying source and a newborn
+                // dst at the same pos can share a register.
                 if end <= interval.start {
                     free |= 1u64 << reg;
                     false

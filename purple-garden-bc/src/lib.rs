@@ -513,8 +513,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         // The matching epilogue is emitted before every Op::Ret and Op::Tail.
         self.emit_prologue(lo, max_reg);
 
-        // Two slots per event (early then late), in lockstep with
-        // Func::live_set_into. pos points at the early slot; the
+        // One slot per row, in lockstep with Func::live_set_into; the
         // call-site spill check compares last_use against it.
         let mut pos: u32 = 0;
         for (idx, block) in fun.blocks.iter().enumerate() {
@@ -524,11 +523,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
             self.block_map[block.id.0 as usize] = self.buf.len() as u16;
 
-            pos += 2; // block params row
+            pos += 1; // block params row
             for instruction in &block.instructions {
                 self.cur_span = instruction.span();
                 self.instr(fun, &live_set, pos, instruction);
-                pos += 2;
+                pos += 1;
             }
 
             if let Some(term) = block.term.as_ref() {
@@ -542,7 +541,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 .find(|b| !b.tombstone)
                 .map(|b| b.id);
             self.term(fun, block.term.as_ref(), next_block, lo, max_reg);
-            pos += 2; // terminator row
+            pos += 1; // terminator row
         }
 
         // The entry/root function is entered directly by the VM, not through a
