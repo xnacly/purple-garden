@@ -10,9 +10,7 @@
 //!
 //! xralloc2 is target-independent by allowing a pool of registers to be defined per
 //! [`Class`]: general purpose registers hold integers and pointers, floating point
-//! registers hold doubles. The classes are separate register files, so a value in one
-//! never conflicts with a value in the other.
-
+//! registers hold doubles.
 use std::alloc::{Allocator, Global};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,10 +56,12 @@ pub struct Xralloc2<S: Allocator = Global> {
     map: Vec<Option<Reg>, S>,
     /// `(last_use, reg)` of every value currently holding a register.
     active: Vec<(u32, Reg), S>,
-    /// Free registers per [`Class`].
-    free: [Vec<u8, S>; 2],
+    /// Allocation order per [`Class`], the most preferred register last.
+    pool: [Vec<u8, S>; 2],
+    /// Bitmask per [`Class`] of the registers currently free.
+    free: [u64; 2],
     /// Bitmask per [`Class`] of every register handed out since [`Xralloc2::reset`].
-    used: [u32; 2],
+    used: [u64; 2],
 }
 
 impl Default for Xralloc2 {
@@ -75,19 +75,20 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         Self {
             map: Vec::new_in(scratch.clone()),
             active: Vec::new_in(scratch.clone()),
-            free: [Vec::new_in(scratch.clone()), Vec::new_in(scratch)],
+            pool: [Vec::new_in(scratch.clone()), Vec::new_in(scratch)],
+            free: [0; 2],
             used: [0; 2],
         }
     }
 
-    /// Pools are popped from the back, so the preferred registers go last.
     pub fn reset(&mut self, ids: usize, gprs: &[u8], fprs: &[u8]) {
         self.map.clear();
         self.map.resize(ids, None);
         self.active.clear();
-        for (free, pool) in self.free.iter_mut().zip([gprs, fprs]) {
-            free.clear();
-            free.extend_from_slice(pool);
+        for (class, regs) in [gprs, fprs].into_iter().enumerate() {
+            self.pool[class].clear();
+            self.pool[class].extend_from_slice(regs);
+            self.free[class] = regs.iter().fold(0, |mask, &num| mask | 1u64 << num);
         }
         self.used = [0; 2];
     }
@@ -97,7 +98,7 @@ impl<S: Allocator + Clone> Xralloc2<S> {
     }
 
     /// Assign `id` a register of `class`, reusing those of values whose last
-    /// use is at or before `at`. Idempotent for already assigned ids.
+    /// use is at or before `at`
     pub fn alloc(
         &mut self,
         id: impl Into<usize>,
@@ -105,26 +106,59 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         at: u32,
         last_use: u32,
     ) -> Option<Reg> {
-        let id = id.into();
+        self.alloc_inner(id.into(), class, at, last_use, None)
+    }
+
+    /// [`Xralloc2::alloc`], but prioritising `hint` if it is free at `at`.
+    pub fn alloc_with_hint(
+        &mut self,
+        id: impl Into<usize>,
+        class: Class,
+        at: u32,
+        last_use: u32,
+        hint: Reg,
+    ) -> Option<Reg> {
+        self.alloc_inner(id.into(), class, at, last_use, Some(hint))
+    }
+
+    fn alloc_inner(
+        &mut self,
+        id: usize,
+        class: Class,
+        at: u32,
+        last_use: u32,
+        hint: Option<Reg>,
+    ) -> Option<Reg> {
+        // A value keeps its register for its whole live interval, so if its marked as used and
+        // requested again, its the same reg
         if let Some(reg) = self.reg(id) {
             return Some(reg);
         }
+
+        // Values whose last use is at or before `at` are dead, their reg should be free again
+        //
+        // This is what enables reuse of the reg l is in for d in `d = l + r` (if l dead at at)
         self.expire(at);
-        let reg = Reg::new(class, self.free[class as usize].pop()?);
+
+        // The pool is ordered, so the preferred register (hint) must be at the back and be popped
+        // as the allocated register
+        let num = match hint {
+            Some(hint) if hint.class() == class && self.try_take(hint).is_some() => hint.num(),
+            _ => self.pop(class)?,
+        };
+
+        let reg = Reg::new(class, num);
         self.active.push((last_use, reg));
-        *self.map.get_mut(id)? = Some(reg);
+        self.map[id] = Some(reg);
         self.mark_used(reg);
         Some(reg)
     }
 
     /// Assign `id` the free register `reg`, where a parameter arrives. `None` if `reg` isn't free.
-    pub fn alloc_at(&mut self, id: impl Into<usize>, reg: Reg, last_use: u32) -> Option<Reg> {
-        let free = &mut self.free[reg.class() as usize];
-        let i = free.iter().position(|&num| num == reg.num())?;
-        free.remove(i);
+    pub fn try_alloc_at(&mut self, id: impl Into<usize>, reg: Reg, last_use: u32) -> Option<Reg> {
+        self.try_take(reg)?;
         self.active.push((last_use, reg));
-        *self.map.get_mut(id.into())? = Some(reg);
-        self.mark_used(reg);
+        self.map[id.into()] = Some(reg);
         Some(reg)
     }
 
@@ -133,7 +167,7 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         let Self { active, free, .. } = self;
         active.retain(|&(end, reg)| {
             if end <= at {
-                free[reg.class() as usize].push(reg.num());
+                free[reg.class() as usize] |= 1u64 << reg.num();
             }
             end > at
         });
@@ -147,25 +181,40 @@ impl<S: Allocator + Clone> Xralloc2<S> {
             .map(|&(_, reg)| reg)
     }
 
-    /// Borrow a free register of `class` matching `pred` until [`Xralloc2::give_back`].
-    pub fn take_free(&mut self, class: Class, pred: impl Fn(u8) -> bool) -> Option<Reg> {
-        let free = &mut self.free[class as usize];
-        let i = free.iter().rposition(|&reg| pred(reg))?;
-        let reg = Reg::new(class, free.swap_remove(i));
+    /// Take `reg` off the free list until [`Xralloc2::give_back`]. `None` if it isn't free.
+    pub fn try_take(&mut self, reg: Reg) -> Option<Reg> {
+        let bit = 1u64 << reg.num();
+        let free = &mut self.free[reg.class() as usize];
+        if *free & bit == 0 {
+            return None;
+        }
+        *free &= !bit;
         self.mark_used(reg);
         Some(reg)
     }
 
     pub fn give_back(&mut self, reg: Reg) {
-        self.free[reg.class() as usize].push(reg.num());
+        self.free[reg.class() as usize] |= 1u64 << reg.num();
+    }
+
+    /// Take the most preferred free register of `class`, be it the last or the newest, etc.
+    fn pop(&mut self, class: Class) -> Option<u8> {
+        let free = &mut self.free[class as usize];
+        let num = self.pool[class as usize]
+            .iter()
+            .rev()
+            .copied()
+            .find(|&num| *free & (1u64 << num) != 0)?;
+        *free &= !(1u64 << num);
+        Some(num)
     }
 
     pub fn used(&self, reg: Reg) -> bool {
-        self.used[reg.class() as usize] & (1 << reg.num()) != 0
+        self.used[reg.class() as usize] & (1u64 << reg.num()) != 0
     }
 
     fn mark_used(&mut self, reg: Reg) {
-        self.used[reg.class() as usize] |= 1 << reg.num();
+        self.used[reg.class() as usize] |= 1u64 << reg.num();
     }
 }
 

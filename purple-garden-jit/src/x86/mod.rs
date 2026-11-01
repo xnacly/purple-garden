@@ -464,7 +464,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 Class::Gpr => Preg::Gpr(ARG_GPRS[i].0),
                 Class::Fpr => Preg::Fpr(i as u8),
             };
-            if self.ra.alloc_at(param.id, reg, last_use).is_none() {
+            if self.ra.try_alloc_at(param.id, reg, last_use).is_none() {
                 bail!(self, "param register {reg:?} is taken");
             }
         }
@@ -1348,7 +1348,11 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
 
                 let subject = self.ensure_register(*subject);
                 let subject = self.gpr(subject);
-                let Some(base) = self.ra.take_free(Class::Gpr, |_| true) else {
+                let Some(base) = GPR_POOL
+                    .iter()
+                    .rev()
+                    .find_map(|&num| self.ra.try_take(Preg::Gpr(num)))
+                else {
                     bail!(self, "no free register for the switch table");
                     return;
                 };
@@ -1532,6 +1536,19 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         saves
     }
 
+    /// The most preferred free register of `class` that `clobbers` leaves alone.
+    fn take_unclobbered(&mut self, class: Class, clobbers: Clobbers) -> Option<Preg> {
+        let pool = match class {
+            Class::Gpr => GPR_POOL,
+            Class::Fpr => XMM_POOL,
+        };
+        pool.iter()
+            .rev()
+            .map(|&num| Preg::new(class, num))
+            .filter(|&reg| !clobbers.contains(reg))
+            .find_map(|reg| self.ra.try_take(reg))
+    }
+
     /// The `(reg, copy)` pairs [`Lowering::save_clobbered`] would copy, without emitting them.
     fn reserve_copies(&mut self, clobbers: Clobbers) -> Vec<(Preg, Preg), S> {
         let mut saves = std::mem::replace(self.saves, Vec::new_in(self.scratch()));
@@ -1545,11 +1562,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         for save in &mut saves {
             // A call clobbers every fpr, so a live double moves into a callee saved gpr instead.
             let class = save.0.class();
-            let free = |class| move |free| !clobbers.contains(Preg::new(class, free));
             match self
-                .ra
-                .take_free(class, free(class))
-                .or_else(|| self.ra.take_free(Class::Gpr, free(Class::Gpr)))
+                .take_unclobbered(class, clobbers)
+                .or_else(|| self.take_unclobbered(Class::Gpr, clobbers))
             {
                 Some(free) => save.1 = free,
                 None => bail!(
