@@ -82,6 +82,12 @@ impl<'f> Fn<'f> {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Id(pub u32);
 
+impl From<Id> for usize {
+    fn from(id: Id) -> Self {
+        id.0 as usize
+    }
+}
+
 /// Where a backend placed an SSA value, indexed by [`Id`]. Produced by the
 /// bytecode backend's register allocator and consumed by every code generator
 /// (bytecode emit, JIT); hence it lives here in the shared IR vocabulary

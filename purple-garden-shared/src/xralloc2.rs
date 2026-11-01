@@ -15,22 +15,10 @@
 
 use std::alloc::{Allocator, Global};
 
-use purple_garden_ir::Id;
-use purple_garden_runtime::Type;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
     Gpr,
     Fpr,
-}
-
-impl From<&Type<'_>> for Class {
-    fn from(value: &Type<'_>) -> Self {
-        match value {
-            Type::Double => Self::Fpr,
-            _ => Self::Gpr,
-        }
-    }
 }
 
 /// A physical register, numbered within its class' register file.
@@ -104,31 +92,38 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         self.used = [0; 2];
     }
 
-    pub fn reg(&self, id: Id) -> Option<Reg> {
-        self.map.get(id.0 as usize).copied().flatten()
+    pub fn reg(&self, id: impl Into<usize>) -> Option<Reg> {
+        self.map.get(id.into()).copied().flatten()
     }
 
     /// Assign `id` a register of `class`, reusing those of values whose last
     /// use is at or before `at`. Idempotent for already assigned ids.
-    pub fn alloc(&mut self, id: Id, class: Class, at: u32, last_use: u32) -> Option<Reg> {
+    pub fn alloc(
+        &mut self,
+        id: impl Into<usize>,
+        class: Class,
+        at: u32,
+        last_use: u32,
+    ) -> Option<Reg> {
+        let id = id.into();
         if let Some(reg) = self.reg(id) {
             return Some(reg);
         }
         self.expire(at);
         let reg = Reg::new(class, self.free[class as usize].pop()?);
         self.active.push((last_use, reg));
-        *self.map.get_mut(id.0 as usize)? = Some(reg);
+        *self.map.get_mut(id)? = Some(reg);
         self.mark_used(reg);
         Some(reg)
     }
 
     /// Assign `id` the free register `reg`, where a parameter arrives. `None` if `reg` isn't free.
-    pub fn alloc_at(&mut self, id: Id, reg: Reg, last_use: u32) -> Option<Reg> {
+    pub fn alloc_at(&mut self, id: impl Into<usize>, reg: Reg, last_use: u32) -> Option<Reg> {
         let free = &mut self.free[reg.class() as usize];
         let i = free.iter().position(|&num| num == reg.num())?;
         free.remove(i);
         self.active.push((last_use, reg));
-        *self.map.get_mut(id.0 as usize)? = Some(reg);
+        *self.map.get_mut(id.into())? = Some(reg);
         self.mark_used(reg);
         Some(reg)
     }
@@ -177,7 +172,6 @@ impl<S: Allocator + Clone> Xralloc2<S> {
 #[cfg(test)]
 mod tests {
     use super::{Class, Reg, Xralloc2};
-    use purple_garden_ir::Id;
 
     /// A value dying at `at` frees its register for the one defined there,
     /// which is what lets `d = l + r` reuse `l`'s register.
@@ -185,8 +179,8 @@ mod tests {
     fn dying_value_hands_its_register_to_the_next_def() {
         let mut ra = Xralloc2::default();
         ra.reset(2, &[1, 0], &[]);
-        assert_eq!(ra.alloc(Id(0), Class::Gpr, 0, 4), Some(Reg::Gpr(0)));
-        assert_eq!(ra.alloc(Id(1), Class::Gpr, 4, 6), Some(Reg::Gpr(0)));
+        assert_eq!(ra.alloc(0usize, Class::Gpr, 0, 4), Some(Reg::Gpr(0)));
+        assert_eq!(ra.alloc(1usize, Class::Gpr, 4, 6), Some(Reg::Gpr(0)));
     }
 
     /// The classes are separate register files: a double and an integer
@@ -195,10 +189,10 @@ mod tests {
     fn classes_are_allocated_independently() {
         let mut ra = Xralloc2::default();
         ra.reset(4, &[0], &[0]);
-        assert_eq!(ra.alloc(Id(0), Class::Gpr, 0, 10), Some(Reg::Gpr(0)));
-        assert_eq!(ra.alloc(Id(1), Class::Fpr, 0, 2), Some(Reg::Fpr(0)));
-        assert_eq!(ra.alloc(Id(2), Class::Gpr, 2, 4), None);
-        assert_eq!(ra.alloc(Id(3), Class::Fpr, 2, 4), Some(Reg::Fpr(0)));
+        assert_eq!(ra.alloc(0usize, Class::Gpr, 0, 10), Some(Reg::Gpr(0)));
+        assert_eq!(ra.alloc(1usize, Class::Fpr, 0, 2), Some(Reg::Fpr(0)));
+        assert_eq!(ra.alloc(2usize, Class::Gpr, 2, 4), None);
+        assert_eq!(ra.alloc(3usize, Class::Fpr, 2, 4), Some(Reg::Fpr(0)));
         assert!(ra.used(Reg::Gpr(0)));
         assert!(ra.used(Reg::Fpr(0)));
         assert!(!ra.used(Reg::Fpr(1)));

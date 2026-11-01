@@ -40,11 +40,11 @@ mod arch;
 #[path = "aarch64/mod.rs"]
 mod arch;
 pub mod mem;
-mod xralloc2;
 
 pub use mem::CodeArena;
 use purple_garden_ir as ir;
 use purple_garden_runtime::{BuiltinFn, Value};
+use purple_garden_shared::xralloc2;
 use std::{
     alloc::{Allocator, Global},
     collections::HashMap,
