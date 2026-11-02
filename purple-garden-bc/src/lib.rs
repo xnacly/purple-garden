@@ -262,20 +262,21 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         pc
     }
 
-    /// The register of `id`, allocated on its first touch: its def or, for a block param, the
-    /// first edge passing it, which comes before its interval starts.
+    /// The register of `id`, allocated on its first touch, a block param's is picked by
+    /// [`Cc::choose_params`] at the first edge reaching it.
     fn ensure_register(&mut self, id: Id) -> u8 {
         if let Some(reg) = self.regalloc.reg(id) {
             return reg.num();
         }
         let (start, end) = self.live_set[id.0 as usize];
         assert!(start != u32::MAX, "%v{} has no live interval", id.0);
-        let at = self.pos.min(start);
+        debug_assert!(start <= self.pos, "%v{} allocated before it starts", id.0);
         let reg = match self.arg_hints.get(id.0 as usize).copied().flatten() {
-            Some(hint) => self
-                .regalloc
-                .alloc_with_hint(id, Class::Gpr, at, end, Reg::Gpr(hint)),
-            None => self.regalloc.alloc(id, Class::Gpr, at, end),
+            Some(hint) => {
+                self.regalloc
+                    .alloc_with_hint(id, Class::Gpr, self.pos, end, Reg::Gpr(hint))
+            }
+            None => self.regalloc.alloc(id, Class::Gpr, self.pos, end),
         };
         let Some(reg) = reg else {
             todo!(
@@ -445,10 +446,13 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
             self.bind(block.id.0 as u16);
 
-            // Params no edge touched yet start here
             for &param in fun.params(block.params) {
-                if self.live_set[param.0 as usize].0 != u32::MAX {
-                    self.ensure_register(param);
+                let end = self.live_set[param.0 as usize].1;
+                match self.regalloc.reg(param) {
+                    // entry params arrive in their registers
+                    Some(_) if idx == 0 => {}
+                    Some(_) => self.regalloc.activate(param, self.pos, end),
+                    None => _ = self.ensure_register(param),
                 }
             }
             self.pos += 1; // block params row
@@ -737,11 +741,36 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         fun: &Func<'cc, F>,
         (target, params): (ir::Id, ir::ParamsId),
     ) -> bool {
+        self.choose_params(fun, (target, params));
         let dst = fun.params(fun.blocks[target.0 as usize].params);
         fun.params(params)
             .iter()
             .zip(dst)
             .any(|(&src, &dst)| self.ensure_register(src) != self.ensure_register(dst))
+    }
+
+    /// Pick registers for the params of `target` no edge reached yet, without taking them before
+    /// `target` starts. Each is hinted at its arg's register, so its move vanishes.
+    fn choose_params<F: Allocator>(
+        &mut self,
+        fun: &Func<'cc, F>,
+        (target, params): (ir::Id, ir::ParamsId),
+    ) {
+        let dst = fun.params(fun.blocks[target.0 as usize].params);
+        let mut excluded = dst
+            .iter()
+            .filter_map(|&param| self.regalloc.reg(param))
+            .fold(0u64, |mask, reg| mask | 1 << reg.num());
+        for (&src, &dst) in fun.params(params).iter().zip(dst) {
+            if self.regalloc.reg(dst).is_some() {
+                continue;
+            }
+            let hint = Reg::Gpr(self.ensure_register(src));
+            let Some(reg) = self.regalloc.choose(dst, Class::Gpr, Some(hint), excluded) else {
+                todo!("more params than registers for %v{}", dst.0)
+            };
+            excluded |= 1 << reg.num();
+        }
     }
 
     /// Move `params` into the params of `target`, then jump there unless it is `next_block`.
@@ -751,6 +780,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         (target, params): (ir::Id, ir::ParamsId),
         next_block: Option<ir::Id>,
     ) {
+        self.choose_params(fun, (target, params));
         let mut moves = take(&mut self.scratch_pairs);
         moves.clear();
         let dst = fun.params(fun.blocks[target.0 as usize].params);
