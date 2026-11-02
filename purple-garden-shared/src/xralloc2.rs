@@ -162,6 +162,47 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         Some(reg)
     }
 
+    /// Pick a register for `id` without taking it, for a value whose interval starts later, such
+    /// as a block param picked at the first edge reaching it. `excluded` are the registers of
+    /// values starting at the same time, `hint` wins unless excluded.
+    pub fn choose(
+        &mut self,
+        id: impl Into<usize>,
+        class: Class,
+        hint: Option<Reg>,
+        excluded: u64,
+    ) -> Option<Reg> {
+        let id = id.into();
+        if let Some(reg) = self.reg(id) {
+            return Some(reg);
+        }
+        let num = match hint {
+            Some(hint) if hint.class() == class && excluded & (1u64 << hint.num()) == 0 => {
+                hint.num()
+            }
+            _ => self.pool[class as usize]
+                .iter()
+                .rev()
+                .copied()
+                .find(|&num| excluded & (1u64 << num) == 0)?,
+        };
+        let reg = Reg::new(class, num);
+        self.map[id] = Some(reg);
+        Some(reg)
+    }
+
+    /// Take the register [`Xralloc2::choose`] picked for `id` once its interval starts at `at`.
+    pub fn activate(&mut self, id: impl Into<usize>, at: u32, last_use: u32) {
+        let reg = self
+            .reg(id)
+            .expect("activate a value choose picked a register for");
+        self.expire(at);
+        self.try_take(reg).expect(
+            "a chosen register is free at its interval's start, unless a value outlived its block",
+        );
+        self.active.push((last_use, reg));
+    }
+
     /// Free the registers of values whose last use is at or before `at`.
     pub fn expire(&mut self, at: u32) {
         let Self { active, free, .. } = self;
@@ -230,6 +271,26 @@ mod tests {
         ra.reset(2, &[1, 0], &[]);
         assert_eq!(ra.alloc(0usize, Class::Gpr, 0, 4), Some(Reg::Gpr(0)));
         assert_eq!(ra.alloc(1usize, Class::Gpr, 4, 6), Some(Reg::Gpr(0)));
+    }
+
+    /// A chosen register stays free until its value starts, so values dying before then may use
+    /// it, and siblings starting together never share one.
+    #[test]
+    fn chosen_register_is_only_taken_once_its_interval_starts() {
+        let mut ra = Xralloc2::default();
+        ra.reset(4, &[1, 0], &[]);
+        assert_eq!(
+            ra.choose(0usize, Class::Gpr, Some(Reg::Gpr(0)), 0),
+            Some(Reg::Gpr(0))
+        );
+        assert_eq!(
+            ra.choose(1usize, Class::Gpr, Some(Reg::Gpr(0)), 1),
+            Some(Reg::Gpr(1))
+        );
+        assert_eq!(ra.alloc(2usize, Class::Gpr, 1, 3), Some(Reg::Gpr(0)));
+        ra.activate(0usize, 4, 6);
+        ra.activate(1usize, 4, 6);
+        assert_eq!(ra.alloc(3usize, Class::Gpr, 5, 7), None);
     }
 
     /// The classes are separate register files: a double and an integer
