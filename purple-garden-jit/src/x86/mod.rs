@@ -583,7 +583,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     },
                 });
             }
-            ir::Instr::Assert { dst, cond, .. } => {
+            ir::Instr::Assert { cond, .. } => {
                 let cond = self.ensure_register(*cond);
                 let cond = self.gpr(cond);
                 self.emit(Insn::Test {
@@ -598,8 +598,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 );
                 let resume = self.out.len();
                 patch_rel32(self.out, holds, holds + 4, resume).expect("short forward jump");
-                // a Void value is never read, whatever the register holds will do
-                self.def(dst, self.pos);
+                // a Void value is never read, we dont reserve a reg
+                // self.def(dst, self.pos);
             }
             ir::Instr::Load {
                 dst, base, offset, ..
