@@ -88,19 +88,6 @@ impl From<Id> for usize {
     }
 }
 
-/// Where a backend placed an SSA value, indexed by [`Id`]. Produced by the
-/// bytecode backend's register allocator and consumed by every code generator
-/// (bytecode emit, JIT); hence it lives here in the shared IR vocabulary
-/// rather than in any single backend.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Location {
-    /// Slot has no interval (id is unused, e.g. a tombstoned block's param).
-    /// Reading these from a backend's location map is a compiler bug.
-    Unassigned,
-    Reg(u8),
-    Stack,
-}
-
 /// Index into [`Func::params_pool`]. Stands in wherever a block-param
 /// list used to live by value (`Vec<Id>`): in `Block.params` and in
 /// every `Terminator` arm that carries successor params.

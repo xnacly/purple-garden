@@ -8,17 +8,17 @@ use std::{
 
 pub mod dis;
 mod intern;
-mod regalloc;
 
-use crate::{intern::Interner, regalloc::Ralloc};
+use crate::intern::Interner;
 use purple_garden_allocators::page::Pages;
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
 use purple_garden_runtime::{
-    AllocType, BuiltinFn, DebugInfo, Value, Vm, VmConfig,
+    AllocType, BuiltinFn, DebugInfo, REGISTER_COUNT, Value, Vm, VmConfig,
     op::{LookupTable, Op, SwitchKind, SwitchTable},
     string,
 };
 use purple_garden_shared::config::Config;
+use purple_garden_shared::xralloc2::{Class, Reg, Xralloc2};
 
 #[derive(Debug, Clone)]
 pub enum CcFunc<'fun> {
@@ -99,11 +99,12 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     /// runtime traps can be rendered with <file:line:col>. Parallel to
     /// `self.buf`.
     pub pc_to_span: Vec<u32>,
-    /// `block_map[block_id]` is the absolute pc of that block's first op,
-    /// after lowering. `u16::MAX` marks blocks that weren't emitted (e.g.,
+    /// `labels[label]` is the absolute pc a jump to `label` lands on, after lowering. Labels below
+    /// the function's block count are its block ids, the rest come from [`Cc::label`] for code
+    /// without a block. `u16::MAX` marks blocks that weren't emitted (e.g.,
     /// tombstoned blocks). Block ids are dense per-function so a Vec
     /// indexed by id beats a `HashMap` on both alloc cost and lookup speed.
-    block_map: Vec<u16, S>,
+    labels: Vec<u16, S>,
     /// Tables of the emitted [`Op::Switch`]es. Targets are block ids until the
     /// end of [`Cc::cc`] maps them to pcs, like jump targets.
     pub switch_tables: Vec<Box<SwitchTable>>,
@@ -111,16 +112,17 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     pub lookup_tables: Vec<Box<LookupTable>>,
     /// Entry points of the functions compiled natively, for native callers.
     native_fns: purple_garden_jit::Natives<A>,
-    regalloc: Ralloc<S>,
+    /// purple gardens linear scan operating system and architecture overarching register allocator
+    regalloc: Xralloc2<S>,
     /// Set once per IR Instr / Terminator before lowering, consumed by
     /// every `emit` call within that lowering. Saves threading a span
     /// argument through every `self.buf.push(op)` call site.
     cur_span: u32,
-    /// Scratch buffers reused across [`Cc::cc`] invocations. `live_set` and
-    /// `arg_hints` are taken out of `self` via [`std::mem::take`] for the
-    /// duration of one compile, then put back with their grown capacity;
-    /// so after the first few functions warm the buffers, subsequent
-    /// `cc()` calls never re-allocate.
+    /// Liveness position being lowered, one per row in lockstep with
+    /// [`Func::live_set_into`]. Values are allocated at it on their first touch.
+    pos: u32,
+    /// Liveness and placement hints of the function being compiled, read by
+    /// [`Cc::ensure_register`] when a value is first touched.
     live_set: Vec<(u32, u32), S>,
     arg_hints: Vec<Option<u8>, S>,
     /// General-purpose `u8` scratch used by prologue/epilogue and call-site
@@ -133,29 +135,27 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     /// allocation; taken out of `self` for the duration of each shuffle
     /// and restored on exit so the capacity survives across calls.
     scratch_pairs: Vec<(u8, u8), S>,
-    /// Registers at or above the arg zone holding values live across the
-    /// call being lowered. The callee-saved convention leaves them in place
-    /// (no push), so [`Cc::emit_arg_shuffle`] must never borrow one as its
-    /// cycle-breaking scratch. Filled by the `Call`/`Sys` lowering alongside
-    /// the spill list in `scratch`; a `Tail` passes an empty slice since
-    /// nothing outlives it.
-    scratch_live: Vec<u8, S>,
-    /// Callee-saved range for the function currently being compiled.
-    /// Set at the top of [`Cc::cc`] and read by [`Cc::emit_arg_shuffle`]
-    /// to find a free scratch register for cycle breaking.
-    cur_lo: u8,
-    cur_max_reg: u8,
-    /// Values with a liveness interval, ordered by def. Together with
-    /// `live_next` and `live_active` this keeps the set of values live
-    /// across a call up to date as calls are lowered in increasing `pos`,
-    /// see [`Cc::advance_live_across`].
-    live_order: Vec<u32, S>,
-    live_next: usize,
-    live_active: Vec<u32, S>,
     /// Reusable native-code buffer for the JIT, refilled per function. Empty
     /// and untouched when `--no-jit` is set.
     jit: purple_garden_jit::Jit<S>,
 }
+
+const _: () = assert!(REGISTER_COUNT <= 64, "xralloc2 tracks registers in a u64");
+
+/// AArch64 inspired register split: r0..r18 caller-saved (args in r0.., result in r0), r19..r31 callee-saved.
+const CALLEE_SAVED: u8 = 19;
+
+/// Every vm register, r0 last so xralloc2 hands out the lowest free one first, which also puts
+/// the caller-saved registers before the callee-saved ones.
+const POOL: [u8; REGISTER_COUNT] = {
+    let mut pool = [0; REGISTER_COUNT];
+    let mut i = 0;
+    while i < REGISTER_COUNT {
+        pool[i] = (REGISTER_COUNT - 1 - i) as u8;
+        i += 1;
+    }
+    pool
+};
 
 fn take<T, S: Allocator + Clone>(v: &mut Vec<T, S>) -> Vec<T, S> {
     let scratch = v.allocator().clone();
@@ -295,22 +295,17 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             entry_native_idx: None,
             const_pool: Box::new([]),
             str_values: Vec::new(),
-            block_map: Vec::new_in(scratch.clone()),
+            labels: Vec::new_in(scratch.clone()),
             switch_tables: Vec::new(),
             lookup_tables: Vec::new(),
             native_fns: HashMap::new_in(alloc),
-            regalloc: Ralloc::new_in(scratch.clone()),
+            regalloc: Xralloc2::new_in(scratch.clone()),
             cur_span: 0,
+            pos: 0,
             live_set: Vec::new_in(scratch.clone()),
             arg_hints: Vec::new_in(scratch.clone()),
             scratch: Vec::new_in(scratch.clone()),
             scratch_pairs: Vec::new_in(scratch.clone()),
-            scratch_live: Vec::new_in(scratch.clone()),
-            cur_lo: 0,
-            cur_max_reg: 0,
-            live_order: Vec::new_in(scratch.clone()),
-            live_next: 0,
-            live_active: Vec::new_in(scratch.clone()),
             jit: purple_garden_jit::Jit::new_in(scratch),
         }
     }
@@ -326,17 +321,28 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         pc
     }
 
-    fn ensure_register(&self, Id(id): Id) -> u8 {
-        match self.regalloc.map.get(id as usize) {
-            Some(regalloc::Location::Reg(r)) => *r,
-            Some(regalloc::Location::Stack) => {
-                todo!("no stack handling yet, maybe this should be a stack slot?")
-            }
-            Some(regalloc::Location::Unassigned) | None => unreachable!(
-                "Attempted a register alloc lookup for a not defined ssa virtual register %v{}",
-                id
-            ),
+    /// The register of `id`, allocated on its first touch: its def or, for a block param, the
+    /// first edge passing it, which comes before its interval starts.
+    fn ensure_register(&mut self, id: Id) -> u8 {
+        if let Some(reg) = self.regalloc.reg(id) {
+            return reg.num();
         }
+        let (start, end) = self.live_set[id.0 as usize];
+        assert!(start != u32::MAX, "%v{} has no live interval", id.0);
+        let at = self.pos.min(start);
+        let reg = match self.arg_hints.get(id.0 as usize).copied().flatten() {
+            Some(hint) => self
+                .regalloc
+                .alloc_with_hint(id, Class::Gpr, at, end, Reg::Gpr(hint)),
+            None => self.regalloc.alloc(id, Class::Gpr, at, end),
+        };
+        let Some(reg) = reg else {
+            todo!(
+                "no register left for %v{}, there is no stack handling yet",
+                id.0
+            )
+        };
+        reg.num()
     }
 
     /// Compile a list of ir functions to bytecode instructions
@@ -441,14 +447,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         fun: &'cc Func<'cc, F>,
         native: Option<&mut purple_garden_jit::CodeArena<impl Pages>>,
     ) -> Result<(), String> {
-        // Take the reusable scratch buffers out of self so we can hold an
-        // immutable borrow of `live_set` across calls to `&mut self`
-        // helpers (e.g. `self.instr`) without tripping the borrow checker.
-        //
-        // Put them back before returning so the next cc() reuses the same
-        // capacity; after a few warm functions, this path is alloc-free.
+        // Taken out so try_compile_native can borrow it next to `&mut self`
         let mut live_set = take(&mut self.live_set);
-        let mut arg_hints = take(&mut self.arg_hints);
         fun.live_set_into(&mut live_set);
 
         // Native functions are injected as syscalls. The entry function can
@@ -465,19 +465,22 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 self.entry_native_idx = Some(idx);
             }
             self.live_set = live_set;
-            self.arg_hints = arg_hints;
             return Ok(());
         }
+        self.live_set = live_set;
 
-        fun.arg_hints_into(&mut arg_hints);
-        self.regalloc.rebuild(&live_set, &arg_hints);
-
-        self.live_order.clear();
-        self.live_order
-            .extend((0..live_set.len() as u32).filter(|&v| live_set[v as usize].0 != u32::MAX));
-        self.live_order.sort_by_key(|&v| live_set[v as usize].0);
-        self.live_next = 0;
-        self.live_active.clear();
+        fun.arg_hints_into(&mut self.arg_hints);
+        self.regalloc.reset(self.live_set.len(), &POOL, &[]);
+        if let Some(entry) = fun.blocks.first()
+            && !entry.tombstone
+        {
+            for (i, &param) in fun.params(entry.params).iter().enumerate() {
+                let (start, end) = self.live_set[param.0 as usize];
+                if start != u32::MAX {
+                    self.regalloc.try_alloc_at(param, Reg::Gpr(i as u8), end);
+                }
+            }
+        }
 
         // binding the id of a function to its context
         let pc = self.buf.len();
@@ -485,63 +488,45 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         self.functions
             .insert(fun.id, CcFunc::Bc { pc, name: fun.name });
 
-        let max_reg = self.regalloc.max_reg();
-        // lo = first callee-saved register: skip r0..r{nparams-1} (arg zone) and
-        // always skip r0 (return slot). So lo = max(nparams, 1).
-        let nparams = fun
-            .blocks
-            .iter()
-            .find(|b| !b.tombstone)
-            .map(|b| fun.params(b.params).len())
-            .unwrap_or(0) as u8;
-        let lo = if is_root {
-            max_reg.saturating_add(1)
-        } else {
-            nparams.max(1)
-        };
-        self.cur_lo = lo;
-        self.cur_max_reg = max_reg;
         self.cur_span = fun.span;
 
-        // block_map is indexed by ir block id, and block ids restart at 0 per function; size it to
+        // labels is indexed by ir block id, and block ids restart at 0 per function; size it to
         // the current function's block count and fill with the u16::MAX sentinel for
         // tombstoned/unemitted blocks.
-        self.block_map.clear();
-        self.block_map.resize(fun.blocks.len(), u16::MAX);
+        self.labels.clear();
+        self.labels.resize(fun.blocks.len(), u16::MAX);
 
-        // Callee-saved prologue: push r{lo}..r{max_reg} before the first block.
-        // The matching epilogue is emitted before every Op::Ret and Op::Tail.
-        self.emit_prologue(lo, max_reg);
-
-        // One slot per row, in lockstep with Func::live_set_into; the
-        // call-site spill check compares last_use against it.
-        let mut pos: u32 = 0;
+        self.pos = 0;
         for (idx, block) in fun.blocks.iter().enumerate() {
             if block.tombstone {
                 continue;
             }
 
-            self.block_map[block.id.0 as usize] = self.buf.len() as u16;
+            self.bind(block.id.0 as u16);
 
-            pos += 1; // block params row
+            // Params no edge touched yet start here
+            for &param in fun.params(block.params) {
+                if self.live_set[param.0 as usize].0 != u32::MAX {
+                    self.ensure_register(param);
+                }
+            }
+            self.pos += 1; // block params row
             for instruction in &block.instructions {
                 self.cur_span = instruction.span();
-                self.instr(fun, &live_set, pos, instruction);
-                pos += 1;
+                self.instr(fun, instruction);
+                self.pos += 1;
             }
 
             if let Some(term) = block.term.as_ref() {
                 self.cur_span = term.span();
             }
-            // The next emitted block; the Branch lowering uses it to fuse
-            // JmpT yes + Jmp no into a single JmpF when yes is the
-            // fall-through.
+            // The next emitted block, an edge to it falls through instead of jumping
             let next_block = fun.blocks[idx + 1..]
                 .iter()
                 .find(|b| !b.tombstone)
                 .map(|b| b.id);
-            self.term(fun, block.term.as_ref(), next_block, lo, max_reg);
-            pos += 1; // terminator row
+            self.term(fun, block.term.as_ref(), next_block);
+            self.pos += 1; // terminator row
         }
 
         // The entry/root function is entered directly by the VM, not through a
@@ -553,57 +538,61 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             && self.entry_native_idx.is_none()
             && !matches!(self.buf.last(), Some(Op::Ret | Op::Tail { .. }))
         {
-            self.emit_epilogue(lo, max_reg);
             self.emit(Op::Ret);
+        }
+
+        // The root has no caller to restore registers for
+        let max_reg = (CALLEE_SAVED..REGISTER_COUNT as u8)
+            .rev()
+            .find(|&r| self.regalloc.used(Reg::Gpr(r)));
+        if !is_root && let Some(max_reg) = max_reg {
+            self.cur_span = fun.span;
+            self.emit_frame(pc, CALLEE_SAVED, max_reg);
         }
 
         for i in pc..self.buf.len() {
             self.buf[i] = match self.buf[i] {
                 Op::JmpT { cond, target } => Op::JmpT {
                     cond,
-                    target: self.block_map[target as usize],
+                    target: self.labels[target as usize],
                 },
                 Op::JmpF { cond, target } => Op::JmpF {
                     cond,
-                    target: self.block_map[target as usize],
+                    target: self.labels[target as usize],
                 },
                 Op::JmpEqI { lhs, imm, target } => Op::JmpEqI {
                     lhs,
                     imm,
-                    target: self.block_map[target as usize],
+                    target: self.labels[target as usize],
                 },
                 Op::JmpNeI { lhs, imm, target } => Op::JmpNeI {
                     lhs,
                     imm,
-                    target: self.block_map[target as usize],
+                    target: self.labels[target as usize],
                 },
                 Op::JmpSEq { lhs, rhs, target } => Op::JmpSEq {
                     lhs,
                     rhs,
-                    target: self.block_map[target as usize],
+                    target: self.labels[target as usize],
                 },
                 Op::JmpSNe { lhs, rhs, target } => Op::JmpSNe {
                     lhs,
                     rhs,
-                    target: self.block_map[target as usize],
+                    target: self.labels[target as usize],
                 },
                 Op::Jmp { target } => Op::Jmp {
-                    target: self.block_map[target as usize],
+                    target: self.labels[target as usize],
                 },
                 other => other,
             };
         }
         for table in &mut self.switch_tables[tables..] {
             for target in &mut table.targets {
-                *target = self.block_map[*target as usize];
+                *target = self.labels[*target as usize];
             }
         }
 
         purple_garden_shared::trace!("[bc::Cc::cc][{}] size={}", fun.name, self.buf.len() - pc);
-
-        // Hand the scratch buffers back to self with their grown capacity.
-        self.live_set = live_set;
-        self.arg_hints = arg_hints;
 
         Ok(())
     }
@@ -657,11 +646,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     /// dst isn't another pending move's src. When all that remains is one
     /// or more cycles (e.g. swap r0,r1), break them through a free register,
     /// or fall back to push and pop for those leftovers only.
-    ///
-    /// `live_above` lists registers at or above the arg zone that hold values
-    /// live across this call. They are not pushed (the callee preserves them),
-    /// so they are never eligible as the cycle-breaking scratch.
-    fn emit_arg_shuffle(&mut self, args: &[Id], live_above: &[u8]) {
+    fn emit_arg_shuffle(&mut self, args: &[Id]) {
         let mut todo = take(&mut self.scratch_pairs);
         todo.clear();
         todo.extend(
@@ -684,16 +669,14 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 }
             }
 
-            // All remaining moves form cycles. Find a callee-saved register
-            // that isn't a src or dst in any pending move and isn't holding a
-            // value live across this call, and use it to break one cycle at a
-            // time without touching the spill stack.
+            // All remaining moves form cycles. Borrow a free register above the arg zone that
+            // isn't a src or dst in any pending move, and use it to break one cycle at a time
+            // without touching the spill stack
             let arg_end = args.len() as u8;
-            let scratch = (self.cur_lo..=self.cur_max_reg).find(|&r| {
-                r >= arg_end
-                    && !live_above.contains(&r)
-                    && !todo.iter().any(|(s, d)| *s == r || *d == r)
-            });
+            let scratch = (arg_end..REGISTER_COUNT as u8)
+                .filter(|&r| !todo.iter().any(|(s, d)| *s == r || *d == r))
+                .find_map(|r| self.regalloc.try_take(Reg::Gpr(r)))
+                .map(Reg::num);
 
             if let Some(scratch) = scratch {
                 // Break the first cycle: save its head into scratch, walk
@@ -715,6 +698,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     dst: start_dst,
                     src: scratch,
                 });
+                self.regalloc.give_back(Reg::Gpr(scratch));
                 // Loop back to handle any remaining cycles.
             } else {
                 // No free register available; fall back to spill stack.
@@ -727,26 +711,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         self.scratch_pairs = todo;
     }
 
-    /// Bring `live_active` to the values live across the call at `pos`:
-    /// defined before it, used after it. Calls are lowered in increasing
-    /// `pos`, so a value enters once, in def order, and leaves for good once
-    /// its last use is behind. This replaces a scan of every value per call,
-    /// which was quadratic for functions with many calls. Sorted by id so the
-    /// spills come out in the same order as that scan.
-    fn advance_live_across(&mut self, live_set: &[(u32, u32)], pos: u32) {
-        while let Some(&v) = self.live_order.get(self.live_next)
-            && live_set[v as usize].0 < pos
-        {
-            self.live_active.push(v);
-            self.live_next += 1;
-        }
-        self.live_active.retain(|&v| pos < live_set[v as usize].1);
-        self.live_active.sort_unstable();
-    }
-
-    /// Push r{lo}..r{max_reg} onto the spill stack (callee-saved prologue). `lo = max(nparams, 1)`;
-    /// skips the arg zone (r0..r{nparams-1}) and r0 (the return slot), which are never
-    /// callee-saved.
+    /// Push r{lo}..r{max_reg} onto the spill stack (callee-saved prologue), `lo` is
+    /// [`CALLEE_SAVED`] or past `max_reg` for the root.
     fn emit_prologue(&mut self, lo: u8, max_reg: u8) {
         if lo > max_reg {
             return;
@@ -759,6 +725,57 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             self.cur_span,
             &self.scratch,
         );
+    }
+
+    /// A new jump target without a block, unbound until [`Cc::bind`].
+    fn label(&mut self) -> u16 {
+        let label = self.labels.len() as u16;
+        self.labels.push(u16::MAX);
+        label
+    }
+
+    /// Land jumps to `label` on the next emitted op.
+    fn bind(&mut self, label: u16) {
+        self.labels[label as usize] = self.buf.len() as u16;
+    }
+
+    /// The body of the function at `pc` was emitted as if it saved no registers. Lay out its frame
+    /// like the JIT does: returns jump to one shared epilogue, tail calls to a stub restoring the
+    /// registers before the tail call, and the prologue is rotated in front of the body. The new
+    /// jump targets get their own labels.
+    fn emit_frame(&mut self, pc: usize, lo: u8, max_reg: u8) {
+        let body_end = self.buf.len();
+        let epilogue = self.label();
+        self.bind(epilogue);
+        self.emit_epilogue(lo, max_reg);
+        self.emit(Op::Ret);
+
+        for i in pc..body_end {
+            match self.buf[i] {
+                // Falls through into the epilogue
+                Op::Ret if i + 1 == body_end => self.buf[i] = Op::Nop,
+                Op::Ret => self.buf[i] = Op::Jmp { target: epilogue },
+                Op::Tail { func } => {
+                    let stub = self.label();
+                    self.bind(stub);
+                    self.emit_epilogue(lo, max_reg);
+                    self.emit(Op::Tail { func });
+                    self.buf[i] = Op::Jmp { target: stub };
+                }
+                _ => {}
+            }
+        }
+
+        let end = self.buf.len();
+        self.emit_prologue(lo, max_reg);
+        let len = self.buf.len() - end;
+        self.buf[pc..].rotate_right(len);
+        self.pc_to_span[pc..].rotate_right(len);
+        for at in &mut self.labels {
+            if *at != u16::MAX {
+                *at += len as u16;
+            }
+        }
     }
 
     /// Pop r{max_reg}..r{lo} from the spill stack (callee-saved epilogue).
@@ -777,48 +794,61 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         );
     }
 
-    /// Edge shuffles around a fused compare-and-branch: `ne` jumps to `no`,
-    /// `eq` to `yes`. Same fall-through fusion rule as `Branch`.
-    fn cmp_branch<F: Allocator>(
+    /// Lower a conditional branch, `jump_no(target)` leaves for `target` if the condition fails.
+    /// The jump reads the condition before any edge move runs, so a move may reuse its register.
+    /// Each edge then moves on its own path: a no edge with moves gets its own label
+    /// behind the yes path.
+    fn branch<F: Allocator>(
         &mut self,
         fun: &Func<'cc, F>,
-        (yes, yes_params): (ir::Id, ir::ParamsId),
-        (no, no_params): (ir::Id, ir::ParamsId),
+        yes: (ir::Id, ir::ParamsId),
+        no: (ir::Id, ir::ParamsId),
         next_block: Option<ir::Id>,
-        ne: Op,
-        eq: Op,
+        jump_no: impl FnOnce(u16) -> Op,
     ) {
-        let yes_src = fun.params(yes_params);
-        let yes_dst = fun.params(fun.blocks[yes.0 as usize].params);
-        let no_src = fun.params(no_params);
-        let no_dst = fun.params(fun.blocks[no.0 as usize].params);
+        if !self.has_moves(fun, no) {
+            self.emit(jump_no(no.0.0 as u16));
+            self.edge(fun, yes, next_block);
+            return;
+        }
 
-        for (i, &param) in yes_src.iter().enumerate() {
-            let src = self.ensure_register(param);
-            let dst = self.ensure_register(yes_dst[i]);
+        let no_path = self.label();
+        self.emit(jump_no(no_path));
+        self.edge(fun, yes, None);
+        self.bind(no_path);
+        self.edge(fun, no, next_block);
+    }
+
+    fn has_moves<F: Allocator>(
+        &mut self,
+        fun: &Func<'cc, F>,
+        (target, params): (ir::Id, ir::ParamsId),
+    ) -> bool {
+        let dst = fun.params(fun.blocks[target.0 as usize].params);
+        fun.params(params)
+            .iter()
+            .zip(dst)
+            .any(|(&src, &dst)| self.ensure_register(src) != self.ensure_register(dst))
+    }
+
+    /// Move `params` into the params of `target`, then jump there unless it is `next_block`.
+    fn edge<F: Allocator>(
+        &mut self,
+        fun: &Func<'cc, F>,
+        (target, params): (ir::Id, ir::ParamsId),
+        next_block: Option<ir::Id>,
+    ) {
+        let dst = fun.params(fun.blocks[target.0 as usize].params);
+        for (&src, &dst) in fun.params(params).iter().zip(dst) {
+            let src = self.ensure_register(src);
+            let dst = self.ensure_register(dst);
             if src != dst {
                 self.emit(Op::Mov { dst, src });
             }
         }
-
-        let no_movs_empty = no_src
-            .iter()
-            .zip(no_dst)
-            .all(|(&s, &d)| self.ensure_register(s) == self.ensure_register(d));
-
-        if Some(yes) == next_block && no_movs_empty {
-            self.emit(ne);
-        } else {
-            self.emit(eq);
-            for (i, &param) in no_src.iter().enumerate() {
-                let src = self.ensure_register(param);
-                let dst = self.ensure_register(no_dst[i]);
-                if src != dst {
-                    self.emit(Op::Mov { dst, src });
-                }
-            }
+        if Some(target) != next_block {
             self.emit(Op::Jmp {
-                target: no.0 as u16,
+                target: target.0 as u16,
             });
         }
     }
@@ -828,8 +858,6 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         fun: &Func<'cc, F>,
         t: Option<&ir::Terminator>,
         next_block: Option<ir::Id>,
-        lo: u8,
-        max_reg: u8,
     ) {
         let Some(term) = t else {
             return;
@@ -841,87 +869,17 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     let src = self.ensure_register(*src_id);
                     self.emit(Op::Mov { dst: 0, src });
                 }
-                self.emit_epilogue(lo, max_reg);
                 self.emit(Op::Ret);
             }
             ir::Terminator::Jump { id, params, .. } => {
-                let target = &fun.blocks.get(id.0 as usize).unwrap();
-                let src_params = fun.params(*params);
-                let dst_params = fun.params(target.params);
-
-                for (i, &param) in src_params.iter().enumerate() {
-                    let src = self.ensure_register(param);
-                    let dst = self.ensure_register(dst_params[i]);
-
-                    if src == dst {
-                        continue;
-                    }
-                    self.emit(Op::Mov { dst, src });
-                }
-
-                let ir::Id(id) = id;
-                // this gets patched in Cc::finalize after all bytecode is emitted
-                self.emit(Op::Jmp { target: *id as u16 });
+                self.edge(fun, (*id, *params), next_block);
             }
-            ir::Terminator::Branch {
-                cond,
-                yes: (yes, yes_params),
-                no: (no, no_params),
-                ..
-            } => {
-                let yes_target = &fun.blocks.get(yes.0 as usize).unwrap();
-                let yes_src = fun.params(*yes_params);
-                let yes_dst = fun.params(yes_target.params);
-
-                let no_target = &fun.blocks.get(no.0 as usize).unwrap();
-                let no_src = fun.params(*no_params);
-                let no_dst = fun.params(no_target.params);
-
-                // yes_movs run unconditionally; regalloc guarantees their
-                // dst regs are safe on the no-path.
-                for (i, &param) in yes_src.iter().enumerate() {
-                    let src = self.ensure_register(param);
-                    let dst = self.ensure_register(yes_dst[i]);
-                    if src == dst {
-                        continue;
-                    }
-                    self.emit(Op::Mov { dst, src });
-                }
-
-                let cond_reg = self.ensure_register(*cond);
-
-                // Fuse JmpT yes + Jmp no into a single JmpF when yes is
-                // the fall-through AND no-side shuffle is empty. With
-                // non-empty no_movs there is nowhere left to put them
-                // once the unconditional Jmp is dropped. The no==next
-                // case is already handled by the jmp_next peephole.
-                let no_movs_empty = no_src
-                    .iter()
-                    .zip(no_dst)
-                    .all(|(&s, &d)| self.ensure_register(s) == self.ensure_register(d));
-
-                if Some(*yes) == next_block && no_movs_empty {
-                    self.emit(Op::JmpF {
-                        cond: cond_reg,
-                        target: no.0 as u16,
-                    });
-                } else {
-                    self.emit(Op::JmpT {
-                        cond: cond_reg,
-                        target: yes.0 as u16,
-                    });
-                    for (i, &param) in no_src.iter().enumerate() {
-                        let src = self.ensure_register(param);
-                        let dst = self.ensure_register(no_dst[i]);
-                        if src == dst {
-                            continue;
-                        }
-                        self.emit(Op::Mov { dst, src });
-                    }
-                    self.emit(Op::Jmp {
-                        target: no.0 as u16,
-                    });
-                }
+            ir::Terminator::Branch { cond, yes, no, .. } => {
+                let cond = self.ensure_register(*cond);
+                self.branch(fun, *yes, *no, next_block, |target| Op::JmpF {
+                    cond,
+                    target,
+                });
             }
             ir::Terminator::BranchCmpImm {
                 op,
@@ -931,23 +889,16 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 no,
                 ..
             } => {
-                let lhs = self.ensure_register(*lhs);
-                let (ne, eq) = match op {
-                    ir::BinOp::IEq => (
-                        Op::JmpNeI {
-                            lhs,
-                            imm: *imm,
-                            target: no.0.0 as u16,
-                        },
-                        Op::JmpEqI {
-                            lhs,
-                            imm: *imm,
-                            target: yes.0.0 as u16,
-                        },
-                    ),
-                    _ => unreachable!("branch_cmp only emits supported comparison ops"),
+                let ir::BinOp::IEq = op else {
+                    unreachable!("branch_cmp only emits supported comparison ops");
                 };
-                self.cmp_branch(fun, *yes, *no, next_block, ne, eq);
+                let lhs = self.ensure_register(*lhs);
+                let imm = *imm;
+                self.branch(fun, *yes, *no, next_block, |target| Op::JmpNeI {
+                    lhs,
+                    imm,
+                    target,
+                });
             }
             ir::Terminator::BranchCmp {
                 op,
@@ -957,24 +908,16 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 no,
                 ..
             } => {
+                let ir::BinOp::SEq = op else {
+                    unreachable!("branch_cmp only emits supported comparison ops");
+                };
                 let lhs = self.ensure_register(*lhs);
                 let rhs = self.ensure_register(*rhs);
-                let (ne, eq) = match op {
-                    ir::BinOp::SEq => (
-                        Op::JmpSNe {
-                            lhs,
-                            rhs,
-                            target: no.0.0 as u16,
-                        },
-                        Op::JmpSEq {
-                            lhs,
-                            rhs,
-                            target: yes.0.0 as u16,
-                        },
-                    ),
-                    _ => unreachable!("branch_cmp only emits supported comparison ops"),
-                };
-                self.cmp_branch(fun, *yes, *no, next_block, ne, eq);
+                self.branch(fun, *yes, *no, next_block, |target| Op::JmpSNe {
+                    lhs,
+                    rhs,
+                    target,
+                });
             }
             ir::Terminator::Switch {
                 subject,
@@ -1031,9 +974,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 // If the tail target needs a wider argument zone than this the shuffle would write
                 // into registers that this function still owes back to its caller. Fall back to a
                 // normal call so the epilogue can restore them after the callee returns.
-                let tail_clobbers_callee_saved = args.len() as u8 > lo;
-                // Nothing outlives a tail call, so no register is off-limits.
-                self.emit_arg_shuffle(args, &[]);
+                let tail_clobbers_callee_saved = args.len() as u8 > CALLEE_SAVED;
+                self.emit_arg_shuffle(args);
 
                 if tail_clobbers_callee_saved {
                     match target {
@@ -1046,10 +988,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                             returns_double,
                         }),
                     };
-                    self.emit_epilogue(lo, max_reg);
                     self.emit(Op::Ret);
                 } else {
-                    self.emit_epilogue(lo, max_reg);
                     match target {
                         CcCallTarget::Bc { pc } => {
                             self.emit(Op::Tail { func: pc as u32 });
@@ -1071,13 +1011,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     }
 
     /// `owner` is the function `i` belongs to, it holds the lists `i` refers to.
-    fn instr<F: Allocator>(
-        &mut self,
-        owner: &'cc Func<'cc, F>,
-        live_set: &[(u32, u32)],
-        pos: u32,
-        i: &'cc ir::Instr<'cc>,
-    ) {
+    fn instr<F: Allocator>(&mut self, owner: &'cc Func<'cc, F>, i: &'cc ir::Instr<'cc>) {
+        let pos = self.pos;
         match i {
             ir::Instr::Store {
                 src, base, offset, ..
@@ -1222,30 +1157,18 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     unreachable!();
                 };
 
-                // Callee-saved convention: the callee's prologue preserves r1..r{max_reg_callee}.
-                // The caller only needs to spill live values in r0..r{clobber_end-1},
-                // the arg-shuffle zone. r{clobber_end}+ are untouched from the caller's view.
-                let clobber_end = args.len().max(1) as u8;
+                // The callee may clobber every caller-saved register and its arg zone, it
+                // preserves the rest. The caller spills the live values in r0..r{clobber_end-1}.
+                let clobber_end = CALLEE_SAVED.max(args.len() as u8);
                 self.scratch.clear();
-                self.scratch_live.clear();
-                self.advance_live_across(live_set, pos);
-                for &v in &self.live_active {
-                    let regalloc::Location::Reg(src) = self.regalloc.map[v as usize] else {
-                        unreachable!();
-                    };
-                    if src < clobber_end {
+                for reg in self.regalloc.live_after(pos) {
+                    if reg.num() < clobber_end {
                         purple_garden_shared::trace!(
-                            "[bc] spilled r{} at call_idx={};def={};last_use={}",
-                            src,
-                            pos,
-                            live_set[v as usize].0,
-                            live_set[v as usize].1
+                            "[bc] spilled r{} at call_idx={}",
+                            reg.num(),
+                            pos
                         );
-                        self.scratch.push(src);
-                    } else {
-                        // Stays in place across the call; the shuffle
-                        // must not use it as scratch.
-                        self.scratch_live.push(src);
+                        self.scratch.push(reg.num());
                     }
                 }
                 pack_push(
@@ -1255,9 +1178,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     &self.scratch,
                 );
 
-                let live_above = take(&mut self.scratch_live);
-                self.emit_arg_shuffle(args, &live_above);
-                self.scratch_live = live_above;
+                self.emit_arg_shuffle(args);
 
                 let dst = self.ensure_register(dst.id);
                 match target {
@@ -1289,18 +1210,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 // registers, so only spill alive-across values inside that range.
                 let clobber_end = args.len().max(1) as u8;
                 self.scratch.clear();
-                self.scratch_live.clear();
-                self.advance_live_across(live_set, pos);
-                for &v in &self.live_active {
-                    let regalloc::Location::Reg(src) = self.regalloc.map[v as usize] else {
-                        unreachable!();
-                    };
-                    if src < clobber_end {
-                        self.scratch.push(src);
-                    } else {
-                        // Stays in place across the call; the shuffle
-                        // must not use it as scratch.
-                        self.scratch_live.push(src);
+                for reg in self.regalloc.live_after(pos) {
+                    if reg.num() < clobber_end {
+                        self.scratch.push(reg.num());
                     }
                 }
                 pack_push(
@@ -1310,9 +1222,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     &self.scratch,
                 );
 
-                let live_above = take(&mut self.scratch_live);
-                self.emit_arg_shuffle(args, &live_above);
-                self.scratch_live = live_above;
+                self.emit_arg_shuffle(args);
 
                 let dst = self.ensure_register(dst.id);
                 self.emit(Op::Sys {
@@ -1328,11 +1238,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     &self.scratch,
                 );
             }
-            ir::Instr::Assert { dst, cond, .. } => {
+            ir::Instr::Assert { cond, .. } => {
                 let cond = self.ensure_register(*cond);
                 self.emit(Op::Assert { cond });
-                // a Void value is never read, whatever the register holds will do
-                self.ensure_register(dst.id);
+                // a Void value is never read, not reserving a value for assert is fine :)
+                // self.ensure_register(dst.id);
             }
             ir::Instr::Noop {} => {}
             ir::Instr::Bin {
