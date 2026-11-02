@@ -130,10 +130,7 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     /// `pack_push`/`pack_pop` free functions; it is never live across a
     /// call to another `Cc` method.
     scratch: Vec<u8, S>,
-    /// Reusable `(src, dst)` buffer for the parallel-move resolver in
-    /// [`Cc::emit_arg_shuffle`]. Replaces the per-call `todo: Vec<(u8,u8)>`
-    /// allocation; taken out of `self` for the duration of each shuffle
-    /// and restored on exit so the capacity survives across calls.
+    /// Reusable `(src, dst)` buffer for the parallel-move resolver in [`Cc::emit_parallel_move`]
     scratch_pairs: Vec<(u8, u8), S>,
     /// Reusable native-code buffer for the JIT, refilled per function. Empty
     /// and untouched when `--no-jit` is set.
@@ -145,13 +142,16 @@ const _: () = assert!(REGISTER_COUNT <= 64, "xralloc2 tracks registers in a u64"
 /// AArch64 inspired register split: r0..r18 caller-saved (args in r0.., result in r0), r19..r31 callee-saved.
 const CALLEE_SAVED: u8 = 19;
 
-/// Every vm register, r0 last so xralloc2 hands out the lowest free one first, which also puts
-/// the caller-saved registers before the callee-saved ones.
-const POOL: [u8; REGISTER_COUNT] = {
-    let mut pool = [0; REGISTER_COUNT];
+/// Never holds a value: breaks cycles of parallel moves.
+const SCRATCH: u8 = REGISTER_COUNT as u8 - 1;
+
+/// Every vm register but [`SCRATCH`], r0 last so xralloc2 hands out the lowest free one first,
+/// which also puts the caller-saved registers before the callee-saved ones.
+const POOL: [u8; SCRATCH as usize] = {
+    let mut pool = [0; SCRATCH as usize];
     let mut i = 0;
-    while i < REGISTER_COUNT {
-        pool[i] = (REGISTER_COUNT - 1 - i) as u8;
+    while i < SCRATCH as usize {
+        pool[i] = (SCRATCH as usize - 1 - i) as u8;
         i += 1;
     }
     pool
@@ -212,65 +212,6 @@ fn pack_pop(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
     }
     if i < regs.len() {
         buf.push(Op::Pop { dst: regs[i] });
-        spans.push(span);
-    }
-}
-
-/// Like `pack_push` but sources are `pairs[i].0`; avoids collecting srcs into
-/// a separate `Vec<u8>` when the caller already has a `Vec<(u8,u8)>`.
-fn pack_push_pairs(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs: &[(u8, u8)]) {
-    let mut i = 0;
-    while i + 3 <= pairs.len() {
-        buf.push(Op::Push3 {
-            a: pairs[i].0,
-            b: pairs[i + 1].0,
-            c: pairs[i + 2].0,
-        });
-        spans.push(span);
-        i += 3;
-    }
-    if i + 2 <= pairs.len() {
-        buf.push(Op::Push2 {
-            a: pairs[i].0,
-            b: pairs[i + 1].0,
-        });
-        spans.push(span);
-        i += 2;
-    }
-    if i < pairs.len() {
-        buf.push(Op::Push { src: pairs[i].0 });
-        spans.push(span);
-    }
-}
-
-/// Like `pack_pop` but dsts are `pairs[n-1-i].1` (reversed); avoids collecting
-/// into a separate `Vec<u8>`.
-fn pack_pop_pairs_rev(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, pairs: &[(u8, u8)]) {
-    let n = pairs.len();
-    let mut i = 0;
-    while i + 3 <= n {
-        let j = n - 1 - i;
-        buf.push(Op::Pop3 {
-            a: pairs[j].1,
-            b: pairs[j - 1].1,
-            c: pairs[j - 2].1,
-        });
-        spans.push(span);
-        i += 3;
-    }
-    if i + 2 <= n {
-        let j = n - 1 - i;
-        buf.push(Op::Pop2 {
-            a: pairs[j].1,
-            b: pairs[j - 1].1,
-        });
-        spans.push(span);
-        i += 2;
-    }
-    if i < n {
-        buf.push(Op::Pop {
-            dst: pairs[n - 1 - i].1,
-        });
         spans.push(span);
     }
 }
@@ -641,73 +582,45 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
     /// Move `args[i]` into the i-th argument register (`r0..r{N-1}`) for a call
     /// or tail. `r0` is both the first argument and the return-value slot.
-    ///
-    /// Parallel-move: emit a direct Mov for any pending pair whose
-    /// dst isn't another pending move's src. When all that remains is one
-    /// or more cycles (e.g. swap r0,r1), break them through a free register,
-    /// or fall back to push and pop for those leftovers only.
     fn emit_arg_shuffle(&mut self, args: &[Id]) {
-        let mut todo = take(&mut self.scratch_pairs);
-        todo.clear();
-        todo.extend(
-            args.iter()
-                .enumerate()
-                .map(|(i, a)| (self.ensure_register(*a), i as u8))
-                .filter(|(s, d)| s != d),
-        );
-
-        'outer: loop {
-            if todo.is_empty() {
-                break;
-            }
-            for i in 0..todo.len() {
-                let (src, dst) = todo[i];
-                if !todo.iter().any(|(s, _)| *s == dst) {
-                    self.emit(Op::Mov { dst, src });
-                    todo.swap_remove(i);
-                    continue 'outer;
-                }
-            }
-
-            // All remaining moves form cycles. Borrow a free register above the arg zone that
-            // isn't a src or dst in any pending move, and use it to break one cycle at a time
-            // without touching the spill stack
-            let arg_end = args.len() as u8;
-            let scratch = (arg_end..REGISTER_COUNT as u8)
-                .filter(|&r| !todo.iter().any(|(s, d)| *s == r || *d == r))
-                .find_map(|r| self.regalloc.try_take(Reg::Gpr(r)))
-                .map(Reg::num);
-
-            if let Some(scratch) = scratch {
-                // Break the first cycle: save its head into scratch, walk
-                // the chain (find whose dst == the just-freed register),
-                // emit each Mov in turn, then close by writing scratch into
-                // the head's destination.
-                let (start_src, start_dst) = todo.swap_remove(0);
-                self.emit(Op::Mov {
-                    dst: scratch,
-                    src: start_src,
-                });
-                let mut cur_freed = start_src;
-                while let Some(idx) = todo.iter().position(|(_, d)| *d == cur_freed) {
-                    let (src, dst) = todo.swap_remove(idx);
-                    self.emit(Op::Mov { dst, src });
-                    cur_freed = src;
-                }
-                self.emit(Op::Mov {
-                    dst: start_dst,
-                    src: scratch,
-                });
-                self.regalloc.give_back(Reg::Gpr(scratch));
-                // Loop back to handle any remaining cycles.
-            } else {
-                // No free register available; fall back to spill stack.
-                pack_push_pairs(&mut self.buf, &mut self.pc_to_span, self.cur_span, &todo);
-                pack_pop_pairs_rev(&mut self.buf, &mut self.pc_to_span, self.cur_span, &todo);
-                break;
+        let mut moves = take(&mut self.scratch_pairs);
+        moves.clear();
+        for (i, &arg) in args.iter().enumerate() {
+            let src = self.ensure_register(arg);
+            if src != i as u8 {
+                moves.push((src, i as u8));
             }
         }
+        self.emit_parallel_move(moves);
+    }
 
+    /// Emit the `(src, dst)` moves as if all happened at once: a move runs once no pending move
+    /// still reads its dst. When only cycles remain, one src is parked in [`SCRATCH`] and its
+    /// readers read that instead, which turns its cycle into a chain.
+    fn emit_parallel_move(&mut self, mut todo: Vec<(u8, u8), S>) {
+        while !todo.is_empty() {
+            match todo
+                .iter()
+                .position(|&(_, dst)| todo.iter().all(|&(src, _)| src != dst))
+            {
+                Some(i) => {
+                    let (src, dst) = todo.swap_remove(i);
+                    self.emit(Op::Mov { dst, src });
+                }
+                None => {
+                    let parked = todo[0].0;
+                    self.emit(Op::Mov {
+                        dst: SCRATCH,
+                        src: parked,
+                    });
+                    for (src, _) in &mut todo {
+                        if *src == parked {
+                            *src = SCRATCH;
+                        }
+                    }
+                }
+            }
+        }
         self.scratch_pairs = todo;
     }
 
@@ -838,14 +751,17 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         (target, params): (ir::Id, ir::ParamsId),
         next_block: Option<ir::Id>,
     ) {
+        let mut moves = take(&mut self.scratch_pairs);
+        moves.clear();
         let dst = fun.params(fun.blocks[target.0 as usize].params);
         for (&src, &dst) in fun.params(params).iter().zip(dst) {
             let src = self.ensure_register(src);
             let dst = self.ensure_register(dst);
             if src != dst {
-                self.emit(Op::Mov { dst, src });
+                moves.push((src, dst));
             }
         }
+        self.emit_parallel_move(moves);
         if Some(target) != next_block {
             self.emit(Op::Jmp {
                 target: target.0 as u16,

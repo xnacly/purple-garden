@@ -291,9 +291,7 @@ pub enum Op {
         idx: u16,
         returns_double: bool,
     },
-    /// Push `src` onto [`Vm::spilled`]. Used both for caller-save spill
-    /// around [`Op::Call`] / [`Op::Sys`] and for cycle-breaking inside
-    /// `bc::Cc::emit_arg_shuffle`.
+    /// Push `src` onto [`Vm::spilled`].
     ///
     /// Invariant: every function's bytecode must leave [`Vm::spilled`] at
     /// the same depth on [`Op::Ret`] as on entry. Unbalanced push/pop pairs
