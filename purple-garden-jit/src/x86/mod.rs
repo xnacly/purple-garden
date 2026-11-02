@@ -1451,10 +1451,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// Move edge args `src` into the target's block params `dst`, the IR's phi
     /// nodes, as if every move happened at once. `dst` registers are assigned
     /// at `at` if this edge is the first to reach them.
-    ///
-    /// Parallel-move: emit a direct Mov for any pending pair whose dst isn't
-    /// another pending move's src. When only cycles remain (e.g. a->b, b->c,
-    /// c->a), park one head in the scratch register and walk the cycle.
     fn edge_moves(&mut self, src: &[ir::Id], dst: &[ir::Id], at: u32) {
         debug_assert_eq!(src.len(), dst.len(), "edge arity matches target params");
         let mut todo = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
@@ -1469,37 +1465,36 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.parallel_move(todo);
     }
 
-    /// Performs the `(src, dst)` moves as if all at once, a cycle goes through the scratch
-    /// register of its class.
+    /// Performs the `(src, dst)` moves as if all at once: a move runs once no pending move still
+    /// reads its dst. When only cycles remain, one src is parked in the scratch register of its
+    /// class and its readers read that instead, which turns its cycle into a chain.
     fn parallel_move(&mut self, mut todo: Vec<(Preg, Preg), S>) {
-        'outer: loop {
-            if todo.is_empty() {
-                break;
-            }
-            for i in 0..todo.len() {
-                let (src, dst) = todo[i];
-                if !todo.iter().any(|&(s, _)| s == dst) {
+        // A save that found no register after a bail is `(reg, reg)`, it would block forever
+        todo.retain(|&(src, dst)| src != dst);
+        while !todo.is_empty() {
+            match todo
+                .iter()
+                .position(|&(_, dst)| todo.iter().all(|&(src, _)| src != dst))
+            {
+                Some(i) => {
+                    let (src, dst) = todo.swap_remove(i);
                     self.mov(dst, src);
-                    todo.swap_remove(i);
-                    continue 'outer;
+                }
+                None => {
+                    let parked = todo[0].0;
+                    let scratch = match parked {
+                        Preg::Gpr(_) => Preg::Gpr(GPR_SCRATCH.0),
+                        Preg::Fpr(_) => Preg::Fpr(XMM_SCRATCH.0),
+                    };
+                    self.mov(scratch, parked);
+                    for (src, _) in &mut todo {
+                        if *src == parked {
+                            *src = scratch;
+                        }
+                    }
                 }
             }
-
-            let (start_src, start_dst) = todo.swap_remove(0);
-            let scratch = match start_src {
-                Preg::Gpr(_) => Preg::Gpr(GPR_SCRATCH.0),
-                Preg::Fpr(_) => Preg::Fpr(XMM_SCRATCH.0),
-            };
-            self.mov(scratch, start_src);
-            let mut cur_freed = start_src;
-            while let Some(idx) = todo.iter().position(|&(_, d)| d == cur_freed) {
-                let (src, dst) = todo.swap_remove(idx);
-                self.mov(dst, src);
-                cur_freed = src;
-            }
-            self.mov(start_dst, scratch);
         }
-
         *self.move_pairs = todo;
     }
 
