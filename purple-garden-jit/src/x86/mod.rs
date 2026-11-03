@@ -48,7 +48,8 @@ const VM: Reg = RBX;
 /// Never holds a value: breaks edge-move cycles and holds helper addresses.
 const GPR_SCRATCH: Reg = RAX;
 /// Native functions take argument i in `ARG_GPRS[i]`, or in `xmm{i}` if it is a Double, and
-/// return in `rax` or `xmm0`, see `enter_native`.
+/// return in `rax` or `xmm0`, see `enter_native`. Arguments past these stay in `vm.r[i]`, where
+/// the interpreter put them; natives don't pass them to each other yet.
 const ARG_GPRS: [Reg; 6] = [RSI, RDX, RCX, R8, R9, R10];
 
 /// Allocatable GPRs, popped from the back: caller-saved first so leaf functions dont require a
@@ -84,14 +85,6 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     ra: &mut Xralloc2<S>,
     buffers: &mut Scratch<S>,
 ) -> Option<()> {
-    if func.params.len() > ARG_GPRS.len() {
-        skip!(
-            func,
-            "more params than argument registers: {}",
-            func.params.len()
-        );
-    }
-
     let Some(entry) = func.blocks.iter().find(|b| !b.tombstone).map(|b| b.id) else {
         skip!(func, "empty function");
     };
@@ -460,7 +453,26 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             else {
                 continue;
             };
-            let reg = match Class::from(&param.ty) {
+            let class = Class::from(&param.ty);
+            if i >= ARG_GPRS.len() {
+                // the argument registers are all taken by now, this can't clobber one
+                let offset = 8 * i as u32;
+                let dst = self.def_class(param.id, self.pos, class);
+                self.emit(match dst {
+                    Preg::Gpr(dst) => Insn::LoadMem {
+                        dst: Reg(dst),
+                        base: VM,
+                        offset,
+                    },
+                    Preg::Fpr(dst) => Insn::LoadMemSd {
+                        dst: Xmm(dst),
+                        base: VM,
+                        offset,
+                    },
+                });
+                continue;
+            }
+            let reg = match class {
                 Class::Gpr => Preg::Gpr(ARG_GPRS[i].0),
                 Class::Fpr => Preg::Fpr(i as u8),
             };

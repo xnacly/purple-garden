@@ -161,6 +161,7 @@ fn pipeline<A: Pages + Clone>(
     let mut scratch = BumpAlloc::new_in(allocs.scratch);
     let parse = Parser::new(Lexer::new(source), &arena, &scratch).parse_collect();
     scratch.reset();
+
     let purple_garden_frontend::parser::ParseOutput {
         ast,
         diagnostics: parse_diagnostics,
