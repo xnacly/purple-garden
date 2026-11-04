@@ -144,14 +144,16 @@ const CALLEE_SAVED: u8 = 19;
 
 /// Never holds a value: breaks cycles of parallel moves.
 const SCRATCH: u8 = REGISTER_COUNT as u8 - 1;
+/// Second ephemeral register
+const TMP: u8 = SCRATCH - 1;
 
-/// Every vm register but [`SCRATCH`], r0 last so xralloc2 hands out the lowest free one first,
-/// which also puts the caller-saved registers before the callee-saved ones.
-const POOL: [u8; SCRATCH as usize] = {
-    let mut pool = [0; SCRATCH as usize];
+/// Every vm register but [`SCRATCH`] and [`TMP`], r0 last so xralloc2 hands out the lowest free one
+/// first, which also puts the caller-saved registers before the callee-saved ones.
+const POOL: [u8; TMP as usize] = {
+    let mut pool = [0; TMP as usize];
     let mut i = 0;
-    while i < SCRATCH as usize {
-        pool[i] = (SCRATCH as usize - 1 - i) as u8;
+    while i < TMP as usize {
+        pool[i] = (TMP as usize - 1 - i) as u8;
         i += 1;
     }
     pool
@@ -262,12 +264,30 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         pc
     }
 
-    /// The register of `id`, allocated on its first touch, a block param's is picked by
-    /// [`Cc::choose_params`] at the first edge reaching it.
-    fn ensure_register(&mut self, id: Id) -> u8 {
-        if let Some(reg) = self.regalloc.reg(id) {
-            return reg.num();
+    /// The register a spilled operand loads into: [`SCRATCH`], or [`TMP`] if the operand before it
+    /// still waits in [`SCRATCH`] for its op.
+    fn next_tmp(&self) -> u8 {
+        match self.buf.last() {
+            Some(Op::LoadSlot { dst: SCRATCH, .. }) => TMP,
+            _ => SCRATCH,
         }
+    }
+
+    /// Translate virtual register into vm register, abstracts spilling, restoring and register
+    /// allocation in general away
+    fn ensure_register(&mut self, id: Id) -> u8 {
+        match self.regalloc.location(id) {
+            Some(Location::Reg(r)) => return r.num(),
+            // requested value lives on the the stack, we need to restore it and we use a temp
+            // register
+            Some(Location::Stack(slot)) => {
+                let dst = self.next_tmp();
+                self.emit(Op::LoadSlot { dst, slot });
+                return dst;
+            }
+            None => {}
+        };
+
         let (start, end) = self.live_set[id.0 as usize];
         assert!(start != u32::MAX, "%v{} has no live interval", id.0);
         debug_assert!(start <= self.pos, "%v{} allocated before it starts", id.0);
@@ -278,13 +298,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             }
             None => self.regalloc.alloc(id, Class::Gpr, self.pos, end),
         };
-        let Location::Reg(reg) = location else {
-            todo!(
-                "no register left for %v{}, there is no stack handling yet",
-                id.0
-            )
-        };
-        reg.num()
+
+        match location {
+            Location::Reg(reg) => reg.num(),
+            Location::Stack(_) => TMP,
+        }
     }
 
     /// Compile a list of ir functions to bytecode instructions
@@ -459,6 +477,15 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             for instruction in &block.instructions {
                 self.cur_span = instruction.span();
                 self.instr(fun, instruction);
+
+                // register allocator decided the instructions target / dst is supposed to be on the
+                // stack, we do this here:
+                if let Some(Location::Stack(slot)) =
+                    Func::def_of(instruction).and_then(|dst| self.regalloc.location(dst))
+                {
+                    self.emit(Op::StoreSlot { slot, src: TMP });
+                }
+
                 self.pos += 1;
             }
 
@@ -489,10 +516,12 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         // The root has no caller to restore registers for
         let max_reg = (CALLEE_SAVED..REGISTER_COUNT as u8)
             .rev()
-            .find(|&r| self.regalloc.used(Reg::Gpr(r)));
-        if !is_root && let Some(max_reg) = max_reg {
+            .find(|&r| self.regalloc.used(Reg::Gpr(r)))
+            .filter(|_| !is_root);
+        let slots = self.regalloc.slots();
+        if max_reg.is_some() || slots > 0 {
             self.cur_span = fun.span;
-            self.emit_frame(pc, CALLEE_SAVED, max_reg);
+            self.emit_frame(pc, max_reg, slots);
         }
 
         for i in pc..self.buf.len() {
@@ -585,17 +614,31 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     }
 
     /// Move `args[i]` into the i-th argument register (`r0..r{N-1}`) for a call
-    /// or tail. `r0` is both the first argument and the return-value slot.
-    fn emit_arg_shuffle(&mut self, args: &[Id]) {
+    /// or tail. `r0` is both the first argument and the return-value slot. `pushed` is how far
+    /// the top of the spill stack moved since the frame, slots read here are offset by it.
+    fn emit_arg_shuffle(&mut self, args: &[Id], pushed: u16) {
         let mut moves = take(&mut self.scratch_pairs);
         moves.clear();
         for (i, &arg) in args.iter().enumerate() {
+            if let Some(Location::Stack(_)) = self.regalloc.location(arg) {
+                continue;
+            }
             let src = self.ensure_register(arg);
             if src != i as u8 {
                 moves.push((src, i as u8));
             }
         }
         self.emit_parallel_move(moves);
+
+        // after the moves, since r{i} may still be read by one of them
+        for (i, &arg) in args.iter().enumerate() {
+            if let Some(Location::Stack(slot)) = self.regalloc.location(arg) {
+                self.emit(Op::LoadSlot {
+                    dst: i as u8,
+                    slot: slot + pushed,
+                });
+            }
+        }
     }
 
     /// Emit the `(src, dst)` moves as if all happened at once: a move runs once no pending move
@@ -628,14 +671,15 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         self.scratch_pairs = todo;
     }
 
-    /// Push r{lo}..r{max_reg} onto the spill stack (callee-saved prologue), `lo` is
-    /// [`CALLEE_SAVED`] or past `max_reg` for the root.
-    fn emit_prologue(&mut self, lo: u8, max_reg: u8) {
-        if lo > max_reg {
-            return;
-        }
+    /// Push r{CALLEE_SAVED}..r{max_reg} onto the spill stack (callee-saved prologue), then reserve
+    /// `slots` words above them for [`Op::LoadSlot`] and [`Op::StoreSlot`].
+    fn emit_prologue(&mut self, max_reg: Option<u8>, slots: u16) {
         self.scratch.clear();
-        self.scratch.extend(lo..=max_reg);
+        if let Some(max_reg) = max_reg {
+            self.scratch.extend(CALLEE_SAVED..=max_reg);
+        }
+        self.scratch
+            .extend(std::iter::repeat_n(SCRATCH, slots as usize));
         pack_push(
             &mut self.buf,
             &mut self.pc_to_span,
@@ -660,11 +704,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     /// like the JIT does: returns jump to one shared epilogue, tail calls to a stub restoring the
     /// registers before the tail call, and the prologue is rotated in front of the body. The new
     /// jump targets get their own labels.
-    fn emit_frame(&mut self, pc: usize, lo: u8, max_reg: u8) {
+    fn emit_frame(&mut self, pc: usize, max_reg: Option<u8>, slots: u16) {
         let body_end = self.buf.len();
         let epilogue = self.label();
         self.bind(epilogue);
-        self.emit_epilogue(lo, max_reg);
+        self.emit_epilogue(max_reg, slots);
         self.emit(Op::Ret);
 
         for i in pc..body_end {
@@ -675,7 +719,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 Op::Tail { func } => {
                     let stub = self.label();
                     self.bind(stub);
-                    self.emit_epilogue(lo, max_reg);
+                    self.emit_epilogue(max_reg, slots);
                     self.emit(Op::Tail { func });
                     self.buf[i] = Op::Jmp { target: stub };
                 }
@@ -684,7 +728,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         }
 
         let end = self.buf.len();
-        self.emit_prologue(lo, max_reg);
+        self.emit_prologue(max_reg, slots);
         let len = self.buf.len() - end;
         self.buf[pc..].rotate_right(len);
         self.pc_to_span[pc..].rotate_right(len);
@@ -695,14 +739,15 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         }
     }
 
-    /// Pop r{max_reg}..r{lo} from the spill stack (callee-saved epilogue).
-    /// Must mirror emit_prologue exactly (LIFO order).
-    fn emit_epilogue(&mut self, lo: u8, max_reg: u8) {
-        if lo > max_reg {
-            return;
-        }
+    /// Drop the slots and pop r{max_reg}..r{CALLEE_SAVED} from the spill stack (callee-saved
+    /// epilogue). Must mirror emit_prologue exactly (LIFO order).
+    fn emit_epilogue(&mut self, max_reg: Option<u8>, slots: u16) {
         self.scratch.clear();
-        self.scratch.extend((lo..=max_reg).rev());
+        self.scratch
+            .extend(std::iter::repeat_n(SCRATCH, slots as usize));
+        if let Some(max_reg) = max_reg {
+            self.scratch.extend((CALLEE_SAVED..=max_reg).rev());
+        }
         pack_pop(
             &mut self.buf,
             &mut self.pc_to_span,
@@ -921,7 +966,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 // into registers that this function still owes back to its caller. Fall back to a
                 // normal call so the epilogue can restore them after the callee returns.
                 let tail_clobbers_callee_saved = args.len() as u8 > CALLEE_SAVED;
-                self.emit_arg_shuffle(args);
+                self.emit_arg_shuffle(args, 0);
 
                 if tail_clobbers_callee_saved {
                     match target {
@@ -1124,7 +1169,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     &self.scratch,
                 );
 
-                self.emit_arg_shuffle(args);
+                self.emit_arg_shuffle(args, self.scratch.len() as u16);
 
                 let dst = self.ensure_register(dst.id);
                 match target {
@@ -1168,7 +1213,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     &self.scratch,
                 );
 
-                self.emit_arg_shuffle(args);
+                self.emit_arg_shuffle(args, self.scratch.len() as u16);
 
                 let dst = self.ensure_register(dst.id);
                 self.emit(Op::Sys {
