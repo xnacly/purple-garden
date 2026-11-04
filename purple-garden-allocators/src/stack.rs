@@ -125,6 +125,30 @@ impl<'buf> StackAlloc<'buf> {
         std::array::from_fn(|i| unsafe { src.add(i).read() })
     }
 
+    /// Read the `T` with `below` others pushed on top of it.
+    ///
+    /// # Safety
+    ///
+    /// The `below + 1`-th `T` from the top was pushed with `push` or `push_all`.
+    #[inline(always)]
+    pub unsafe fn peek<T: Copy>(&self, below: usize) -> T {
+        debug_assert!((below + 1) * size_of::<T>() <= self.top.get());
+        let at = self.top.get() - (below + 1) * size_of::<T>();
+        unsafe { self.block.add(at).cast::<T>().read() }
+    }
+
+    /// Overwrite the `T` with `below` others pushed on top of it.
+    ///
+    /// # Safety
+    ///
+    /// See [`StackAlloc::peek`].
+    #[inline(always)]
+    pub unsafe fn poke<T: Copy>(&self, below: usize, value: T) {
+        debug_assert!((below + 1) * size_of::<T>() <= self.top.get());
+        let at = self.top.get() - (below + 1) * size_of::<T>();
+        unsafe { self.block.add(at).cast::<T>().write(value) };
+    }
+
     fn offset(&self, ptr: NonNull<u8>) -> usize {
         ptr.as_ptr() as usize - self.block.as_ptr() as usize
     }

@@ -323,6 +323,17 @@ pub enum Op {
         b: u8,
         c: u8,
     },
+    /// Overwrite the value `slot` below the top of [`Vm::spilled`] with `src`. Slots count from
+    /// the top, so `slot` includes everything pushed after the slot was reserved.
+    StoreSlot {
+        slot: u16,
+        src: u8,
+    },
+    /// Read the value `slot` below the top of [`Vm::spilled`] into `dst`, see [`Op::StoreSlot`].
+    LoadSlot {
+        dst: u8,
+        slot: u16,
+    },
 
     CastToInt {
         dst: u8,
