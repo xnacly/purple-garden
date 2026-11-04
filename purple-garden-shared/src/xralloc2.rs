@@ -14,6 +14,14 @@
 use std::alloc::{Allocator, Global};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Location {
+    /// A stack slot, jit indexes via memory offset
+    Stack(u16),
+    /// A register
+    Reg(Reg),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
     Gpr,
     Fpr,
@@ -53,15 +61,19 @@ impl Reg {
 
 #[derive(Debug, Clone)]
 pub struct Xralloc2<S: Allocator = Global> {
-    map: Vec<Option<Reg>, S>,
-    /// `(last_use, reg)` of every value currently holding a register.
-    active: Vec<(u32, Reg), S>,
+    map: Vec<Option<Location>, S>,
+    /// `(last_use, location)` of every value currently holding a register or slot.
+    active: Vec<(u32, Location), S>,
     /// Allocation order per [`Class`], the most preferred register last.
     pool: [Vec<u8, S>; 2],
     /// Bitmask per [`Class`] of the registers currently free.
     free: [u64; 2],
     /// Bitmask per [`Class`] of every register handed out since [`Xralloc2::reset`].
     used: [u64; 2],
+    /// Freed slots, reused before a new one is opened.
+    free_slots: Vec<u16, S>,
+    /// Slots opened since [`Xralloc2::reset`], the frame holds this many.
+    slots: u16,
 }
 
 impl Default for Xralloc2 {
@@ -75,9 +87,11 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         Self {
             map: Vec::new_in(scratch.clone()),
             active: Vec::new_in(scratch.clone()),
-            pool: [Vec::new_in(scratch.clone()), Vec::new_in(scratch)],
+            pool: [Vec::new_in(scratch.clone()), Vec::new_in(scratch.clone())],
             free: [0; 2],
             used: [0; 2],
+            free_slots: Vec::new_in(scratch),
+            slots: 0,
         }
     }
 
@@ -91,21 +105,36 @@ impl<S: Allocator + Clone> Xralloc2<S> {
             self.free[class] = regs.iter().fold(0, |mask, &num| mask | 1u64 << num);
         }
         self.used = [0; 2];
+        self.free_slots.clear();
+        self.slots = 0;
     }
 
-    pub fn reg(&self, id: impl Into<usize>) -> Option<Reg> {
+    pub fn location(&self, id: impl Into<usize>) -> Option<Location> {
         self.map.get(id.into()).copied().flatten()
     }
 
+    /// The register of `id`, `None` if it has none or lives in a slot.
+    pub fn reg(&self, id: impl Into<usize>) -> Option<Reg> {
+        match self.location(id)? {
+            Location::Reg(reg) => Some(reg),
+            Location::Stack(_) => None,
+        }
+    }
+
+    /// Slots opened since [`Xralloc2::reset`], the frame needs this many.
+    pub fn slots(&self) -> u16 {
+        self.slots
+    }
+
     /// Assign `id` a register of `class`, reusing those of values whose last
-    /// use is at or before `at`
+    /// use is at or before `at`, or a slot if none is free.
     pub fn alloc(
         &mut self,
         id: impl Into<usize>,
         class: Class,
         at: u32,
         last_use: u32,
-    ) -> Option<Reg> {
+    ) -> Location {
         self.alloc_inner(id.into(), class, at, last_use, None)
     }
 
@@ -117,7 +146,7 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         at: u32,
         last_use: u32,
         hint: Reg,
-    ) -> Option<Reg> {
+    ) -> Location {
         self.alloc_inner(id.into(), class, at, last_use, Some(hint))
     }
 
@@ -128,11 +157,11 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         at: u32,
         last_use: u32,
         hint: Option<Reg>,
-    ) -> Option<Reg> {
-        // A value keeps its register for its whole live interval, so if its marked as used and
-        // requested again, its the same reg
-        if let Some(reg) = self.reg(id) {
-            return Some(reg);
+    ) -> Location {
+        // A value keeps its location for its whole live interval, so if its marked as used and
+        // requested again, its the same location
+        if let Some(location) = self.location(id) {
+            return location;
         }
 
         // Values whose last use is at or before `at` are dead, their reg should be free again
@@ -143,22 +172,33 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         // The pool is ordered, so the preferred register (hint) must be at the back and be popped
         // as the allocated register
         let num = match hint {
-            Some(hint) if hint.class() == class && self.try_take(hint).is_some() => hint.num(),
-            _ => self.pop(class)?,
+            Some(hint) if hint.class() == class && self.try_take(hint).is_some() => {
+                Some(hint.num())
+            }
+            _ => self.pop(class),
         };
 
-        let reg = Reg::new(class, num);
-        self.active.push((last_use, reg));
-        self.map[id] = Some(reg);
-        self.mark_used(reg);
-        Some(reg)
+        let location = match num {
+            Some(num) => {
+                let reg = Reg::new(class, num);
+                self.mark_used(reg);
+                Location::Reg(reg)
+            }
+            None => Location::Stack(self.free_slots.pop().unwrap_or_else(|| {
+                self.slots += 1;
+                self.slots - 1
+            })),
+        };
+        self.active.push((last_use, location));
+        self.map[id] = Some(location);
+        location
     }
 
     /// Assign `id` the free register `reg`, where a parameter arrives. `None` if `reg` isn't free.
     pub fn try_alloc_at(&mut self, id: impl Into<usize>, reg: Reg, last_use: u32) -> Option<Reg> {
         self.try_take(reg)?;
-        self.active.push((last_use, reg));
-        self.map[id.into()] = Some(reg);
+        self.active.push((last_use, Location::Reg(reg)));
+        self.map[id.into()] = Some(Location::Reg(reg));
         Some(reg)
     }
 
@@ -173,8 +213,11 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         excluded: u64,
     ) -> Option<Reg> {
         let id = id.into();
-        if let Some(reg) = self.reg(id) {
-            return Some(reg);
+        if let Some(location) = self.location(id) {
+            return match location {
+                Location::Reg(reg) => Some(reg),
+                Location::Stack(_) => None,
+            };
         }
         let num = match hint {
             Some(hint) if hint.class() == class && excluded & (1u64 << hint.num()) == 0 => {
@@ -187,7 +230,7 @@ impl<S: Allocator + Clone> Xralloc2<S> {
                 .find(|&num| excluded & (1u64 << num) == 0)?,
         };
         let reg = Reg::new(class, num);
-        self.map[id] = Some(reg);
+        self.map[id] = Some(Location::Reg(reg));
         Some(reg)
     }
 
@@ -200,26 +243,38 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         self.try_take(reg).expect(
             "a chosen register is free at its interval's start, unless a value outlived its block",
         );
-        self.active.push((last_use, reg));
+        self.active.push((last_use, Location::Reg(reg)));
     }
 
-    /// Free the registers of values whose last use is at or before `at`.
+    /// Free the registers and slots of values whose last use is at or before `at`.
     pub fn expire(&mut self, at: u32) {
-        let Self { active, free, .. } = self;
-        active.retain(|&(end, reg)| {
+        let Self {
+            active,
+            free,
+            free_slots,
+            ..
+        } = self;
+        active.retain(|&(end, location)| {
             if end <= at {
-                free[reg.class() as usize] |= 1u64 << reg.num();
+                match location {
+                    Location::Reg(reg) => free[reg.class() as usize] |= 1u64 << reg.num(),
+                    Location::Stack(slot) => free_slots.push(slot),
+                }
             }
             end > at
         });
     }
 
-    /// Registers holding values still needed after `pos`.
+    /// Registers holding values still needed after `pos`. Slots are left out, a call can't
+    /// clobber them.
     pub fn live_after(&self, pos: u32) -> impl Iterator<Item = Reg> + '_ {
         self.active
             .iter()
             .filter(move |&&(end, _)| end > pos)
-            .map(|&(_, reg)| reg)
+            .filter_map(|&(_, location)| match location {
+                Location::Reg(reg) => Some(reg),
+                Location::Stack(_) => None,
+            })
     }
 
     /// Take `reg` off the free list until [`Xralloc2::give_back`]. `None` if it isn't free.
@@ -261,7 +316,7 @@ impl<S: Allocator + Clone> Xralloc2<S> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Class, Reg, Xralloc2};
+    use super::{Class, Location, Reg, Xralloc2};
 
     /// A value dying at `at` frees its register for the one defined there,
     /// which is what lets `d = l + r` reuse `l`'s register.
@@ -269,8 +324,14 @@ mod tests {
     fn dying_value_hands_its_register_to_the_next_def() {
         let mut ra = Xralloc2::default();
         ra.reset(2, &[1, 0], &[]);
-        assert_eq!(ra.alloc(0usize, Class::Gpr, 0, 4), Some(Reg::Gpr(0)));
-        assert_eq!(ra.alloc(1usize, Class::Gpr, 4, 6), Some(Reg::Gpr(0)));
+        assert_eq!(
+            ra.alloc(0usize, Class::Gpr, 0, 4),
+            Location::Reg(Reg::Gpr(0))
+        );
+        assert_eq!(
+            ra.alloc(1usize, Class::Gpr, 4, 6),
+            Location::Reg(Reg::Gpr(0))
+        );
     }
 
     /// A chosen register stays free until its value starts, so values dying before then may use
@@ -287,10 +348,13 @@ mod tests {
             ra.choose(1usize, Class::Gpr, Some(Reg::Gpr(0)), 1),
             Some(Reg::Gpr(1))
         );
-        assert_eq!(ra.alloc(2usize, Class::Gpr, 1, 3), Some(Reg::Gpr(0)));
+        assert_eq!(
+            ra.alloc(2usize, Class::Gpr, 1, 3),
+            Location::Reg(Reg::Gpr(0))
+        );
         ra.activate(0usize, 4, 6);
         ra.activate(1usize, 4, 6);
-        assert_eq!(ra.alloc(3usize, Class::Gpr, 5, 7), None);
+        assert_eq!(ra.alloc(3usize, Class::Gpr, 5, 7), Location::Stack(0));
     }
 
     /// The classes are separate register files: a double and an integer
@@ -299,12 +363,39 @@ mod tests {
     fn classes_are_allocated_independently() {
         let mut ra = Xralloc2::default();
         ra.reset(4, &[0], &[0]);
-        assert_eq!(ra.alloc(0usize, Class::Gpr, 0, 10), Some(Reg::Gpr(0)));
-        assert_eq!(ra.alloc(1usize, Class::Fpr, 0, 2), Some(Reg::Fpr(0)));
-        assert_eq!(ra.alloc(2usize, Class::Gpr, 2, 4), None);
-        assert_eq!(ra.alloc(3usize, Class::Fpr, 2, 4), Some(Reg::Fpr(0)));
+        assert_eq!(
+            ra.alloc(0usize, Class::Gpr, 0, 10),
+            Location::Reg(Reg::Gpr(0))
+        );
+        assert_eq!(
+            ra.alloc(1usize, Class::Fpr, 0, 2),
+            Location::Reg(Reg::Fpr(0))
+        );
+        assert_eq!(ra.alloc(2usize, Class::Gpr, 2, 4), Location::Stack(0));
+        assert_eq!(
+            ra.alloc(3usize, Class::Fpr, 2, 4),
+            Location::Reg(Reg::Fpr(0))
+        );
         assert!(ra.used(Reg::Gpr(0)));
         assert!(ra.used(Reg::Fpr(0)));
         assert!(!ra.used(Reg::Fpr(1)));
+    }
+
+    /// Without a free register a value lives in a slot, which it hands to the next one once it
+    /// dies. Only registers count as live across a call.
+    #[test]
+    fn values_without_a_register_share_slots() {
+        let mut ra = Xralloc2::default();
+        ra.reset(4, &[0], &[]);
+        assert_eq!(
+            ra.alloc(0usize, Class::Gpr, 0, 10),
+            Location::Reg(Reg::Gpr(0))
+        );
+        assert_eq!(ra.alloc(1usize, Class::Fpr, 1, 3), Location::Stack(0));
+        assert_eq!(ra.alloc(2usize, Class::Gpr, 2, 6), Location::Stack(1));
+        assert_eq!(ra.alloc(3usize, Class::Gpr, 3, 6), Location::Stack(0));
+        assert_eq!(ra.reg(3usize), None);
+        assert_eq!(ra.slots(), 2);
+        assert_eq!(ra.live_after(4).collect::<Vec<_>>(), [Reg::Gpr(0)]);
     }
 }

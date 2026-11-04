@@ -18,7 +18,7 @@ use purple_garden_runtime::{
     string,
 };
 use purple_garden_shared::config::Config;
-use purple_garden_shared::xralloc2::{Class, Reg, Xralloc2};
+use purple_garden_shared::xralloc2::{Class, Location, Reg, Xralloc2};
 
 #[derive(Debug, Clone)]
 pub enum CcFunc<'fun> {
@@ -271,14 +271,14 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         let (start, end) = self.live_set[id.0 as usize];
         assert!(start != u32::MAX, "%v{} has no live interval", id.0);
         debug_assert!(start <= self.pos, "%v{} allocated before it starts", id.0);
-        let reg = match self.arg_hints.get(id.0 as usize).copied().flatten() {
+        let location = match self.arg_hints.get(id.0 as usize).copied().flatten() {
             Some(hint) => {
                 self.regalloc
                     .alloc_with_hint(id, Class::Gpr, self.pos, end, Reg::Gpr(hint))
             }
             None => self.regalloc.alloc(id, Class::Gpr, self.pos, end),
         };
-        let Some(reg) = reg else {
+        let Location::Reg(reg) = location else {
             todo!(
                 "no register left for %v{}, there is no stack handling yet",
                 id.0
