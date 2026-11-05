@@ -119,12 +119,13 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     /// argument through every `self.buf.push(op)` call site.
     cur_span: u32,
     /// Liveness position being lowered, one per row in lockstep with
-    /// [`Func::live_set_into`]. Values are allocated at it on their first touch.
+    /// [`Func::live_set_into`].
     pos: u32,
-    /// Liveness and placement hints of the function being compiled, read by
-    /// [`Cc::ensure_register`] when a value is first touched.
+    /// Liveness and placement hints of the function being compiled, read by [`Cc::prealloc`].
     live_set: Vec<(u32, u32), S>,
     arg_hints: Vec<Option<u8>, S>,
+    /// Per row, the registers holding values still needed after it. Only filled for calls.
+    live_across: Vec<u64, S>,
     /// General-purpose `u8` scratch used by prologue/epilogue and call-site
     /// spills. Callers fill it, then immediately consume it via the
     /// `pack_push`/`pack_pop` free functions; it is never live across a
@@ -247,6 +248,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             pos: 0,
             live_set: Vec::new_in(scratch.clone()),
             arg_hints: Vec::new_in(scratch.clone()),
+            live_across: Vec::new_in(scratch.clone()),
             scratch: Vec::new_in(scratch.clone()),
             scratch_pairs: Vec::new_in(scratch.clone()),
             jit: purple_garden_jit::Jit::new_in(scratch),
@@ -283,25 +285,114 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             Some(Location::Stack(slot)) => {
                 let dst = self.next_tmp();
                 self.emit(Op::LoadSlot { dst, slot });
-                return dst;
+                dst
             }
-            None => {}
-        };
+            None => unreachable!("%v{} has no location", id.0),
+        }
+    }
 
+    /// The register an op writes `id` into, [`TMP`] if `id` lives in a slot: the block loop stores
+    /// it there after the op.
+    fn def_register(&self, id: Id) -> u8 {
+        match self.regalloc.location(id) {
+            Some(Location::Reg(r)) => r.num(),
+            Some(Location::Stack(_)) => TMP,
+            None => unreachable!("%v{} has no location", id.0),
+        }
+    }
+
+    /// Give every value of `fun` its location before lowering, walking the rows of
+    /// [`Func::live_set_into`]. A block param is hinted at the register of the arg the last edge
+    /// before it passes, over its call arg hint, so that move vanishes.
+    fn prealloc<F: Allocator>(&mut self, fun: &Func<'cc, F>) {
+        let ids = self.live_set.len();
+        self.regalloc.reset(ids, &POOL, &[]);
+        self.arg_hints.resize(ids, None);
+        self.live_across.clear();
+        self.live_across.resize(
+            fun.blocks
+                .iter()
+                .filter(|b| !b.tombstone)
+                .map(|b| b.instructions.len() + 2)
+                .sum(),
+            0,
+        );
+
+        let mut pos = 0;
+        for (idx, block) in fun.blocks.iter().enumerate() {
+            if block.tombstone {
+                continue;
+            }
+            for (i, &param) in fun.params(block.params).iter().enumerate() {
+                // entry params arrive in their registers
+                if idx == 0 {
+                    let end = self.live_set[param.0 as usize].1;
+                    if self
+                        .regalloc
+                        .try_alloc_at(param, Reg::Gpr(i as u8), end)
+                        .is_some()
+                    {
+                        continue;
+                    }
+                }
+                self.alloc(param, pos);
+            }
+            pos += 1;
+
+            for instruction in &block.instructions {
+                if let ir::Instr::Call { .. } | ir::Instr::Sys { .. } = instruction {
+                    self.live_across[pos as usize] = self
+                        .regalloc
+                        .live_after(pos)
+                        .fold(0, |mask, reg| mask | 1 << reg.num());
+                }
+                if let Some(dst) = Func::def_of(instruction) {
+                    self.alloc(dst, pos);
+                }
+                pos += 1;
+            }
+
+            let mut hint = |(target, params): (ir::Id, ir::ParamsId)| {
+                if (target.0 as usize) <= idx {
+                    return;
+                }
+                let dst = fun.params(fun.blocks[target.0 as usize].params);
+                for (&src, &dst) in fun.params(params).iter().zip(dst) {
+                    if let Some(reg) = self.regalloc.reg(src) {
+                        self.arg_hints[dst.0 as usize] = Some(reg.num());
+                    }
+                }
+            };
+            match &block.term {
+                Some(ir::Terminator::Jump { id, params, .. }) => hint((*id, *params)),
+                Some(
+                    ir::Terminator::Branch { yes, no, .. }
+                    | ir::Terminator::BranchCmpImm { yes, no, .. }
+                    | ir::Terminator::BranchCmp { yes, no, .. },
+                ) => {
+                    hint(*no);
+                    hint(*yes);
+                }
+                Some(ir::Terminator::Switch { cases, default, .. }) => {
+                    for case in fun.cases(*cases) {
+                        hint(case.target);
+                    }
+                    hint(*default);
+                }
+                Some(ir::Terminator::Return { .. } | ir::Terminator::Tail { .. }) | None => {}
+            }
+            pos += 1;
+        }
+    }
+
+    fn alloc(&mut self, id: Id, at: u32) -> Location {
         let (start, end) = self.live_set[id.0 as usize];
         assert!(start != u32::MAX, "%v{} has no live interval", id.0);
-        debug_assert!(start <= self.pos, "%v{} allocated before it starts", id.0);
-        let location = match self.arg_hints.get(id.0 as usize).copied().flatten() {
-            Some(hint) => {
-                self.regalloc
-                    .alloc_with_hint(id, Class::Gpr, self.pos, end, Reg::Gpr(hint))
-            }
-            None => self.regalloc.alloc(id, Class::Gpr, self.pos, end),
-        };
-
-        match location {
-            Location::Reg(reg) => reg.num(),
-            Location::Stack(_) => TMP,
+        match self.arg_hints[id.0 as usize] {
+            Some(hint) => self
+                .regalloc
+                .alloc_with_hint(id, Class::Gpr, at, end, Reg::Gpr(hint)),
+            None => self.regalloc.alloc(id, Class::Gpr, at, end),
         }
     }
 
@@ -430,17 +521,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         self.live_set = live_set;
 
         fun.arg_hints_into(&mut self.arg_hints);
-        self.regalloc.reset(self.live_set.len(), &POOL, &[]);
-        if let Some(entry) = fun.blocks.first()
-            && !entry.tombstone
-        {
-            for (i, &param) in fun.params(entry.params).iter().enumerate() {
-                let (start, end) = self.live_set[param.0 as usize];
-                if start != u32::MAX {
-                    self.regalloc.try_alloc_at(param, Reg::Gpr(i as u8), end);
-                }
-            }
-        }
+        self.prealloc(fun);
 
         // binding the id of a function to its context
         let pc = self.buf.len();
@@ -463,16 +544,6 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             }
 
             self.bind(block.id.0 as u16);
-
-            for &param in fun.params(block.params) {
-                let end = self.live_set[param.0 as usize].1;
-                match self.regalloc.reg(param) {
-                    // entry params arrive in their registers
-                    Some(_) if idx == 0 => {}
-                    Some(_) => self.regalloc.activate(param, self.pos, end),
-                    None => _ = self.ensure_register(param),
-                }
-            }
             self.pos += 1; // block params row
             for instruction in &block.instructions {
                 self.cur_span = instruction.span();
@@ -786,36 +857,17 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         fun: &Func<'cc, F>,
         (target, params): (ir::Id, ir::ParamsId),
     ) -> bool {
-        self.choose_params(fun, (target, params));
         let dst = fun.params(fun.blocks[target.0 as usize].params);
-        fun.params(params)
-            .iter()
-            .zip(dst)
-            .any(|(&src, &dst)| self.ensure_register(src) != self.ensure_register(dst))
+        fun.params(params).iter().zip(dst).any(|(&src, &dst)| {
+            self.is_read(dst) && self.regalloc.location(src) != self.regalloc.location(dst)
+        })
     }
 
-    /// Pick registers for the params of `target` no edge reached yet, without taking them before
-    /// `target` starts. Each is hinted at its arg's register, so its move vanishes.
-    fn choose_params<F: Allocator>(
-        &mut self,
-        fun: &Func<'cc, F>,
-        (target, params): (ir::Id, ir::ParamsId),
-    ) {
-        let dst = fun.params(fun.blocks[target.0 as usize].params);
-        let mut excluded = dst
-            .iter()
-            .filter_map(|&param| self.regalloc.reg(param))
-            .fold(0u64, |mask, reg| mask | 1 << reg.num());
-        for (&src, &dst) in fun.params(params).iter().zip(dst) {
-            if self.regalloc.reg(dst).is_some() {
-                continue;
-            }
-            let hint = Reg::Gpr(self.ensure_register(src));
-            let Some(reg) = self.regalloc.choose(dst, Class::Gpr, Some(hint), excluded) else {
-                todo!("more params than registers for %v{}", dst.0)
-            };
-            excluded |= 1 << reg.num();
-        }
+    /// A param nothing reads dies where it starts, and its register may go to a sibling. Edges
+    /// skip it.
+    fn is_read(&self, param: Id) -> bool {
+        let (start, end) = self.live_set[param.0 as usize];
+        end > start
     }
 
     /// Move `params` into the params of `target`, then jump there unless it is `next_block`.
@@ -825,13 +877,18 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         (target, params): (ir::Id, ir::ParamsId),
         next_block: Option<ir::Id>,
     ) {
-        self.choose_params(fun, (target, params));
         let mut moves = take(&mut self.scratch_pairs);
         moves.clear();
         let dst = fun.params(fun.blocks[target.0 as usize].params);
         for (&src, &dst) in fun.params(params).iter().zip(dst) {
+            if !self.is_read(dst) {
+                continue;
+            }
             let src = self.ensure_register(src);
-            let dst = self.ensure_register(dst);
+            let Some(Location::Reg(dst)) = self.regalloc.location(dst) else {
+                todo!("block param %v{} in a slot", dst.0)
+            };
+            let dst = dst.num();
             if src != dst {
                 moves.push((src, dst));
             }
@@ -1019,7 +1076,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             ir::Instr::Load {
                 dst, base, offset, ..
             } => {
-                let dst = self.ensure_register(dst.id);
+                let dst = self.def_register(dst.id);
                 let base = self.ensure_register(*base);
                 self.emit(Op::Load {
                     dst,
@@ -1030,7 +1087,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             ir::Instr::AddrOf {
                 dst, base, offset, ..
             } => {
-                let dst = self.ensure_register(dst.id);
+                let dst = self.def_register(dst.id);
                 let base = self.ensure_register(*base);
                 self.emit(Op::AddrOf {
                     dst,
@@ -1043,7 +1100,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 layout,
                 ..
             } => {
-                let dst = self.ensure_register(*id);
+                let dst = self.def_register(*id);
                 let Some(kind) = AllocType::from_ty(ty) else {
                     unreachable!("alloc attempts to alloc non heap allocated value?");
                 };
@@ -1065,7 +1122,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 ..
             } => {
                 use ptype::Type::{Bool, Double, Int};
-                let dst = self.ensure_register(*id);
+                let dst = self.def_register(*id);
                 let src = self.ensure_register(*src_id);
                 let op = match (src_ty, dst_ty) {
                     (Int, Double) => Op::CastToDouble { dst, src },
@@ -1107,7 +1164,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     values,
                     default: value(default),
                 });
-                let dst = self.ensure_register(dst.id);
+                let dst = self.def_register(dst.id);
                 let subject = self.ensure_register(*subject);
                 let ptr = NonNull::from(&*table);
                 self.lookup_tables.push(table);
@@ -1119,7 +1176,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 });
             }
             ir::Instr::LoadConst { dst, value, .. } => {
-                let dst = self.ensure_register(dst.id);
+                let dst = self.def_register(dst.id);
                 match value {
                     Const::Int(i) if *i > i32::MIN as i64 && *i < i32::MAX as i64 => {
                         self.emit(Op::LoadI {
@@ -1152,15 +1209,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 // preserves the rest. The caller spills the live values in r0..r{clobber_end-1}.
                 let clobber_end = CALLEE_SAVED.max(args.len() as u8);
                 self.scratch.clear();
-                for reg in self.regalloc.live_after(pos) {
-                    if reg.num() < clobber_end {
-                        purple_garden_shared::trace!(
-                            "[bc] spilled r{} at call_idx={}",
-                            reg.num(),
-                            pos
-                        );
-                        self.scratch.push(reg.num());
-                    }
+                let live = self.live_across[pos as usize];
+                for reg in (0..clobber_end).filter(|r| live & 1 << r != 0) {
+                    purple_garden_shared::trace!("[bc] spilled r{} at call_idx={}", reg, pos);
+                    self.scratch.push(reg);
                 }
                 pack_push(
                     &mut self.buf,
@@ -1171,7 +1223,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
                 self.emit_arg_shuffle(args, self.scratch.len() as u16);
 
-                let dst = self.ensure_register(dst.id);
+                let dst = self.def_register(dst.id);
                 match target {
                     CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
                     CcCallTarget::Native {
@@ -1201,11 +1253,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 // registers, so only spill alive-across values inside that range.
                 let clobber_end = args.len().max(1) as u8;
                 self.scratch.clear();
-                for reg in self.regalloc.live_after(pos) {
-                    if reg.num() < clobber_end {
-                        self.scratch.push(reg.num());
-                    }
-                }
+                let live = self.live_across[pos as usize];
+                self.scratch
+                    .extend((0..clobber_end).filter(|r| live & 1 << r != 0));
                 pack_push(
                     &mut self.buf,
                     &mut self.pc_to_span,
@@ -1215,7 +1265,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
                 self.emit_arg_shuffle(args, self.scratch.len() as u16);
 
-                let dst = self.ensure_register(dst.id);
+                let dst = self.def_register(dst.id);
                 self.emit(Op::Sys {
                     idx: idx as u16,
                     argc: args.len() as u8,
@@ -1239,7 +1289,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             ir::Instr::Bin {
                 op, dst, lhs, rhs, ..
             } => {
-                let dst = self.ensure_register(dst.id);
+                let dst = self.def_register(dst.id);
                 let lhs = self.ensure_register(*lhs);
                 let rhs = self.ensure_register(*rhs);
 
@@ -1268,7 +1318,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             ir::Instr::BinImm {
                 op, dst, lhs, imm, ..
             } => {
-                let dst = self.ensure_register(dst.id);
+                let dst = self.def_register(dst.id);
                 let lhs = self.ensure_register(*lhs);
                 let imm = *imm;
 
