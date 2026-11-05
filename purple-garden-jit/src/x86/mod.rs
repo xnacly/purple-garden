@@ -226,6 +226,12 @@ pub struct Scratch<S: Allocator> {
     move_pairs: Vec<(Preg, Preg), S>,
     /// `(reg, copy)` pairs preserved across a clobbering instruction.
     saves: Vec<(Preg, Preg), S>,
+    /// Register hint per value, a block param gets its edge arg's register and class.
+    hints: Vec<Option<Preg>, S>,
+    /// The `(reg, copy)` pairs [`Lowering::prealloc`] planned, per row from `copies_at[row]` to
+    /// `copies_at[row + 1]`.
+    copies: Vec<(Preg, Preg), S>,
+    copies_at: Vec<u32, S>,
     /// Body offsets of the rel32s (self calls) that address the function's own start.
     self_refs: Vec<usize, S>,
     /// Body offsets of the rel32s (tail calls) and the native function each jumps to.
@@ -242,6 +248,9 @@ impl<S: Allocator + Clone> Scratch<S> {
             patches: Vec::new_in(scratch.clone()),
             move_pairs: Vec::new_in(scratch.clone()),
             saves: Vec::new_in(scratch.clone()),
+            hints: Vec::new_in(scratch.clone()),
+            copies: Vec::new_in(scratch.clone()),
+            copies_at: Vec::new_in(scratch.clone()),
             self_refs: Vec::new_in(scratch.clone()),
             tail_refs: Vec::new_in(scratch.clone()),
             native_refs: Vec::new_in(scratch),
@@ -354,6 +363,9 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     move_pairs: &'a mut Vec<(Preg, Preg), S>,
     /// Reusable `(reg, copy)` buffer of [`Lowering::save_clobbered`].
     saves: &'a mut Vec<(Preg, Preg), S>,
+    hints: &'a mut Vec<Option<Preg>, S>,
+    copies: &'a mut Vec<(Preg, Preg), S>,
+    copies_at: &'a mut Vec<u32, S>,
     self_refs: &'a mut Vec<usize, S>,
     tail_refs: &'a mut Vec<(usize, usize), S>,
     native_refs: &'a mut Vec<(usize, usize), S>,
@@ -376,6 +388,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             patches,
             move_pairs,
             saves,
+            hints,
+            copies,
+            copies_at,
             self_refs,
             tail_refs,
             native_refs,
@@ -405,6 +420,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             patches,
             move_pairs,
             saves,
+            hints,
+            copies,
+            copies_at,
             self_refs,
             tail_refs,
             native_refs,
@@ -418,6 +436,11 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// Emit the body, ending where the epilogue is appended. Returns whether
     /// it calls helpers, `None` if the function can't be compiled.
     fn lower(mut self) -> Option<bool> {
+        self.prealloc();
+        if self.unsupported {
+            return None;
+        }
+
         // Native calls recurse on the machine stack: trap like the interpreter
         // before running off its end.
         // Functions are defined before use, so only a function calling itself
@@ -446,18 +469,17 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         }
 
         for (i, param) in self.func.params.iter().enumerate() {
-            let Some(&(_, last_use)) = self
+            if self
                 .liveness
                 .get(param.id.0 as usize)
-                .filter(|&&(start, _)| start != u32::MAX)
-            else {
+                .is_none_or(|&(start, _)| start == u32::MAX)
+            {
                 continue;
-            };
-            let class = Class::from(&param.ty);
+            }
             if i >= ARG_GPRS.len() {
                 // the argument registers are all taken by now, this can't clobber one
                 let offset = 8 * i as u32;
-                let dst = self.def_class(param.id, self.pos, class);
+                let dst = self.def_id(param.id);
                 self.emit(match dst {
                     Preg::Gpr(dst) => Insn::LoadMem {
                         dst: Reg(dst),
@@ -470,14 +492,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         offset,
                     },
                 });
-                continue;
-            }
-            let reg = match class {
-                Class::Gpr => Preg::Gpr(ARG_GPRS[i].0),
-                Class::Fpr => Preg::Fpr(i as u8),
-            };
-            if self.ra.try_alloc_at(param.id, reg, last_use).is_none() {
-                bail!(self, "param register {reg:?} is taken");
             }
         }
 
@@ -488,9 +502,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             }
             self.block_offsets[block.id.0 as usize] = self.out.len();
             self.block = block.id;
-            for &param in self.func.params(block.params) {
-                self.def_class(param, self.pos, Class::Gpr);
-            }
             self.pos += 1;
 
             for instruction in &block.instructions {
@@ -540,23 +551,185 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         }
     }
 
-    /// Register of `id`, assigned if this is its first touch. `at` is where it
-    /// is first needed; a forward edge needs a block param before its block
-    /// starts. Registers are only reclaimed up to the interval start, so the
-    /// register is clear of every value the interval overlaps.
-    fn def(&mut self, &ir::TypeId { id, ref ty }: &ir::TypeId<'ir>, at: u32) -> Preg {
-        self.def_class(id, at, ty.into())
+    /// Give every value its register before lowering, walking the rows of
+    /// [`ir::Func::live_set_into`]. An instruction overwriting registers besides its dst gets
+    /// free registers planned for the values living there, see [`Lowering::save_clobbered`].
+    fn prealloc(&mut self) {
+        let func = self.func;
+        self.hints.clear();
+        self.hints.resize(self.liveness.len(), None);
+        self.copies.clear();
+        self.copies_at.clear();
+
+        for (i, param) in func.params.iter().enumerate() {
+            let Some(&(_, last_use)) = self
+                .liveness
+                .get(param.id.0 as usize)
+                .filter(|&&(start, _)| start != u32::MAX)
+            else {
+                continue;
+            };
+            let class = Class::from(&param.ty);
+            if i >= ARG_GPRS.len() {
+                self.alloc(param.id, class, 0);
+                continue;
+            }
+            let reg = match class {
+                Class::Gpr => Preg::Gpr(ARG_GPRS[i].0),
+                Class::Fpr => Preg::Fpr(i as u8),
+            };
+            if self.ra.try_alloc_at(param.id, reg, last_use).is_none() {
+                bail!(self, "param register {reg:?} is taken");
+                return;
+            }
+        }
+
+        let mut pos = 0;
+        for (idx, block) in func.blocks.iter().enumerate() {
+            if block.tombstone {
+                continue;
+            }
+            self.copies_at.push(self.copies.len() as u32);
+            for &param in func.params(block.params) {
+                let class = self.hints[param.0 as usize].map_or(Class::Gpr, Preg::class);
+                self.alloc(param, class, pos);
+            }
+            pos += 1;
+
+            for instruction in &block.instructions {
+                self.copies_at.push(self.copies.len() as u32);
+                self.plan(instruction, pos);
+                pos += 1;
+            }
+
+            self.copies_at.push(self.copies.len() as u32);
+            let mut hint = |(target, params): (ir::Id, ir::ParamsId)| {
+                if (target.0 as usize) <= idx {
+                    return;
+                }
+                let dst = func.params(func.blocks[target.0 as usize].params);
+                for (&src, &dst) in func.params(params).iter().zip(dst) {
+                    if let Some(reg) = self.ra.reg(src) {
+                        self.hints[dst.0 as usize] = Some(reg);
+                    }
+                }
+            };
+            match &block.term {
+                Some(ir::Terminator::Jump { id, params, .. }) => hint((*id, *params)),
+                Some(
+                    ir::Terminator::Branch { yes, no, .. }
+                    | ir::Terminator::BranchCmpImm { yes, no, .. }
+                    | ir::Terminator::BranchCmp { yes, no, .. },
+                ) => {
+                    hint(*no);
+                    hint(*yes);
+                }
+                Some(ir::Terminator::Switch { cases, default, .. }) => {
+                    for case in func.cases(*cases) {
+                        hint(case.target);
+                    }
+                    hint(*default);
+                }
+                Some(ir::Terminator::Return { .. } | ir::Terminator::Tail { .. }) | None => {}
+            }
+            pos += 1;
+        }
+        self.copies_at.push(self.copies.len() as u32);
     }
 
-    /// [`Lowering::def`] for the ids the IR doesn't type at the definition:
-    /// params, whose class the caller picks, and block params, which take
-    /// the class of the edge argument moved into them.
-    fn def_class(&mut self, id: ir::Id, at: u32, class: Class) -> Preg {
-        let (start, last_use) = self.liveness[id.0 as usize];
-        match self.ra.alloc(id, class, at.min(start), last_use) {
-            Location::Reg(reg) => reg,
-            Location::Stack(_) => {
-                bail!(self, "out of registers at %v{}", id.0);
+    /// Assign `i`'s dst at `pos`, after planning the copies of what lowering `i` clobbers. A
+    /// call's copies are free again once it returned, so its dst may take one.
+    fn plan(&mut self, i: &ir::Instr<'ir>, pos: u32) {
+        const IDIV: Clobbers = Clobbers {
+            gprs: &[RDX],
+            fprs: false,
+        };
+        // a divisor in rdx, or an immediate one, is staged in rcx
+        const IDIV_STAGED: Clobbers = Clobbers {
+            gprs: &[RCX, RDX],
+            fprs: false,
+        };
+        let (clobbers, call) = match i {
+            ir::Instr::Call { .. } | ir::Instr::Sys { .. } => (Some(CALL_CLOBBERS), true),
+            ir::Instr::Alloc { .. } => (Some(CALL_CLOBBERS), false),
+            ir::Instr::Bin {
+                op: BinOp::IDiv | BinOp::IMod,
+                rhs,
+                ..
+            } if self.ra.reg(*rhs) == Some(Preg::Gpr(RDX.0)) => (Some(IDIV_STAGED), false),
+            ir::Instr::Bin {
+                op: BinOp::IDiv | BinOp::IMod,
+                ..
+            } => (Some(IDIV), false),
+            ir::Instr::BinImm {
+                op: BinOp::IDiv | BinOp::IMod,
+                imm,
+                ..
+            } if *imm != 0 && !pow2(*imm) => (Some(IDIV_STAGED), false),
+            _ => (None, false),
+        };
+
+        let start = self.copies.len();
+        if let Some(clobbers) = clobbers {
+            // the parallel move reads a call's args before writing a copy over one dying there
+            if call {
+                self.ra.expire(pos);
+            }
+            self.reserve_copies(clobbers, pos);
+        }
+        if call {
+            self.give_back_copies(start);
+        }
+        let dst = match i {
+            // a Void value is never read, see the Assert lowering
+            ir::Instr::Assert { .. } => None,
+            ir::Instr::Alloc { dst, .. }
+            | ir::Instr::Load { dst, .. }
+            | ir::Instr::AddrOf { dst, .. }
+            | ir::Instr::Bin { dst, .. }
+            | ir::Instr::BinImm { dst, .. }
+            | ir::Instr::LoadConst { dst, .. }
+            | ir::Instr::Call { dst, .. }
+            | ir::Instr::Sys { dst, .. }
+            | ir::Instr::Cast { dst, .. }
+            | ir::Instr::Lookup { dst, .. } => Some(dst),
+            ir::Instr::Store { .. } | ir::Instr::Noop => None,
+        };
+        if let Some(dst) = dst {
+            self.alloc(dst.id, Class::from(&dst.ty), pos);
+        }
+        if !call {
+            self.give_back_copies(start);
+        }
+    }
+
+    fn alloc(&mut self, id: ir::Id, class: Class, at: u32) {
+        let last_use = self.liveness[id.0 as usize].1;
+        let location = match self.hints[id.0 as usize] {
+            Some(hint) => self.ra.alloc_with_hint(id, class, at, last_use, hint),
+            None => self.ra.alloc(id, class, at, last_use),
+        };
+        if let Location::Stack(_) = location {
+            bail!(self, "out of registers at %v{}", id.0);
+        }
+    }
+
+    fn give_back_copies(&mut self, start: usize) {
+        for &(_, copy) in &self.copies[start..] {
+            self.ra.give_back(copy);
+        }
+    }
+
+    fn def(&mut self, dst: &ir::TypeId<'ir>) -> Preg {
+        self.def_id(dst.id)
+    }
+
+    /// The register [`Lowering::prealloc`] gave `id`.
+    fn def_id(&mut self, id: ir::Id) -> Preg {
+        match self.ra.reg(id) {
+            Some(reg) => reg,
+            None => {
+                bail!(self, "%v{} has no register", id.0);
                 Preg::Gpr(GPR_SCRATCH.0)
             }
         }
@@ -611,7 +784,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let resume = self.out.len();
                 patch_rel32(self.out, holds, holds + 4, resume).expect("short forward jump");
                 // a Void value is never read, we dont reserve a reg
-                // self.def(dst, self.pos);
+                // self.def(dst);
             }
             ir::Instr::Load {
                 dst, base, offset, ..
@@ -619,7 +792,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let base = self.ensure_register(*base);
                 let base = self.gpr(base);
                 let offset = *offset;
-                let dst = self.def(dst, self.pos);
+                let dst = self.def(dst);
                 self.emit(match dst {
                     Preg::Gpr(dst) => Insn::LoadMem {
                         dst: Reg(dst),
@@ -638,7 +811,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             } if *offset <= i32::MAX as u32 => {
                 let base = self.ensure_register(*base);
                 let base = self.gpr(base);
-                let dst = self.def(dst, self.pos);
+                let dst = self.def(dst);
                 let dst = self.gpr(dst);
                 self.emit(Insn::LeaMem {
                     dst,
@@ -655,8 +828,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     bail!(self, "unsupported allocation type");
                     return;
                 };
-                let saves = self.save_clobbered(CALL_CLOBBERS);
-                let dst = self.def_class(*id, self.pos, ty.into());
+                let saves = self.save_clobbered();
+                let dst = self.def_id(*id);
                 let dst = self.gpr(dst);
                 self.call(
                     purple_garden_runtime::jit_alloc as *const () as u64,
@@ -683,7 +856,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     bail!(self, "string constant missing from the const pool");
                     return;
                 };
-                let dst = self.def(dst, self.pos);
+                let dst = self.def(dst);
                 let dst = self.gpr(dst);
                 self.emit(Insn::MovAbs { dst, imm: value.0 });
             }
@@ -694,7 +867,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             } => {
                 // xmm doesnt have an immediate form:
                 // so we move the bits in the GPR scratch.
-                let dst = self.def(dst, self.pos);
+                let dst = self.def(dst);
                 let dst = self.xmm(dst);
                 self.emit(Insn::MovAbs {
                     dst: GPR_SCRATCH,
@@ -711,7 +884,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 value: ir::Const::Undefined,
                 ..
             } => {
-                self.def(dst, self.pos);
+                self.def(dst);
             }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let Some(imm) = (match value {
@@ -724,7 +897,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     return;
                 };
 
-                let dst = self.def(dst, self.pos);
+                let dst = self.def(dst);
                 let dst = self.gpr(dst);
                 if imm > i32::MAX as i64 || imm < i32::MIN as i64 {
                     let imm = imm.cast_unsigned();
@@ -755,7 +928,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let lhs = self.ensure_register(*lhs);
                 let lhs = self.gpr(lhs);
                 let imm = *imm;
-                let dst = self.def(dst, self.pos);
+                let dst = self.def(dst);
                 let dst = self.gpr(dst);
 
                 match op {
@@ -860,7 +1033,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let rhs = self.ensure_register(*rhs);
                 let rhs = self.xmm(rhs);
 
-                let dst = self.def(dst, self.pos);
+                let dst = self.def(dst);
                 let dst = self.xmm(dst);
 
                 self.emit(match op {
@@ -883,7 +1056,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let rhs = self.ensure_register(*rhs);
                 let rhs = self.xmm(rhs);
 
-                let dst = self.def(dst, self.pos);
+                let dst = self.def(dst);
                 let dst = self.gpr(dst);
 
                 // ucomisd reports `<` like a NaN, via CF, but `>` only when
@@ -908,7 +1081,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let rhs = self.gpr(rhs);
                 match op {
                     BinOp::IAdd | BinOp::ISub | BinOp::IMul | BinOp::IAnd => {
-                        let dst = self.def(dst, self.pos);
+                        let dst = self.def(dst);
                         let dst = self.gpr(dst);
 
                         // x86 arithmetic is `dst <op>= src`, so dst has to
@@ -929,7 +1102,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                     // Strings are interned: equal contents share one pointer.
                     BinOp::IEq | BinOp::BEq | BinOp::SEq | BinOp::ILt | BinOp::IGt => {
-                        let dst = self.def(dst, self.pos);
+                        let dst = self.def(dst);
                         let dst = self.gpr(dst);
                         self.emit(Insn::Cmp { lhs, rhs });
                         self.emit(Insn::MovImm { dst, imm: 0 });
@@ -964,7 +1137,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ir::Instr::Cast { dst, from, .. } => {
                 use ir::ptype::Type::{Bool, Double, Int};
                 let src = self.ensure_register(from.id);
-                let to = self.def(dst, self.pos);
+                let to = self.def(dst);
                 match (&from.ty, &dst.ty) {
                     (Int, Double) => {
                         let src = self.gpr(src);
@@ -1072,7 +1245,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
 
                 let subject = self.ensure_register(*subject);
                 let subject = self.gpr(subject);
-                let dst = self.def(dst, self.pos);
+                let dst = self.def(dst);
                 let dst = self.gpr(dst);
 
                 // rax = the subject's slot, everything outside the table wraps
@@ -1142,7 +1315,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let src = self.func.params(*args)[0];
                 let src = self.ensure_register(src);
                 let src = self.xmm(src);
-                let dst = self.def(dst, self.pos);
+                let dst = self.def(dst);
                 let dst = self.xmm(dst);
                 self.emit(Insn::VSqrtSd { dst, src });
             }
@@ -1184,7 +1357,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             return;
         };
         let func = self.func;
-        let pos = self.pos;
 
         match term {
             ir::Terminator::Return { value, .. } => {
@@ -1209,7 +1381,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ir::Terminator::Jump { id, params, .. } => {
                 let src = func.params(*params);
                 let dst = func.params(func.blocks[id.0 as usize].params);
-                self.edge_moves(src, dst, pos);
+                self.edge_moves(src, dst);
                 if Some(*id) != next {
                     self.jump(Cond::Always, Target::Block(*id));
                 }
@@ -1226,7 +1398,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let no_dst = func.params(func.blocks[no.0 as usize].params);
 
                 // Same phasing as liveness: yes moves, then cond, then no moves.
-                self.edge_moves(yes_src, yes_dst, pos);
+                self.edge_moves(yes_src, yes_dst);
                 let cond = self.ensure_register(*cond);
                 let cond = self.gpr(cond);
                 self.emit(Insn::Test {
@@ -1248,7 +1420,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let no_src = func.params(*no_params);
                 let no_dst = func.params(func.blocks[no.0 as usize].params);
 
-                self.edge_moves(yes_src, yes_dst, pos);
+                self.edge_moves(yes_src, yes_dst);
                 let lhs = self.ensure_register(*lhs);
                 let lhs = self.gpr(lhs);
                 if *imm == 0 {
@@ -1274,7 +1446,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let no_src = func.params(*no_params);
                 let no_dst = func.params(func.blocks[no.0 as usize].params);
 
-                self.edge_moves(yes_src, yes_dst, pos);
+                self.edge_moves(yes_src, yes_dst);
                 let lhs = self.ensure_register(*lhs);
                 let lhs = self.gpr(lhs);
                 let rhs = self.ensure_register(*rhs);
@@ -1287,7 +1459,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 func: callee, args, ..
             } if *callee == func.id => {
                 let entry_params = func.params(func.blocks[self.entry.0 as usize].params);
-                self.edge_moves(func.params(*args), entry_params, pos);
+                self.edge_moves(func.params(*args), entry_params);
                 self.jump(Cond::Always, Target::Block(self.entry));
             }
             ir::Terminator::Tail {
@@ -1360,15 +1532,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
 
                 let subject = self.ensure_register(*subject);
                 let subject = self.gpr(subject);
-                let Some(base) = GPR_POOL
-                    .iter()
-                    .rev()
-                    .find_map(|&num| self.ra.try_take(Preg::Gpr(num)))
-                else {
-                    bail!(self, "no free register for the switch table");
-                    return;
-                };
-                let base = self.gpr(base);
+                // nothing outlives the switch, it jumps without edge moves: the table base
+                // reuses the subject's register once rax is computed from it
+                let base = subject;
 
                 // rax = the subject's slot. A subject below `first` wraps around
                 // to a huge slot, so one unsigned compare sends everything
@@ -1407,7 +1573,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     src: base,
                 });
                 self.emit(Insn::JmpReg { reg: GPR_SCRATCH });
-                self.ra.give_back(Preg::Gpr(base.0));
 
                 while !self.out.len().is_multiple_of(4) {
                     self.out.push(0xcc);
@@ -1445,7 +1610,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     ) {
         self.jump(cond, Target::Block(yes));
         let moves_at = self.out.len();
-        self.edge_moves(no_src, no_dst, self.pos + 1);
+        self.edge_moves(no_src, no_dst);
         if Some(no) == next {
             return;
         }
@@ -1461,15 +1626,19 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     }
 
     /// Move edge args `src` into the target's block params `dst`, the IR's phi
-    /// nodes, as if every move happened at once. `dst` registers are assigned
-    /// at `at` if this edge is the first to reach them.
-    fn edge_moves(&mut self, src: &[ir::Id], dst: &[ir::Id], at: u32) {
+    /// nodes, as if every move happened at once.
+    fn edge_moves(&mut self, src: &[ir::Id], dst: &[ir::Id]) {
         debug_assert_eq!(src.len(), dst.len(), "edge arity matches target params");
         let mut todo = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
         todo.clear();
         for (&s, &d) in src.iter().zip(dst) {
+            // nothing reads it, it may share its register with a sibling
+            let (start, end) = self.liveness[d.0 as usize];
+            if end <= start {
+                continue;
+            }
             let s = self.ensure_register(s);
-            let d = self.def_class(d, at, s.class());
+            let d = self.def_id(d);
             if s != d {
                 todo.push((s, d));
             }
@@ -1531,12 +1700,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         }
     }
 
-    /// Copy values living in `clobbers` past this instruction into free
-    /// registers; [`Lowering::restore`] copies them back. Runs before the
-    /// instruction's dst is assigned, so neither a copy nor dst can take an
-    /// operand register the instruction still reads.
-    fn save_clobbered(&mut self, clobbers: Clobbers) -> Vec<(Preg, Preg), S> {
-        let saves = self.reserve_copies(clobbers);
+    /// Copy the values living in registers this instruction clobbers into the free registers
+    /// [`Lowering::plan`] picked; [`Lowering::restore`] copies them back.
+    fn save_clobbered(&mut self) -> Vec<(Preg, Preg), S> {
+        let saves = self.planned_copies();
         for &(reg, copy) in &saves {
             self.mov(copy, reg);
         }
@@ -1556,44 +1723,50 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             .find_map(|reg| self.ra.try_take(reg))
     }
 
-    /// The `(reg, copy)` pairs [`Lowering::save_clobbered`] would copy, without emitting them.
-    fn reserve_copies(&mut self, clobbers: Clobbers) -> Vec<(Preg, Preg), S> {
-        let mut saves = std::mem::replace(self.saves, Vec::new_in(self.scratch()));
-        saves.clear();
-        saves.extend(
+    /// Plan a `(reg, copy)` pair for every value living in `clobbers` past `pos`, taking the copies
+    /// until [`Lowering::give_back_copies`].
+    fn reserve_copies(&mut self, clobbers: Clobbers, pos: u32) {
+        let start = self.copies.len();
+        self.copies.extend(
             self.ra
-                .live_after(self.pos)
+                .live_after(pos)
                 .filter(|&reg| clobbers.contains(reg))
                 .map(|reg| (reg, reg)),
         );
-        for save in &mut saves {
+        for i in start..self.copies.len() {
             // A call clobbers every fpr, so a live double moves into a callee saved gpr instead.
-            let class = save.0.class();
+            let reg = self.copies[i].0;
             match self
-                .take_unclobbered(class, clobbers)
+                .take_unclobbered(reg.class(), clobbers)
                 .or_else(|| self.take_unclobbered(Class::Gpr, clobbers))
             {
-                Some(free) => save.1 = free,
+                Some(free) => self.copies[i].1 = free,
                 None => bail!(
                     self,
-                    "no free register to preserve {:?} across a clobber",
-                    save.0
+                    "no free register to preserve {reg:?} across a clobber"
                 ),
             }
         }
+    }
+
+    /// The `(reg, copy)` pairs planned for the current row.
+    fn planned_copies(&mut self) -> Vec<(Preg, Preg), S> {
+        let mut saves = std::mem::replace(self.saves, Vec::new_in(self.scratch()));
+        saves.clear();
+        let row = self.pos as usize;
+        let (start, end) = (
+            self.copies_at[row] as usize,
+            self.copies_at[row + 1] as usize,
+        );
+        saves.extend_from_slice(&self.copies[start..end]);
         saves
     }
 
     /// Moves the arguments of a call into place and copies the values live across it out of the
     /// registers it clobbers, as one parallel move: the registers of arguments dying at the call
     /// can hold the copies, the resolver reads them first.
-    fn move_args_and_save(
-        &mut self,
-        mut moves: Vec<(Preg, Preg), S>,
-        clobbers: Clobbers,
-    ) -> Vec<(Preg, Preg), S> {
-        self.ra.expire(self.pos);
-        let saves = self.reserve_copies(clobbers);
+    fn move_args_and_save(&mut self, mut moves: Vec<(Preg, Preg), S>) -> Vec<(Preg, Preg), S> {
+        let saves = self.planned_copies();
         moves.extend_from_slice(&saves);
         self.parallel_move(moves);
         saves
@@ -1602,7 +1775,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     fn restore(&mut self, saves: Vec<(Preg, Preg), S>) {
         for &(reg, copy) in &saves {
             self.mov(reg, copy);
-            self.ra.give_back(copy);
         }
         *self.saves = saves;
     }
@@ -1614,13 +1786,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// `i64::MIN % -1` faults in `idiv` (#DE); the bytecode VM panics on the
     /// same input via Rust's checked `%`, so neither path is lenient here.
     fn div(&mut self, op: BinOp, dst: ir::Id, lhs: Reg, divisor: Divisor) {
-        let staged = !matches!(divisor, Divisor::Reg(r) if r != RDX);
-        let clobbers = Clobbers {
-            gprs: if staged { &[RCX, RDX] } else { &[RDX] },
-            fprs: false,
-        };
-        let saves = self.save_clobbered(clobbers);
-        let dst = self.def_class(dst, self.pos, Class::Gpr);
+        let saves = self.save_clobbered();
+        let dst = self.def_id(dst);
         let dst = self.gpr(dst);
 
         self.emit(Insn::Mov { dst: RAX, src: lhs });
@@ -1664,7 +1831,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 moves.push((src, dst));
             }
         }
-        let saves = self.move_args_and_save(moves, CALL_CLOBBERS);
+        let saves = self.move_args_and_save(moves);
         self.calls = true;
         match callee {
             Callee::Native(f) => {
@@ -1693,7 +1860,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         }
         self.restore(saves);
         let void = dst.ty == ir::ptype::Type::Void;
-        let dst = self.def(dst, self.pos);
+        let dst = self.def(dst);
         // a Void value is never read, whatever the register holds will do
         if !void && dst != ret {
             self.mov(dst, ret);
@@ -1746,7 +1913,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         fun: &ir::Fn<'_>,
         dst: &ir::TypeId<'ir>,
     ) {
-        let saves = self.move_args_and_save(moves, CALL_CLOBBERS);
+        let saves = self.move_args_and_save(moves);
         self.calls = true;
         self.emit(Insn::Mov { dst: RDI, src: VM });
         self.emit(Insn::MovAbs {
