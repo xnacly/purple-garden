@@ -21,7 +21,7 @@ pub struct LookupTable {
 }
 
 /// The jump table of an [`Op::Switch`], owned by [`crate::vm::Vm::switch_tables`]
-/// so the op can point at it while staying `Copy`.
+/// so the op can stay `Copy`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchTable {
     pub first: u64,
