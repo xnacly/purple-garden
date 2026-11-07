@@ -52,6 +52,11 @@ const GPR_SCRATCH: Reg = RAX;
 /// the interpreter put them; natives don't pass them to each other yet.
 const ARG_GPRS: [Reg; 6] = [RSI, RDX, RCX, R8, R9, R10];
 
+/// A builtin's native entry takes its arguments after the vm in `rdi`: these in order for
+/// everything but Doubles, which take `xmm0..NATIVE_ENTRY_XMMS`.
+const NATIVE_ENTRY_GPRS: [Reg; 5] = [RSI, RDX, RCX, R8, R9];
+const NATIVE_ENTRY_XMMS: u8 = 8;
+
 /// Allocatable GPRs, popped from the back: caller-saved first so leaf functions dont require a
 /// prologue, `rcx`/`rdx` last since `idiv` clobbers them.
 const GPR_POOL: &[u8] = &[
@@ -661,6 +666,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             for &param in func.params(block.params) {
                 self.alloc(param, self.classes[param.0 as usize], pos);
             }
+            self.hint_uses(idx);
             pos += 1;
 
             for instruction in &block.instructions {
@@ -753,26 +759,98 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         if call {
             self.give_back_copies(start);
         }
-        let dst = match i {
-            // a Void value is never read, see the Assert lowering
-            ir::Instr::Assert { .. } => None,
-            ir::Instr::Alloc { dst, .. }
-            | ir::Instr::Load { dst, .. }
-            | ir::Instr::AddrOf { dst, .. }
-            | ir::Instr::Bin { dst, .. }
-            | ir::Instr::BinImm { dst, .. }
-            | ir::Instr::LoadConst { dst, .. }
-            | ir::Instr::Call { dst, .. }
-            | ir::Instr::Sys { dst, .. }
-            | ir::Instr::Cast { dst, .. }
-            | ir::Instr::Lookup { dst, .. } => Some(dst),
-            ir::Instr::Store { .. } | ir::Instr::Noop => None,
-        };
+        // a Void value is never read, see the Assert lowering
+        let dst = ir::Func::typed_def_of(i).filter(|_| !matches!(i, ir::Instr::Assert { .. }));
         if let Some(dst) = dst {
             self.alloc(dst.id, Class::from(&dst.ty), pos);
         }
         if !call {
             self.give_back_copies(start);
+        }
+    }
+
+    /// Hint the values block `idx` passes on at where they are passed: call args at their argument
+    /// registers, a returned double at xmm0, back edge args at the params they move into, which have
+    /// their registers already. A forward edge's params take their args' registers instead.
+    fn hint_uses(&mut self, idx: usize) {
+        let func = self.func;
+        let block = &func.blocks[idx];
+        for dst in block.instructions.iter().filter_map(ir::Func::typed_def_of) {
+            self.classes[dst.id.0 as usize] = Class::from(&dst.ty);
+        }
+        for instr in &block.instructions {
+            match instr {
+                ir::Instr::Call { args, .. } => self.hint_args(func.params(*args)),
+                ir::Instr::Sys { fun, args, .. }
+                    if fun.intrinsic.is_none() && fun.native.is_some() =>
+                {
+                    let (mut gprs, mut xmms) = (NATIVE_ENTRY_GPRS.iter(), 0..NATIVE_ENTRY_XMMS);
+                    for (&arg, ty) in func.params(*args).iter().zip(fun.args) {
+                        let reg = match Class::from(ty) {
+                            Class::Gpr => gprs.next().map(|r| Preg::Gpr(r.0)),
+                            Class::Fpr => xmms.next().map(Preg::Fpr),
+                        };
+                        if let Some(reg) = reg {
+                            self.hint(arg, reg);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let back_edge = |this: &mut Self, (target, args): (ir::Id, ir::ParamsId)| {
+            if target.0 as usize > idx {
+                return;
+            }
+            let params = func.params(func.blocks[target.0 as usize].params);
+            for (&arg, &param) in func.params(args).iter().zip(params) {
+                if let Some(reg) = this.ra.reg(param) {
+                    this.hint(arg, reg);
+                }
+            }
+        };
+        match &block.term {
+            Some(ir::Terminator::Return {
+                value: Some(value), ..
+            }) => self.hint(*value, Preg::Fpr(0)),
+            Some(ir::Terminator::Jump { id, params, .. }) => back_edge(self, (*id, *params)),
+            Some(
+                ir::Terminator::Branch { yes, no, .. }
+                | ir::Terminator::BranchCmpImm { yes, no, .. }
+                | ir::Terminator::BranchCmp { yes, no, .. },
+            ) => {
+                back_edge(self, *yes);
+                back_edge(self, *no);
+            }
+            Some(ir::Terminator::Switch { cases, default, .. }) => {
+                for case in func.cases(*cases) {
+                    back_edge(self, case.target);
+                }
+                back_edge(self, *default);
+            }
+            Some(ir::Terminator::Tail {
+                func: callee, args, ..
+            }) if *callee == func.id => {
+                back_edge(self, (self.entry, *args));
+            }
+            Some(ir::Terminator::Tail { args, .. }) => self.hint_args(func.params(*args)),
+            Some(ir::Terminator::Return { value: None, .. }) | None => {}
+        }
+    }
+
+    /// Hint `args` at the registers a native function takes them in.
+    fn hint_args(&mut self, args: &[ir::Id]) {
+        for (i, &arg) in args.iter().enumerate().take(ARG_GPRS.len()) {
+            self.hint(arg, arg_reg(self.classes[arg.0 as usize], i));
+        }
+    }
+
+    /// The first hint of a value wins, and only one of its class.
+    fn hint(&mut self, id: ir::Id, reg: Preg) {
+        let hint = &mut self.hints[id.0 as usize];
+        if hint.is_none() && reg.class() == self.classes[id.0 as usize] {
+            *hint = Some(reg);
         }
     }
 
@@ -2139,12 +2217,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         fun: &ir::Fn<'_>,
         args: &[ir::Id],
     ) -> Option<Vec<(Location, Location), S>> {
-        const GPR_ARGS: [Reg; 5] = [RSI, RDX, RCX, R8, R9];
-        const XMM_ARGS: u8 = 8;
-
         let mut moves = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
         moves.clear();
-        let (mut gprs, mut xmms) = (GPR_ARGS.iter(), 0..XMM_ARGS);
+        let (mut gprs, mut xmms) = (NATIVE_ENTRY_GPRS.iter(), 0..NATIVE_ENTRY_XMMS);
         for (&arg, ty) in args.iter().zip(fun.args) {
             let class = self.classes[arg.0 as usize];
             let src = self.location(arg);
