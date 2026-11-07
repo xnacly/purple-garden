@@ -1671,21 +1671,55 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                             value.0 as i64
                         }
                     };
-                    keys.push((key, case.target.0));
+                    let dst = func.params(func.blocks[case.target.0.0 as usize].params);
+                    let moves = self.edge_has_moves(func.params(case.target.1), dst);
+                    keys.push((key, case.target, moves));
                 }
-                let first = keys.iter().map(|&(key, _)| key).min().unwrap();
+                let first = keys.iter().map(|&(key, ..)| key).min().unwrap();
                 let slot = |key: i64| ((key - first) / step) as usize;
-                let len = keys.iter().map(|&(key, _)| slot(key)).max().unwrap() + 1;
+                let len = keys.iter().map(|&(key, ..)| slot(key)).max().unwrap() + 1;
                 let Ok(len_imm) = i32::try_from(len) else {
                     bail!(self, "switch table of {len} slots");
                     return;
                 };
 
+                // An edge that moves goes through a pad after the table, the table's holes take
+                // the default's.
+                let default_dst = func.params(func.blocks[default.0.0 as usize].params);
+                let default_moves = self.edge_has_moves(func.params(default.1), default_dst);
+                let mut pads = Vec::new_in(self.scratch());
+                let mut entry = |edge: (ir::Id, ir::ParamsId), moves: bool| {
+                    if moves {
+                        pads.push(edge);
+                        Err(pads.len() - 1)
+                    } else {
+                        Ok(edge.0)
+                    }
+                };
+                let default_entry = entry(*default, default_moves);
+                let mut targets = Vec::with_capacity_in(len, self.scratch());
+                targets.resize(len, default_entry);
+                for &(key, edge, moves) in &keys {
+                    targets[slot(key)] = entry(edge, moves);
+                }
+
                 let subject = self.ensure_register(*subject);
                 let subject = self.gpr(subject);
-                // nothing outlives the switch, it jumps without edge moves: the table base
-                // reuses the subject's register once rax is computed from it
+                // the table base reuses the subject's register once rax is computed from it, kept
+                // on the stack meanwhile if a case still reads it, through a param or its moves
                 let base = subject;
+                let keep_base = keys.iter().any(|&(_, (target, _), moves)| {
+                    moves
+                        || func
+                            .params(func.blocks[target.0 as usize].params)
+                            .iter()
+                            .any(|&param| {
+                                let (start, end) = self.liveness[param.0 as usize];
+                                end > start
+                                    && self.ra.location(param)
+                                        == Some(Location::Reg(Preg::Gpr(base.0)))
+                            })
+                });
 
                 // rax = the subject's slot. A subject below `first` wraps around
                 // to a huge slot, so one unsigned compare sends everything
@@ -1708,10 +1742,19 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     reg: GPR_SCRATCH,
                     imm: len_imm,
                 });
-                self.jump(Cond::AboveEq, Target::Block(default.0));
+                let to_default_pad = match default_entry {
+                    Ok(_) => {
+                        self.jump(Cond::AboveEq, Target::Block(default.0));
+                        None
+                    }
+                    Err(_) => Some(encode::jump(self.out, Cond::AboveEq)),
+                };
 
                 // Jump through the table placed right after the jmp. Its entries
                 // are offsets from the table start, so the code stays relocatable.
+                if keep_base {
+                    self.emit(Insn::Push { reg: base });
+                }
                 self.emit(Insn::LeaRip { dst: base, disp: 0 });
                 let lea = self.out.len() - 4;
                 self.emit(Insn::LoadI32Scaled {
@@ -1723,6 +1766,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     dst: GPR_SCRATCH,
                     src: base,
                 });
+                if keep_base {
+                    self.emit(Insn::Pop { reg: base });
+                }
                 self.emit(Insn::JmpReg { reg: GPR_SCRATCH });
 
                 while !self.out.len().is_multiple_of(4) {
@@ -1730,18 +1776,34 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 }
                 let table = self.out.len();
                 patch_rel32(self.out, lea, lea + 4, table).expect("table follows the lea");
-                let mut targets = Vec::with_capacity_in(len, self.scratch());
-                targets.resize(len, default.0);
-                for &(key, target) in &keys {
-                    targets[slot(key)] = target;
-                }
+                let mut pad_entries = Vec::new_in(self.scratch());
                 for target in targets {
-                    self.patches.push(Patch {
-                        rel: self.out.len(),
-                        target: Target::Block(target),
-                        from: table,
-                    });
+                    match target {
+                        Ok(block) => self.patches.push(Patch {
+                            rel: self.out.len(),
+                            target: Target::Block(block),
+                            from: table,
+                        }),
+                        Err(pad) => pad_entries.push((self.out.len(), pad)),
+                    }
                     self.out.extend_from_slice(&[0; 4]);
+                }
+
+                let mut pad_at = Vec::with_capacity_in(pads.len(), self.scratch());
+                for (target, args) in pads {
+                    pad_at.push(self.out.len());
+                    let dst = func.params(func.blocks[target.0 as usize].params);
+                    self.edge_moves(func.params(args), dst);
+                    self.jump(Cond::Always, Target::Block(target));
+                }
+                for (rel, pad) in pad_entries {
+                    let offset = (pad_at[pad] - table) as i32;
+                    self.out[rel..rel + 4].copy_from_slice(&offset.to_le_bytes());
+                }
+                if let (Some(rel), Err(pad)) = (to_default_pad, default_entry)
+                    && patch_rel32(self.out, rel, rel + 4, pad_at[pad]).is_none()
+                {
+                    bail!(self, "switch default pad out of rel32 range");
                 }
             }
             _ => bail!(self, "unsupported terminator"),
