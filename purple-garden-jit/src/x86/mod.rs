@@ -57,6 +57,14 @@ const ARG_GPRS: [Reg; 6] = [RSI, RDX, RCX, R8, R9, R10];
 const GPR_POOL: &[u8] = &[
     RBP.0, R12.0, R13.0, R14.0, R15.0, RDI.0, RDX.0, RCX.0, R11.0, R10.0, R9.0, R8.0, RSI.0,
 ];
+/// [`GPR_POOL`] without [`GPR_TEMPS`], for functions that spill.
+const GPR_POOL_SPILLING: &[u8] = &[
+    RBP.0, R12.0, R13.0, R14.0, R15.0, RDX.0, RCX.0, R10.0, R9.0, R8.0, RSI.0,
+];
+/// A value living in a slot is reloaded into these for the instruction reading it, a dst in a slot
+/// is computed in the first and stored after. Only functions that spill give them up, see
+/// [`Lowering::lower`]. Neither is an argument register nor touched by `idiv`.
+const GPR_TEMPS: [Reg; 2] = [R11, RDI];
 /// No frame pointer is kept, `rbp` is just another callee saved register.
 const GPR_CALLEE_SAVED: &[Reg] = &[RBP, R12, R13, R14, R15];
 /// Allocatable registers a SysV helper call clobbers.
@@ -71,6 +79,10 @@ const CALL_CLOBBERS: Clobbers = Clobbers {
 const XMM_POOL: &[u8] = &[14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
 /// scratch reg, not in pool, cycles and helper loc
 const XMM_SCRATCH: Xmm = Xmm(15);
+/// [`XMM_POOL`] without [`XMM_TEMPS`].
+const XMM_POOL_SPILLING: &[u8] = &[12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+/// The [`GPR_TEMPS`] of doubles.
+const XMM_TEMPS: [Xmm; 2] = [Xmm(14), Xmm(13)];
 
 /// Compile one IR function into x86-64 machine code, returning `None` if unsupported constructs are
 /// included
@@ -89,7 +101,6 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
         skip!(func, "empty function");
     };
 
-    ra.reset(liveness.len(), GPR_POOL, XMM_POOL);
     let calls = Lowering::new(
         func, liveness, globals, strings, natives, ra, buffers, entry,
     )
@@ -100,9 +111,9 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     //
     //     push <saved>     ; callee-saved regs the body used, the interpreter
     //                      ; calls us as a C function and expects them intact
-    //     sub rsp, 8       ; pad, only if needed for alignment
+    //     sub rsp, 8*n     ; slot k at [rsp+8k], plus a pad if needed for alignment
     //     <body>           ; returns jump to the epilogue below
-    //     add rsp, 8
+    //     add rsp, 8*n
     //     pop <saved>      ; reverse order
     //     ret
     let saved = GPR_CALLEE_SAVED
@@ -114,8 +125,10 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     // that (our caller pushed the return address) and every push flips it, so
     // an even number of pushes leaves it misaligned. Only matters if the body
     // calls helpers.
-    let pad = calls && saved.clone().count() % 2 == 0;
-    let frameless = !pad && saved.clone().next().is_none();
+    let slots = u32::from(ra.slots());
+    let pad = calls && (saved.clone().count() as u32 + slots).is_multiple_of(2);
+    let frame = 8 * (slots + u32::from(pad));
+    let frameless = frame == 0 && saved.clone().next().is_none();
 
     if frameless {
         // The epilogue is a bare `ret`, so each `jmp epilogue` (e9 + rel32) in
@@ -142,8 +155,12 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     for reg in saved.clone() {
         Insn::Push { reg }.encode(out);
     }
-    if pad {
-        Insn::SubImm { dst: RSP, imm: 8 }.encode(out);
+    if frame > 0 {
+        Insn::SubImm {
+            dst: RSP,
+            imm: frame as i32,
+        }
+        .encode(out);
     }
     let body_at = out.len();
     out.extend_from_slice(&buffers.body);
@@ -162,8 +179,12 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
         patch_native(out, body_at + rel, target);
     }
     let epilogue = |out: &mut Vec<u8, S>| {
-        if pad {
-            Insn::AddImm { dst: RSP, imm: 8 }.encode(out);
+        if frame > 0 {
+            Insn::AddImm {
+                dst: RSP,
+                imm: frame as i32,
+            }
+            .encode(out);
         }
         for reg in saved.clone().rev() {
             Insn::Pop { reg }.encode(out);
@@ -223,14 +244,16 @@ pub struct Scratch<S: Allocator> {
     body: Vec<u8, S>,
     block_offsets: Vec<usize, S>,
     patches: Vec<Patch, S>,
-    move_pairs: Vec<(Preg, Preg), S>,
+    move_pairs: Vec<(Location, Location), S>,
     /// `(reg, copy)` pairs preserved across a clobbering instruction.
-    saves: Vec<(Preg, Preg), S>,
-    /// Register hint per value, a block param gets its edge arg's register and class.
+    saves: Vec<(Preg, Location), S>,
+    /// Register hint per value, a block param gets its edge arg's register.
     hints: Vec<Option<Preg>, S>,
+    /// Class per value, a block param gets its edge arg's.
+    classes: Vec<Class, S>,
     /// The `(reg, copy)` pairs [`Lowering::prealloc`] planned, per row from `copies_at[row]` to
     /// `copies_at[row + 1]`.
-    copies: Vec<(Preg, Preg), S>,
+    copies: Vec<(Preg, Location), S>,
     copies_at: Vec<u32, S>,
     /// Body offsets of the rel32s (self calls) that address the function's own start.
     self_refs: Vec<usize, S>,
@@ -249,6 +272,7 @@ impl<S: Allocator + Clone> Scratch<S> {
             move_pairs: Vec::new_in(scratch.clone()),
             saves: Vec::new_in(scratch.clone()),
             hints: Vec::new_in(scratch.clone()),
+            classes: Vec::new_in(scratch.clone()),
             copies: Vec::new_in(scratch.clone()),
             copies_at: Vec::new_in(scratch.clone()),
             self_refs: Vec::new_in(scratch.clone()),
@@ -289,6 +313,22 @@ impl Clobbers {
 enum AbiArg {
     Reg(Reg),
     Imm(u64),
+}
+
+/// The `n`th temp of `class`, see [`GPR_TEMPS`].
+fn temp(class: Class, n: usize) -> Preg {
+    match class {
+        Class::Gpr => Preg::Gpr(GPR_TEMPS[n].0),
+        Class::Fpr => Preg::Fpr(XMM_TEMPS[n].0),
+    }
+}
+
+/// Where a native function takes its `i`th argument of `class`.
+fn arg_reg(class: Class, i: usize) -> Preg {
+    match class {
+        Class::Gpr => Preg::Gpr(ARG_GPRS[i].0),
+        Class::Fpr => Preg::Fpr(i as u8),
+    }
 }
 
 /// Divisors [`Lowering::div`] leaves to shifts.
@@ -360,11 +400,14 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     patches: &'a mut Vec<Patch, S>,
     /// Reusable `(src, dst)` buffer for the parallel-move resolver in
     /// [`Lowering::edge_moves`].
-    move_pairs: &'a mut Vec<(Preg, Preg), S>,
+    move_pairs: &'a mut Vec<(Location, Location), S>,
     /// Reusable `(reg, copy)` buffer of [`Lowering::save_clobbered`].
-    saves: &'a mut Vec<(Preg, Preg), S>,
+    saves: &'a mut Vec<(Preg, Location), S>,
     hints: &'a mut Vec<Option<Preg>, S>,
-    copies: &'a mut Vec<(Preg, Preg), S>,
+    classes: &'a mut Vec<Class, S>,
+    /// [`GPR_TEMPS`] and [`XMM_TEMPS`] the current instruction took.
+    temps: [usize; 2],
+    copies: &'a mut Vec<(Preg, Location), S>,
     copies_at: &'a mut Vec<u32, S>,
     self_refs: &'a mut Vec<usize, S>,
     tail_refs: &'a mut Vec<(usize, usize), S>,
@@ -389,6 +432,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             move_pairs,
             saves,
             hints,
+            classes,
             copies,
             copies_at,
             self_refs,
@@ -414,6 +458,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             block: entry,
             pos: 0,
             calls: false,
+            temps: [0; 2],
             unsupported: false,
             avx: std::arch::is_x86_feature_detected!("avx"),
             block_offsets,
@@ -421,6 +466,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             move_pairs,
             saves,
             hints,
+            classes,
             copies,
             copies_at,
             self_refs,
@@ -436,7 +482,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// Emit the body, ending where the epilogue is appended. Returns whether
     /// it calls helpers, `None` if the function can't be compiled.
     fn lower(mut self) -> Option<bool> {
-        self.prealloc();
+        self.prealloc(GPR_POOL, XMM_POOL);
+        // values in slots need temps to be read and written, only a function that spills pays for
+        // them, with registers it was short of anyway
+        if !self.unsupported && self.ra.slots() > 0 {
+            self.prealloc(GPR_POOL_SPILLING, XMM_POOL_SPILLING);
+        }
         if self.unsupported {
             return None;
         }
@@ -479,6 +530,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             if i >= ARG_GPRS.len() {
                 // the argument registers are all taken by now, this can't clobber one
                 let offset = 8 * i as u32;
+                self.temps = [0; 2];
                 let dst = self.def_id(param.id);
                 self.emit(match dst {
                     Preg::Gpr(dst) => Insn::LoadMem {
@@ -492,6 +544,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         offset,
                     },
                 });
+                self.spill(param.id);
             }
         }
 
@@ -505,9 +558,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             self.pos += 1;
 
             for instruction in &block.instructions {
+                self.temps = [0; 2];
                 self.instr(instruction);
                 if self.unsupported {
                     return None;
+                }
+                if let Some(dst) = ir::Func::def_of(instruction) {
+                    self.spill(dst);
                 }
                 self.pos += 1;
             }
@@ -516,6 +573,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 .iter()
                 .find(|b| !b.tombstone)
                 .map(|b| b.id);
+            self.temps = [0; 2];
             self.term(block.term.as_ref(), next);
             if self.unsupported {
                 return None;
@@ -554,10 +612,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// Give every value its register before lowering, walking the rows of
     /// [`ir::Func::live_set_into`]. An instruction overwriting registers besides its dst gets
     /// free registers planned for the values living there, see [`Lowering::save_clobbered`].
-    fn prealloc(&mut self) {
+    fn prealloc(&mut self, gprs: &[u8], fprs: &[u8]) {
         let func = self.func;
+        self.ra.reset(self.liveness.len(), gprs, fprs);
         self.hints.clear();
         self.hints.resize(self.liveness.len(), None);
+        self.classes.clear();
+        self.classes.resize(self.liveness.len(), Class::Gpr);
         self.copies.clear();
         self.copies_at.clear();
 
@@ -570,6 +631,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 continue;
             };
             let class = Class::from(&param.ty);
+            self.classes[param.id.0 as usize] = class;
             if i >= ARG_GPRS.len() {
                 self.alloc(param.id, class, 0);
                 continue;
@@ -591,8 +653,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             }
             self.copies_at.push(self.copies.len() as u32);
             for &param in func.params(block.params) {
-                let class = self.hints[param.0 as usize].map_or(Class::Gpr, Preg::class);
-                self.alloc(param, class, pos);
+                self.alloc(param, self.classes[param.0 as usize], pos);
             }
             pos += 1;
 
@@ -609,6 +670,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 }
                 let dst = func.params(func.blocks[target.0 as usize].params);
                 for (&src, &dst) in func.params(params).iter().zip(dst) {
+                    self.classes[dst.0 as usize] = self.classes[src.0 as usize];
                     if let Some(reg) = self.ra.reg(src) {
                         self.hints[dst.0 as usize] = Some(reg);
                     }
@@ -705,18 +767,19 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
 
     fn alloc(&mut self, id: ir::Id, class: Class, at: u32) {
         let last_use = self.liveness[id.0 as usize].1;
-        let location = match self.hints[id.0 as usize] {
+        self.classes[id.0 as usize] = class;
+        match self.hints[id.0 as usize] {
             Some(hint) => self.ra.alloc_with_hint(id, class, at, last_use, hint),
             None => self.ra.alloc(id, class, at, last_use),
         };
-        if let Location::Stack(_) = location {
-            bail!(self, "out of registers at %v{}", id.0);
-        }
     }
 
     fn give_back_copies(&mut self, start: usize) {
         for &(_, copy) in &self.copies[start..] {
-            self.ra.give_back(copy);
+            match copy {
+                Location::Reg(copy) => self.ra.give_back(copy),
+                Location::Stack(slot) => self.ra.give_back_slot(slot),
+            }
         }
     }
 
@@ -724,10 +787,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.def_id(dst.id)
     }
 
-    /// The register [`Lowering::prealloc`] gave `id`.
+    /// The register [`Lowering::prealloc`] gave `id`, the first temp if it lives in a slot:
+    /// [`Lowering::spill`] stores it there after the instruction.
     fn def_id(&mut self, id: ir::Id) -> Preg {
-        match self.ra.reg(id) {
-            Some(reg) => reg,
+        match self.ra.location(id) {
+            Some(Location::Reg(reg)) => reg,
+            Some(Location::Stack(_)) => temp(self.classes[id.0 as usize], 0),
             None => {
                 bail!(self, "%v{} has no register", id.0);
                 Preg::Gpr(GPR_SCRATCH.0)
@@ -735,14 +800,77 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         }
     }
 
+    /// The register holding `id`, a value living in a slot is loaded into the next free temp.
     fn ensure_register(&mut self, id: ir::Id) -> Preg {
-        match self.ra.reg(id) {
-            Some(reg) => reg,
+        match self.ra.location(id) {
+            Some(Location::Reg(reg)) => reg,
+            Some(Location::Stack(slot)) => {
+                let class = self.classes[id.0 as usize];
+                let taken = &mut self.temps[class as usize];
+                if *taken == GPR_TEMPS.len() {
+                    bail!(self, "more operands in slots than temps at %v{}", id.0);
+                    return Preg::Gpr(GPR_SCRATCH.0);
+                }
+                let reg = temp(class, *taken);
+                *taken += 1;
+                self.load_slot(reg, slot);
+                reg
+            }
             None => {
                 bail!(self, "use of %v{} before its definition", id.0);
                 Preg::Gpr(GPR_SCRATCH.0)
             }
         }
+    }
+
+    /// The location of `id`, which must have one.
+    fn location(&mut self, id: ir::Id) -> Location {
+        match self.ra.location(id) {
+            Some(location) => location,
+            None => {
+                bail!(self, "use of %v{} before its definition", id.0);
+                Location::Reg(Preg::Gpr(GPR_SCRATCH.0))
+            }
+        }
+    }
+
+    /// Store `id` into its slot from the temp [`Lowering::def_id`] computed it in, if it has one.
+    fn spill(&mut self, id: ir::Id) {
+        if let Some(Location::Stack(slot)) = self.ra.location(id) {
+            self.store_slot(slot, temp(self.classes[id.0 as usize], 0));
+        }
+    }
+
+    fn load_slot(&mut self, dst: Preg, slot: u16) {
+        let offset = 8 * u32::from(slot);
+        self.emit(match dst {
+            Preg::Gpr(dst) => Insn::LoadMem {
+                dst: Reg(dst),
+                base: RSP,
+                offset,
+            },
+            Preg::Fpr(dst) => Insn::LoadMemSd {
+                dst: Xmm(dst),
+                base: RSP,
+                offset,
+            },
+        });
+    }
+
+    fn store_slot(&mut self, slot: u16, src: Preg) {
+        let offset = 8 * u32::from(slot);
+        self.emit(match src {
+            Preg::Gpr(src) => Insn::StoreMem {
+                base: RSP,
+                offset,
+                src: Reg(src),
+            },
+            Preg::Fpr(src) => Insn::StoreMemSd {
+                base: RSP,
+                offset,
+                src: Xmm(src),
+            },
+        });
     }
 
     fn instr(&mut self, i: &ir::Instr<'ir>) {
@@ -1493,11 +1621,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let mut moves = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
                 moves.clear();
                 for (i, &arg) in args.iter().enumerate() {
-                    let src = self.ensure_register(arg);
-                    let dst = match src {
-                        Preg::Gpr(_) => Preg::Gpr(ARG_GPRS[i].0),
-                        Preg::Fpr(_) => Preg::Fpr(i as u8),
-                    };
+                    let src = self.location(arg);
+                    let dst = Location::Reg(arg_reg(self.classes[arg.0 as usize], i));
                     if src != dst {
                         moves.push((src, dst));
                     }
@@ -1680,8 +1805,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             if end <= start {
                 continue;
             }
-            let s = self.ensure_register(s);
-            let d = self.def_id(d);
+            let (s, d) = (self.location(s), self.location(d));
             if s != d {
                 todo.push((s, d));
             }
@@ -1691,8 +1815,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
 
     /// Performs the `(src, dst)` moves as if all at once: a move runs once no pending move still
     /// reads its dst. When only cycles remain, one src is parked in the scratch register of its
-    /// class and its readers read that instead, which turns its cycle into a chain.
-    fn parallel_move(&mut self, mut todo: Vec<(Preg, Preg), S>) {
+    /// class and its readers read that instead, which turns its cycle into a chain. A slot is
+    /// parked in the gpr scratch, it holds a word of either class.
+    fn parallel_move(&mut self, mut todo: Vec<(Location, Location), S>) {
         // A save that found no register after a bail is `(reg, reg)`, it would block forever
         todo.retain(|&(src, dst)| src != dst);
         while !todo.is_empty() {
@@ -1702,15 +1827,16 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             {
                 Some(i) => {
                     let (src, dst) = todo.swap_remove(i);
-                    self.mov(dst, src);
+                    self.move_location(dst, src);
                 }
                 None => {
                     let parked = todo[0].0;
                     let scratch = match parked {
-                        Preg::Gpr(_) => Preg::Gpr(GPR_SCRATCH.0),
-                        Preg::Fpr(_) => Preg::Fpr(XMM_SCRATCH.0),
+                        Location::Reg(Preg::Fpr(_)) => Preg::Fpr(XMM_SCRATCH.0),
+                        _ => Preg::Gpr(GPR_SCRATCH.0),
                     };
-                    self.mov(scratch, parked);
+                    let scratch = Location::Reg(scratch);
+                    self.move_location(scratch, parked);
                     for (src, _) in &mut todo {
                         if *src == parked {
                             *src = scratch;
@@ -1720,6 +1846,21 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             }
         }
         *self.move_pairs = todo;
+    }
+
+    /// One move of [`Lowering::parallel_move`], slot to slot goes through the first gpr temp: a
+    /// function with slots never allocates it.
+    fn move_location(&mut self, dst: Location, src: Location) {
+        match (dst, src) {
+            (Location::Reg(dst), Location::Reg(src)) => self.mov(dst, src),
+            (Location::Reg(dst), Location::Stack(slot)) => self.load_slot(dst, slot),
+            (Location::Stack(slot), Location::Reg(src)) => self.store_slot(slot, src),
+            (Location::Stack(dst), Location::Stack(src)) => {
+                let tmp = temp(Class::Gpr, 0);
+                self.load_slot(tmp, src);
+                self.store_slot(dst, tmp);
+            }
+        }
     }
 
     fn mov(&mut self, dst: Preg, src: Preg) {
@@ -1745,10 +1886,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
 
     /// Copy the values living in registers this instruction clobbers into the free registers
     /// [`Lowering::plan`] picked; [`Lowering::restore`] copies them back.
-    fn save_clobbered(&mut self) -> Vec<(Preg, Preg), S> {
+    fn save_clobbered(&mut self) -> Vec<(Preg, Location), S> {
         let saves = self.planned_copies();
         for &(reg, copy) in &saves {
-            self.mov(copy, reg);
+            self.move_location(copy, Location::Reg(reg));
         }
         saves
     }
@@ -1767,14 +1908,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     }
 
     /// Plan a `(reg, copy)` pair for every value living in `clobbers` past `pos`, taking the copies
-    /// until [`Lowering::give_back_copies`].
+    /// until [`Lowering::give_back_copies`]. Without a free register the copy is a slot.
     fn reserve_copies(&mut self, clobbers: Clobbers, pos: u32) {
         let start = self.copies.len();
         self.copies.extend(
             self.ra
                 .live_after(pos)
                 .filter(|&reg| clobbers.contains(reg))
-                .map(|reg| (reg, reg)),
+                .map(|reg| (reg, Location::Reg(reg))),
         );
         for i in start..self.copies.len() {
             // A call clobbers every fpr, so a live double moves into a callee saved gpr instead.
@@ -1783,17 +1924,14 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 .take_unclobbered(reg.class(), clobbers)
                 .or_else(|| self.take_unclobbered(Class::Gpr, clobbers))
             {
-                Some(free) => self.copies[i].1 = free,
-                None => bail!(
-                    self,
-                    "no free register to preserve {reg:?} across a clobber"
-                ),
+                Some(free) => self.copies[i].1 = Location::Reg(free),
+                None => self.copies[i].1 = Location::Stack(self.ra.take_slot()),
             }
         }
     }
 
     /// The `(reg, copy)` pairs planned for the current row.
-    fn planned_copies(&mut self) -> Vec<(Preg, Preg), S> {
+    fn planned_copies(&mut self) -> Vec<(Preg, Location), S> {
         let mut saves = std::mem::replace(self.saves, Vec::new_in(self.scratch()));
         saves.clear();
         let row = self.pos as usize;
@@ -1808,16 +1946,19 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// Moves the arguments of a call into place and copies the values live across it out of the
     /// registers it clobbers, as one parallel move: the registers of arguments dying at the call
     /// can hold the copies, the resolver reads them first.
-    fn move_args_and_save(&mut self, mut moves: Vec<(Preg, Preg), S>) -> Vec<(Preg, Preg), S> {
+    fn move_args_and_save(
+        &mut self,
+        mut moves: Vec<(Location, Location), S>,
+    ) -> Vec<(Preg, Location), S> {
         let saves = self.planned_copies();
-        moves.extend_from_slice(&saves);
+        moves.extend(saves.iter().map(|&(reg, copy)| (Location::Reg(reg), copy)));
         self.parallel_move(moves);
         saves
     }
 
-    fn restore(&mut self, saves: Vec<(Preg, Preg), S>) {
+    fn restore(&mut self, saves: Vec<(Preg, Location), S>) {
         for &(reg, copy) in &saves {
-            self.mov(reg, copy);
+            self.move_location(Location::Reg(reg), copy);
         }
         *self.saves = saves;
     }
@@ -1865,11 +2006,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         let mut moves = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
         moves.clear();
         for (i, &arg) in args.iter().enumerate() {
-            let src = self.ensure_register(arg);
-            let dst = match src {
-                Preg::Gpr(_) => Preg::Gpr(ARG_GPRS[i].0),
-                Preg::Fpr(_) => Preg::Fpr(i as u8),
-            };
+            let src = self.location(arg);
+            let dst = Location::Reg(arg_reg(self.classes[arg.0 as usize], i));
             if src != dst {
                 moves.push((src, dst));
             }
@@ -1896,7 +2034,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// Restores `saves` and moves a call's result from `ret` into `dst`. `dst` may take the
     /// register of a value dying right after the call, so the restores go first; a double restored
     /// into xmm0 would overwrite a result there, it waits in the scratch register then.
-    fn take_result(&mut self, dst: &ir::TypeId<'ir>, mut ret: Preg, saves: Vec<(Preg, Preg), S>) {
+    fn take_result(
+        &mut self,
+        dst: &ir::TypeId<'ir>,
+        mut ret: Preg,
+        saves: Vec<(Preg, Location), S>,
+    ) {
         if saves.iter().any(|&(reg, _)| reg == ret) {
             self.mov(Preg::Fpr(XMM_SCRATCH.0), ret);
             ret = Preg::Fpr(XMM_SCRATCH.0);
@@ -1918,7 +2061,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         &mut self,
         fun: &ir::Fn<'_>,
         args: &[ir::Id],
-    ) -> Option<Vec<(Preg, Preg), S>> {
+    ) -> Option<Vec<(Location, Location), S>> {
         const GPR_ARGS: [Reg; 5] = [RSI, RDX, RCX, R8, R9];
         const XMM_ARGS: u8 = 8;
 
@@ -1926,7 +2069,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         moves.clear();
         let (mut gprs, mut xmms) = (GPR_ARGS.iter(), 0..XMM_ARGS);
         for (&arg, ty) in args.iter().zip(fun.args) {
-            let src = self.ensure_register(arg);
+            let class = self.classes[arg.0 as usize];
+            let src = self.location(arg);
             let dst = match Class::from(ty) {
                 Class::Gpr => gprs.next().map(|r| Preg::Gpr(r.0)),
                 Class::Fpr => xmms.next().map(Preg::Fpr),
@@ -1936,10 +2080,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 return None;
             };
             assert!(
-                src.class() == dst.class() || matches!(ty, ir::ptype::Type::Slot(_)),
-                "typecheck lets a {:?} through as {ty:?}",
-                src.class()
+                class == dst.class() || matches!(ty, ir::ptype::Type::Slot(_)),
+                "typecheck lets a {class:?} through as {ty:?}"
             );
+            let dst = Location::Reg(dst);
             if src != dst {
                 moves.push((src, dst));
             }
@@ -1952,7 +2096,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     fn call_native_entry(
         &mut self,
         native: ir::NativeFn,
-        moves: Vec<(Preg, Preg), S>,
+        moves: Vec<(Location, Location), S>,
         fun: &ir::Fn<'_>,
         dst: &ir::TypeId<'ir>,
     ) {
