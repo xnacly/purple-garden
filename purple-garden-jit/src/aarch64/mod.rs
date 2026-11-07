@@ -11,7 +11,11 @@ impl<S> Scratch<S> {
     }
 }
 
-pub fn compile_func<F: Allocator, S: std::alloc::Allocator, N: std::alloc::Allocator>(
+pub fn compile_func<
+    F: std::alloc::Allocator,
+    S: std::alloc::Allocator,
+    N: std::alloc::Allocator,
+>(
     _func: &ir::Func<'_, F>,
     _: &mut Vec<u8, S>,
     _: &[(u32, u32)],
