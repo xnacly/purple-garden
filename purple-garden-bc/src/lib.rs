@@ -132,7 +132,7 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     /// call to another `Cc` method.
     scratch: Vec<u8, S>,
     /// Reusable `(src, dst)` buffer for the parallel-move resolver in [`Cc::emit_parallel_move`]
-    scratch_pairs: Vec<(u8, u8), S>,
+    scratch_pairs: Vec<(Location, Location), S>,
     /// Reusable native-code buffer for the JIT, refilled per function. Empty
     /// and untouched when `--no-jit` is set.
     jit: purple_garden_jit::Jit<S>,
@@ -289,6 +289,12 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             }
             None => unreachable!("%v{} has no location", id.0),
         }
+    }
+
+    fn location(&self, id: Id) -> Location {
+        self.regalloc
+            .location(id)
+            .unwrap_or_else(|| unreachable!("%v{} has no location", id.0))
     }
 
     /// The register an op writes `id` into, [`TMP`] if `id` lives in a slot: the block loop stores
@@ -691,31 +697,22 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         let mut moves = take(&mut self.scratch_pairs);
         moves.clear();
         for (i, &arg) in args.iter().enumerate() {
-            if let Some(Location::Stack(_)) = self.regalloc.location(arg) {
-                continue;
-            }
-            let src = self.ensure_register(arg);
-            if src != i as u8 {
-                moves.push((src, i as u8));
+            let src = match self.location(arg) {
+                Location::Stack(slot) => Location::Stack(slot + pushed),
+                reg => reg,
+            };
+            let dst = Location::Reg(Reg::Gpr(i as u8));
+            if src != dst {
+                moves.push((src, dst));
             }
         }
         self.emit_parallel_move(moves);
-
-        // after the moves, since r{i} may still be read by one of them
-        for (i, &arg) in args.iter().enumerate() {
-            if let Some(Location::Stack(slot)) = self.regalloc.location(arg) {
-                self.emit(Op::LoadSlot {
-                    dst: i as u8,
-                    slot: slot + pushed,
-                });
-            }
-        }
     }
 
     /// Emit the `(src, dst)` moves as if all happened at once: a move runs once no pending move
     /// still reads its dst. When only cycles remain, one src is parked in [`SCRATCH`] and its
     /// readers read that instead, which turns its cycle into a chain.
-    fn emit_parallel_move(&mut self, mut todo: Vec<(u8, u8), S>) {
+    fn emit_parallel_move(&mut self, mut todo: Vec<(Location, Location), S>) {
         while !todo.is_empty() {
             match todo
                 .iter()
@@ -723,23 +720,55 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             {
                 Some(i) => {
                     let (src, dst) = todo.swap_remove(i);
-                    self.emit(Op::Mov { dst, src });
+                    self.emit_move(src, dst);
                 }
                 None => {
                     let parked = todo[0].0;
-                    self.emit(Op::Mov {
-                        dst: SCRATCH,
-                        src: parked,
-                    });
+                    let scratch = Location::Reg(Reg::Gpr(SCRATCH));
+                    self.emit_move(parked, scratch);
                     for (src, _) in &mut todo {
                         if *src == parked {
-                            *src = SCRATCH;
+                            *src = scratch;
                         }
                     }
                 }
             }
         }
         self.scratch_pairs = todo;
+    }
+
+    /// One move of [`Cc::emit_parallel_move`], slot to slot goes through [`TMP`].
+    fn emit_move(&mut self, src: Location, dst: Location) {
+        match (src, dst) {
+            (Location::Reg(src), Location::Reg(dst)) => {
+                self.emit(Op::Mov {
+                    dst: dst.num(),
+                    src: src.num(),
+                });
+            }
+            (Location::Stack(slot), Location::Reg(dst)) => {
+                self.emit(Op::LoadSlot {
+                    dst: dst.num(),
+                    slot,
+                });
+            }
+            (Location::Reg(src), Location::Stack(slot)) => {
+                self.emit(Op::StoreSlot {
+                    slot,
+                    src: src.num(),
+                });
+            }
+            (Location::Stack(src), Location::Stack(dst)) => {
+                self.emit(Op::LoadSlot {
+                    dst: TMP,
+                    slot: src,
+                });
+                self.emit(Op::StoreSlot {
+                    slot: dst,
+                    src: TMP,
+                });
+            }
+        }
     }
 
     /// Push r{CALLEE_SAVED}..r{max_reg} onto the spill stack (callee-saved prologue), then reserve
@@ -884,11 +913,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             if !self.is_read(dst) {
                 continue;
             }
-            let src = self.ensure_register(src);
-            let Some(Location::Reg(dst)) = self.regalloc.location(dst) else {
-                todo!("block param %v{} in a slot", dst.0)
-            };
-            let dst = dst.num();
+            let (src, dst) = (self.location(src), self.location(dst));
             if src != dst {
                 moves.push((src, dst));
             }
