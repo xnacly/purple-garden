@@ -1,6 +1,6 @@
 //! x86-64 JIT backend
 //!
-//! IR is lowered to native code in a single pass, uses xralloc2 to map SSA values to x86 GPRs while emitting.
+//! IR is lowered to native code after a pre-pass uses xralloc2 to map SSA values to x86 registers.
 //!
 //! The native ABI keeps `*mut Vm` in `rbx`. `Vm::r` being the first field, `rbx` is the base of the VM
 //! register file. Arguments arrive in `vm.r[0..n]`; return register is `vm.r[0]`. All
@@ -327,9 +327,9 @@ macro_rules! bail {
     }};
 }
 
-/// Lowers one function, assigning registers as it emits.
+/// Lowers one function, assigning registers before it emits.
 ///
-/// Registers come from [`Xralloc2`] the first time a value is touched and stay
+/// Registers come from [`Xralloc2`] in a pre-pass over the whole function and stay
 /// fixed for the value's whole liveness interval, so every CFG edge agrees on
 /// where a value lives.
 struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {

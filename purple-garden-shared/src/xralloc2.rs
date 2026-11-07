@@ -1,7 +1,7 @@
-//! Forward register allocator for the JIT:
+//! Forward register allocator for the backends:
 //!
-//! - Registers are handed out while the backend emits code
-//! - A value takes a free register when first touched and keeps it for its whole interval
+//! - Registers are handed out in a pass before the backend emits code
+//! - A value takes a free register (or a slot) at its definition and keeps it for its whole interval
 //! - A register returns to the free list once the interval holding it ends or before the current allocation point
 //!
 //! For instructions clobbering fixed registers (such as helper calls, or x86 `idiv`)  the live
