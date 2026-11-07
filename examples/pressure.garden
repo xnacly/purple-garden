@@ -65,7 +65,7 @@ fn mix(i:Int) Int {
     let d10 = d9 + d1
     let d11 = d10 - d5
     let d12 = d11 / 7.0
-    let d13 = d12 * d3
+    let d13 = d12 + d3
     let d14 = d13 + (a17 as Double)
     let d15 = d14 - d2
     let d16 = d15 * 0.125
@@ -95,4 +95,4 @@ fn run(i:Int n:Int acc:Int) Int {
     }
 }
 
-testing.assert(run(0 2000 0) == -939667777)
+testing.assert(run(0 2000 0) == -941609952)
