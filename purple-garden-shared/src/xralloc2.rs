@@ -184,10 +184,7 @@ impl<S: Allocator + Clone> Xralloc2<S> {
                 self.mark_used(reg);
                 Location::Reg(reg)
             }
-            None => Location::Stack(self.free_slots.pop().unwrap_or_else(|| {
-                self.slots += 1;
-                self.slots - 1
-            })),
+            None => Location::Stack(self.take_slot()),
         };
         self.active.push((last_use, location));
         self.map[id] = Some(location);
@@ -246,6 +243,18 @@ impl<S: Allocator + Clone> Xralloc2<S> {
 
     pub fn give_back(&mut self, reg: Reg) {
         self.free[reg.class() as usize] |= 1u64 << reg.num();
+    }
+
+    /// Take a free slot until [`Xralloc2::give_back_slot`], opening one if none is.
+    pub fn take_slot(&mut self) -> u16 {
+        self.free_slots.pop().unwrap_or_else(|| {
+            self.slots += 1;
+            self.slots - 1
+        })
+    }
+
+    pub fn give_back_slot(&mut self, slot: u16) {
+        self.free_slots.push(slot);
     }
 
     /// Take the most preferred free register of `class`, be it the last or the newest, etc.
