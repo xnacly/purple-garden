@@ -16,9 +16,6 @@ impl<A: Allocator> Func<'_, A> {
         /// observer Id := (lo,hi), always updates lo, only fills hi, if previously unset
         fn observe<V: Allocator>(out: &mut Vec<(u32, u32), V>, id: Id, pos: u32) {
             let idx = id.0 as usize;
-            if idx >= out.len() {
-                out.resize(idx + 1, UNSET);
-            }
             let e = &mut out[idx];
             if e.1 == 0 {
                 e.1 = pos;

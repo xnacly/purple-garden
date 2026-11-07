@@ -491,7 +491,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         debug_assert_eq!(self.const_pool.as_ptr(), base);
 
         for func in ir.iter().filter(|f| !f.unused) {
-            self.cc(func, arena.as_mut())?;
+            self.cc(func, arena.as_mut());
         }
 
         if let Some(arena) = &mut arena {
@@ -504,7 +504,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         &mut self,
         fun: &'cc Func<'cc, F>,
         native: Option<&mut purple_garden_jit::CodeArena<impl Pages>>,
-    ) -> Result<(), String> {
+    ) {
         // Taken out so try_compile_native can borrow it next to `&mut self`
         let mut live_set = take(&mut self.live_set);
         fun.live_set_into(&mut live_set);
@@ -523,7 +523,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 self.entry_native_idx = Some(idx);
             }
             self.live_set = live_set;
-            return Ok(());
+            return;
         }
         self.live_set = live_set;
 
@@ -645,8 +645,6 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         }
 
         purple_garden_shared::trace!("[bc::Cc::cc][{}] size={}", fun.name, self.buf.len() - pc);
-
-        Ok(())
     }
 
     fn try_compile_native<F: Allocator>(
