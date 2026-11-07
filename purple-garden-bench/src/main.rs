@@ -102,8 +102,9 @@ fn raise_stack_limit() {
 
 fn run(args: &RunArgs) -> Result<(), String> {
     raise_stack_limit();
-    // Every runtime inherits the hint, so none of them depends on where the scheduler would put it.
-    // Garden gives itself the same one.
+    // On Linux every runtime inherits the hint, so none of them depends on where the scheduler would
+    // put it; on macOS every process's main thread starts at the class the hint asks for. Garden gives
+    // itself the same one.
     purple_garden_shared::sched::prefer_performance_cores();
     let garden = args.garden.canonicalize().map_err(|e| {
         format!(
