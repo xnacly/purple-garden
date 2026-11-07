@@ -614,6 +614,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// free registers planned for the values living there, see [`Lowering::save_clobbered`].
     fn prealloc(&mut self, gprs: &[u8], fprs: &[u8]) {
         let func = self.func;
+        purple_garden_shared::trace!(
+            "[jit::x86] prealloc {} with {} gprs, {} fprs",
+            func.name,
+            gprs.len(),
+            fprs.len()
+        );
         self.ra.reset(self.liveness.len(), gprs, fprs);
         self.hints.clear();
         self.hints.resize(self.liveness.len(), None);
@@ -697,6 +703,11 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             pos += 1;
         }
         self.copies_at.push(self.copies.len() as u32);
+        purple_garden_shared::trace!(
+            "[jit::x86] prealloc {}: {} slots",
+            func.name,
+            self.ra.slots()
+        );
     }
 
     /// Assign `i`'s dst at `pos`, after planning the copies of what lowering `i` clobbers. A
@@ -1927,6 +1938,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 Some(free) => self.copies[i].1 = Location::Reg(free),
                 None => self.copies[i].1 = Location::Stack(self.ra.take_slot()),
             }
+            purple_garden_shared::trace!(
+                "[jit::x86] row {pos}: save {reg} in {}",
+                self.copies[i].1
+            );
         }
     }
 

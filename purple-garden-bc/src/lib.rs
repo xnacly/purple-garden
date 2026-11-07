@@ -312,6 +312,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     /// before it passes, over its call arg hint, so that move vanishes.
     fn prealloc<F: Allocator>(&mut self, fun: &Func<'cc, F>) {
         let ids = self.live_set.len();
+        purple_garden_shared::trace!("[bc] prealloc {}", fun.name);
         self.regalloc.reset(ids, &POOL, &[]);
         self.arg_hints.resize(ids, None);
         self.live_across.clear();

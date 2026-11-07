@@ -11,7 +11,10 @@
 //! xralloc2 is target-independent by allowing a pool of registers to be defined per
 //! [`Class`]: general purpose registers hold integers and pointers, floating point
 //! registers hold doubles.
-use std::alloc::{Allocator, Global};
+use std::{
+    alloc::{Allocator, Global},
+    fmt,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Location {
@@ -19,6 +22,15 @@ pub enum Location {
     Stack(u16),
     /// A register
     Reg(Reg),
+}
+
+impl fmt::Display for Location {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Stack(slot) => write!(f, "s{slot}"),
+            Self::Reg(reg) => reg.fmt(f),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +67,17 @@ impl Reg {
     pub fn num(self) -> u8 {
         match self {
             Self::Gpr(num) | Self::Fpr(num) => num,
+        }
+    }
+}
+
+/// The backend's register number, `g` for gprs and `f` for fprs: `g3` is `r3` in bc and `rbx`
+/// on x86.
+impl fmt::Display for Reg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Gpr(num) => write!(f, "g{num}"),
+            Self::Fpr(num) => write!(f, "f{num}"),
         }
     }
 }
@@ -186,6 +209,14 @@ impl<S: Allocator + Clone> Xralloc2<S> {
             }
             None => Location::Stack(self.take_slot()),
         };
+        crate::trace!(
+            "[xralloc2] %v{id} [{at}, {last_use}] -> {location}{}",
+            match hint {
+                Some(hint) if Location::Reg(hint) == location => " (hinted)".to_string(),
+                Some(hint) => format!(" (hint {hint} taken)"),
+                None => String::new(),
+            }
+        );
         self.active.push((last_use, location));
         self.map[id] = Some(location);
         location
@@ -194,6 +225,7 @@ impl<S: Allocator + Clone> Xralloc2<S> {
     /// Assign `id` the free register `reg`, where a parameter arrives. `None` if `reg` isn't free.
     pub fn try_alloc_at(&mut self, id: impl Into<usize>, reg: Reg, last_use: u32) -> Option<Reg> {
         self.try_take(reg)?;
+        crate::trace!("[xralloc2] param -> {reg}, last use {last_use}");
         self.active.push((last_use, Location::Reg(reg)));
         self.map[id.into()] = Some(Location::Reg(reg));
         Some(reg)
