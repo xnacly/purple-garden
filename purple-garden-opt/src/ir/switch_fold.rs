@@ -18,12 +18,15 @@ pub const MAX_SLOTS_PER_CASE: usize = 4;
 /// b1(%v0):                                        b1(%v0):
 ///     %v1:Str = `alpha`                               switch %v0
 ///     br_cmp SEq %v0, %v1, b2(%v0), b3(%v0)               `alpha` -> b2(%v0)
-/// b3(%v0):                                   =>           `beta`  -> b4(%v0)
+/// b3(%v2):                                   =>           `beta`  -> b4(%v0)
 ///     %v4:Str = `beta`                                    ...
-///     br_cmp SEq %v0, %v4, b4(%v0), b5(%v0)               _       -> b7(%v0)
-/// ...                                             b3(%v0):
+///     br_cmp SEq %v2, %v4, b4(%v2), b5(%v2)               _       -> b7(%v0)
+/// ...                                             b3(%v2):
 ///                                                     <tombstone>
 /// ```
+///
+/// A chain block's params are the args of the edge into it, so its compare and edges are renamed
+/// back to the head's values.
 ///
 /// Integer chains (`br_imm IEq %v0, k, ...`) fold the same way
 pub fn switch_fold<F: Allocator, S: Allocator>(
@@ -38,11 +41,18 @@ pub fn switch_fold<F: Allocator, S: Allocator>(
         if fun.blocks[head].tombstone {
             continue;
         }
-        let Some((subject, key, head_key, yes, mut default)) = compare(fun, head) else {
+        let Some((subject, key, head_key, yes, no)) = compare(fun, head) else {
             continue;
         };
+        // An edge as its target and its args in the head's values.
+        let edge = |(target, args): Edge| {
+            let mut renamed = Vec::new_in(alloc);
+            renamed.extend_from_slice(fun.params(args));
+            (target, renamed)
+        };
 
-        let mut cases = vec![Case { key, target: yes }];
+        let mut cases = vec![(key, edge(yes))];
+        let mut default = edge(no);
         let mut chain = Vec::new_in(alloc);
         loop {
             let b = default.0.0 as usize;
@@ -61,11 +71,23 @@ pub fn switch_fold<F: Allocator, S: Allocator>(
                 }
                 _ => false,
             });
-            if lhs != subject || !only_constants {
+            let params = fun.params(fun.blocks[b].params);
+            let head_value = |id: Id| params.iter().position(|&p| p == id).map(|i| default.1[i]);
+            let rename = |(target, args): Edge| {
+                let mut renamed = Vec::new_in(alloc);
+                for &arg in fun.params(args) {
+                    renamed.push(head_value(arg)?);
+                }
+                Some((target, renamed))
+            };
+            let (Some(yes), Some(no)) = (rename(yes), rename(no)) else {
+                break;
+            };
+            if head_value(lhs) != Some(subject) || !only_constants {
                 break;
             }
-            if !cases.iter().any(|case| case.key == key) {
-                cases.push(Case { key, target: yes });
+            if !cases.iter().any(|(k, _)| *k == key) {
+                cases.push((key, yes));
             }
             chain.push(b);
             default = no;
@@ -75,8 +97,8 @@ pub fn switch_fold<F: Allocator, S: Allocator>(
             continue;
         }
         let mut ints = Vec::new_in(alloc);
-        ints.extend(cases.iter().filter_map(|case| match case.key {
-            Const::Int(v) => Some(v),
+        ints.extend(cases.iter().filter_map(|(key, _)| match key {
+            Const::Int(v) => Some(*v),
             _ => None,
         }));
         if let (Some(min), Some(max)) = (ints.iter().min(), ints.iter().max())
@@ -93,7 +115,15 @@ pub fn switch_fold<F: Allocator, S: Allocator>(
         for b in chain {
             fun.blocks[b].tombstone = true;
         }
-        let cases = fun.intern_cases(cases);
+        let mut interned = Vec::with_capacity_in(cases.len(), alloc);
+        for (key, (target, args)) in cases {
+            interned.push(Case {
+                key,
+                target: (target, fun.intern_params(args)),
+            });
+        }
+        let cases = fun.intern_cases(interned);
+        let default = (default.0, fun.intern_params(default.1));
         let block = &mut fun.blocks[head];
         if let Some(key) = head_key
             && scratch.use_count(key) == 1
@@ -117,9 +147,7 @@ pub fn switch_fold<F: Allocator, S: Allocator>(
 type Edge = (Id, ParamsId);
 
 /// `(subject, key, key_load, yes, no)` of a `subject == key` branch. `key_load`
-/// is the `LoadConst` of a string key, integer keys are immediates. A switch
-/// moves nothing along its edges, so both must pass their target's params
-/// unchanged.
+/// is the `LoadConst` of a string key, integer keys are immediates.
 fn compare<'f, F: Allocator>(
     fun: &ir::Func<'f, F>,
     b: usize,
@@ -154,11 +182,7 @@ fn compare<'f, F: Allocator>(
         }) => (lhs, Const::Int(i64::from(imm)), None, yes, no),
         _ => return None,
     };
-
-    let unchanged = |(target, params): Edge| {
-        fun.params(params) == fun.params(fun.blocks[target.0 as usize].params)
-    };
-    (unchanged(yes) && unchanged(no)).then_some((subject, key, key_load, yes, no))
+    Some((subject, key, key_load, yes, no))
 }
 
 #[cfg(test)]
@@ -177,10 +201,20 @@ mod tests {
         Int(i32),
     }
 
+    /// The params of block `b`: `(%v0, %v1)` for the head, fresh ones for every other block, as
+    /// match lowering names them.
+    fn params_of(b: u32) -> [Id; 2] {
+        if b == 0 {
+            [V0, V1]
+        } else {
+            [Id(1000 + 2 * b), Id(1001 + 2 * b)]
+        }
+    }
+
     /// `match { subject == key { k + 1 } ... { 0 } }` as match lowering and
     /// branch_cmp leave it: chain block `b{2k}` compares case `k`, arm
     /// `b{2k+1}` returns `k + 1`, the last block `b{2n}` returns 0. Every block
-    /// takes and passes the params `(%v0, %v1)`.
+    /// passes its own params on, `subject` names the first or second of them.
     fn chain(cases: &[(Id, Key)]) -> Func<'static> {
         let mut fun = Func::new(
             "f",
@@ -197,9 +231,11 @@ mod tests {
             ],
             Some(Type::Int),
         );
-        let params = fun.intern_params(vec![V0, V1]);
         for (k, &(subject, key)) in cases.iter().enumerate() {
             let k = k as u32;
+            let own = params_of(2 * k);
+            let params = fun.intern_params(own);
+            let subject = own[usize::from(subject == V1)];
             let (yes, no) = ((Id(2 * k + 1), params), (Id(2 * k + 2), params));
             let (instructions, term) = match key {
                 Key::Str(s) => (
@@ -247,10 +283,13 @@ mod tests {
                 instructions,
                 term: Some(term),
             });
+            let arm_params = fun.intern_params(params_of(2 * k + 1));
             fun.blocks
-                .push(arm(Id(2 * k + 1), i64::from(k) + 1, params));
+                .push(arm(Id(2 * k + 1), i64::from(k) + 1, arm_params));
         }
-        fun.blocks.push(arm(Id(2 * cases.len() as u32), 0, params));
+        let last = 2 * cases.len() as u32;
+        let last_params = fun.intern_params(params_of(last));
+        fun.blocks.push(arm(Id(last), 0, last_params));
         fun
     }
 
@@ -281,7 +320,8 @@ mod tests {
         fun
     }
 
-    /// `(key, target)` of every case of `b0`'s switch on `%v0`, and its default.
+    /// `(key, target)` of every case of `b0`'s switch on `%v0`, and its default. Every edge passes
+    /// the head's params, whatever the chain block it came from named them.
     fn switch_of(fun: &Func<'static>) -> (Vec<(Const<'static>, Id)>, Id) {
         let Some(Terminator::Switch {
             subject: V0,
@@ -292,6 +332,9 @@ mod tests {
         else {
             panic!("b0 is not a switch on %v0: {:?}", fun.blocks[0].term);
         };
+        for edge in fun.cases(*cases).iter().map(|c| c.target).chain([*default]) {
+            assert_eq!(fun.params(edge.1), [V0, V1], "edge to b{}", edge.0.0);
+        }
         let cases = fun
             .cases(*cases)
             .iter()
@@ -427,9 +470,10 @@ mod tests {
         // The compare on %v1 becomes the default and stays as it is.
         assert_eq!(default, Id(8));
         assert!(!fun.blocks[8].tombstone);
+        let [_, v1] = params_of(8);
         assert!(matches!(
             fun.blocks[8].term,
-            Some(Terminator::BranchCmp { lhs: V1, .. })
+            Some(Terminator::BranchCmp { lhs, .. }) if lhs == v1
         ));
     }
 }
