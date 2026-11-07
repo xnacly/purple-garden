@@ -812,7 +812,9 @@ mod tests {
 
     #[test]
     fn compile_collects_signatures_for_bytecode_and_native_targets() {
-        for (no_jit, want_native) in [(true, false), (false, true)] {
+        // aarch64 only has the JIT scaffold, which leaves every function to the bytecode
+        let jit_compiles = cfg!(target_arch = "x86_64");
+        for (no_jit, want_native) in [(true, false), (false, jit_compiles)] {
             let mut config = config::Config::default();
             config.no_jit = no_jit;
             let program = Pg::new()
