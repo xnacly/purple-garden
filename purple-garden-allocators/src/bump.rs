@@ -90,6 +90,7 @@ impl<A: Allocator> BumpAlloc<A> {
         let Some(chunk) = self.chunk.get() else {
             return;
         };
+        // SAFETY: chunk header is live, &mut self so older chunks are unborrowed
         unsafe {
             self.free_from((*chunk.as_ptr()).prev.take());
             self.top.set(Self::start(chunk));
@@ -97,12 +98,15 @@ impl<A: Allocator> BumpAlloc<A> {
     }
 
     fn start(chunk: NonNull<Chunk>) -> NonNull<u8> {
+        // SAFETY: every chunk is larger than its header
         unsafe { chunk.add(1).cast() }
     }
 
     unsafe fn free_from(&self, mut chunk: Option<NonNull<Chunk>>) {
         while let Some(c) = chunk {
+            // SAFETY: header written by grow_chunks, read once before freeing
             let Chunk { prev, layout } = unsafe { c.read() };
+            // SAFETY: c came from parent with the layout in its header
             unsafe { self.parent.deallocate(c.cast(), layout) };
             chunk = prev;
         }
@@ -116,7 +120,9 @@ impl<A: Allocator> BumpAlloc<A> {
         if pad.checked_add(layout.size())? > room {
             return None;
         }
+        // SAFETY: pad + size fits in room, inside the chunk
         let ptr = unsafe { top.add(pad) };
+        // SAFETY: pad + size fits in room, inside the chunk
         Some((ptr, unsafe { ptr.add(layout.size()) }))
     }
 
@@ -129,6 +135,7 @@ impl<A: Allocator> BumpAlloc<A> {
             .map_err(|_| AllocError)?;
         let block = self.parent.allocate(chunk_layout)?;
         let chunk = block.cast::<Chunk>();
+        // SAFETY: block came from parent, sized and aligned for Chunk
         unsafe {
             chunk.write(Chunk {
                 prev: self.chunk.get(),
@@ -137,12 +144,14 @@ impl<A: Allocator> BumpAlloc<A> {
         };
         self.chunk.set(Some(chunk));
         self.top.set(Self::start(chunk));
+        // SAFETY: one past the end of block
         self.end.set(unsafe { block.cast::<u8>().add(block.len()) });
         self.next.set((self.next.get() * 2).min(MAX_CHUNK));
         Ok(())
     }
 
     fn is_top(&self, ptr: NonNull<u8>, layout: Layout) -> bool {
+        // SAFETY: ptr is a live block of ours spanning layout.size()
         unsafe { ptr.add(layout.size()) == self.top.get() }
     }
 }
@@ -176,14 +185,17 @@ unsafe impl<A: Allocator> Allocator for BumpAlloc<A> {
         old: Layout,
         new: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
-        if self.is_top(ptr, old) && ptr.addr().get().is_multiple_of(new.align()) {
+        if self.is_top(ptr, old)
+            && ptr.addr().get().is_multiple_of(new.align())
+            && new.size() <= self.end.get().addr().get() - ptr.addr().get()
+        {
+            // SAFETY: ptr is top, new.size() fits before the chunk end
             let end = unsafe { ptr.add(new.size()) };
-            if end <= self.end.get() {
-                self.top.set(end);
-                return Ok(NonNull::slice_from_raw_parts(ptr, new.size()));
-            }
+            self.top.set(end);
+            return Ok(NonNull::slice_from_raw_parts(ptr, new.size()));
         }
         let block = self.allocate(new)?;
+        // SAFETY: fresh block is disjoint from ptr, old fits both
         unsafe { ptr.copy_to_nonoverlapping(block.cast(), old.size()) };
         Ok(block)
     }
@@ -196,10 +208,12 @@ unsafe impl<A: Allocator> Allocator for BumpAlloc<A> {
     ) -> Result<NonNull<[u8]>, AllocError> {
         if !ptr.addr().get().is_multiple_of(new.align()) {
             let block = self.allocate(new)?;
+            // SAFETY: fresh block is disjoint from ptr, new fits both
             unsafe { ptr.copy_to_nonoverlapping(block.cast(), new.size()) };
             return Ok(block);
         }
         if self.is_top(ptr, old) {
+            // SAFETY: new.size() <= old.size(), stays in the block
             self.top.set(unsafe { ptr.add(new.size()) });
         }
         Ok(NonNull::slice_from_raw_parts(ptr, new.size()))
@@ -208,6 +222,7 @@ unsafe impl<A: Allocator> Allocator for BumpAlloc<A> {
 
 impl<A: Allocator> Drop for BumpAlloc<A> {
     fn drop(&mut self) {
+        // SAFETY: dropping, nothing borrows the chunks anymore
         unsafe { self.free_from(self.chunk.get()) };
     }
 }
@@ -239,6 +254,7 @@ mod tests {
         let c = bump.allocate(layout(1, 1)).unwrap().cast::<u8>();
         assert!(b.addr().get().is_multiple_of(8));
         assert!(b > a && b.addr().get() - a.addr().get() < 16);
+        // SAFETY: b spans 8 bytes, one past its end
         assert_eq!(unsafe { b.add(8) }, c);
     }
 
@@ -248,7 +264,9 @@ mod tests {
         let l = layout(32, 8);
         let a = bump.allocate(l).unwrap().cast::<u8>();
         let b = bump.allocate(l).unwrap().cast::<u8>();
+        // SAFETY: a came from bump with l
         unsafe { bump.deallocate(a, l) };
+        // SAFETY: b came from bump with l
         unsafe { bump.deallocate(b, l) };
         assert_eq!(bump.allocate(l).unwrap().cast::<u8>(), b);
     }
@@ -326,5 +344,24 @@ mod tests {
         let bump = BumpAlloc::new();
         let ids: Vec<&[usize]> = (0..100).map(|n| &*bump.alloc_slice([n; 3])).collect();
         assert!(ids.iter().enumerate().all(|(n, s)| s == &[n; 3]));
+    }
+
+    #[test]
+    fn grow_of_top_past_chunk_end() {
+        let bump = BumpAlloc::new_in(std::alloc::Global);
+        let old = layout(8, 8);
+        let a = bump.allocate(old).unwrap().cast::<u8>();
+        // SAFETY: a came from bump with old
+        let b = unsafe { bump.grow(a, old, layout(2 * FIRST_CHUNK, 8)) }.unwrap();
+        assert_ne!(b.cast::<u8>(), a);
+    }
+
+    #[test]
+    fn grow_of_zero_size_on_fresh_arena() {
+        let bump = BumpAlloc::new_in(std::alloc::Global);
+        let old = layout(0, 1);
+        let a = bump.allocate(old).unwrap().cast::<u8>();
+        // SAFETY: a came from bump with old
+        unsafe { bump.grow(a, old, layout(16, 1)) }.unwrap();
     }
 }

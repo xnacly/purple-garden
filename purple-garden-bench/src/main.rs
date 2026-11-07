@@ -90,6 +90,7 @@ fn main() {
 /// raise it for every runtime, keeping deep recursion working with the JIT.
 fn raise_stack_limit() {
     const STACK: libc::rlim_t = 256 << 20;
+    // SAFETY: rlimit is plain data, zeroed is a valid value
     unsafe {
         let mut limit: libc::rlimit = std::mem::zeroed();
         if libc::getrlimit(libc::RLIMIT_STACK, &mut limit) == 0 && limit.rlim_cur < STACK {

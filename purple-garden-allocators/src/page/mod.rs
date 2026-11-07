@@ -50,12 +50,15 @@ unsafe impl Allocator for PageAlloc {
         )
         .map_err(|_| AllocError)?;
         let head = map.as_ptr().align_offset(layout.align());
+        // SAFETY: head <= slack, inside the mapping
         let ptr = unsafe { map.add(head) };
         if head > 0 {
-            mmap::munmap(map, head).map_err(|_| AllocError)?;
+            // SAFETY: unaligned head of our fresh mapping, nothing points into it
+            unsafe { mmap::munmap(map, head) }.map_err(|_| AllocError)?;
         }
         if slack > head {
-            mmap::munmap(unsafe { ptr.add(len) }, slack - head).map_err(|_| AllocError)?;
+            // SAFETY: tail of our fresh mapping past len, nothing points into it
+            unsafe { mmap::munmap(ptr.add(len), slack - head) }.map_err(|_| AllocError)?;
         }
         Ok(NonNull::slice_from_raw_parts(ptr, len))
     }
@@ -68,7 +71,9 @@ unsafe impl Allocator for PageAlloc {
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         if layout.size() != 0 {
-            mmap::munmap(ptr, mapped_len(layout)).expect("unmapping pages of a live allocation");
+            // SAFETY: forwarded from caller, ptr is a whole mapping of ours
+            unsafe { mmap::munmap(ptr, mapped_len(layout)) }
+                .expect("unmapping pages of a live allocation");
         }
     }
 
@@ -88,10 +93,12 @@ unsafe impl Allocator for PageAlloc {
         }
         #[cfg(target_os = "linux")]
         if new.align() <= mmap::page_size() {
-            let moved = mmap::mremap(ptr, old_len, new_len).map_err(|_| AllocError)?;
+            // SAFETY: forwarded from caller, ptr is a whole mapping of ours
+            let moved = unsafe { mmap::mremap(ptr, old_len, new_len) }.map_err(|_| AllocError)?;
             return Ok(NonNull::slice_from_raw_parts(moved, new_len));
         }
         let block = self.allocate(new)?;
+        // SAFETY: block is a fresh mapping, ptr is ours with old
         unsafe {
             ptr.copy_to_nonoverlapping(block.cast(), old.size());
             self.deallocate(ptr, old);
@@ -107,11 +114,13 @@ unsafe impl Allocator for PageAlloc {
         new: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
         if old.size() != 0 {
+            // SAFETY: the pages up to mapped_len(old) are ours
             unsafe {
                 ptr.add(old.size())
                     .write_bytes(0, mapped_len(old).min(new.size()) - old.size());
             }
         }
+        // SAFETY: forwarded from caller
         unsafe { self.grow(ptr, old, new) }
     }
 
@@ -124,6 +133,7 @@ unsafe impl Allocator for PageAlloc {
     ) -> Result<NonNull<[u8]>, AllocError> {
         if !ptr.addr().get().is_multiple_of(new.align()) {
             let block = self.allocate(new)?;
+            // SAFETY: block is a fresh mapping, ptr is ours with old
             unsafe {
                 ptr.copy_to_nonoverlapping(block.cast(), new.size());
                 self.deallocate(ptr, old);
@@ -131,12 +141,14 @@ unsafe impl Allocator for PageAlloc {
             return Ok(block);
         }
         if new.size() == 0 {
+            // SAFETY: forwarded from caller
             unsafe { self.deallocate(ptr, old) };
             return Ok(NonNull::slice_from_raw_parts(new.dangling_ptr(), 0));
         }
         let (old_len, new_len) = (mapped_len(old), mapped_len(new));
         if new_len < old_len {
-            mmap::munmap(unsafe { ptr.add(new_len) }, old_len - new_len).map_err(|_| AllocError)?;
+            // SAFETY: tail of our mapping past new_len, caller gave it up
+            unsafe { mmap::munmap(ptr.add(new_len), old_len - new_len) }.map_err(|_| AllocError)?;
         }
         Ok(NonNull::slice_from_raw_parts(ptr, new_len))
     }
@@ -153,8 +165,10 @@ mod tests {
         let layout = Layout::from_size_align(page + 1, 8).unwrap();
         let block = PageAlloc {}.allocate_zeroed(layout).unwrap();
         assert_eq!(block.len(), 2 * page);
+        // SAFETY: fresh zeroed mapping of block.len() bytes
         let bytes = unsafe { block.as_ref() };
         assert!(bytes.iter().all(|&b| b == 0));
+        // SAFETY: block came from PageAlloc with layout
         unsafe { PageAlloc {}.deallocate(block.cast(), layout) };
     }
 
@@ -164,6 +178,7 @@ mod tests {
         let layout = Layout::from_size_align(100, align).unwrap();
         let block = PageAlloc {}.allocate(layout).unwrap();
         assert_eq!(block.cast::<u8>().as_ptr() as usize % align, 0);
+        // SAFETY: block spans at least 100 bytes, then freed with layout
         unsafe {
             block.cast::<u8>().write_bytes(0xab, 100);
             PageAlloc {}.deallocate(block.cast(), layout);
@@ -179,6 +194,7 @@ mod tests {
         }
         let mut pages = vec![0u8; len.div_ceil(mmap::page_size())];
         assert_eq!(
+            // SAFETY: pages holds one byte per page of len
             unsafe { mincore(ptr.as_ptr().cast(), len, pages.as_mut_ptr()) },
             0
         );
@@ -191,8 +207,10 @@ mod tests {
         let layout = Layout::from_size_align(64 << 20, 8).unwrap();
         let block = PageAlloc {}.allocate_zeroed(layout).unwrap();
         let resident = resident_pages(block.cast(), block.len());
+        // SAFETY: block is a live rw mapping
         unsafe { block.cast::<u8>().write(1) };
         let touched = resident_pages(block.cast(), block.len());
+        // SAFETY: block came from PageAlloc with layout
         unsafe { PageAlloc {}.deallocate(block.cast(), layout) };
         assert_eq!(resident, 0);
         assert!(touched >= 1);
@@ -204,6 +222,7 @@ mod tests {
         let block = PageAlloc {}.allocate(layout).unwrap();
         assert_eq!(block.len(), 0);
         assert_eq!(block.cast::<u8>().as_ptr() as usize % 64, 0);
+        // SAFETY: block came from PageAlloc with layout
         unsafe { PageAlloc {}.deallocate(block.cast(), layout) };
     }
 
@@ -228,11 +247,15 @@ mod tests {
             Layout::from_size_align(3 * page, 8).unwrap(),
         );
         let block = PageAlloc {}.allocate(old).unwrap();
+        // SAFETY: block is a live rw mapping of block.len() bytes
         unsafe { block.cast::<u8>().write_bytes(0xff, block.len()) };
+        // SAFETY: block came from PageAlloc with old
         let grown = unsafe { PageAlloc {}.grow_zeroed(block.cast(), old, new) }.unwrap();
+        // SAFETY: grown is live, every byte written or zeroed
         let bytes = unsafe { grown.as_ref() };
         assert!(bytes[..10].iter().all(|&b| b == 0xff));
         assert!(bytes[10..].iter().all(|&b| b == 0));
+        // SAFETY: grown came from PageAlloc with new
         unsafe { PageAlloc {}.deallocate(grown.cast(), new) };
     }
 

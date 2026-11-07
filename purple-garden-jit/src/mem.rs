@@ -72,12 +72,14 @@ impl<P: Pages> CodeArena<P> {
             return None;
         }
         let base = self.ptr.as_ptr();
+        // SAFETY: len <= start <= end <= cap, arena not sealed yet
         unsafe {
             // int3 padding, so a stray fall-through traps.
             std::ptr::write_bytes(base.add(self.len), 0xcc, start - self.len);
             std::ptr::copy_nonoverlapping(code.as_ptr(), base.add(start), code.len());
         }
         self.len = end;
+        // SAFETY: entry is in the arena, only called after seal
         Some(unsafe { std::mem::transmute::<*const u8, BuiltinFn>(base.add(start)) })
     }
 
@@ -88,12 +90,14 @@ impl<P: Pages> CodeArena<P> {
         if self.len == 0 {
             return Ok(());
         }
-        mmap::mprotect(self.ptr, self.len, MmapProt::READ | MmapProt::EXEC)
+        // SAFETY: our pages, sealed refuses further writes
+        unsafe { mmap::mprotect(self.ptr, self.len, MmapProt::READ | MmapProt::EXEC) }
     }
 }
 
 impl<P: Pages> Drop for CodeArena<P> {
     fn drop(&mut self) {
+        // SAFETY: ptr was allocated by pages with this layout
         unsafe { self.pages.deallocate(self.ptr, Self::layout()) };
     }
 }

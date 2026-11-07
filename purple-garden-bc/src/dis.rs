@@ -298,6 +298,7 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                         SwitchKind::Str => "str",
                         SwitchKind::Int => "int",
                     },
+                    // SAFETY: the vm owns the tables, they outlive the disassembler
                     unsafe { table.as_ref() }.values.len()
                 ),
                 Op::Switch {
@@ -310,6 +311,7 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                         SwitchKind::Str => "str",
                         SwitchKind::Int => "int",
                     },
+                    // SAFETY: the vm owns the tables, they outlive the disassembler
                     unsafe { table.as_ref() }.targets.len()
                 ),
                 Op::Call { func } => format!(

@@ -60,7 +60,8 @@ impl<T: PgType + ?Sized> PgType for &mut T {
 
 impl<'vm> FromVm<'vm> for &'vm str {
     fn from_vm(_: &'vm Vm, value: Value) -> Self {
-        value.as_str()
+        // SAFETY: the typechecker only routes strings here
+        unsafe { value.as_str() }
     }
 }
 
@@ -76,7 +77,8 @@ impl PgType for String {
 
 impl<'vm> FromVm<'vm> for String {
     fn from_vm(_: &'vm Vm, value: Value) -> Self {
-        value.as_str().to_owned()
+        // SAFETY: the typechecker only routes strings here
+        unsafe { value.as_str() }.to_owned()
     }
 }
 
@@ -100,6 +102,7 @@ impl<T: PgType> PgType for Option<T> {
 
 impl<'vm, T: FromVm<'vm>> FromVm<'vm> for Option<T> {
     fn from_vm(vm: &'vm Vm, value: Value) -> Self {
+        // SAFETY: Option values point at a 16 byte tag+payload box
         let [tag, payload] = unsafe { *(value.0 as *const [u64; 2]) };
         debug_assert!(tag <= 1, "option tag {tag}");
         (tag == 1).then(|| T::from_vm(vm, Value(payload)))
@@ -154,34 +157,38 @@ mod tests {
         let mut vm = Vm::new(VmConfig::default());
         let hello = vm.new_string("hello".to_owned());
         let world = vm.new_string("world".to_owned());
-        *vm.r_mut(0) = hello;
-        *vm.r_mut(1) = world;
-        *vm.r_mut(2) = Value::from(42_i64);
-        *vm.r_mut(3) = Value::from(3.5_f64);
-        *vm.r_mut(4) = Value::from(true);
+        // SAFETY: registers 0..5 exist, r0 holds a string where read as one
+        unsafe {
+            *vm.r_mut(0) = hello;
+            *vm.r_mut(1) = world;
+            *vm.r_mut(2) = Value::from(42_i64);
+            *vm.r_mut(3) = Value::from(3.5_f64);
+            *vm.r_mut(4) = Value::from(true);
 
-        let arg0 = <&str as FromVm>::from_vm(&vm, *vm.r(0));
-        let arg1 = <&str as FromVm>::from_vm(&vm, *vm.r(1));
-        assert_eq!((arg0, arg1), ("hello", "world"));
-        assert_eq!(<i64 as FromVm>::from_vm(&vm, *vm.r(2)), 42);
-        assert_eq!(<f64 as FromVm>::from_vm(&vm, *vm.r(3)), 3.5);
-        assert!(<bool as FromVm>::from_vm(&vm, *vm.r(4)));
-        assert_eq!(<String as FromVm>::from_vm(&vm, *vm.r(0)), "hello");
+            let arg0 = <&str as FromVm>::from_vm(&vm, *vm.r(0));
+            let arg1 = <&str as FromVm>::from_vm(&vm, *vm.r(1));
+            assert_eq!((arg0, arg1), ("hello", "world"));
+            assert_eq!(<i64 as FromVm>::from_vm(&vm, *vm.r(2)), 42);
+            assert_eq!(<f64 as FromVm>::from_vm(&vm, *vm.r(3)), 3.5);
+            assert!(<bool as FromVm>::from_vm(&vm, *vm.r(4)));
+            assert_eq!(<String as FromVm>::from_vm(&vm, *vm.r(0)), "hello");
 
-        let returned = "returned".into_vm(&mut vm);
-        *vm.r_mut(0) = returned;
-        assert_eq!(vm.r(0).as_str(), "returned");
-        *vm.r_mut(0) = 7_i64.into_vm(&mut vm);
-        assert_eq!(vm.r(0).as_int(), 7);
-        *vm.r_mut(0) = 2.25_f64.into_vm(&mut vm);
-        assert_eq!(vm.r(0).as_f64(), 2.25);
-        *vm.r_mut(0) = false.into_vm(&mut vm);
-        assert!(!vm.r(0).as_bool());
+            let returned = "returned".into_vm(&mut vm);
+            *vm.r_mut(0) = returned;
+            assert_eq!(vm.r(0).as_str(), "returned");
+            *vm.r_mut(0) = 7_i64.into_vm(&mut vm);
+            assert_eq!(vm.r(0).as_int(), 7);
+            *vm.r_mut(0) = 2.25_f64.into_vm(&mut vm);
+            assert_eq!(vm.r(0).as_f64(), 2.25);
+            *vm.r_mut(0) = false.into_vm(&mut vm);
+            assert!(!vm.r(0).as_bool());
+        }
         assert_eq!(().into_vm(&mut vm), Value::UNDEF);
     }
 
     /// The tag and payload words of the box `value` points to, see [`Type::Option`].
     fn option_box(value: Value) -> [u64; 2] {
+        // SAFETY: Option values point at a 16 byte tag+payload box
         unsafe { *(value.0 as *const [u64; 2]) }
     }
 
@@ -198,6 +205,7 @@ mod tests {
         for (value, payload) in boxes {
             assert_eq!(option_box(value), [1, payload]);
 
+            // SAFETY: into_vm gc-allocates every Option box
             let metadata = unsafe {
                 crate::gc::Metadata::from_payload(
                     std::ptr::NonNull::new(value.0 as *mut u8).unwrap(),

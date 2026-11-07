@@ -15,10 +15,16 @@ unsafe extern "C" {
     fn pthread_attr_destroy(attr: *mut PthreadAttr) -> i32;
 }
 
-/// Room for glibc's `pthread_attr_t` on every supported target.
+/// Room for `pthread_attr_t`: 56 bytes on x86_64, 64 on aarch64, glibc and musl alike.
 #[cfg(target_os = "linux")]
 #[repr(C, align(8))]
 struct PthreadAttr([u8; 64]);
+
+#[cfg(all(
+    target_os = "linux",
+    not(any(target_arch = "x86_64", target_arch = "aarch64"))
+))]
+compile_error!("PthreadAttr is only sized for x86_64 and aarch64");
 
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
@@ -32,6 +38,7 @@ unsafe extern "C" {
 #[must_use]
 pub fn thread_stack_low() -> Option<usize> {
     let mut attr = PthreadAttr([0; 64]);
+    // SAFETY: PthreadAttr has room for glibc's pthread_attr_t
     unsafe {
         if pthread_getattr_np(pthread_self(), &mut attr) != 0 {
             return None;
@@ -47,6 +54,7 @@ pub fn thread_stack_low() -> Option<usize> {
 #[cfg(target_os = "macos")]
 #[must_use]
 pub fn thread_stack_low() -> Option<usize> {
+    // SAFETY: pthread_self is always the live calling thread
     unsafe {
         let thread = pthread_self();
         Some(pthread_get_stackaddr_np(thread) as usize - pthread_get_stacksize_np(thread))

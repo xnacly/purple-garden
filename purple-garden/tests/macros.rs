@@ -57,7 +57,8 @@ mod counters {
 
     #[purple_garden::pg_fn(unsafe)]
     pub fn add_register_zero(vm: &mut Vm, value: i64) -> i64 {
-        vm.r(0).as_int() + value
+        // SAFETY: r0 exists
+        unsafe { vm.r(0) }.as_int() + value
     }
 }
 
@@ -160,23 +161,30 @@ fn pg_pkg_generates_subpackage_metadata() {
 fn pg_pkg_wrapper_decodes_args_and_encodes_return() {
     let mut vm = Vm::new(VmConfig::default());
     let s = vm.new_string("hello".to_owned());
-    *vm.r_mut(0) = s;
+    // SAFETY: r0 exists
+    *unsafe { vm.r_mut(0) } = s;
 
+    // SAFETY: valid vm, r0 holds the Str len expects
     unsafe { (str::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
 
-    assert_eq!(vm.r(0).as_int(), 5);
+    // SAFETY: r0 exists
+    assert_eq!(unsafe { vm.r(0) }.as_int(), 5);
 }
 
 #[test]
 fn pg_pkg_wrapper_allocates_return_strings() {
     let mut vm = Vm::new(VmConfig::default());
     let s = vm.new_string("ha".to_owned());
-    *vm.r_mut(0) = s;
-    *vm.r_mut(1) = Value::from(3_i64);
+    // SAFETY: r0 exists
+    *unsafe { vm.r_mut(0) } = s;
+    // SAFETY: r1 exists
+    *unsafe { vm.r_mut(1) } = Value::from(3_i64);
 
+    // SAFETY: valid vm, r0 and r1 hold repeat's Str and Int
     unsafe { (str::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
-    assert_eq!(vm.r(0).as_str(), "hahaha");
+    // SAFETY: r0 exists and holds a Str
+    assert_eq!(unsafe { vm.r(0).as_str() }, "hahaha");
 }
 
 #[test]
@@ -191,12 +199,15 @@ fn pg_pkg_supports_garden_opaque_types() {
     );
 
     let mut vm = Vm::new(VmConfig::default());
-    *vm.r_mut(0) = Value::from(7_i64);
+    // SAFETY: r0 exists
+    *unsafe { vm.r_mut(0) } = Value::from(7_i64);
 
+    // SAFETY: valid vm, r0 holds new_counter's Int, then its Counter
     unsafe { (counters::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
     unsafe { (counters::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
-    assert_eq!(vm.r(0).as_int(), 7);
+    // SAFETY: r0 exists
+    assert_eq!(unsafe { vm.r(0) }.as_int(), 7);
 }
 
 #[test]
@@ -218,11 +229,14 @@ fn pg_fn_unsafe_passes_vm_and_exposes_remaining_signature() {
     assert_eq!(fun.ret, purple_garden::embed::Type::Int);
 
     let mut vm = Vm::new(VmConfig::default());
-    *vm.r_mut(0) = Value::from(40_i64);
+    // SAFETY: r0 exists
+    *unsafe { vm.r_mut(0) } = Value::from(40_i64);
 
+    // SAFETY: valid vm, r0 holds add_register_zero's Int
     unsafe { (fun.ptr)((&mut vm as *mut Vm).cast()) };
 
-    assert_eq!(vm.r(0).as_int(), 80);
+    // SAFETY: r0 exists
+    assert_eq!(unsafe { vm.r(0) }.as_int(), 80);
 }
 
 #[test]
@@ -255,23 +269,30 @@ fn pg_pkg_wrapper_decodes_record_arg() {
         age: 42,
     }
     .into_vm(&mut vm);
-    *vm.r_mut(0) = record;
+    // SAFETY: r0 exists
+    *unsafe { vm.r_mut(0) } = record;
 
+    // SAFETY: valid vm, r0 holds a User record
     unsafe { (users::PACKAGE.fns[0].ptr)((&mut vm as *mut Vm).cast()) };
 
-    assert_eq!(vm.r(0).as_str(), "teo");
+    // SAFETY: r0 exists and holds a Str
+    assert_eq!(unsafe { vm.r(0).as_str() }, "teo");
 }
 
 #[test]
 fn pg_pkg_wrapper_encodes_record_return() {
     let mut vm = Vm::new(VmConfig::default());
     let name = vm.new_string("ada".to_owned());
-    *vm.r_mut(0) = name;
-    *vm.r_mut(1) = Value::from(37_i64);
+    // SAFETY: r0 exists
+    *unsafe { vm.r_mut(0) } = name;
+    // SAFETY: r1 exists
+    *unsafe { vm.r_mut(1) } = Value::from(37_i64);
 
+    // SAFETY: valid vm, r0 and r1 hold make_user's Str and Int
     unsafe { (users::PACKAGE.fns[1].ptr)((&mut vm as *mut Vm).cast()) };
 
-    let user = User::from_vm(&vm, *vm.r(0));
+    // SAFETY: r0 exists
+    let user = User::from_vm(&vm, *unsafe { vm.r(0) });
     assert_eq!(user.name, "ada");
     assert_eq!(user.age, 37);
 }
@@ -286,16 +307,22 @@ fn pg_pkg_supports_nested_records() {
         active: true,
     }
     .into_vm(&mut vm);
-    *vm.r_mut(0) = account;
+    // SAFETY: r0 exists
+    *unsafe { vm.r_mut(0) } = account;
 
+    // SAFETY: valid vm, r0 holds an Account record
     unsafe { (users::PACKAGE.fns[2].ptr)((&mut vm as *mut Vm).cast()) };
 
-    assert_eq!(vm.r(0).as_str(), "grace");
+    // SAFETY: r0 exists and holds a Str
+    assert_eq!(unsafe { vm.r(0).as_str() }, "grace");
 
     let name = vm.new_string("lin".to_owned());
-    *vm.r_mut(0) = name;
+    // SAFETY: r0 exists
+    *unsafe { vm.r_mut(0) } = name;
+    // SAFETY: valid vm, r0 holds make_account's Str
     unsafe { (users::PACKAGE.fns[3].ptr)((&mut vm as *mut Vm).cast()) };
-    let account = Account::from_vm(&vm, *vm.r(0));
+    // SAFETY: r0 exists
+    let account = Account::from_vm(&vm, *unsafe { vm.r(0) });
     assert_eq!(account.profile.name, "lin");
     assert!(account.active);
 }
@@ -310,9 +337,12 @@ fn pg_fn_with_slots_declares_slot_types_and_moves_the_word() {
     assert_eq!(id.ret, Type::Slot("T"));
 
     let mut vm = Vm::new(VmConfig::default());
-    *vm.r_mut(0) = Value::from(42_i64);
+    // SAFETY: r0 exists
+    *unsafe { vm.r_mut(0) } = Value::from(42_i64);
+    // SAFETY: valid vm, r0 holds the word id moves
     unsafe { (id.ptr)((&mut vm as *mut Vm).cast()) };
-    assert_eq!(vm.r(0).as_int(), 42);
+    // SAFETY: r0 exists
+    assert_eq!(unsafe { vm.r(0) }.as_int(), 42);
 }
 
 #[test]
@@ -350,44 +380,52 @@ fn pg_fn_native_entries_take_and_return_hardware_values() {
             .native
     }
     let mut vm = Vm::new(VmConfig::default());
+    let name = vm.new_string("garden".to_owned());
     let vm_ptr = (&mut vm as *mut Vm).cast::<std::ffi::c_void>();
 
+    // SAFETY: add's native entry has this signature
     let add = unsafe {
         std::mem::transmute::<
             NativeFn,
             unsafe extern "C" fn(*mut std::ffi::c_void, Value, Value) -> Value,
         >(native("add").unwrap())
     };
+    // SAFETY: vm_ptr is the live vm, args match add
     assert_eq!(
         unsafe { add(vm_ptr, Value::from(40_i64), Value::from(2_i64)) }.as_int(),
         42
     );
 
+    // SAFETY: scale's native entry has this signature
     let scale = unsafe {
         std::mem::transmute::<
             NativeFn,
             unsafe extern "C" fn(*mut std::ffi::c_void, f64, Value, f64) -> f64,
         >(native("scale").unwrap())
     };
+    // SAFETY: vm_ptr is the live vm, args match scale
     assert_eq!(
         unsafe { scale(vm_ptr, 1.5, Value::from(2_i64), 0.25) },
         3.25
     );
 
+    // SAFETY: greet's native entry has this signature
     let greet = unsafe {
         std::mem::transmute::<NativeFn, unsafe extern "C" fn(*mut std::ffi::c_void, Value) -> Value>(
             native("greet").unwrap(),
         )
     };
-    let name = vm.new_string("garden".to_owned());
+    // SAFETY: vm_ptr is the live vm, name is a Str
     let greeting = unsafe { greet(vm_ptr, name) };
     assert_eq!(<&str as FromVm>::from_vm(&vm, greeting), "hi garden");
 
+    // SAFETY: id's native entry has this signature
     let id = unsafe {
         std::mem::transmute::<NativeFn, unsafe extern "C" fn(*mut std::ffi::c_void, Value) -> Value>(
             native("id").unwrap(),
         )
     };
+    // SAFETY: vm_ptr is the live vm, args match id
     assert_eq!(unsafe { id(vm_ptr, Value::from(7_i64)) }.as_int(), 7);
 }
 

@@ -68,6 +68,7 @@ macro_rules! enter_native {
         /// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
         #[cfg(not(target_arch = "x86_64"))]
         pub unsafe extern "C" fn $name(vm: *mut c_void, target: BuiltinFn) {
+            // SAFETY: caller upholds # Safety
             unsafe { target(vm) }
         }
     };
@@ -119,10 +120,13 @@ pub unsafe extern "C" fn jit_abort(vm: *mut c_void) -> ! {
 ///
 /// # Safety
 ///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`], called from native code
+/// entered through [`enter_native`].
 pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) -> ! {
+    // SAFETY: caller upholds # Safety
     let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
     vm_ref.trap(Anomaly::DivisionByZero { pc: vm_ref.pc });
+    // SAFETY: caller upholds # Safety
     unsafe { abort(vm) }
 }
 
@@ -130,10 +134,13 @@ pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) -> ! {
 ///
 /// # Safety
 ///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`], called from native code
+/// entered through [`enter_native`].
 pub unsafe extern "C" fn jit_trap_assert(vm: *mut c_void) -> ! {
+    // SAFETY: caller upholds # Safety
     let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
     vm_ref.trap(Anomaly::AssertionFailed { pc: vm_ref.pc });
+    // SAFETY: caller upholds # Safety
     unsafe { abort(vm) }
 }
 
@@ -142,10 +149,13 @@ pub unsafe extern "C" fn jit_trap_assert(vm: *mut c_void) -> ! {
 ///
 /// # Safety
 ///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`], called from native code
+/// entered through [`enter_native`].
 pub unsafe extern "C" fn jit_trap_stack_overflow(vm: *mut c_void) -> ! {
+    // SAFETY: caller upholds # Safety
     let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
     vm_ref.trap(Anomaly::StackOverflow { pc: vm_ref.pc });
+    // SAFETY: caller upholds # Safety
     unsafe { abort(vm) }
 }
 
@@ -159,13 +169,15 @@ pub unsafe extern "C" fn jit_trap_stack_overflow(vm: *mut c_void) -> ! {
 ///
 /// # Safety
 ///
-/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`].
+/// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`], called from native code
+/// entered through [`enter_native`].
 pub unsafe extern "C" fn jit_alloc(
     vm: *mut c_void,
     alloc_type: u8,
     size: usize,
     align: usize,
 ) -> *mut u8 {
+    // SAFETY: caller upholds # Safety
     let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
     let ptr = AllocType::from_u8(alloc_type)
         .zip(Layout::from_size_align(size, align).ok())
@@ -175,14 +187,20 @@ pub unsafe extern "C" fn jit_alloc(
         Some(ptr) => ptr.as_ptr(),
         None => {
             vm_ref.trap(Anomaly::AllocationFailed { pc: vm_ref.pc });
+            // SAFETY: caller upholds # Safety
             unsafe { abort(vm) }
         }
     }
 }
 
 /// Leaves native code with the trap `vm` holds, see [`jit_abort`].
+///
+/// # Safety
+///
+/// Same as [`jit_abort`].
 unsafe fn abort(vm: *mut c_void) -> ! {
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: caller upholds # Safety
     unsafe {
         jit_abort(vm)
     }
@@ -282,6 +300,7 @@ mod tests {
     fn enter_native_restores_callee_saved_on_return() {
         let mut vm = Vm::new(VmConfig::default());
         let vm = (&mut vm as *mut Vm).cast();
+        // SAFETY: vm outlives the call, targets keep rbx or abort
         assert_eq!(unsafe { keeps_callee_saved(vm, clobbers_and_returns) }, 1);
     }
 
@@ -289,6 +308,7 @@ mod tests {
     fn jit_abort_returns_to_enter_native_with_callee_saved_intact() {
         let mut vm = Vm::new(VmConfig::default());
         let vm = (&mut vm as *mut Vm).cast();
+        // SAFETY: vm outlives the call, targets keep rbx or abort
         assert_eq!(unsafe { keeps_callee_saved(vm, clobbers_and_aborts) }, 1);
         // native code can be entered again after an abort
         assert_eq!(unsafe { keeps_callee_saved(vm, clobbers_and_returns) }, 1);

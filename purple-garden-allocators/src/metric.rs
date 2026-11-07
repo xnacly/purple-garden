@@ -88,6 +88,7 @@ unsafe impl<A: Allocator> Allocator for MetricAlloc<A> {
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded from caller
         unsafe { self.inner.deallocate(ptr, layout) };
         self.record(|m| {
             m.frees += 1;
@@ -101,6 +102,7 @@ unsafe impl<A: Allocator> Allocator for MetricAlloc<A> {
         old: Layout,
         new: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
+        // SAFETY: forwarded from caller
         let block = unsafe { self.inner.grow(ptr, old, new) }?;
         self.resized(old.size(), new.size());
         Ok(NonNull::slice_from_raw_parts(block.cast(), new.size()))
@@ -112,6 +114,7 @@ unsafe impl<A: Allocator> Allocator for MetricAlloc<A> {
         old: Layout,
         new: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
+        // SAFETY: forwarded from caller
         let block = unsafe { self.inner.grow_zeroed(ptr, old, new) }?;
         self.resized(old.size(), new.size());
         Ok(NonNull::slice_from_raw_parts(block.cast(), new.size()))
@@ -123,6 +126,7 @@ unsafe impl<A: Allocator> Allocator for MetricAlloc<A> {
         old: Layout,
         new: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
+        // SAFETY: forwarded from caller
         let block = unsafe { self.inner.shrink(ptr, old, new) }?;
         self.resized(old.size(), new.size());
         Ok(NonNull::slice_from_raw_parts(block.cast(), new.size()))

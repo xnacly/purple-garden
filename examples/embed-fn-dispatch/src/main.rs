@@ -19,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .function::<i64, i64>("identity")
         .expect("Wasnt able to find `identity` function");
 
+    // SAFETY: one Int arg, matching identity's signature
     assert_eq!(
         unsafe { pg.call_unchecked(&identity_function, &[256i64.into(),])? },
         256i64.into()
