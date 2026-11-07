@@ -1,8 +1,6 @@
 use std::{borrow::Cow, fmt::Display};
 
-use purple_garden_shared::ansi::{
-    BLOCK, COMMENT, DEAD, FLOW, FUNC, IMM, LABEL, MNEM, REG, TYPE, paint,
-};
+use purple_garden_shared::ansi::{BLOCK, COMMENT, FLOW, FUNC, IMM, LABEL, MNEM, REG, TYPE, paint};
 
 use crate::{Const, Func, Id, Instr, Terminator, TypeId};
 
@@ -234,13 +232,13 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                 continue;
             }
             push(Some(pos), 1, label);
-            pos += 2;
+            pos += 1;
 
             for ins in &block.instructions {
                 if !matches!(ins, Instr::Noop) {
                     push(Some(pos), 2, self.instr_display(ins));
                 }
-                pos += 2;
+                pos += 1;
             }
 
             match &block.term {
@@ -269,7 +267,7 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                 Some(term) => push(Some(pos), 2, self.term_display(term)),
                 None => {}
             }
-            pos += 2;
+            pos += 1;
         }
 
         push(None, 0, "}".to_string());
@@ -412,12 +410,12 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                         .zip(&labels)
                         .map(|(&(def, last), label)| {
                             let pad = " ".repeat(label.len() - 1);
-                            if def == u32::MAX || def > p + 1 || last < p {
+                            if def == u32::MAX || def > p || last < p {
                                 format!(" {pad}")
-                            } else if def == last {
-                                format!("{}{pad}", paint(color, DEAD, "X"))
-                            } else {
+                            } else if def != last {
                                 format!("{}{pad}", paint(color, REG, "|"))
+                            } else {
+                                format!(" {pad}")
                             }
                         })
                         .collect()

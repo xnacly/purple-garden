@@ -46,7 +46,7 @@ pub fn inline<'c, 'f: 'c, F: Allocator + 'c, S: Allocator>(
     scratch: &mut Scratch<'_, S>,
 ) {
     scratch.reset();
-    let mut next = next_id(fun);
+    let mut next = fun.next_id();
     let mut args = Vec::new_in(scratch.alloc());
     let mut body = Vec::new_in(scratch.alloc());
 
@@ -99,7 +99,7 @@ pub fn inline<'c, 'f: 'c, F: Allocator + 'c, S: Allocator>(
             );
             let mut ret = ret;
             rename(&mut ret);
-            next = base + next_id(target);
+            next = base + target.next_id();
 
             purple_garden_shared::trace!(
                 "[opt::ir::inline] inlined f{} into {} as %v{}",
@@ -157,27 +157,6 @@ fn single_block<'c, 'f, F: Allocator>(fun: &'c ir::Func<'f, F>) -> Option<(&'c B
         return None;
     };
     Some((block, ret))
-}
-
-/// One past the highest id `fun` takes as a param or defines.
-fn next_id<F: Allocator>(fun: &ir::Func<'_, F>) -> u32 {
-    let params = fun.params.iter().map(|p| p.id);
-    let block_params = fun
-        .blocks
-        .iter()
-        .flat_map(|b| fun.params(b.params))
-        .copied();
-    let defs = fun
-        .blocks
-        .iter()
-        .flat_map(|b| &b.instructions)
-        .filter_map(ir::Func::def_of);
-    params
-        .chain(block_params)
-        .chain(defs)
-        .map(|id| id.0 + 1)
-        .max()
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

@@ -336,6 +336,8 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                 Op::Pop { dst } => format!("pop r{dst}"),
                 Op::Pop2 { a, b } => format!("pop2 r{a}, r{b}"),
                 Op::Pop3 { a, b, c } => format!("pop3 r{a}, r{b}, r{c}"),
+                Op::StoreSlot { slot, src } => format!("store_slot s{slot}, r{src}"),
+                Op::LoadSlot { dst, slot } => format!("load_slot r{dst}, s{slot}"),
                 Op::Alloc {
                     dst,
                     kind,

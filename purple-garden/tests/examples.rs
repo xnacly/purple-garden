@@ -23,44 +23,37 @@ fn examples() -> Vec<(String, Vec<u8>)> {
     out
 }
 
-fn run_source(name: &str, input: &[u8]) {
+fn run_source(name: &str, input: &[u8], opt: usize, no_jit: bool) {
     let mut config = Config::default();
-    config.opt = 0;
+    config.opt = opt;
+    config.no_jit = no_jit;
     let mut program = purple_garden::Pg::new()
         .with_stdlib()
         .with_unsafe_stdlib()
         .config(config)
         .compile(input)
-        .unwrap_or_else(|err| panic!("compilation failed for {name}: {err:?}"));
+        .unwrap_or_else(|err| panic!("compilation failed for {name} at O{opt}: {err:?}"));
     program
         .run()
-        .unwrap_or_else(|err| panic!("program run failed for {name}: {err:?}"));
+        .unwrap_or_else(|err| panic!("program run failed for {name} at O{opt}: {err:?}"));
 }
 
-fn run_source_opt(name: &str, input: &[u8]) {
-    let mut config = Config::default();
-    config.opt = 3;
-    let mut program = purple_garden::Pg::new()
-        .with_stdlib()
-        .with_unsafe_stdlib()
-        .config(config)
-        .compile(input)
-        .unwrap_or_else(|err| panic!("optimized compilation failed for {name}: {err:?}"));
-    program
-        .run()
-        .unwrap_or_else(|err| panic!("optimized program run failed for {name}: {err:?}"));
-}
-
+/// Every level, since passes like the tailcall one change which code paths the backends take.
 #[test]
 fn garden_examples() {
     for (name, source) in examples() {
-        run_source(&name, &source);
+        for opt in 0..=3 {
+            run_source(&name, &source, opt, false);
+        }
     }
 }
 
+/// The JIT takes over most functions, so the bytecode backend needs a run of its own.
 #[test]
-fn optimized_garden_examples() {
+fn bytecode_garden_examples() {
     for (name, source) in examples() {
-        run_source_opt(&name, &source);
+        for opt in 0..=3 {
+            run_source(&name, &source, opt, true);
+        }
     }
 }

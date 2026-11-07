@@ -40,11 +40,11 @@ mod arch;
 #[path = "aarch64/mod.rs"]
 mod arch;
 pub mod mem;
-mod xralloc2;
 
 pub use mem::CodeArena;
 use purple_garden_ir as ir;
 use purple_garden_runtime::{BuiltinFn, Value};
+use purple_garden_shared::xralloc2;
 use std::{
     alloc::{Allocator, Global},
     collections::HashMap,
@@ -452,25 +452,19 @@ mod tests_x86 {
             ],
             Some(Type::Int),
         );
-        let args0 = func.intern_params([Id(5), Id(6)]);
-        let params = func.intern_params(vec![Id(0), Id(1)]);
-        let ret_args = func.intern_params(vec![Id(1)]);
-        let ret_params = func.intern_params(vec![Id(7)]);
+        let params = func.intern_params([Id(0), Id(1)]);
+        let ret_args = func.intern_params([Id(1)]);
+        let ret_params = func.intern_params([Id(3)]);
+        let loop_params = func.intern_params([Id(4), Id(5)]);
+        let tail_args = func.intern_params([Id(6), Id(7)]);
         func.blocks = vec![
             Block {
                 tombstone: false,
                 id: Id(0),
-                instructions: vec![],
-                params,
-                term: None,
-            },
-            Block {
-                tombstone: false,
-                id: Id(1),
                 instructions: vec![Instr::BinImm {
                     op: BinOp::IEq,
                     dst: TypeId {
-                        id: Id(3),
+                        id: Id(2),
                         ty: Type::Bool,
                     },
                     lhs: Id(0),
@@ -479,58 +473,51 @@ mod tests_x86 {
                 }],
                 params,
                 term: Some(Terminator::Branch {
-                    cond: Id(3),
-                    yes: (Id(4), ret_args),
-                    no: (Id(3), params),
+                    cond: Id(2),
+                    yes: (Id(1), ret_args),
+                    no: (Id(2), params),
                     span: 0,
                 }),
             },
             Block {
-                tombstone: true,
-                id: Id(2),
+                tombstone: false,
+                id: Id(1),
                 instructions: vec![],
-                params: EMPTY_PARAMS,
-                term: None,
+                params: ret_params,
+                term: Some(Terminator::Return {
+                    value: Some(Id(3)),
+                    span: 0,
+                }),
             },
             Block {
                 tombstone: false,
-                id: Id(3),
+                id: Id(2),
                 instructions: vec![
                     Instr::BinImm {
                         op: BinOp::ISub,
                         dst: TypeId {
-                            id: Id(5),
+                            id: Id(6),
                             ty: Type::Int,
                         },
-                        lhs: Id(0),
+                        lhs: Id(4),
                         imm: 1,
                         span: 0,
                     },
                     Instr::Bin {
                         op: BinOp::IMul,
                         dst: TypeId {
-                            id: Id(6),
+                            id: Id(7),
                             ty: Type::Int,
                         },
-                        lhs: Id(0),
-                        rhs: Id(1),
+                        lhs: Id(4),
+                        rhs: Id(5),
                         span: 0,
                     },
                 ],
-                params,
+                params: loop_params,
                 term: Some(Terminator::Tail {
                     func: Id(0),
-                    args: args0,
-                    span: 0,
-                }),
-            },
-            Block {
-                tombstone: false,
-                id: Id(4),
-                instructions: vec![],
-                params: ret_params,
-                term: Some(Terminator::Return {
-                    value: Some(Id(7)),
+                    args: tail_args,
                     span: 0,
                 }),
             },
@@ -1947,7 +1934,8 @@ mod tests_x86 {
         let params = func.intern_params([Id(0), Id(1), Id(2)]);
         let done_args = func.intern_params([Id(1), Id(2)]);
         let done_params = func.intern_params([Id(4), Id(5)]);
-        let swapped = func.intern_params([Id(7), Id(2), Id(1)]);
+        let loop_params = func.intern_params([Id(8), Id(9), Id(10)]);
+        let swapped = func.intern_params([Id(7), Id(10), Id(9)]);
         func.blocks = vec![
             Block {
                 tombstone: false,
@@ -1986,11 +1974,11 @@ mod tests_x86 {
             Block {
                 tombstone: false,
                 id: Id(2),
-                params,
+                params: loop_params,
                 instructions: vec![Instr::BinImm {
                     op: BinOp::ISub,
                     dst: ty(7, Type::Int),
-                    lhs: Id(0),
+                    lhs: Id(8),
                     imm: 1,
                     span: 0,
                 }],

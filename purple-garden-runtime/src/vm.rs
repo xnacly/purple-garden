@@ -803,6 +803,13 @@ impl<'vm> Vm<'vm> {
                     r_mut!(b) = below;
                     r_mut!(c) = bottom;
                 },
+                // SAFETY: bc only emits registers below REGISTER_COUNT, and slots inside the frame it
+                // reserved on the spill stack
+                Op::StoreSlot { slot, src } => unsafe { spilled.poke(slot as usize, *r!(src)) },
+                // SAFETY: see StoreSlot
+                Op::LoadSlot { dst, slot } => unsafe {
+                    r_mut!(dst) = spilled.peek::<Value>(slot as usize);
+                },
                 // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::CastToDouble { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_f64();
@@ -1463,6 +1470,24 @@ mod ops {
         assert_eq!(vm.r[2].as_int(), 30);
         assert_eq!(vm.r[3].as_int(), 40);
         assert_eq!(vm.r[4].as_int(), 50);
+    }
+
+    /// A slot counts from the top of the spill stack: a push on top of it moves it one further down.
+    #[test]
+    fn slots_count_from_the_top() {
+        let vm = run(vec![
+            Op::LoadI { dst: 0, value: 10 },
+            Op::LoadI { dst: 1, value: 20 },
+            Op::Push2 { a: 0, b: 0 },
+            Op::StoreSlot { slot: 1, src: 1 },
+            Op::StoreSlot { slot: 0, src: 0 },
+            Op::Push { src: 0 },
+            Op::LoadSlot { dst: 2, slot: 2 },
+            Op::LoadSlot { dst: 3, slot: 1 },
+            Op::Pop3 { a: 4, b: 4, c: 4 },
+        ]);
+        assert_eq!(vm.r[2].as_int(), 20);
+        assert_eq!(vm.r[3].as_int(), 10);
     }
 
     #[test]

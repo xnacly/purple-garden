@@ -234,3 +234,139 @@ fn nested_in_default(a:Int) Int {
 testing.assert(nested_in_default(0) == 1)
 testing.assert(nested_in_default(1) == 10)
 testing.assert(nested_in_default(2) == 20)
+
+#! More values live at once than the vm has registers: some live in slots, one of them is
+#! passed to a call while others are saved around it.
+fn sub2(a:Int b:Int) Int { a - b }
+fn spill_call(x:Int) Int {
+    let v1 = x * 2
+    let v2 = x * 3
+    let v3 = x * 4
+    let v4 = x * 5
+    let v5 = x * 6
+    let v6 = x * 7
+    let v7 = x * 8
+    let v8 = x * 9
+    let v9 = x * 10
+    let v10 = x * 11
+    let v11 = x * 12
+    let v12 = x * 13
+    let v13 = x * 14
+    let v14 = x * 15
+    let v15 = x * 16
+    let v16 = x * 17
+    let v17 = x * 18
+    let v18 = x * 19
+    let v19 = x * 20
+    let v20 = x * 21
+    let v21 = x * 22
+    let v22 = x * 23
+    let v23 = x * 24
+    let v24 = x * 25
+    let v25 = x * 26
+    let v26 = x * 27
+    let v27 = x * 28
+    let v28 = x * 29
+    let v29 = x * 30
+    let v30 = x * 31
+    let v31 = x * 32
+    let v32 = x * 33
+    let d = sub2(v32 v31)
+    d + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32
+}
+testing.assert(spill_call(1) == 561)
+
+#! The values outlive a match, so the join block takes them as params in slots.
+fn spill_join(x:Int) Int {
+    let v1 = x * 2
+    let v2 = x * 3
+    let v3 = x * 4
+    let v4 = x * 5
+    let v5 = x * 6
+    let v6 = x * 7
+    let v7 = x * 8
+    let v8 = x * 9
+    let v9 = x * 10
+    let v10 = x * 11
+    let v11 = x * 12
+    let v12 = x * 13
+    let v13 = x * 14
+    let v14 = x * 15
+    let v15 = x * 16
+    let v16 = x * 17
+    let v17 = x * 18
+    let v18 = x * 19
+    let v19 = x * 20
+    let v20 = x * 21
+    let v21 = x * 22
+    let v22 = x * 23
+    let v23 = x * 24
+    let v24 = x * 25
+    let v25 = x * 26
+    let v26 = x * 27
+    let v27 = x * 28
+    let v28 = x * 29
+    let v29 = x * 30
+    let v30 = x * 31
+    let v31 = x * 32
+    let v32 = x * 33
+    let m = match {
+        x == 1 { v1 + v32 }
+        { v2 - v31 }
+    }
+    m + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32
+}
+testing.assert(spill_join(1) == 595)
+testing.assert(spill_join(2) == 1062)
+
+#! A switch over values living in slots: its edges move them into the arms' params.
+fn spill_switch(x:Int) Int {
+    let v1 = x * 2
+    let v2 = x * 3
+    let v3 = x * 4
+    let v4 = x * 5
+    let v5 = x * 6
+    let v6 = x * 7
+    let v7 = x * 8
+    let v8 = x * 9
+    let v9 = x * 10
+    let v10 = x * 11
+    let v11 = x * 12
+    let v12 = x * 13
+    let v13 = x * 14
+    let v14 = x * 15
+    let v15 = x * 16
+    let v16 = x * 17
+    let v17 = x * 18
+    let v18 = x * 19
+    let v19 = x * 20
+    let v20 = x * 21
+    let v21 = x * 22
+    let v22 = x * 23
+    let v23 = x * 24
+    let v24 = x * 25
+    let v25 = x * 26
+    let v26 = x * 27
+    let v27 = x * 28
+    let v28 = x * 29
+    let v29 = x * 30
+    let v30 = x * 31
+    let v31 = x * 32
+    let v32 = x * 33
+    let v33 = x * 34
+    let v34 = x * 35
+    let m = match {
+        x == 1 { v1 + v34 + x }
+        x == 2 { v2 - v33 + x }
+        x == 3 { v3 * 2 - v32 }
+        x == 4 { v4 + v31 }
+        { v5 - v30 - x }
+    }
+    m + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34
+}
+testing.assert(spill_switch(1) == 667)
+testing.assert(spill_switch(2) == 1198)
+testing.assert(spill_switch(3) == 1812)
+testing.assert(spill_switch(4) == 2664)
+testing.assert(spill_switch(5) == 3015)
+testing.assert(spill_switch(9) == 5427)

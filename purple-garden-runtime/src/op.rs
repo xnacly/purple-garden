@@ -21,7 +21,7 @@ pub struct LookupTable {
 }
 
 /// The jump table of an [`Op::Switch`], owned by [`crate::vm::Vm::switch_tables`]
-/// so the op can point at it while staying `Copy`.
+/// so the op can stay `Copy`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchTable {
     pub first: u64,
@@ -291,9 +291,7 @@ pub enum Op {
         idx: u16,
         returns_double: bool,
     },
-    /// Push `src` onto [`Vm::spilled`]. Used both for caller-save spill
-    /// around [`Op::Call`] / [`Op::Sys`] and for cycle-breaking inside
-    /// `bc::Cc::emit_arg_shuffle`.
+    /// Push `src` onto [`Vm::spilled`].
     ///
     /// Invariant: every function's bytecode must leave [`Vm::spilled`] at
     /// the same depth on [`Op::Ret`] as on entry. Unbalanced push/pop pairs
@@ -324,6 +322,17 @@ pub enum Op {
         a: u8,
         b: u8,
         c: u8,
+    },
+    /// Overwrite the value `slot` below the top of [`Vm::spilled`] with `src`. Slots count from
+    /// the top, so `slot` includes everything pushed after the slot was reserved.
+    StoreSlot {
+        slot: u16,
+        src: u8,
+    },
+    /// Read the value `slot` below the top of [`Vm::spilled`] into `dst`, see [`Op::StoreSlot`].
+    LoadSlot {
+        dst: u8,
+        slot: u16,
     },
 
     CastToInt {

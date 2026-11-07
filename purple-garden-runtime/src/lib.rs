@@ -21,7 +21,7 @@ pub mod string;
 pub mod value;
 pub mod vm;
 
-pub const REGISTER_COUNT: usize = 64;
+pub const REGISTER_COUNT: usize = 32;
 
 pub use crate::anomaly::Anomaly;
 pub use crate::gc::{AllocType, Gc, Metadata};

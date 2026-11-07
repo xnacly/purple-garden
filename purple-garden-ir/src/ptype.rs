@@ -7,8 +7,18 @@ use std::{
 };
 
 use purple_garden_allocators::bump::Arena;
+use purple_garden_shared::xralloc2::Class;
 
 use crate::Const;
+
+impl From<&Type<'_>> for Class {
+    fn from(value: &Type<'_>) -> Self {
+        match value {
+            Type::Double => Self::Fpr,
+            _ => Self::Gpr,
+        }
+    }
+}
 
 // TODO: replace with mem::{size_of,align_of}
 const WORD_SIZE: usize = 8;
