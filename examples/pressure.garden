@@ -1,0 +1,98 @@
+# More values live at once than either backend has registers: most of them sit in slots, so
+# arithmetic, division, double math, casts, calls and branches read their operands from the
+# stack and write their results back, and edges move values between slots and registers.
+import "testing"
+import "math"
+
+#! A few residues to weights, a native call with an argument from a slot.
+fn weight(n:Int) Int {
+    match {
+        n == 0 { 3 }
+        n == 1 { 5 }
+        n == 2 { 7 }
+        n == 3 { 11 }
+        { 13 }
+    }
+}
+
+#! A record built and read while everything else is live.
+fn pair(a:Int b:Double) Record<a:Int b:Double> {
+    {a: a b: b}
+}
+
+fn mix(i:Int) Int {
+    let a1 = i * 3 + 1
+    let a2 = a1 - (7 * i)
+    let a3 = a1 / 7
+    let a4 = a2 / 3
+    let a5 = a2 % 5
+    let a6 = a1 / 4
+    let a7 = a2 / 8
+    let a8 = a2 % 16
+    let a9 = a1 * a2
+    let a10 = a9 / (a3 + 1)
+    let a11 = a9 % (a6 + 2)
+    let a12 = weight(a1 % 5)
+    let a13 = math.abs(a2)
+    let a14 = a13 - a12
+    let a15 = a14 * 3
+    let a16 = a15 / 5
+    let a17 = a16 % 9
+    let a18 = a17 + a1
+    let a19 = a18 * a5
+    let a20 = a19 - a4
+    let a21 = a20 / (a12 + 0)
+    let a22 = a21 + a7
+    let a23 = a22 * 2
+    let a24 = a23 - a8
+    let a25 = a24 % 11
+    let a26 = a25 + a10
+    let a27 = a26 - a11
+    let a28 = a27 * 5
+    let a29 = a28 / 6
+    let a30 = a29 + a3
+    let a31 = a30 - a6
+    let a32 = a31 + a2
+    let d1 = (a1 as Double) * 0.5
+    let d2 = (a2 as Double) / 3.0
+    let d3 = d1 - d2
+    let d4 = d1 * d2
+    let d5 = math.sqrt(d1 + 1.0)
+    let d6 = d3 / (d5 + 1.0)
+    let d7 = d4 + d6
+    let d8 = (a5 as Double) - d7
+    let d9 = d8 * 0.25
+    let d10 = d9 + d1
+    let d11 = d10 - d5
+    let d12 = d11 / 7.0
+    let d13 = d12 * d3
+    let d14 = d13 + (a17 as Double)
+    let d15 = d14 - d2
+    let d16 = d15 * 0.125
+    let p = pair(a10 d8)
+    let c1 = match {
+        d3 > d4 { 1 }
+        { 2 }
+    }
+    let c2 = match {
+        d1 < d5 { 4 }
+        { 8 }
+    }
+    let c3 = match {
+        a2 < a3 { 16 }
+        { 32 }
+    }
+    let ints = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11 + a12 + a13 + a14 + a15 + a16 + a17 + a18 + a19 + a20 + a21 + a22 + a23 + a24 + a25 + a26 + a27 + a28 + a29 + a30 + a31 + a32
+    let doubles = d1 + d2 + d3 + d4 + d5 + d6 + d7 + d8 + d9 + d10 + d11 + d12 + d13 + d14 + d15 + d16
+    ints % 1000003 + (doubles as Int) % 1009 + p.a % 101 + (p.b as Int) % 13 + c1 + c2 + c3
+}
+
+#! Sum `mix` over `i..n`.
+fn run(i:Int n:Int acc:Int) Int {
+    match {
+        i == n { acc }
+        { run(i + 1 n acc + mix(i)) }
+    }
+}
+
+testing.assert(run(0 2000 0) == -939667777)
