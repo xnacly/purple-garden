@@ -34,14 +34,14 @@ use purple_garden_ir::{self as ir, Instr};
 /// }
 /// ```
 ///
-/// - B: tailcalls spanning blocks
+/// - B: tailcalls spanning blocks, the join may take more params than the one it returns
 /// ```text
 /// b3(%v0, %v1):
 ///         // tailcall, because the return flows to ret
 ///         %v7:Int = call f1(%v5, %v6)
-///         jmp b4(%v7)
-/// b4(%v7):
-///         ret %v7
+///         jmp b4(%v7, %v0)
+/// b4(%v8, %v9):
+///         ret %v8
 /// ```
 pub fn tailcall<F: Allocator>(fun: &mut ir::Func<'_, F>) {
     // the entry runs once and hands its last value to the interpreter, a tail call saves nothing
@@ -50,12 +50,14 @@ pub fn tailcall<F: Allocator>(fun: &mut ir::Func<'_, F>) {
     }
     let last_id = fun.blocks.len() - 1;
 
-    // verify the return block is trivial: no instructions and a simple return
+    // verify the return block is trivial: no instructions, returning one of its params
     let last = &fun.blocks[last_id];
-    let trivial_return = matches!(
-        (&last.instructions[..], &last.term),
-        ([], Some(ir::Terminator::Return { .. }))
-    );
+    let returned = match (&last.instructions[..], &last.term) {
+        ([], Some(ir::Terminator::Return { value: Some(v), .. })) => {
+            fun.params(last.params).iter().position(|p| p == v)
+        }
+        _ => None,
+    };
 
     for i in 0..fun.blocks.len() {
         if fun.blocks[i].tombstone {
@@ -83,9 +85,8 @@ pub fn tailcall<F: Allocator>(fun: &mut ir::Func<'_, F>) {
                     id: ir::Id(id),
                     params: jump_params,
                     ..
-                }) if *id == last_id as u32 && trivial_return => {
-                    let resolved = fun.params(*jump_params);
-                    resolved.len() == 1 && resolved[0].0 == dst.id.0
+                }) if *id == last_id as u32 => {
+                    returned.is_some_and(|i| fun.params(*jump_params).get(i) == Some(&dst.id))
                 }
 
                 _ => false,
@@ -160,10 +161,37 @@ mod tests {
     }
 
     /// Pattern B: a block that ends with Call then Jump to a trivial
-    /// return block (passing the call's dst as the lone jump arg) is
-    /// also a tail call.
+    /// return block, passing the call's dst into the param it returns, is
+    /// also a tail call. The join takes the other live values too.
     #[test]
     fn rewrites_call_jump_to_trivial_return_pattern_b() {
+        let mut fun = join(1);
+
+        tailcall(&mut fun);
+
+        assert!(fun.blocks[0].instructions.is_empty());
+        assert!(matches!(
+            &fun.blocks[0].term,
+            Some(Terminator::Tail { func, .. }) if *func == Id(42)
+        ));
+    }
+
+    /// The join returns the live value it was passed, not the call's result.
+    #[test]
+    fn leaves_a_call_whose_result_the_join_drops() {
+        let mut fun = join(0);
+
+        tailcall(&mut fun);
+
+        assert!(matches!(
+            fun.blocks[0].instructions.last(),
+            Some(Instr::Call { .. })
+        ));
+    }
+
+    /// `b0` calls f42 and jumps to the join `b1(%v2, %v3)` with `(%v1, %v0)`, the call's result
+    /// and the param; the join returns `%v2` for `returned == 1`, `%v3` otherwise.
+    fn join(returned: u32) -> ir::Func<'static> {
         let mut fun = ir::Func::new(
             "tail",
             Id(1),
@@ -175,8 +203,8 @@ mod tests {
         );
         let args0 = fun.intern_params([Id(0)]);
         let b0_params = fun.intern_params(vec![Id(0)]);
-        let b1_params = fun.intern_params(vec![Id(2)]);
-        let jump_params = fun.intern_params(vec![Id(1)]);
+        let b1_params = fun.intern_params(vec![Id(2), Id(3)]);
+        let jump_params = fun.intern_params(vec![Id(1), Id(0)]);
         fun.blocks = vec![
             Block {
                 tombstone: false,
@@ -203,19 +231,12 @@ mod tests {
                 params: b1_params,
                 instructions: vec![],
                 term: Some(Terminator::Return {
-                    value: Some(Id(2)),
+                    value: Some(Id(if returned == 1 { 2 } else { 3 })),
                     span: 0,
                 }),
             },
         ];
-
-        tailcall(&mut fun);
-
-        assert!(fun.blocks[0].instructions.is_empty());
-        assert!(matches!(
-            &fun.blocks[0].term,
-            Some(Terminator::Tail { func, .. }) if *func == Id(42)
-        ));
+        fun
     }
 
     /// A call whose result is not what the function returns is NOT a
