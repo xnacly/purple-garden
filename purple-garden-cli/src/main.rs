@@ -75,6 +75,9 @@ macro_rules! err {
 /// ```
 fn entry() -> Result<(), Box<dyn std::error::Error>> {
     let cli = <Cli as clap::Parser>::parse();
+    if !cli.any_core {
+        purple_garden_shared::sched::prefer_performance_cores();
+    }
 
     match cli.version {
         1 => {
