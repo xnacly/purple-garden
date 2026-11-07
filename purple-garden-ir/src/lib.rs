@@ -568,6 +568,12 @@ impl<'f, A: Allocator> Func<'f, A> {
 impl Func<'_> {
     #[must_use]
     pub fn def_of(instr: &Instr<'_>) -> Option<Id> {
+        Self::typed_def_of(instr).map(|dst| dst.id)
+    }
+
+    /// [`Func::def_of`] with the type of the value.
+    #[must_use]
+    pub fn typed_def_of<'i, 'f>(instr: &'i Instr<'f>) -> Option<&'i TypeId<'f>> {
         match instr {
             Instr::Alloc { dst, .. }
             | Instr::Load { dst, .. }
@@ -579,7 +585,7 @@ impl Func<'_> {
             | Instr::Sys { dst, .. }
             | Instr::Cast { dst, .. }
             | Instr::Lookup { dst, .. }
-            | Instr::Assert { dst, .. } => Some(dst.id),
+            | Instr::Assert { dst, .. } => Some(dst),
             Instr::Store { .. } | Instr::Noop => None,
         }
     }
