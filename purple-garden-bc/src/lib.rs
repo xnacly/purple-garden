@@ -997,8 +997,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             } => {
                 let subject = self.ensure_register(*subject);
                 let cases = fun.cases(*cases);
+                let default_edge = *default;
                 let default = default.0.0 as u16;
-                let block = |case: &ir::Case| case.target.0.0 as u16;
 
                 // Strings are interned, so a string key is its address in the
                 // pool, where strings sit ALIGN bytes apart.
@@ -1015,9 +1015,20 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let slot = |case: &ir::Case| ((key(case) - first) / step) as usize;
                 let len = cases.iter().map(slot).max().unwrap() + 1;
 
+                let mut slots = Vec::with_capacity(cases.len());
+                slots.extend(cases.iter().map(|case| (slot(case), case.target)));
+
+                // A case whose edge moves gets a pad doing so, laid out after the switch.
                 let mut targets = vec![default; len].into_boxed_slice();
-                for case in cases {
-                    targets[slot(case)] = block(case);
+                let mut pads = Vec::new();
+                for (slot, edge) in slots {
+                    targets[slot] = if self.has_moves(fun, edge) {
+                        let pad = self.label();
+                        pads.push((pad, edge));
+                        pad
+                    } else {
+                        edge.0.0 as u16
+                    };
                 }
                 let table = Box::new(SwitchTable {
                     first: first as u64,
@@ -1031,8 +1042,12 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     table: ptr,
                 });
 
-                if Some(ir::Id(u32::from(default))) != next_block {
-                    self.emit(Op::Jmp { target: default });
+                // the pads follow, so the default can't fall through once there are any
+                let next_block = next_block.filter(|_| pads.is_empty());
+                self.edge(fun, default_edge, next_block);
+                for (pad, edge) in pads {
+                    self.bind(pad);
+                    self.edge(fun, edge, None);
                 }
             }
             ir::Terminator::Tail { func, args, .. } => {
