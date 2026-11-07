@@ -1360,7 +1360,11 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
 
         match term {
             ir::Terminator::Return { value, .. } => {
-                if let Some(value) = value {
+                // an Assert's Void value has no register, see its lowering
+                if let Some(value) = value
+                    .as_ref()
+                    .filter(|&&value| self.ra.location(value).is_some())
+                {
                     match self.ensure_register(*value) {
                         // only enter_native calls the entry, it reads the result from rax
                         Preg::Fpr(fpr) if self.func.id == ir::Id(0) => {
