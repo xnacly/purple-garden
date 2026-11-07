@@ -148,6 +148,7 @@ impl<'buf> StackAlloc<'buf> {
     pub unsafe fn peek<T: Copy>(&self, below: usize) -> T {
         debug_assert!((below + 1) * size_of::<T>() <= self.top.get());
         let at = self.top.get() - (below + 1) * size_of::<T>();
+        // SAFETY: at..at + size_of::<T>() lies below top, caller upholds # Safety
         unsafe { self.block.add(at).cast::<T>().read() }
     }
 
@@ -160,6 +161,7 @@ impl<'buf> StackAlloc<'buf> {
     pub unsafe fn poke<T: Copy>(&self, below: usize, value: T) {
         debug_assert!((below + 1) * size_of::<T>() <= self.top.get());
         let at = self.top.get() - (below + 1) * size_of::<T>();
+        // SAFETY: see peek
         unsafe { self.block.add(at).cast::<T>().write(value) };
     }
 
