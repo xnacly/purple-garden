@@ -22,6 +22,10 @@ pub struct Cli {
     #[arg(long)]
     pub no_env: bool,
 
+    /// Don't ask the scheduler to prefer the performance cores of a hybrid CPU
+    #[arg(long)]
+    pub any_core: bool,
+
     /// Readable abstract syntax tree
     #[arg(short = 'A', long)]
     pub ast: bool,
