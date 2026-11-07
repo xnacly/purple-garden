@@ -1397,15 +1397,18 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let no_src = func.params(*no_params);
                 let no_dst = func.params(func.blocks[no.0 as usize].params);
 
-                // Same phasing as liveness: yes moves, then cond, then no moves.
-                self.edge_moves(yes_src, yes_dst);
                 let cond = self.ensure_register(*cond);
                 let cond = self.gpr(cond);
                 self.emit(Insn::Test {
                     lhs: cond,
                     rhs: cond,
                 });
-                self.branch(Cond::NotZero, *yes, *no, no_src, no_dst, next);
+                self.branch(
+                    Cond::NotZero,
+                    (*yes, yes_src, yes_dst),
+                    (*no, no_src, no_dst),
+                    next,
+                );
             }
             ir::Terminator::BranchCmpImm {
                 op: BinOp::IEq,
@@ -1420,7 +1423,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let no_src = func.params(*no_params);
                 let no_dst = func.params(func.blocks[no.0 as usize].params);
 
-                self.edge_moves(yes_src, yes_dst);
                 let lhs = self.ensure_register(*lhs);
                 let lhs = self.gpr(lhs);
                 if *imm == 0 {
@@ -1431,7 +1433,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         imm: *imm,
                     });
                 }
-                self.branch(Cond::Zero, *yes, *no, no_src, no_dst, next);
+                self.branch(
+                    Cond::Zero,
+                    (*yes, yes_src, yes_dst),
+                    (*no, no_src, no_dst),
+                    next,
+                );
             }
             ir::Terminator::BranchCmp {
                 op: BinOp::SEq,
@@ -1446,14 +1453,18 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let no_src = func.params(*no_params);
                 let no_dst = func.params(func.blocks[no.0 as usize].params);
 
-                self.edge_moves(yes_src, yes_dst);
                 let lhs = self.ensure_register(*lhs);
                 let lhs = self.gpr(lhs);
                 let rhs = self.ensure_register(*rhs);
                 let rhs = self.gpr(rhs);
                 // Strings are interned: equal contents share one pointer.
                 self.emit(Insn::Cmp { lhs, rhs });
-                self.branch(Cond::Zero, *yes, *no, no_src, no_dst, next);
+                self.branch(
+                    Cond::Zero,
+                    (*yes, yes_src, yes_dst),
+                    (*no, no_src, no_dst),
+                    next,
+                );
             }
             ir::Terminator::Tail {
                 func: callee, args, ..
@@ -1599,15 +1610,36 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
 
     /// Jump to `yes` on `cond`, else move the no edge and go to `no`. Whichever
     /// target is laid out `next` is reached by falling through instead.
+    ///
+    /// The moves of one edge may overwrite what the other edge reads, so each edge moves only on
+    /// its own path. Moves leave the flags alone.
     fn branch(
         &mut self,
         cond: Cond,
-        yes: ir::Id,
-        no: ir::Id,
-        no_src: &[ir::Id],
-        no_dst: &[ir::Id],
+        (yes, yes_src, yes_dst): (ir::Id, &[ir::Id], &[ir::Id]),
+        (no, no_src, no_dst): (ir::Id, &[ir::Id], &[ir::Id]),
         next: Option<ir::Id>,
     ) {
+        if self.edge_has_moves(yes_src, yes_dst) {
+            // the edge going to `next` goes last and falls through
+            let (first, last, to_last) = if Some(yes) == next {
+                ((no, no_src, no_dst), (yes, yes_src, yes_dst), cond)
+            } else {
+                ((yes, yes_src, yes_dst), (no, no_src, no_dst), cond.invert())
+            };
+            let to_last_at = encode::jump(self.out, to_last);
+            self.edge_moves(first.1, first.2);
+            self.jump(Cond::Always, Target::Block(first.0));
+            let last_at = self.out.len();
+            if patch_rel32(self.out, to_last_at, to_last_at + 4, last_at).is_none() {
+                bail!(self, "edge moves out of rel32 range");
+            }
+            self.edge_moves(last.1, last.2);
+            if Some(last.0) != next {
+                self.jump(Cond::Always, Target::Block(last.0));
+            }
+            return;
+        }
         self.jump(cond, Target::Block(yes));
         let moves_at = self.out.len();
         self.edge_moves(no_src, no_dst);
@@ -1623,6 +1655,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             return;
         }
         self.jump(Cond::Always, Target::Block(no));
+    }
+
+    fn edge_has_moves(&self, src: &[ir::Id], dst: &[ir::Id]) -> bool {
+        src.iter().zip(dst).any(|(&s, &d)| {
+            let (start, end) = self.liveness[d.0 as usize];
+            end > start && self.ra.location(s) != self.ra.location(d)
+        })
     }
 
     /// Move edge args `src` into the target's block params `dst`, the IR's phi
