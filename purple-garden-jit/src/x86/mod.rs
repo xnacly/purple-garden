@@ -2141,8 +2141,25 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 RCX
             }
         };
+        // 64 bit idiv costs ~1.7x of 32 bit div on some cores, take the latter when both operands
+        // are in [0, 2^32): signed and unsigned agree there, and anything negative has its high
+        // bits set. rdx is free, cqo clobbers it anyway, and on the jump it is the zero high half
+        // div expects. The narrow path is the single taken jump, like LLVM lays it out.
+        self.emit(Insn::Mov { dst: RDX, src: RAX });
+        self.emit(Insn::Or {
+            dst: RDX,
+            src: divisor,
+        });
+        self.emit(Insn::ShrImm { dst: RDX, imm: 32 });
+        let narrow = encode::jump(self.out, Cond::Zero);
         self.emit(Insn::Cqo);
         self.emit(Insn::Idiv { divisor });
+        let done = encode::jump(self.out, Cond::Always);
+        let fast = self.out.len();
+        patch_rel32(self.out, narrow, narrow + 4, fast).expect("short forward jump");
+        self.emit(Insn::Div32 { divisor });
+        let end = self.out.len();
+        patch_rel32(self.out, done, done + 4, end).expect("short forward jump");
         let src = if op == BinOp::IDiv { RAX } else { RDX };
         self.emit(Insn::Mov { dst, src });
 

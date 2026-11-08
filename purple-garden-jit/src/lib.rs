@@ -1318,6 +1318,45 @@ mod tests_x86 {
         assert_eq!(run(jit.code(), [-20i64 as u64, 7, 0])[0] as i64, -2);
     }
 
+    /// Operands in [0, 2^32) take a 32 bit div, the rest idiv; both sides of the edge agree with
+    /// the VM.
+    #[test]
+    fn reg_divisor_32_bit_edge() {
+        let edge = [
+            i64::MIN,
+            -(1 << 32),
+            -(1 << 31) - 1,
+            -(1 << 31),
+            -7,
+            -1,
+            0,
+            1,
+            7,
+            (1 << 31) - 1,
+            1 << 31,
+            (1 << 32) - 1,
+            1 << 32,
+            i64::MAX,
+        ];
+        for op in [BinOp::IDiv, BinOp::IMod] {
+            let mut jit = Jit::new();
+            jit.compile_func(&reg_div_func(op)).expect("jit div");
+            for a in edge {
+                for b in edge {
+                    if b == 0 || (a == i64::MIN && b == -1) {
+                        continue;
+                    }
+                    let expected = if op == BinOp::IDiv { a / b } else { a % b };
+                    assert_eq!(
+                        run(jit.code(), [a as u64, b as u64, 0])[0] as i64,
+                        expected,
+                        "{a} {op:?} {b}"
+                    );
+                }
+            }
+        }
+    }
+
     /// `fn f(a, b) int { b + (a % b) }`: `b` must survive the rax/rcx/rdx
     /// clobber from the register-divisor idiv.
     #[test]
