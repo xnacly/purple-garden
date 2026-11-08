@@ -148,6 +148,11 @@ pub enum Insn {
         dst: Reg,
         src: Reg,
     },
+    /// `or r{dst}, r{src}`
+    Or {
+        dst: Reg,
+        src: Reg,
+    },
     /// `sub r{dst}, r{src}`
     Sub {
         dst: Reg,
@@ -294,6 +299,11 @@ pub enum Insn {
     Idiv {
         divisor: Reg,
     },
+    /// `div r{divisor}d`; unsigned edx:eax / divisor, quotient to eax, remainder to edx, both
+    /// zero-extended.
+    Div32 {
+        divisor: Reg,
+    },
     /// `vaddsd xmm{dst}, xmm{lhs}, xmm{rhs}`: AVX's three-operand form, so dst
     /// may alias either operand. The high lane comes from lhs, not from dst,
     /// so unlike the SSE ops it doesn't depend on dst's old value. The same
@@ -401,6 +411,7 @@ impl Insn {
             Insn::Add { dst, src } => reg_reg(code, 0x01, src.0, dst.0),
             Insn::Sub { dst, src } => reg_reg(code, 0x29, src.0, dst.0),
             Insn::And { dst, src } => reg_reg(code, 0x21, src.0, dst.0),
+            Insn::Or { dst, src } => reg_reg(code, 0x09, src.0, dst.0),
             // 0x0f 0xaf = `imul r64, r/m64`.
             // Here ModRM.reg is dst and ModRM.r/m is src, opposite of add/sub.
             Insn::Imul { dst, src } => {
@@ -521,6 +532,13 @@ impl Insn {
             Insn::Idiv { divisor } => {
                 code.push(rex(0, divisor.0));
                 code.extend_from_slice(&[0xf7, modrm(7, divisor.0)]);
+            }
+            // 0xf7 /6 = `div r/m32`, no REX.W; REX.B only for r8d..r15d.
+            Insn::Div32 { divisor } => {
+                if divisor.0 >= 8 {
+                    code.push(0x41);
+                }
+                code.extend_from_slice(&[0xf7, modrm(6, divisor.0)]);
             }
             // VEX.LIG.F2.0F 58/5C/59/5E /r = `vaddsd/vsubsd/vmulsd/vdivsd xmm1,
             // xmm2, xmm3/m64`, the same opcodes as the SSE forms.
@@ -1214,6 +1232,15 @@ mod tests {
             }),
             [0x4d, 0x21, 0xe1]
         ); // and r9,r12
+        assert_eq!(
+            enc(Insn::Or {
+                dst: Reg(2),
+                src: Reg(9)
+            }),
+            [0x4c, 0x09, 0xca]
+        ); // or rdx,r9
+        assert_eq!(enc(Insn::Div32 { divisor: Reg(1) }), [0xf7, 0xf1]); // div ecx
+        assert_eq!(enc(Insn::Div32 { divisor: Reg(14) }), [0x41, 0xf7, 0xf6]); // div r14d
         assert_eq!(
             enc(Insn::Cmp {
                 lhs: Reg(0),
