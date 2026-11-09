@@ -231,13 +231,13 @@ ops! {
     /// Conditional jump: branch when `r[lhs] == imm`.
     JmpEqI {
         lhs: u8,
-        imm: i32,
+        imm: i8,
         target: u16,
     },
     /// Conditional jump: branch when `r[lhs] != imm`.
     JmpNeI {
         lhs: u8,
-        imm: i32,
+        imm: i8,
         target: u16,
     },
     /// Conditional jump: branch when `r[lhs] == r[rhs]` by string content.

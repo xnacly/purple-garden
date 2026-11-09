@@ -150,6 +150,8 @@ const TMP: u8 = SCRATCH - 1;
 
 /// Bits of [`Op::LoadI`]'s value in the packed encoding.
 const LOAD_I_BITS: u32 = 21;
+/// Bits of [`Op::JmpEqI`]'s and [`Op::JmpNeI`]'s immediate in the packed encoding.
+const JMP_IMM_BITS: u32 = 5;
 
 const fn fits_signed(i: i64, bits: u32) -> bool {
     let half = 1 << (bits - 1);
@@ -985,11 +987,34 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 };
                 let lhs = self.ensure_register(*lhs);
                 let imm = *imm;
-                self.branch(fun, *yes, *no, next_block, |target| Op::JmpNeI {
-                    lhs,
-                    imm,
-                    target,
-                });
+                if fits_signed(imm.into(), JMP_IMM_BITS) {
+                    self.branch(fun, *yes, *no, next_block, |target| Op::JmpNeI {
+                        lhs,
+                        imm: imm as i8,
+                        target,
+                    });
+                } else {
+                    // too wide for the fused jump, compare into a temp and branch on that
+                    let cond = self.next_tmp();
+                    if let Ok(imm) = i16::try_from(imm) {
+                        self.emit(Op::IEqI {
+                            dst: cond,
+                            lhs,
+                            imm,
+                        });
+                    } else {
+                        self.load_int(cond, imm.into());
+                        self.emit(Op::IEq {
+                            dst: cond,
+                            lhs,
+                            rhs: cond,
+                        });
+                    }
+                    self.branch(fun, *yes, *no, next_block, |target| Op::JmpF {
+                        cond,
+                        target,
+                    });
+                }
             }
             ir::Terminator::BranchCmp {
                 op,
@@ -1961,8 +1986,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn lowers_branch_cmp_imm_to_bytecode_branch() {
+    fn branch_cmp_imm_fun(imm: i32) -> Func<'static> {
         let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Int));
         fun.blocks = vec![
             Block {
@@ -1977,7 +2001,7 @@ mod tests {
                 term: Some(Terminator::BranchCmpImm {
                     op: BinOp::IEq,
                     lhs: Id(0),
-                    imm: 1,
+                    imm,
                     yes: (Id(1), EMPTY_PARAMS),
                     no: (Id(2), EMPTY_PARAMS),
                     span: 0,
@@ -2012,8 +2036,12 @@ mod tests {
                 }),
             },
         ];
+        fun
+    }
 
-        let ops = compile_one(fun);
+    #[test]
+    fn lowers_branch_cmp_imm_to_bytecode_branch() {
+        let ops = compile_one(branch_cmp_imm_fun(1));
 
         assert!(
             has_op(&ops, |op| matches!(
@@ -2023,5 +2051,31 @@ mod tests {
             "expected BranchCmpImm IEq to lower to an immediate compare jump: {:?}",
             ops
         );
+    }
+
+    #[test]
+    fn lowers_branch_cmp_imm_past_its_field_to_compare_and_branch() {
+        for (imm, fused) in [
+            (-16, true),
+            (15, true),
+            (16, false),
+            (-17, false),
+            (1 << 15, false),
+        ] {
+            let ops = compile_one(branch_cmp_imm_fun(imm));
+            let jmp = has_op(
+                &ops,
+                |op| matches!(op, Op::JmpNeI { imm: i, .. } if i32::from(*i) == imm),
+            );
+            let cmp = has_op(
+                &ops,
+                |op| matches!(op, Op::IEqI { imm: i, .. } if i32::from(*i) == imm),
+            ) || has_op(&ops, |op| matches!(op, Op::IEq { .. }));
+            assert_eq!(
+                (jmp, cmp && has_op(&ops, |op| matches!(op, Op::JmpF { .. }))),
+                (fused, !fused),
+                "{imm}: {ops:?}"
+            );
+        }
     }
 }
