@@ -143,7 +143,7 @@ fn measure(
                 .iter()
                 .find(|r| r.name() == m.runtime)
                 .expect("hyperfine labels are runtime names");
-            m.memory_mb = Some(rusage::peak_rss_mb(&w.command(rt))?);
+            m.memory_mb = Some(rusage::peak_rss_mb(&w.command(rt), rt.spec.env)?);
         }
     }
     Ok(measured)

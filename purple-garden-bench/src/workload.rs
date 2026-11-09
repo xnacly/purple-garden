@@ -25,12 +25,12 @@ impl Workload {
         runtimes.iter().filter(|rt| self.has(rt)).collect()
     }
 
-    /// `[program, source_file]` to run this workload on `rt`.
+    /// `[program, args.., source_file]` to run this workload on `rt`.
     pub fn command(&self, rt: &Runtime) -> Vec<String> {
-        vec![
-            rt.bin.clone(),
-            self.dir.join(rt.spec.source).to_string_lossy().into_owned(),
-        ]
+        let mut cmd = vec![rt.bin.clone()];
+        cmd.extend(rt.spec.args.iter().map(|a| a.to_string()));
+        cmd.push(self.dir.join(rt.spec.source).to_string_lossy().into_owned());
+        cmd
     }
 }
 
@@ -74,6 +74,7 @@ pub fn preflight(workloads: &[Workload], runtimes: &[Runtime]) -> Result<(), Str
             let cmd = w.command(rt);
             let status = Command::new(&cmd[0])
                 .args(&cmd[1..])
+                .envs(rt.spec.env.iter().copied())
                 .stdout(Stdio::null())
                 .stderr(Stdio::inherit())
                 .status();

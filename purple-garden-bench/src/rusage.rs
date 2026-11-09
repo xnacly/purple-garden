@@ -2,10 +2,11 @@
 
 use std::process::{Command, Stdio};
 
-/// Run `cmd` once and return its peak RSS in MiB.
-pub fn peak_rss_mb(cmd: &[String]) -> Result<f64, String> {
+/// Run `cmd` once with `env` and return its peak RSS in MiB.
+pub fn peak_rss_mb(cmd: &[String], env: &[(&str, &str)]) -> Result<f64, String> {
     let child = Command::new(&cmd[0])
         .args(&cmd[1..])
+        .envs(env.iter().copied())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

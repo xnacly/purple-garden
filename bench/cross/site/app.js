@@ -8,13 +8,24 @@
 //   per-bench — latest run, CPU time per benchmark in ms, one bar per runtime
 //   history   — one chart per benchmark, CPU time in ms per commit, one line per runtime
 
-const RUNTIMES = ["garden", "bun", "luajit", "python3"];
+const RUNTIMES = [
+  "garden",
+  "garden-nojit",
+  "bun",
+  "bun-nojit",
+  "luajit",
+  "luajit-nojit",
+  "python3",
+];
 const COLORS = {
   garden: "#a78bfa",
   bun: "#fb923c",
   luajit: "#38bdf8",
   python3: "#facc15",
 };
+// `<rt>-nojit` shares its runtime's colour, drawn translucent and dashed.
+const nojit = (rt) => rt.endsWith("-nojit");
+const color = (rt) => COLORS[rt.replace(/-nojit$/, "")];
 
 const state = {
   log: true,
@@ -100,7 +111,8 @@ function renderControls() {
       render();
     };
     const swatch = document.createElement("i");
-    swatch.style.background = COLORS[rt];
+    swatch.style.background = nojit(rt) ? `${color(rt)}66` : color(rt);
+    swatch.style.outline = `1px solid ${color(rt)}`;
     l.append(cb, swatch, document.createTextNode(rt));
     toggles.appendChild(l);
   }
@@ -139,7 +151,9 @@ function renderPerBench() {
   const datasets = runtimes.map((rt) => ({
     label: rt,
     data: benches.map((w) => cpu(latest, w, rt)),
-    backgroundColor: COLORS[rt],
+    backgroundColor: nojit(rt) ? `${color(rt)}66` : color(rt),
+    borderColor: color(rt),
+    borderWidth: nojit(rt) ? 1 : 0,
     borderRadius: 3,
   }));
 
@@ -218,8 +232,9 @@ function renderHistory(workload) {
       datasets: runtimes.map((rt) => ({
         label: rt,
         data: series[rt],
-        borderColor: COLORS[rt],
-        backgroundColor: COLORS[rt],
+        borderColor: color(rt),
+        backgroundColor: color(rt),
+        borderDash: nojit(rt) ? [5, 4] : [],
         pointRadius: state.reports.length > 40 ? 0 : 3,
         tension: 0.15,
         spanGaps: true,

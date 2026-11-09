@@ -9,32 +9,70 @@ pub struct Spec {
     bin: Option<&'static str>,
     /// Source file name inside a workload directory.
     pub source: &'static str,
+    /// Flags passed before the source file.
+    pub args: &'static [&'static str],
+    /// Environment set for every run, JavaScriptCore only takes its JIT switch this way.
+    pub env: &'static [(&'static str, &'static str)],
     version_args: &'static [&'static str],
 }
 
+/// Every JIT runtime also runs as `<name>-nojit` with its JIT disabled. python3 is
+/// interpreter-only unless built with `--enable-experimental-jit`, which is off by default.
 pub const SPECS: &[Spec] = &[
     Spec {
         name: "garden",
         bin: None,
         source: "main.garden",
+        args: &[],
+        env: &[],
+        version_args: &["-V"],
+    },
+    Spec {
+        name: "garden-nojit",
+        bin: None,
+        source: "main.garden",
+        args: &["--no-jit"],
+        env: &[],
         version_args: &["-V"],
     },
     Spec {
         name: "bun",
         bin: Some("bun"),
         source: "main.js",
+        args: &[],
+        env: &[],
+        version_args: &["--version"],
+    },
+    Spec {
+        name: "bun-nojit",
+        bin: Some("bun"),
+        source: "main.js",
+        args: &[],
+        env: &[("BUN_JSC_useJIT", "0")],
         version_args: &["--version"],
     },
     Spec {
         name: "luajit",
         bin: Some("luajit"),
         source: "main.lua",
+        args: &[],
+        env: &[],
+        version_args: &["-v"],
+    },
+    Spec {
+        name: "luajit-nojit",
+        bin: Some("luajit"),
+        source: "main.lua",
+        args: &["-joff"],
+        env: &[],
         version_args: &["-v"],
     },
     Spec {
         name: "python3",
         bin: Some("python3"),
         source: "main.py",
+        args: &[],
+        env: &[],
         version_args: &["--version"],
     },
 ];
