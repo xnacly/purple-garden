@@ -1374,11 +1374,20 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let dst = self.def_register(dst.id);
                 let lhs = self.ensure_register(*lhs);
                 let imm = *imm;
+                // too wide for the immediate, the register form takes it from a temp
+                let wide = i16::try_from(imm).is_err().then(|| {
+                    let rhs = self.next_tmp();
+                    self.load_int(rhs, imm.into());
+                    rhs
+                });
 
                 macro_rules! emit_bin_imms {
                     ($($ir:ident => $op:ident),* $(,)?) => {
-                        match op {
-                            $(ir::BinOp::$ir => Op::$op { dst, lhs, imm },)*
+                        match (op, wide) {
+                            $(
+                                (ir::BinOp::$ir, None) => Op::$op { dst, lhs, imm: imm as i16 },
+                                (ir::BinOp::$ir, Some(rhs)) => Op::$ir { dst, lhs, rhs },
+                            )*
                             _ => unreachable!("only integer immediate binops are represented as BinImm"),
                         }
                     };
@@ -1734,6 +1743,41 @@ mod tests {
                 global,
                 "{value}: {ops:?}"
             );
+        }
+    }
+
+    #[test]
+    fn lowers_bin_imm_past_its_field_to_register_form() {
+        for (imm, imm_form) in [(-(1 << 15), true), ((1 << 15) - 1, true), (1 << 15, false)] {
+            let ops = compile_one(entry_fun(
+                vec![
+                    Instr::LoadConst {
+                        dst: type_id(0, Type::Int),
+                        value: Const::Int(7),
+                        span: 0,
+                    },
+                    Instr::BinImm {
+                        op: BinOp::IAdd,
+                        dst: type_id(1, Type::Int),
+                        lhs: Id(0),
+                        imm,
+                        span: 0,
+                    },
+                ],
+                Some((Id(1), Type::Int)),
+            ));
+            let lowered = if imm_form {
+                has_op(
+                    &ops,
+                    |op| matches!(op, Op::IAddI { imm: i, .. } if i32::from(*i) == imm),
+                )
+            } else {
+                has_op(
+                    &ops,
+                    |op| matches!(op, Op::LoadI { dst: SCRATCH, value } if *value == imm),
+                ) && has_op(&ops, |op| matches!(op, Op::IAdd { rhs: SCRATCH, .. }))
+            };
+            assert!(lowered, "{imm}: {ops:?}");
         }
     }
 

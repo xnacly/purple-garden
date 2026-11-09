@@ -56,7 +56,7 @@ ops! {
     IAddI {
         dst: u8,
         lhs: u8,
-        imm: i32,
+        imm: i16,
     },
     ISub {
         dst: u8,
@@ -70,7 +70,7 @@ ops! {
     ISubI {
         dst: u8,
         lhs: u8,
-        imm: i32,
+        imm: i16,
     },
     IMul {
         dst: u8,
@@ -82,7 +82,7 @@ ops! {
     IMulI {
         dst: u8,
         lhs: u8,
-        imm: i32,
+        imm: i16,
     },
     IDiv {
         dst: u8,
@@ -96,7 +96,7 @@ ops! {
     IDivI {
         dst: u8,
         lhs: u8,
-        imm: i32,
+        imm: i16,
     },
     IMod {
         dst: u8,
@@ -108,7 +108,7 @@ ops! {
     IModI {
         dst: u8,
         lhs: u8,
-        imm: i32,
+        imm: i16,
     },
     IAnd {
         dst: u8,
@@ -119,7 +119,7 @@ ops! {
     IAndI {
         dst: u8,
         lhs: u8,
-        imm: i32,
+        imm: i16,
     },
     ILt {
         dst: u8,
@@ -139,21 +139,21 @@ ops! {
     IEqI {
         dst: u8,
         lhs: u8,
-        imm: i32,
+        imm: i16,
     },
     /// `r[dst] = r[lhs] > imm`. Lowered from IR `BinImm`, including
     /// swapped constant-lhs comparisons.
     IGtI {
         dst: u8,
         lhs: u8,
-        imm: i32,
+        imm: i16,
     },
     /// `r[dst] = r[lhs] < imm`. Lowered from IR `BinImm`, including
     /// swapped constant-lhs comparisons.
     ILtI {
         dst: u8,
         lhs: u8,
-        imm: i32,
+        imm: i16,
     },
     DAdd {
         dst: u8,
