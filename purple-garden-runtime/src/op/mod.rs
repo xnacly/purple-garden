@@ -1,5 +1,3 @@
-use std::ptr::NonNull;
-
 // codegen for both packed and base op codes
 macro_rules! ops {
     (
@@ -258,7 +256,8 @@ ops! {
     Switch {
         kind: SwitchKind,
         subject: u8,
-        table: NonNull<SwitchTable>,
+        /// Index into [`crate::vm::Vm::switch_tables`].
+        table: u16,
     },
     /// `r[dst] = table.values[slot]`, slot as for [`Op::Switch`];
     /// `table.default` when `slot` is out of range.
@@ -266,7 +265,8 @@ ops! {
         kind: SwitchKind,
         dst: u8,
         subject: u8,
-        table: NonNull<LookupTable>,
+        /// Index into [`crate::vm::Vm::lookup_tables`].
+        table: u16,
     },
     /// Tail call: jump to `func` (an absolute pc) without growing the
     /// callstack. Same calling convention as [`Op::Call`].
@@ -423,7 +423,7 @@ pub struct SwitchTable {
 #[cfg(test)]
 mod op_test {
     #[test]
-    fn op_size_16_byte() {
-        assert_eq!(std::mem::size_of::<crate::op::Op>(), 16);
+    fn op_size_8_byte() {
+        assert_eq!(std::mem::size_of::<crate::op::Op>(), 8);
     }
 }

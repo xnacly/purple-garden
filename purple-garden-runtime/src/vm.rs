@@ -92,10 +92,10 @@ pub struct Vm<'vm> {
 
     pub bytecode: Vec<Op>,
     pub globals: Vec<Value>,
-    /// Owns the tables [`Op::Switch`] points into; boxed so they stay put.
-    pub switch_tables: Vec<Box<SwitchTable>>,
-    /// Owns the tables [`Op::Lookup`] points into.
-    pub lookup_tables: Vec<Box<LookupTable>>,
+    /// The tables [`Op::Switch`] indexes.
+    pub switch_tables: Vec<SwitchTable>,
+    /// The tables [`Op::Lookup`] indexes.
+    pub lookup_tables: Vec<LookupTable>,
     pub gc: Gc<VmAlloc<'vm>>,
 
     /// Backing storage for string constants emitted by the compiler.
@@ -399,6 +399,8 @@ impl<'vm> Vm<'vm> {
         let mut regs = self.r.as_mut_ptr();
         let instructions = self.bytecode.as_mut_ptr();
         let globals = self.globals.as_mut_ptr();
+        let switch_tables = self.switch_tables.as_ptr();
+        let lookup_tables = self.lookup_tables.as_ptr();
         let syscalls = syscalls.as_ptr();
 
         macro_rules! r {
@@ -636,13 +638,13 @@ impl<'vm> Vm<'vm> {
                         continue;
                     }
                 },
-                // SAFETY: table lives in vm.switch_tables as long as the vm
+                // SAFETY: bc only emits indices into vm.switch_tables
                 Op::Switch {
                     kind,
                     subject,
                     table,
                 } => unsafe {
-                    let table = table.as_ref();
+                    let table = &*switch_tables.add(table as usize);
                     // Strings are interned, equal strings share one address. string key is its
                     // address in the string pool, an int key its value. Wrapping keeps a subject
                     // below `first` huge, so the bounds check below rejects it along with those
@@ -660,14 +662,14 @@ impl<'vm> Vm<'vm> {
                         continue;
                     }
                 },
-                // SAFETY: table lives in vm.lookup_tables as long as the vm
+                // SAFETY: bc only emits indices into vm.lookup_tables
                 Op::Lookup {
                     kind,
                     dst,
                     subject,
                     table,
                 } => unsafe {
-                    let table = table.as_ref();
+                    let table = &*lookup_tables.add(table as usize);
                     let offset = r!(subject).0.wrapping_sub(table.first);
                     let slot = match kind {
                         SwitchKind::Str => offset / string::ALIGN as u64,
@@ -1125,18 +1127,17 @@ mod ops {
     /// holds the miss pc, slot 2 loads 30, a miss loads -1.
     fn switch(kind: SwitchKind, first: Value, subject: Value) -> i64 {
         let mut vm = Vm::new(VmConfig::default());
-        vm.switch_tables.push(Box::new(SwitchTable {
+        vm.switch_tables.push(SwitchTable {
             first: first.0,
             targets: Box::new([4, 2, 6]),
-        }));
-        let table = std::ptr::NonNull::from(&*vm.switch_tables[0]);
+        });
         vm.globals.push(subject);
         vm.bytecode = vec![
             Op::LoadG { dst: 0, idx: 0 },
             Op::Switch {
                 kind,
                 subject: 0,
-                table,
+                table: 0,
             },
             Op::LoadI { dst: 1, value: -1 },
             Op::Halt,
@@ -1164,7 +1165,7 @@ mod ops {
     fn lookup_takes_the_default_outside_its_keys() {
         let lookup = |subject: i64| {
             let mut vm = Vm::new(VmConfig::default());
-            vm.lookup_tables.push(Box::new(LookupTable {
+            vm.lookup_tables.push(LookupTable {
                 first: Value::from(-1_i64).0,
                 values: Box::new([
                     Value::from(10_i64),
@@ -1172,8 +1173,7 @@ mod ops {
                     Value::from(30_i64),
                 ]),
                 default: Value::from(-1_i64),
-            }));
-            let table = std::ptr::NonNull::from(&*vm.lookup_tables[0]);
+            });
             vm.globals.push(Value::from(subject));
             vm.bytecode = vec![
                 Op::LoadG { dst: 0, idx: 0 },
@@ -1181,7 +1181,7 @@ mod ops {
                     kind: SwitchKind::Int,
                     dst: 1,
                     subject: 0,
-                    table,
+                    table: 0,
                 },
                 Op::Halt,
             ];

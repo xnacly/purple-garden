@@ -1,7 +1,7 @@
 use purple_garden_ir::Id;
 use purple_garden_runtime::{
     BuiltinFn,
-    op::{Op, SwitchKind},
+    op::{LookupTable, Op, SwitchKind, SwitchTable},
 };
 use purple_garden_shared::ansi::{
     ADDR, BLOCK, COMMENT, FLOW, FUNC, IMM, LABEL, MNEM, REG, SECTION, paint,
@@ -71,6 +71,8 @@ pub struct Disassembler<
     A: std::alloc::Allocator + Clone = std::alloc::Global,
 > {
     bc: &'dis [Op],
+    switch_tables: &'dis [SwitchTable],
+    lookup_tables: &'dis [LookupTable],
     cc: crate::Cc<'dis, S, A>,
     source: Option<&'dis [u8]>,
 }
@@ -79,9 +81,16 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
     Disassembler<'dis, S, A>
 {
     #[must_use]
-    pub fn new(bc: &'dis [Op], cc: crate::Cc<'dis, S, A>) -> Self {
+    pub fn new(
+        bc: &'dis [Op],
+        switch_tables: &'dis [SwitchTable],
+        lookup_tables: &'dis [LookupTable],
+        cc: crate::Cc<'dis, S, A>,
+    ) -> Self {
         Self {
             bc,
+            switch_tables,
+            lookup_tables,
             cc,
             source: None,
         }
@@ -161,8 +170,7 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                 | Op::JmpNeI { target, .. }
                 | Op::JmpSEq { target, .. }
                 | Op::JmpSNe { target, .. } => std::slice::from_ref(target),
-                // The tables outlive the disassembler, the vm owns them.
-                Op::Switch { table, .. } => unsafe { &table.as_ref().targets[..] },
+                Op::Switch { table, .. } => &self.switch_tables[*table as usize].targets[..],
                 _ => continue,
             };
             for &target in targets {
@@ -298,8 +306,7 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                         SwitchKind::Str => "str",
                         SwitchKind::Int => "int",
                     },
-                    // SAFETY: the vm owns the tables, they outlive the disassembler
-                    unsafe { table.as_ref() }.values.len()
+                    self.lookup_tables[*table as usize].values.len()
                 ),
                 Op::Switch {
                     kind,
@@ -311,8 +318,7 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                         SwitchKind::Str => "str",
                         SwitchKind::Int => "int",
                     },
-                    // SAFETY: the vm owns the tables, they outlive the disassembler
-                    unsafe { table.as_ref() }.targets.len()
+                    self.switch_tables[*table as usize].targets.len()
                 ),
                 Op::Call { func } => format!(
                     "call {func:04x} <{}>",

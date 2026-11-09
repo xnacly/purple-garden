@@ -3,7 +3,6 @@ use std::{
     alloc::{Allocator, Global},
     collections::HashMap,
     hash::RandomState,
-    ptr::NonNull,
 };
 
 pub mod dis;
@@ -107,9 +106,9 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     labels: Vec<u16, S>,
     /// Tables of the emitted [`Op::Switch`]es. Targets are block ids until the
     /// end of [`Cc::cc`] maps them to pcs, like jump targets.
-    pub switch_tables: Vec<Box<SwitchTable>>,
+    pub switch_tables: Vec<SwitchTable>,
     /// Tables of the emitted [`Op::Lookup`]s.
-    pub lookup_tables: Vec<Box<LookupTable>>,
+    pub lookup_tables: Vec<LookupTable>,
     /// Entry points of the functions compiled natively, for native callers.
     native_fns: purple_garden_jit::Natives<A>,
     /// purple gardens linear scan operating system and architecture overarching register allocator
@@ -1076,16 +1075,16 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                         edge.0.0 as u16
                     };
                 }
-                let table = Box::new(SwitchTable {
+                let table = u16::try_from(self.switch_tables.len())
+                    .expect("more switch tables than Op::Switch indexes");
+                self.switch_tables.push(SwitchTable {
                     first: first as u64,
                     targets,
                 });
-                let ptr = NonNull::from(&*table);
-                self.switch_tables.push(table);
                 self.emit(Op::Switch {
                     kind,
                     subject,
-                    table: ptr,
+                    table,
                 });
 
                 // the pads follow, so the default can't fall through once there are any
@@ -1242,20 +1241,21 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 for (k, v) in entries {
                     values[slot(k)] = value(v);
                 }
-                let table = Box::new(LookupTable {
-                    first: first as u64,
-                    values,
-                    default: value(default),
-                });
+                let default = value(default);
                 let dst = self.def_register(dst.id);
                 let subject = self.ensure_register(*subject);
-                let ptr = NonNull::from(&*table);
-                self.lookup_tables.push(table);
+                let table = u16::try_from(self.lookup_tables.len())
+                    .expect("more lookup tables than Op::Lookup indexes");
+                self.lookup_tables.push(LookupTable {
+                    first: first as u64,
+                    values,
+                    default,
+                });
                 self.emit(Op::Lookup {
                     kind,
                     dst,
                     subject,
-                    table: ptr,
+                    table,
                 });
             }
             ir::Instr::LoadConst { dst, value, .. } => {
@@ -1606,10 +1606,10 @@ mod tests {
         let mut cc = Cc::new();
         cc.buf = vec![Op::Nop, Op::Halt, Op::Nop, Op::Ret];
         cc.pc_to_span = vec![0; cc.buf.len()];
-        cc.switch_tables.push(Box::new(SwitchTable {
+        cc.switch_tables.push(SwitchTable {
             first: 0,
             targets: Box::new([1, 3]),
-        }));
+        });
         cc.compact_nops();
         assert_eq!(cc.buf, [Op::Halt, Op::Ret]);
         assert_eq!(&*cc.switch_tables[0].targets, [0, 1]);
