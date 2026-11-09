@@ -1,36 +1,51 @@
 use std::ptr::NonNull;
 
+// codegen for both packed and base op codes
+macro_rules! ops {
+    (
+        // match a single definition
+        $(
+            // meta tags like doc comments, which are just #[doc]
+            $(#[$meta:meta])*
+
+            // definition and tag name
+            $name:ident
+
+            // body delimited with {}, matches field containers, is optional via ? to support Halt
+            // and Nop (bodyless variants)
+            $({ $($body:tt)* })?
+        ),*
+        $(,)?
+    ) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Op {
+             $( $(#[$meta])* $name $({ $($body)* })? ),*
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(u8)]
+        pub enum Tag {
+            $($name),*
+        }
+
+        /// static assertion since tag is 6 bits, meaning 2^6=64 op codes can be represented
+        const _: () = assert!([$(Tag::$name),*].len() <= 64);
+
+        impl Op {
+            pub const fn tag(&self) -> Tag {
+                match self {
+                    $(Self::$name {..} => Tag::$name),*
+                }
+            }
+        }
+    }
+}
+
 use crate::AllocType;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SwitchKind {
-    /// Interned string keys in the string pool, `first` is the lowest key's
-    /// address and a slot spans [`crate::string::ALIGN`] bytes.
-    Str,
-    /// Integer keys, `first` is the smallest.
-    Int,
-}
+pub mod packed;
 
-/// The value table of an [`Op::Lookup`], owned by [`crate::vm::Vm::lookup_tables`].
-#[derive(Debug, Clone)]
-pub struct LookupTable {
-    pub first: u64,
-    /// A value per slot, slots without a key hold `default`.
-    pub values: Box<[crate::Value]>,
-    pub default: crate::Value,
-}
-
-/// The jump table of an [`Op::Switch`], owned by [`crate::vm::Vm::switch_tables`]
-/// so the op can stay `Copy`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SwitchTable {
-    pub first: u64,
-    /// A pc per slot, slots without a key hold the default's pc.
-    pub targets: Box<[u16]>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Op {
+ops! {
     IAdd {
         dst: u8,
         lhs: u8,
@@ -343,8 +358,6 @@ pub enum Op {
         dst: u8,
         src: u8,
     },
-    /// Reads `src` as a u64 and stores `!= 0`. Not valid for f64 inputs:
-    /// -0.0 and NaN would land as `true`.
     CastToBool {
         dst: u8,
         src: u8,
@@ -371,13 +384,40 @@ pub enum Op {
         offset: u32,
     },
     Ret,
-    /// Trap with [`crate::Anomaly::AssertionFailed`] when `cond` is falsy.
+    /// Trap with [`crate::Anomaly::AssertionFailed`] when `cond` is false.
     Assert {
         cond: u8,
     },
     /// Stop the dispatch loop
     Halt,
     Nop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwitchKind {
+    /// Interned string keys in the string pool, `first` is the lowest key's
+    /// address and a slot spans [`crate::string::ALIGN`] bytes.
+    Str,
+    /// Integer keys, `first` is the smallest.
+    Int,
+}
+
+/// The value table of an [`Op::Lookup`], owned by [`crate::vm::Vm::lookup_tables`].
+#[derive(Debug, Clone)]
+pub struct LookupTable {
+    pub first: u64,
+    /// A value per slot, slots without a key hold `default`.
+    pub values: Box<[crate::Value]>,
+    pub default: crate::Value,
+}
+
+/// The jump table of an [`Op::Switch`], owned by [`crate::vm::Vm::switch_tables`]
+/// so the op can stay `Copy`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchTable {
+    pub first: u64,
+    /// A pc per slot, slots without a key hold the default's pc.
+    pub targets: Box<[u16]>,
 }
 
 #[cfg(test)]
