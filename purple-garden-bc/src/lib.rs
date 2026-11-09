@@ -1151,7 +1151,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let base = self.ensure_register(*base);
                 self.emit(Op::Store {
                     base,
-                    offset: *offset,
+                    offset: u16::try_from(*offset).expect("record offset past Op::Store's"),
                     src,
                 });
             }
@@ -1163,7 +1163,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 self.emit(Op::Load {
                     dst,
                     base,
-                    offset: *offset,
+                    offset: u16::try_from(*offset).expect("record offset past Op::Load's"),
                 });
             }
             ir::Instr::AddrOf {
@@ -1174,7 +1174,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 self.emit(Op::AddrOf {
                     dst,
                     base,
-                    offset: *offset,
+                    offset: u16::try_from(*offset).expect("record offset past Op::AddrOf's"),
                 });
             }
             ir::Instr::Alloc {
@@ -1186,7 +1186,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let Some(kind) = AllocType::from_ty(ty) else {
                     unreachable!("alloc attempts to alloc non heap allocated value?");
                 };
-                let (size, align) = (layout.size() as u32, layout.align() as u8);
+                let size = u16::try_from(layout.size()).expect("allocation past Op::Alloc's size");
+                let align = layout.align() as u8;
                 self.emit(Op::Alloc {
                     dst,
                     kind,

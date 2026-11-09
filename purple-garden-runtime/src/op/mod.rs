@@ -365,23 +365,23 @@ ops! {
     Alloc {
         dst: u8,
         kind: AllocType,
-        size: u32,
+        size: u16,
         align: u8,
     },
     Store {
         base: u8,
-        offset: u32,
+        offset: u16,
         src: u8,
     },
     Load {
         dst: u8,
         base: u8,
-        offset: u32,
+        offset: u16,
     },
     AddrOf {
         dst: u8,
         base: u8,
-        offset: u32,
+        offset: u16,
     },
     Ret,
     /// Trap with [`crate::Anomaly::AssertionFailed`] when `cond` is false.
