@@ -420,164 +420,136 @@ impl<'vm> Vm<'vm> {
             let op = unsafe { *instructions.add(pc) };
 
             match op {
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::LoadI { dst, value } => unsafe {
                     r_mut!(dst) = Value::from(value as i64);
                 },
                 // SAFETY: bc only emits in-bounds registers and globals
                 Op::LoadG { dst, idx } => unsafe { r_mut!(dst) = *globals.add(idx as usize) },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IAdd { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l + r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IAddI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l + imm as i64);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::ISub { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l - r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::ISubI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l - imm as i64);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IMul { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l * r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IMulI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l * imm as i64);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     trap_if!(r == 0, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l / r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IDivI { dst, lhs, imm } => unsafe {
                     let imm = imm as i64;
                     trap_if!(imm == 0, Anomaly::DivisionByZero { pc });
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l / imm);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IMod { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     trap_if!(r == 0, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l % r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IModI { dst, lhs, imm } => unsafe {
                     let imm = imm as i64;
                     trap_if!(imm == 0, Anomaly::DivisionByZero { pc });
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l % imm);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IAnd { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l & r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IAndI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l & imm as i64);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IEq { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l == r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IEqI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l == imm as i64);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IGt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l > r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::IGtI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l > imm as i64);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::ILt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l < r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::ILtI { dst, lhs, imm } => unsafe {
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l < imm as i64);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DAdd { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l + r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DSub { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l - r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DMul { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l * r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DDiv { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l / r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DGt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l > r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::DLt { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l < r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::BEq { dst, lhs, rhs } => unsafe {
                     let l = r!(lhs).as_bool();
                     let r = r!(rhs).as_bool();
                     r_mut!(dst) = Value::from(l == r);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::SEq { dst, lhs, rhs } => unsafe {
                     r_mut!(dst) = Value::from(r!(lhs).str_eq(r!(rhs)));
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::Mov { dst, src } => unsafe {
                     r_mut!(dst) = *r!(src);
                 },
@@ -592,46 +564,39 @@ impl<'vm> Vm<'vm> {
                     pc = func as usize;
                     continue;
                 }
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpT { target, cond } => unsafe {
                     if r!(cond).as_bool() {
                         pc = target as usize;
                         continue;
                     }
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpF { target, cond } => unsafe {
                     if !r!(cond).as_bool() {
                         pc = target as usize;
                         continue;
                     }
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::Assert { cond } => unsafe {
                     trap_if!(!r!(cond).as_bool(), Anomaly::AssertionFailed { pc });
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpEqI { lhs, imm, target } => unsafe {
                     if r!(lhs).as_int() == imm as i64 {
                         pc = target as usize;
                         continue;
                     }
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpNeI { lhs, imm, target } => unsafe {
                     if r!(lhs).as_int() != imm as i64 {
                         pc = target as usize;
                         continue;
                     }
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpSEq { lhs, rhs, target } => unsafe {
                     if r!(lhs).str_eq(r!(rhs)) {
                         pc = target as usize;
                         continue;
                     }
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::JmpSNe { lhs, rhs, target } => unsafe {
                     if !r!(lhs).str_eq(r!(rhs)) {
                         pc = target as usize;
@@ -767,19 +732,16 @@ impl<'vm> Vm<'vm> {
                     );
                     pc = frame.return_to;
                 }
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::Push { src } => unsafe {
                     if std::hint::unlikely(!spilled.push(*r!(src))) {
                         return Err(Anomaly::StackOverflow { pc });
                     }
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::Push2 { a, b } => unsafe {
                     if std::hint::unlikely(!spilled.push_all([*r!(a), *r!(b)])) {
                         return Err(Anomaly::StackOverflow { pc });
                     }
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::Push3 { a, b, c } => unsafe {
                     if std::hint::unlikely(!spilled.push_all([*r!(a), *r!(b), *r!(c)])) {
                         return Err(Anomaly::StackOverflow { pc });
@@ -812,15 +774,12 @@ impl<'vm> Vm<'vm> {
                 Op::LoadSlot { dst, slot } => unsafe {
                     r_mut!(dst) = spilled.peek::<Value>(slot as usize);
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::CastToDouble { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_f64();
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::CastToInt { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).f64_to_int();
                 },
-                // SAFETY: bc only emits registers below REGISTER_COUNT
                 Op::CastToBool { dst, src } => unsafe {
                     r_mut!(dst) = r!(src).int_to_bool();
                 },
