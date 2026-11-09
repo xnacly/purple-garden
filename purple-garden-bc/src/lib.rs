@@ -148,6 +148,14 @@ const SCRATCH: u8 = REGISTER_COUNT as u8 - 1;
 /// Second ephemeral register
 const TMP: u8 = SCRATCH - 1;
 
+/// Bits of [`Op::LoadI`]'s value in the packed encoding.
+const LOAD_I_BITS: u32 = 21;
+
+const fn fits_signed(i: i64, bits: u32) -> bool {
+    let half = 1 << (bits - 1);
+    -half <= i && i < half
+}
+
 /// Every vm register but [`SCRATCH`] and [`TMP`], r0 last so xralloc2 hands out the lowest free one
 /// first, which also puts the caller-saved registers before the callee-saved ones.
 const POOL: [u8; TMP as usize] = {
@@ -257,6 +265,19 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
     fn intern(&mut self, constant: &'cc Const<'cc>) -> u32 {
         self.globals.intern(constant.clone())
+    }
+
+    /// `r[dst] = i`, from the globals if it doesn't fit [`Op::LoadI`].
+    fn load_int(&mut self, dst: u8, i: i64) {
+        if fits_signed(i, LOAD_I_BITS) {
+            self.emit(Op::LoadI {
+                dst,
+                value: i as i32,
+            });
+        } else {
+            let idx = self.globals.intern(Const::Int(i));
+            self.emit(Op::LoadG { dst, idx });
+        }
     }
 
     fn emit(&mut self, op: Op) -> usize {
@@ -1215,12 +1236,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             ir::Instr::LoadConst { dst, value, .. } => {
                 let dst = self.def_register(dst.id);
                 match value {
-                    Const::Int(i) if *i > i32::MIN as i64 && *i < i32::MAX as i64 => {
-                        self.emit(Op::LoadI {
-                            dst,
-                            value: *i as i32,
-                        });
-                    }
+                    Const::Int(i) => self.load_int(dst, *i),
                     Const::True | Const::False => {
                         // fast path for booleans
                         let value = matches!(value, Const::True) as i32;
@@ -1700,6 +1716,25 @@ mod tests {
             "expected BinImm IAdd to lower to IAddI: {:?}",
             ops
         );
+    }
+
+    #[test]
+    fn lowers_int_load_const_past_load_i_to_load_global() {
+        for (value, global) in [(-(1 << 20), false), ((1 << 20) - 1, false), (1 << 20, true)] {
+            let ops = compile_one(entry_fun(
+                vec![Instr::LoadConst {
+                    dst: type_id(0, Type::Int),
+                    value: Const::Int(value),
+                    span: 0,
+                }],
+                Some((Id(0), Type::Int)),
+            ));
+            assert_eq!(
+                has_op(&ops, |op| matches!(op, Op::LoadG { dst: 0, .. })),
+                global,
+                "{value}: {ops:?}"
+            );
+        }
     }
 
     #[test]
