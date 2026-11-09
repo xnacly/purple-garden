@@ -83,48 +83,61 @@ impl Entry {
     }
 }
 
-/// Benchmark one workload on the runtimes it is ported to in a single
-/// hyperfine invocation (`-N`: no shell), each command labelled with its
-/// runtime name.
+/// Benchmark one workload on the runtimes it is ported to. Runtimes differ in
+/// their environment, which hyperfine can only set per invocation, so each
+/// gets its own (`-N`: no shell), labelled with its runtime name.
 pub fn measure(
     w: &Workload,
     runtimes: &[&Runtime],
     runs: u32,
     warmup: u32,
 ) -> Result<Vec<Measurement>, String> {
+    let mut out = Vec::new();
+    for rt in runtimes {
+        out.extend(measure_one(w, rt, runs, warmup)?);
+    }
+    Ok(out)
+}
+
+fn measure_one(
+    w: &Workload,
+    rt: &Runtime,
+    runs: u32,
+    warmup: u32,
+) -> Result<Vec<Measurement>, String> {
     let export = std::env::temp_dir().join(format!(
-        "pg-bench-{}-{}.json",
+        "pg-bench-{}-{}-{}.json",
         w.name,
+        rt.name(),
         std::process::id()
     ));
-    let mut cmd = Command::new("hyperfine");
-    cmd.args([
-        "-N",
-        "--style",
-        "none",
-        "--warmup",
-        &warmup.to_string(),
-        "--runs",
-        &runs.to_string(),
-        "--export-json",
-    ])
-    .arg(&export);
-    for rt in runtimes {
-        let parts = w.command(rt);
-        if parts.iter().any(|p| p.chars().any(char::is_whitespace)) {
-            return Err(format!(
-                "paths with whitespace are not supported with hyperfine -N: {parts:?}"
-            ));
-        }
-        cmd.args(["-n", rt.name()]).arg(parts.join(" "));
+    let parts = w.command(rt);
+    if parts.iter().any(|p| p.chars().any(char::is_whitespace)) {
+        return Err(format!(
+            "paths with whitespace are not supported with hyperfine -N: {parts:?}"
+        ));
     }
-    let status = cmd
+    let status = Command::new("hyperfine")
+        .args([
+            "-N",
+            "--style",
+            "none",
+            "--warmup",
+            &warmup.to_string(),
+            "--runs",
+            &runs.to_string(),
+            "--export-json",
+        ])
+        .arg(&export)
+        .args(["-n", rt.name()])
+        .arg(parts.join(" "))
+        .envs(rt.spec.env.iter().copied())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .status()
         .map_err(|e| format!("hyperfine: {e} (is it installed?)"))?;
     if !status.success() {
-        return Err(format!("hyperfine failed on workload `{}`", w.name));
+        return Err(format!("hyperfine failed on `{}/{}`", w.name, rt.name()));
     }
     let text =
         fs::read_to_string(&export).map_err(|e| format!("read {}: {e}", export.display()))?;

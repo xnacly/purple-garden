@@ -6,6 +6,10 @@ purple-garden on wall, cpu, peak rss against:
 - JavaScriptCore (`bun`)
 - LuaJIT (`luajit`)
 
+Every runtime with a JIT also runs as `<name>-nojit` with the JIT disabled
+(`--no-jit`, `BUN_JSC_useJIT=0`, `luajit -joff`), to compare interpreters.
+python3 is interpreter-only unless built with `--enable-experimental-jit`.
+
 ## Running
 
 ```sh
