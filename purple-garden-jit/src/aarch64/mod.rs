@@ -9,6 +9,10 @@ impl<S> Scratch<S> {
     pub fn new_in(_: S) -> Self {
         Self(std::marker::PhantomData)
     }
+
+    pub fn tables(&self) -> &[std::ops::Range<usize>] {
+        &[]
+    }
 }
 
 pub fn compile_func<F: Allocator, S: std::alloc::Allocator, N: std::alloc::Allocator>(

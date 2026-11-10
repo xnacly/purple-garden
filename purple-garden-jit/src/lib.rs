@@ -141,6 +141,12 @@ impl<S: Allocator + Clone> Jit<S> {
     pub fn code(&self) -> &[u8] {
         &self.code
     }
+
+    /// Byte ranges of [`Jit::code`] that hold inlined tables, not instructions.
+    #[must_use]
+    pub fn tables(&self) -> &[std::ops::Range<usize>] {
+        self.scratch.tables()
+    }
 }
 
 #[cfg(all(

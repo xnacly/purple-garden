@@ -13,7 +13,7 @@ use purple_garden_frontend::{
 use purple_garden_runtime::{Vm, VmConfig};
 use purple_garden_typecheck::Typechecker;
 
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, ops::Range, path::Path};
 
 mod cli;
 mod doc;
@@ -342,12 +342,12 @@ fn pipeline<A: Pages + Clone>(
 }
 
 /// perf's symbol format for jitted code, see tools/perf/Documentation/jit-interface.txt
-fn write_perf_map(native_code: &[(&str, usize, Vec<u8>)]) -> std::io::Result<()> {
+fn write_perf_map(native_code: &[(&str, usize, Vec<u8>, Vec<Range<usize>>)]) -> std::io::Result<()> {
     use std::io::Write;
 
     let path = format!("/tmp/perf-{}.map", std::process::id());
     let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
-    for (name, entry, code) in native_code {
+    for (name, entry, code, _) in native_code {
         writeln!(out, "{entry:x} {:x} jit_{name}", code.len())?;
     }
     out.flush()
