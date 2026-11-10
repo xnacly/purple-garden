@@ -1540,9 +1540,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             .or_else(|| functions.get(&ir::Id(0)).and_then(CcFunc::pc))
             .unwrap_or_default();
 
-        vm.bytecode = buf;
-        vm.switch_tables = switch_tables;
-        vm.lookup_tables = lookup_tables;
+        vm.bytecode = buf.into_iter().map(Op::encode).collect();
+        vm.switch_tables = switch_tables.into_boxed_slice();
+        vm.lookup_tables = lookup_tables.into_boxed_slice();
 
         debug_assert_eq!(
             globals
@@ -1553,11 +1553,13 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             str_values.iter().filter(|&&v| v != Value::UNDEF).count(),
             "every string constant is laid out before lowering",
         );
-        vm.globals = globals.into_vec_map(|constant| match constant {
-            // Filled from str_values below, the closure doesn't see the slot.
-            Const::Str(_) => Value::UNDEF,
-            constant => Value::from(constant),
-        });
+        vm.globals = globals
+            .into_vec_map(|constant| match constant {
+                // Filled from str_values below, the closure doesn't see the slot.
+                Const::Str(_) => Value::UNDEF,
+                constant => Value::from(constant),
+            })
+            .into_boxed_slice();
         for (slot, &value) in str_values.iter().enumerate() {
             if value != Value::UNDEF {
                 vm.globals[slot] = value;

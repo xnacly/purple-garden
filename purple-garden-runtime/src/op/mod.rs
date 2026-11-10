@@ -394,12 +394,13 @@ ops! {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum SwitchKind {
     /// Interned string keys in the string pool, `first` is the lowest key's
     /// address and a slot spans [`crate::string::ALIGN`] bytes.
-    Str,
+    Str = 0,
     /// Integer keys, `first` is the smallest.
-    Int,
+    Int = 1,
 }
 
 /// The value table of an [`Op::Lookup`], owned by [`crate::vm::Vm::lookup_tables`].

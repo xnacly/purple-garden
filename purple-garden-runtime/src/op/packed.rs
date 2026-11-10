@@ -3,18 +3,123 @@
 /// Packed version of [Op], since [Op] is 16 bytes and branching on it in the interpreter costs big
 /// fetches, making it 4 bytes large results in better locality, more instructions per prefetch and
 /// less decoding work, since the vm can simply call [Packed::tag()] to branch on it, for encoding
-/// see [encode_packed!] and [super::Op::encode]
+/// see [encode_packed!] and [super::Op::encode]. Every class has a method to facilitate decoding
 pub struct Packed(u32);
 
 impl Packed {
-    /// first 6 bit decoded into [Tag]
+    /// [0..5]
+    #[inline(always)]
     pub fn tag(&self) -> super::Tag {
         let tag_raw = (self.0 & 0b0011_1111) as u8;
         unsafe { std::mem::transmute::<u8, super::Tag>(tag_raw) }
     }
 
+    #[inline(always)]
     pub fn to_le_bytes(self) -> [u8; 4] {
         self.0.to_le_bytes()
+    }
+
+    /// `width` bits starting at bit `at`
+    #[inline(always)]
+    fn bits(self, at: u32, width: u32) -> u32 {
+        (self.0 >> at) & ((1 << width) - 1)
+    }
+
+    #[inline(always)]
+    pub fn r(self) -> u8 {
+        self.bits(6, 5) as u8
+    }
+
+    #[inline(always)]
+    pub fn rr(self) -> (u8, u8) {
+        (self.r(), self.bits(11, 5) as u8)
+    }
+
+    #[inline(always)]
+    pub fn rrr(self) -> (u8, u8, u8) {
+        let (r1, r2) = self.rr();
+        (r1, r2, self.bits(16, 5) as u8)
+    }
+
+    #[inline(always)]
+    pub fn rri16(self) -> (u8, u8, i16) {
+        let (r1, r2) = self.rr();
+        (r1, r2, (self.0 as i32 >> 16) as i16)
+    }
+
+    #[inline(always)]
+    pub fn ri21(self) -> (u8, i32) {
+        (self.r(), self.0 as i32 >> 11)
+    }
+
+    #[inline(always)]
+    pub fn ru21(self) -> (u8, u32) {
+        (self.r(), self.0 >> 11)
+    }
+
+    #[inline(always)]
+    pub fn t16(self) -> u16 {
+        self.bits(6, 16) as u16
+    }
+
+    #[inline(always)]
+    pub fn u26(self) -> u32 {
+        self.0 >> 6
+    }
+
+    #[inline(always)]
+    pub fn rt16(self) -> (u8, u16) {
+        (self.r(), self.bits(11, 16) as u16)
+    }
+
+    #[inline(always)]
+    pub fn rrt16(self) -> (u8, u8, u16) {
+        let (r1, r2) = self.rr();
+        (r1, r2, (self.0 >> 16) as u16)
+    }
+
+    #[inline(always)]
+    pub fn ri5t16(self) -> (u8, i8, u16) {
+        // bit 15 moved to bit 31, so the arithmetic shift back down sign extends imm5
+        let imm = ((self.0 << 16) as i32 >> 27) as i8;
+        (self.r(), imm, (self.0 >> 16) as u16)
+    }
+
+    #[inline(always)]
+    pub fn rru16(self) -> (u8, u8, u16) {
+        self.rrt16()
+    }
+
+    #[inline(always)]
+    pub fn rk1u20(self) -> (u8, super::SwitchKind, u32) {
+        // SAFETY: SwitchKind is repr(u8) with a variant for both 1 bit values
+        let kind = unsafe { std::mem::transmute::<u8, super::SwitchKind>(self.bits(11, 1) as u8) };
+        (self.r(), kind, self.0 >> 12)
+    }
+
+    #[inline(always)]
+    pub fn rrk1u15(self) -> (u8, u8, super::SwitchKind, u16) {
+        let (r1, r2) = self.rr();
+        // SAFETY: SwitchKind is repr(u8) with a variant for both 1 bit values
+        let kind = unsafe { std::mem::transmute::<u8, super::SwitchKind>(self.bits(16, 1) as u8) };
+        (r1, r2, kind, (self.0 >> 17) as u16)
+    }
+
+    #[inline(always)]
+    pub fn rk2u3u16(self) -> (u8, crate::AllocType, u8, u16) {
+        // SAFETY: AllocType is repr(u8) with a variant for every 2 bit value
+        let kind = unsafe { std::mem::transmute::<u8, crate::AllocType>(self.bits(11, 2) as u8) };
+        (self.r(), kind, 1 << self.bits(13, 3), (self.0 >> 16) as u16)
+    }
+
+    #[inline(always)]
+    pub fn u5u16(self) -> (u8, u16) {
+        (self.r(), (self.0 >> 16) as u16)
+    }
+
+    #[inline(always)]
+    pub fn u16k1(self) -> (u16, bool) {
+        (self.bits(6, 16) as u16, self.bits(22, 1) == 1)
     }
 }
 
@@ -271,6 +376,144 @@ mod tests {
         AllocType,
         op::{Op, SwitchKind, Tag},
     };
+
+    #[test]
+    fn decodes_every_class() {
+        let enc = Op::encode;
+        assert_eq!(enc(Op::Push { src: 31 }).r(), 31);
+        assert_eq!(enc(Op::Mov { dst: 1, src: 2 }).rr(), (1, 2));
+        assert_eq!(
+            enc(Op::IAdd {
+                dst: 1,
+                lhs: 2,
+                rhs: 31
+            })
+            .rrr(),
+            (1, 2, 31)
+        );
+        assert_eq!(
+            enc(Op::IAddI {
+                dst: 1,
+                lhs: 2,
+                imm: -3
+            })
+            .rri16(),
+            (1, 2, -3)
+        );
+        assert_eq!(
+            enc(Op::LoadI {
+                dst: 1,
+                value: -(1 << 20)
+            })
+            .ri21(),
+            (1, -(1 << 20))
+        );
+        assert_eq!(
+            enc(Op::LoadG {
+                dst: 1,
+                idx: (1 << 21) - 1
+            })
+            .ru21(),
+            (1, (1 << 21) - 1)
+        );
+        assert_eq!(enc(Op::Jmp { target: u16::MAX }).t16(), u16::MAX);
+        assert_eq!(
+            enc(Op::Call {
+                func: (1 << 26) - 1
+            })
+            .u26(),
+            (1 << 26) - 1
+        );
+        assert_eq!(
+            enc(Op::JmpF {
+                cond: 4,
+                target: u16::MAX
+            })
+            .rt16(),
+            (4, u16::MAX)
+        );
+        assert_eq!(
+            enc(Op::JmpSEq {
+                lhs: 1,
+                rhs: 2,
+                target: u16::MAX
+            })
+            .rrt16(),
+            (1, 2, u16::MAX)
+        );
+        assert_eq!(
+            enc(Op::JmpNeI {
+                lhs: 1,
+                imm: -16,
+                target: 3
+            })
+            .ri5t16(),
+            (1, -16, 3)
+        );
+        assert_eq!(
+            enc(Op::JmpEqI {
+                lhs: 1,
+                imm: 15,
+                target: 3
+            })
+            .ri5t16(),
+            (1, 15, 3)
+        );
+        assert_eq!(
+            enc(Op::Load {
+                dst: 1,
+                base: 2,
+                offset: u16::MAX
+            })
+            .rru16(),
+            (1, 2, u16::MAX)
+        );
+        assert_eq!(
+            enc(Op::Switch {
+                kind: SwitchKind::Int,
+                subject: 3,
+                table: u16::MAX
+            })
+            .rk1u20(),
+            (3, SwitchKind::Int, u16::MAX.into())
+        );
+        assert_eq!(
+            enc(Op::Lookup {
+                kind: SwitchKind::Str,
+                dst: 1,
+                subject: 2,
+                table: (1 << 15) - 1
+            })
+            .rrk1u15(),
+            (1, 2, SwitchKind::Str, (1 << 15) - 1)
+        );
+        assert_eq!(
+            enc(Op::Alloc {
+                dst: 3,
+                kind: AllocType::String,
+                size: u16::MAX,
+                align: 128
+            })
+            .rk2u3u16(),
+            (3, AllocType::String, 128, u16::MAX)
+        );
+        assert_eq!(
+            enc(Op::Sys {
+                idx: u16::MAX,
+                argc: 31
+            })
+            .u5u16(),
+            (31, u16::MAX)
+        );
+        assert_eq!(
+            enc(Op::Native {
+                idx: u16::MAX,
+                returns_double: true
+            })
+            .u16k1(),
+            (u16::MAX, true)
+        );
+    }
 
     #[test]
     fn encodes_every_class() {

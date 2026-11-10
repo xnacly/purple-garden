@@ -1,7 +1,7 @@
 use crate::{
     Anomaly, BuiltinFn, DEFAULT_STACK_SIZE, IntoVm, MIB, REGISTER_COUNT, Value,
     gc::{AllocType, Gc},
-    op::{LookupTable, Op, SwitchKind, SwitchTable},
+    op::{LookupTable, SwitchKind, SwitchTable, Tag, packed::Packed},
     string,
 };
 use purple_garden_allocators::{page::PageAlloc, stack::StackAlloc};
@@ -41,7 +41,7 @@ type CollectFn<'vm> = fn(&mut Vm<'vm>);
 pub struct CallFrame {
     pub return_to: usize,
     /// Snapshot of [`Vm::spilled`].`len()` at call entry. Used by the debug
-    /// check on [`Op::Ret`] to catch bytecode that leaves the spill stack
+    /// check on [`Op::Ret`](crate::op::Op::Ret) to catch bytecode that leaves the spill stack
     /// unbalanced across a call.
     #[cfg(debug_assertions)]
     pub spilled_depth: usize,
@@ -90,12 +90,12 @@ pub struct Vm<'vm> {
     frames: Box<[CallFrame]>,
     frame_depth: usize,
 
-    pub bytecode: Vec<Op>,
-    pub globals: Vec<Value>,
-    /// The tables [`Op::Switch`] indexes.
-    pub switch_tables: Vec<SwitchTable>,
-    /// The tables [`Op::Lookup`] indexes.
-    pub lookup_tables: Vec<LookupTable>,
+    pub bytecode: Box<[Packed]>,
+    pub globals: Box<[Value]>,
+    /// The tables [`Op::Switch`](crate::op::Op::Switch) indexes.
+    pub switch_tables: Box<[SwitchTable]>,
+    /// The tables [`Op::Lookup`](crate::op::Op::Lookup) indexes.
+    pub lookup_tables: Box<[LookupTable]>,
     pub gc: Gc<VmAlloc<'vm>>,
 
     /// Backing storage for string constants emitted by the compiler.
@@ -108,7 +108,7 @@ pub struct Vm<'vm> {
     /// --backtrace was passed as an option to the interpreter
     pub backtrace: Vec<usize>,
 
-    /// A trap raised by a syscall via [`Vm::trap`]. Checked at each [`Op::Ret`]
+    /// A trap raised by a syscall via [`Vm::trap`]. Checked at each [`Op::Ret`](crate::op::Op::Ret)
     /// so the `Op::Sys` hot path stays branch-free.
     pub pending_trap: Option<Anomaly>,
     /// Native code traps instead of growing its stack below this, see
@@ -222,10 +222,10 @@ impl<'vm> Vm<'vm> {
             frames,
             frame_depth: 1,
             pc: 0,
-            bytecode: Vec::new(),
-            globals: Vec::new(),
-            switch_tables: Vec::new(),
-            lookup_tables: Vec::new(),
+            bytecode: Box::default(),
+            globals: Box::default(),
+            switch_tables: Box::default(),
+            lookup_tables: Box::default(),
             gc: Gc::new_in(VmAlloc(Box::new(alloc))),
             const_pool: Box::new([]),
             strings: string::StrTable::default(),
@@ -379,7 +379,7 @@ impl<'vm> Vm<'vm> {
             return Ok(());
         };
         debug_assert!(
-            matches!(last, Op::Halt),
+            last.tag() == Tag::Halt,
             "bytecode must end in Op::Halt (bc::Cc::finalize emits it)"
         );
         let halt = self.bytecode.len() - 1;
@@ -397,8 +397,8 @@ impl<'vm> Vm<'vm> {
 
         // A use of &mut self invalidates regs, so it is re-derived after each one.
         let mut regs = self.r.as_mut_ptr();
-        let instructions = self.bytecode.as_mut_ptr();
-        let globals = self.globals.as_mut_ptr();
+        let instructions = self.bytecode.as_ptr();
+        let globals = self.globals.as_ptr();
         let switch_tables = self.switch_tables.as_ptr();
         let lookup_tables = self.lookup_tables.as_ptr();
         let syscalls = syscalls.as_ptr();
@@ -419,196 +419,233 @@ impl<'vm> Vm<'vm> {
             // SAFETY: bc ends in Halt and only jumps within bytecode
             let op = unsafe { *instructions.add(pc) };
 
-            match op {
-                Op::LoadI { dst, value } => unsafe {
+            match op.tag() {
+                Tag::LoadI => unsafe {
+                    let (dst, value) = op.ri21();
                     r_mut!(dst) = Value::from(value as i64);
                 },
                 // SAFETY: bc only emits in-bounds registers and globals
-                Op::LoadG { dst, idx } => unsafe { r_mut!(dst) = *globals.add(idx as usize) },
-                Op::IAdd { dst, lhs, rhs } => unsafe {
+                Tag::LoadG => unsafe {
+                    let (dst, idx) = op.ru21();
+                    r_mut!(dst) = *globals.add(idx as usize)
+                },
+                Tag::IAdd => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l + r);
                 },
-                Op::IAddI { dst, lhs, imm } => unsafe {
+                Tag::IAddI => unsafe {
+                    let (dst, lhs, imm) = op.rri16();
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l + imm as i64);
                 },
-                Op::ISub { dst, lhs, rhs } => unsafe {
+                Tag::ISub => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l - r);
                 },
-                Op::ISubI { dst, lhs, imm } => unsafe {
+                Tag::ISubI => unsafe {
+                    let (dst, lhs, imm) = op.rri16();
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l - imm as i64);
                 },
-                Op::IMul { dst, lhs, rhs } => unsafe {
+                Tag::IMul => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l * r);
                 },
-                Op::IMulI { dst, lhs, imm } => unsafe {
+                Tag::IMulI => unsafe {
+                    let (dst, lhs, imm) = op.rri16();
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l * imm as i64);
                 },
-                Op::IDiv { dst, lhs, rhs } => unsafe {
+                Tag::IDiv => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     trap_if!(r == 0, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l / r);
                 },
-                Op::IDivI { dst, lhs, imm } => unsafe {
+                Tag::IDivI => unsafe {
+                    let (dst, lhs, imm) = op.rri16();
                     let imm = imm as i64;
                     trap_if!(imm == 0, Anomaly::DivisionByZero { pc });
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l / imm);
                 },
-                Op::IMod { dst, lhs, rhs } => unsafe {
+                Tag::IMod => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     trap_if!(r == 0, Anomaly::DivisionByZero { pc });
                     r_mut!(dst) = Value::from(l % r);
                 },
-                Op::IModI { dst, lhs, imm } => unsafe {
+                Tag::IModI => unsafe {
+                    let (dst, lhs, imm) = op.rri16();
                     let imm = imm as i64;
                     trap_if!(imm == 0, Anomaly::DivisionByZero { pc });
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l % imm);
                 },
-                Op::IAnd { dst, lhs, rhs } => unsafe {
+                Tag::IAnd => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l & r);
                 },
-                Op::IAndI { dst, lhs, imm } => unsafe {
+                Tag::IAndI => unsafe {
+                    let (dst, lhs, imm) = op.rri16();
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l & imm as i64);
                 },
-                Op::IEq { dst, lhs, rhs } => unsafe {
+                Tag::IEq => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l == r);
                 },
-                Op::IEqI { dst, lhs, imm } => unsafe {
+                Tag::IEqI => unsafe {
+                    let (dst, lhs, imm) = op.rri16();
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l == imm as i64);
                 },
-                Op::IGt { dst, lhs, rhs } => unsafe {
+                Tag::IGt => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l > r);
                 },
-                Op::IGtI { dst, lhs, imm } => unsafe {
+                Tag::IGtI => unsafe {
+                    let (dst, lhs, imm) = op.rri16();
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l > imm as i64);
                 },
-                Op::ILt { dst, lhs, rhs } => unsafe {
+                Tag::ILt => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_int();
                     let r = r!(rhs).as_int();
                     r_mut!(dst) = Value::from(l < r);
                 },
-                Op::ILtI { dst, lhs, imm } => unsafe {
+                Tag::ILtI => unsafe {
+                    let (dst, lhs, imm) = op.rri16();
                     let l = r!(lhs).as_int();
                     r_mut!(dst) = Value::from(l < imm as i64);
                 },
-                Op::DAdd { dst, lhs, rhs } => unsafe {
+                Tag::DAdd => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l + r);
                 },
-                Op::DSub { dst, lhs, rhs } => unsafe {
+                Tag::DSub => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l - r);
                 },
-                Op::DMul { dst, lhs, rhs } => unsafe {
+                Tag::DMul => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l * r);
                 },
-                Op::DDiv { dst, lhs, rhs } => unsafe {
+                Tag::DDiv => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l / r);
                 },
-                Op::DGt { dst, lhs, rhs } => unsafe {
+                Tag::DGt => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l > r);
                 },
-                Op::DLt { dst, lhs, rhs } => unsafe {
+                Tag::DLt => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_f64();
                     let r = r!(rhs).as_f64();
                     r_mut!(dst) = Value::from(l < r);
                 },
-                Op::BEq { dst, lhs, rhs } => unsafe {
+                Tag::BEq => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     let l = r!(lhs).as_bool();
                     let r = r!(rhs).as_bool();
                     r_mut!(dst) = Value::from(l == r);
                 },
-                Op::SEq { dst, lhs, rhs } => unsafe {
+                Tag::SEq => unsafe {
+                    let (dst, lhs, rhs) = op.rrr();
                     r_mut!(dst) = Value::from(r!(lhs).str_eq(r!(rhs)));
                 },
-                Op::Mov { dst, src } => unsafe {
+                Tag::Mov => unsafe {
+                    let (dst, src) = op.rr();
                     r_mut!(dst) = *r!(src);
                 },
-                Op::Jmp { target } => {
+                Tag::Jmp => {
+                    let target = op.t16();
                     pc = target as usize;
                     continue;
                 }
-                Op::Tail { func } => {
+                Tag::Tail => {
+                    let func = op.u26();
                     if BACKTRACE {
                         self.backtrace.push(func as usize);
                     }
                     pc = func as usize;
                     continue;
                 }
-                Op::JmpT { target, cond } => unsafe {
+                Tag::JmpT => unsafe {
+                    let (cond, target) = op.rt16();
                     if r!(cond).as_bool() {
                         pc = target as usize;
                         continue;
                     }
                 },
-                Op::JmpF { target, cond } => unsafe {
+                Tag::JmpF => unsafe {
+                    let (cond, target) = op.rt16();
                     if !r!(cond).as_bool() {
                         pc = target as usize;
                         continue;
                     }
                 },
-                Op::Assert { cond } => unsafe {
+                Tag::Assert => unsafe {
+                    let cond = op.r();
                     trap_if!(!r!(cond).as_bool(), Anomaly::AssertionFailed { pc });
                 },
-                Op::JmpEqI { lhs, imm, target } => unsafe {
+                Tag::JmpEqI => unsafe {
+                    let (lhs, imm, target) = op.ri5t16();
                     if r!(lhs).as_int() == imm as i64 {
                         pc = target as usize;
                         continue;
                     }
                 },
-                Op::JmpNeI { lhs, imm, target } => unsafe {
+                Tag::JmpNeI => unsafe {
+                    let (lhs, imm, target) = op.ri5t16();
                     if r!(lhs).as_int() != imm as i64 {
                         pc = target as usize;
                         continue;
                     }
                 },
-                Op::JmpSEq { lhs, rhs, target } => unsafe {
+                Tag::JmpSEq => unsafe {
+                    let (lhs, rhs, target) = op.rrt16();
                     if r!(lhs).str_eq(r!(rhs)) {
                         pc = target as usize;
                         continue;
                     }
                 },
-                Op::JmpSNe { lhs, rhs, target } => unsafe {
+                Tag::JmpSNe => unsafe {
+                    let (lhs, rhs, target) = op.rrt16();
                     if !r!(lhs).str_eq(r!(rhs)) {
                         pc = target as usize;
                         continue;
                     }
                 },
                 // SAFETY: bc only emits indices into vm.switch_tables
-                Op::Switch {
-                    kind,
-                    subject,
-                    table,
-                } => unsafe {
+                Tag::Switch => unsafe {
+                    let (subject, kind, table) = op.rk1u20();
                     let table = &*switch_tables.add(table as usize);
                     // Strings are interned, equal strings share one address. string key is its
                     // address in the string pool, an int key its value. Wrapping keeps a subject
@@ -628,12 +665,8 @@ impl<'vm> Vm<'vm> {
                     }
                 },
                 // SAFETY: bc only emits indices into vm.lookup_tables
-                Op::Lookup {
-                    kind,
-                    dst,
-                    subject,
-                    table,
-                } => unsafe {
+                Tag::Lookup => unsafe {
+                    let (dst, subject, kind, table) = op.rrk1u15();
                     let table = &*lookup_tables.add(table as usize);
                     let offset = r!(subject).0.wrapping_sub(table.first);
                     let slot = match kind {
@@ -642,7 +675,8 @@ impl<'vm> Vm<'vm> {
                     };
                     r_mut!(dst) = *table.values.get(slot as usize).unwrap_or(&table.default);
                 },
-                Op::Call { func } => {
+                Tag::Call => {
+                    let func = op.u26();
                     if BACKTRACE {
                         self.backtrace.push(func as usize);
                     }
@@ -666,7 +700,8 @@ impl<'vm> Vm<'vm> {
                     continue;
                 }
                 // SAFETY: bc only emits Sys indices present in syscalls
-                Op::Sys { idx, argc } => unsafe {
+                Tag::Sys => unsafe {
+                    let (argc, idx) = op.u5u16();
                     #[cfg(not(debug_assertions))]
                     let _ = argc;
                     #[cfg(debug_assertions)]
@@ -691,10 +726,8 @@ impl<'vm> Vm<'vm> {
                     }
                 },
                 // SAFETY: idx present in syscalls, vm not otherwise borrowed
-                Op::Native {
-                    idx,
-                    returns_double,
-                } => unsafe {
+                Tag::Native => unsafe {
+                    let (idx, returns_double) = op.u16k1();
                     self.pc = pc;
                     let enter = if returns_double {
                         crate::enter_native_double
@@ -707,7 +740,7 @@ impl<'vm> Vm<'vm> {
                         return Err(self.pending_trap.take().unwrap());
                     }
                 },
-                Op::Ret => {
+                Tag::Ret => {
                     if BACKTRACE {
                         self.backtrace.pop();
                     }
@@ -732,35 +765,41 @@ impl<'vm> Vm<'vm> {
                     );
                     pc = frame.return_to;
                 }
-                Op::Push { src } => unsafe {
+                Tag::Push => unsafe {
+                    let src = op.r();
                     if std::hint::unlikely(!spilled.push(*r!(src))) {
                         return Err(Anomaly::StackOverflow { pc });
                     }
                 },
-                Op::Push2 { a, b } => unsafe {
+                Tag::Push2 => unsafe {
+                    let (a, b) = op.rr();
                     if std::hint::unlikely(!spilled.push_all([*r!(a), *r!(b)])) {
                         return Err(Anomaly::StackOverflow { pc });
                     }
                 },
-                Op::Push3 { a, b, c } => unsafe {
+                Tag::Push3 => unsafe {
+                    let (a, b, c) = op.rrr();
                     if std::hint::unlikely(!spilled.push_all([*r!(a), *r!(b), *r!(c)])) {
                         return Err(Anomaly::StackOverflow { pc });
                     }
                 },
                 // SAFETY: bc pairs every Pop with an earlier Push
-                Op::Pop { dst } => unsafe {
+                Tag::Pop => unsafe {
+                    let dst = op.r();
                     debug_assert!(spilled.depth() >= size_of::<Value>());
                     r_mut!(dst) = spilled.pop::<Value>();
                 },
                 // SAFETY: bc pairs every Pop with an earlier Push
-                Op::Pop2 { a, b } => unsafe {
+                Tag::Pop2 => unsafe {
+                    let (a, b) = op.rr();
                     debug_assert!(spilled.depth() >= 2 * size_of::<Value>());
                     let [below, top] = spilled.pop_all::<Value, 2>();
                     r_mut!(a) = top;
                     r_mut!(b) = below;
                 },
                 // SAFETY: bc pairs every Pop with an earlier Push
-                Op::Pop3 { a, b, c } => unsafe {
+                Tag::Pop3 => unsafe {
+                    let (a, b, c) = op.rrr();
                     debug_assert!(spilled.depth() >= 3 * size_of::<Value>());
                     let [bottom, below, top] = spilled.pop_all::<Value, 3>();
                     r_mut!(a) = top;
@@ -769,27 +808,30 @@ impl<'vm> Vm<'vm> {
                 },
                 // SAFETY: bc only emits registers below REGISTER_COUNT, and slots inside the frame it
                 // reserved on the spill stack
-                Op::StoreSlot { slot, src } => unsafe { spilled.poke(slot as usize, *r!(src)) },
+                Tag::StoreSlot => unsafe {
+                    let (src, slot) = op.ru21();
+                    spilled.poke(slot as usize, *r!(src))
+                },
                 // SAFETY: see StoreSlot
-                Op::LoadSlot { dst, slot } => unsafe {
+                Tag::LoadSlot => unsafe {
+                    let (dst, slot) = op.ru21();
                     r_mut!(dst) = spilled.peek::<Value>(slot as usize);
                 },
-                Op::CastToDouble { dst, src } => unsafe {
+                Tag::CastToDouble => unsafe {
+                    let (dst, src) = op.rr();
                     r_mut!(dst) = r!(src).int_to_f64();
                 },
-                Op::CastToInt { dst, src } => unsafe {
+                Tag::CastToInt => unsafe {
+                    let (dst, src) = op.rr();
                     r_mut!(dst) = r!(src).f64_to_int();
                 },
-                Op::CastToBool { dst, src } => unsafe {
+                Tag::CastToBool => unsafe {
+                    let (dst, src) = op.rr();
                     r_mut!(dst) = r!(src).int_to_bool();
                 },
                 // SAFETY: size and align come from a Layout in lowering
-                Op::Alloc {
-                    dst,
-                    kind,
-                    size,
-                    align,
-                } => unsafe {
+                Tag::Alloc => unsafe {
+                    let (dst, kind, align, size) = op.rk2u3u16();
                     let ptr = self.alloc(
                         kind,
                         Layout::from_size_align_unchecked(size as usize, align as usize),
@@ -798,19 +840,22 @@ impl<'vm> Vm<'vm> {
                     r_mut!(dst) = Value::from_ptr(ptr.as_ptr());
                 },
                 // SAFETY: offset lies within the block base was allocated as
-                Op::Store { base, offset, src } => unsafe {
+                Tag::Store => unsafe {
+                    let (src, base, offset) = op.rru16();
                     (r!(base).as_ptr::<u8>().add(offset as usize) as *mut Value).write(*r!(src));
                 },
                 // SAFETY: offset lies within the block base was allocated as
-                Op::Load { dst, base, offset } => unsafe {
+                Tag::Load => unsafe {
+                    let (dst, base, offset) = op.rru16();
                     r_mut!(dst) = *(r!(base).as_ptr::<u8>().add(offset as usize) as *const Value);
                 },
                 // SAFETY: offset lies within the block base was allocated as
-                Op::AddrOf { dst, base, offset } => unsafe {
+                Tag::AddrOf => unsafe {
+                    let (dst, base, offset) = op.rru16();
                     r_mut!(dst) = Value::from_ptr(r!(base).as_ptr::<u8>().add(offset as usize));
                 },
-                Op::Halt => break,
-                Op::Nop => {}
+                Tag::Halt => break,
+                Tag::Nop => {}
             }
 
             pc = pc.wrapping_add(1);
@@ -860,6 +905,11 @@ impl<'vm> Vm<'vm> {
 #[cfg(test)]
 mod ops {
     use super::*;
+    use crate::op::Op;
+
+    fn packed<const N: usize>(ops: [Op; N]) -> Box<[Packed]> {
+        ops.map(Op::encode).into()
+    }
 
     /// Every string created before the intern table rehashes must still be
     /// found after it.
@@ -875,7 +925,7 @@ mod ops {
     fn run(mut bytecode: Vec<Op>) -> Vm<'static> {
         bytecode.push(Op::Halt);
         let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = bytecode;
+        vm.bytecode = bytecode.into_iter().map(Op::encode).collect();
         vm.run::<false>(&[]).expect("vm run failed");
         vm
     }
@@ -883,7 +933,7 @@ mod ops {
     fn run_err(mut bytecode: Vec<Op>) -> Anomaly {
         bytecode.push(Op::Halt);
         let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = bytecode;
+        vm.bytecode = bytecode.into_iter().map(Op::encode).collect();
         vm.run::<false>(&[])
             .expect_err("vm run unexpectedly succeeded")
     }
@@ -891,7 +941,7 @@ mod ops {
     #[test]
     fn prepare_run_reinstalls_root_frame_after_return() {
         let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = vec![Op::LoadI { dst: 0, value: 42 }, Op::Ret, Op::Halt];
+        vm.bytecode = packed([Op::LoadI { dst: 0, value: 42 }, Op::Ret, Op::Halt]);
 
         vm.reset();
         vm.pc = 0;
@@ -909,7 +959,7 @@ mod ops {
     #[test]
     fn prepare_run_discards_frames_left_by_a_trap() {
         let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = vec![
+        vm.bytecode = packed([
             Op::LoadI { dst: 0, value: 1 },
             Op::LoadI { dst: 1, value: 0 },
             Op::IDiv {
@@ -919,7 +969,7 @@ mod ops {
             },
             Op::Ret,
             Op::Halt,
-        ];
+        ]);
 
         vm.reset();
         vm.pc = 0;
@@ -928,7 +978,7 @@ mod ops {
             Err(Anomaly::DivisionByZero { .. })
         ));
 
-        vm.bytecode[2] = Op::LoadI { dst: 0, value: 7 };
+        vm.bytecode[2] = Op::LoadI { dst: 0, value: 7 }.encode();
         vm.reset();
         vm.pc = 0;
         vm.run::<false>(&[])
@@ -1086,12 +1136,12 @@ mod ops {
     /// holds the miss pc, slot 2 loads 30, a miss loads -1.
     fn switch(kind: SwitchKind, first: Value, subject: Value) -> i64 {
         let mut vm = Vm::new(VmConfig::default());
-        vm.switch_tables.push(SwitchTable {
+        vm.switch_tables = Box::new([SwitchTable {
             first: first.0,
             targets: Box::new([4, 2, 6]),
-        });
-        vm.globals.push(subject);
-        vm.bytecode = vec![
+        }]);
+        vm.globals = Box::new([subject]);
+        vm.bytecode = packed([
             Op::LoadG { dst: 0, idx: 0 },
             Op::Switch {
                 kind,
@@ -1104,7 +1154,7 @@ mod ops {
             Op::Halt,
             Op::LoadI { dst: 1, value: 30 },
             Op::Halt,
-        ];
+        ]);
         vm.run::<false>(&[]).unwrap();
         vm.r[1].as_int()
     }
@@ -1124,7 +1174,7 @@ mod ops {
     fn lookup_takes_the_default_outside_its_keys() {
         let lookup = |subject: i64| {
             let mut vm = Vm::new(VmConfig::default());
-            vm.lookup_tables.push(LookupTable {
+            vm.lookup_tables = Box::new([LookupTable {
                 first: Value::from(-1_i64).0,
                 values: Box::new([
                     Value::from(10_i64),
@@ -1132,9 +1182,9 @@ mod ops {
                     Value::from(30_i64),
                 ]),
                 default: Value::from(-1_i64),
-            });
-            vm.globals.push(Value::from(subject));
-            vm.bytecode = vec![
+            }]);
+            vm.globals = Box::new([Value::from(subject)]);
+            vm.bytecode = packed([
                 Op::LoadG { dst: 0, idx: 0 },
                 Op::Lookup {
                     kind: SwitchKind::Int,
@@ -1143,7 +1193,7 @@ mod ops {
                     table: 0,
                 },
                 Op::Halt,
-            ];
+            ]);
             vm.run::<false>(&[]).unwrap();
             vm.r[1].as_int()
         };
@@ -1168,9 +1218,8 @@ mod ops {
     #[test]
     fn ddiv_by_zero_is_inf() {
         let mut vm = Vm::new(VmConfig::default());
-        vm.globals.push(Value::from(4.0_f64));
-        vm.globals.push(Value::from(-0.0_f64));
-        vm.bytecode = vec![
+        vm.globals = Box::new([Value::from(4.0_f64), Value::from(-0.0_f64)]);
+        vm.bytecode = packed([
             Op::LoadG { dst: 0, idx: 0 },
             Op::LoadG { dst: 1, idx: 1 },
             Op::DDiv {
@@ -1179,7 +1228,7 @@ mod ops {
                 rhs: 1,
             },
             Op::Halt,
-        ];
+        ]);
         vm.run::<false>(&[]).unwrap();
         assert_eq!(vm.r[2].as_f64(), f64::NEG_INFINITY);
     }
@@ -1232,9 +1281,8 @@ mod ops {
     #[test]
     fn double_arith() {
         let mut vm = Vm::new(VmConfig::default());
-        vm.globals.push(Value::from(1.5_f64));
-        vm.globals.push(Value::from(2.5_f64));
-        vm.bytecode = vec![
+        vm.globals = Box::new([Value::from(1.5_f64), Value::from(2.5_f64)]);
+        vm.bytecode = packed([
             Op::LoadG { dst: 0, idx: 0 },
             Op::LoadG { dst: 1, idx: 1 },
             Op::DAdd {
@@ -1258,7 +1306,7 @@ mod ops {
                 rhs: 0,
             },
             Op::Halt,
-        ];
+        ]);
         vm.run::<false>(&[]).unwrap();
         assert_eq!(vm.r[2].as_f64(), 4.0);
         assert_eq!(vm.r[3].as_f64(), 1.0);
@@ -1452,8 +1500,8 @@ mod ops {
     #[test]
     fn casts() {
         let mut vm = Vm::new(VmConfig::default());
-        vm.globals.push(Value::from(3.7_f64));
-        vm.bytecode = vec![
+        vm.globals = Box::new([Value::from(3.7_f64)]);
+        vm.bytecode = packed([
             Op::LoadI { dst: 0, value: 5 },
             Op::CastToDouble { dst: 1, src: 0 },
             Op::LoadG { dst: 2, idx: 0 },
@@ -1462,7 +1510,7 @@ mod ops {
             Op::LoadI { dst: 5, value: 0 },
             Op::CastToBool { dst: 6, src: 5 },
             Op::Halt,
-        ];
+        ]);
         vm.run::<false>(&[]).unwrap();
         assert_eq!(vm.r[1].as_f64(), 5.0);
         assert_eq!(vm.r[3].as_int(), 3);

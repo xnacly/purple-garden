@@ -22,7 +22,7 @@ pub fn bench_uniform_dispatch(c: &mut Criterion) {
                 }
                 bc.push(Op::Halt);
                 let mut vm = Vm::new(CONFIG);
-                vm.bytecode = bc;
+                vm.bytecode = bc.into_iter().map(Op::encode).collect();
                 vm
             },
             |mut vm| vm.run::<false>(&[]),
@@ -115,7 +115,7 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
                 }
                 bc.push(Op::Halt);
                 let mut vm = Vm::new(CONFIG);
-                vm.bytecode = bc;
+                vm.bytecode = bc.into_iter().map(Op::encode).collect();
                 vm
             },
             |mut vm| vm.run::<false>(&[]),
@@ -137,7 +137,7 @@ pub fn bench_call_dispatch(c: &mut Criterion) {
                 bc.push(Op::Ret);
                 bc.push(Op::Halt);
                 let mut vm = Vm::new(CONFIG);
-                vm.bytecode = bc;
+                vm.bytecode = bc.into_iter().map(Op::encode).collect();
                 vm
             },
             |mut vm| vm.run::<false>(&[]),
@@ -169,7 +169,7 @@ pub fn bench_packed_spill_dispatch(c: &mut Criterion) {
                     }
                     bc.push(Op::Halt);
                     let mut vm = Vm::new(CONFIG);
-                    vm.bytecode = bc;
+                    vm.bytecode = bc.into_iter().map(Op::encode).collect();
                     vm
                 },
                 |mut vm| vm.run::<false>(&[]),
