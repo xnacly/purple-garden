@@ -2,6 +2,7 @@ use std::{
     alloc::Allocator,
     collections::HashMap,
     io::{self, Write},
+    ops::Range,
 };
 
 use purple_garden_bc::{Cc, CcFunc};
@@ -90,7 +91,7 @@ pub(crate) fn addresses<S: Allocator + Clone, A: Allocator + Clone>(
 /// Writes `native_code` as a relocatable object, every embedded address `addresses` names as a
 /// relocation against that name, so `objdump -dr` shows it below its `movabs`.
 pub(crate) fn write(
-    native_code: &[(&str, usize, Vec<u8>)],
+    native_code: &[(&str, usize, Vec<u8>, Vec<Range<usize>>)],
     addresses: &HashMap<u64, String>,
     mut out: impl Write,
 ) -> io::Result<()> {
@@ -99,12 +100,18 @@ pub(crate) fn write(
     pad(&mut buf, 16);
     let text_off = buf.len();
     let mut funcs = Vec::with_capacity(native_code.len());
-    for (name, _, code) in native_code {
+    let mut tables = Vec::new();
+    for (name, _, code, func_tables) in native_code {
         // laid out like the code arena, so `call rel32`s between functions resolve
         pad(&mut buf, 16);
         let off = buf.len() - text_off;
         buf.extend_from_slice(code);
         funcs.push((format!("jit_{name}"), off, code.len()));
+        tables.extend(
+            func_tables
+                .iter()
+                .map(|t| (format!("jit_{name}.table_{:x}", t.start), off + t.start..off + t.end)),
+        );
     }
     let text_size = buf.len() - text_off;
 
@@ -118,6 +125,10 @@ pub(crate) fn write(
     let mut relocs = Vec::new();
     let mut i = text_off;
     while i + 10 <= text_off + text_size {
+        if let Some((_, table)) = tables.iter().find(|(_, t)| t.contains(&(i - text_off))) {
+            i = text_off + table.end;
+            continue;
+        }
         let Some(name) = movabs_immediate(&buf[i..i + 10]).and_then(|imm| addresses.get(&imm))
         else {
             i += 1;
@@ -152,6 +163,14 @@ pub(crate) fn write(
     for name in &undefined {
         let name_off = push_name(name);
         sym(&mut buf, name_off, 0x10, 0, 0, 0);
+    }
+    // objdump dumps the bytes from an object symbol up to the next symbol as data, the code
+    // following a table needs a symbol of its own to be decoded again
+    for (name, table) in &tables {
+        let name_off = push_name(name);
+        sym(&mut buf, name_off, 0x11, TEXT, table.start as u64, table.len() as u64);
+        let name_off = push_name(&format!("{name}.end"));
+        sym(&mut buf, name_off, 0x10, TEXT, table.end as u64, 0);
     }
     let symtab_size = buf.len() - symtab_off;
 
@@ -304,7 +323,8 @@ fn shdr(out: &mut [u8], header: SectionHeader) {
     put!(out, @at 56, entsize, u64);
 }
 
-/// `info` is binding << 4 | type: 0x12 a global function, 0x10 a global undefined name.
+/// `info` is binding << 4 | type: 0x12 a global function, 0x11 a global object, 0x10 a global
+/// label, undefined with `shndx` 0.
 fn sym(out: &mut Vec<u8>, name: u32, info: u8, shndx: u16, value: u64, size: u64) {
     put!(out, @push name, u32);
     out.push(info);

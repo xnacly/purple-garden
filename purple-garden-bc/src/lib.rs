@@ -82,8 +82,9 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     pub globals: Interner<Const<'cc>>,
     pub std_fns: Interner<BuiltinFn>,
     pub functions: HashMap<Id, CcFunc<'cc>, RandomState, A>,
-    /// Native code and its entry address, retained only for diagnostic dumps and perf maps.
-    pub native_code: Option<Vec<(&'cc str, usize, Vec<u8>)>>,
+    /// Native code, its entry address and the ranges of it holding tables, retained only for
+    /// diagnostic dumps and perf maps.
+    pub native_code: Option<Vec<(&'cc str, usize, Vec<u8>, Vec<std::ops::Range<usize>>)>>,
     /// Syscall slot of the native entry function (`Id(0)`), if it compiled to
     /// JIT. When present, `Program::run` can jump directly into the native page
     /// instead of starting from the bytecode trampoline.
@@ -672,7 +673,12 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
         // Retain a copy only when diagnostics need it.
         if let Some(native_code) = &mut self.native_code {
-            native_code.push((fun.name, entry as usize, self.jit.code().to_vec()));
+            native_code.push((
+                fun.name,
+                entry as usize,
+                self.jit.code().to_vec(),
+                self.jit.tables().to_vec(),
+            ));
         }
         self.native_fns.insert(fun.id, entry);
         let idx = self.std_fns.intern(entry) as u16;

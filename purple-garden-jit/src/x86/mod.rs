@@ -15,7 +15,7 @@
 
 mod encode;
 
-use std::{alloc::Allocator, collections::HashMap};
+use std::{alloc::Allocator, collections::HashMap, ops::Range};
 
 use crate::{
     arch::encode::Xmm,
@@ -169,6 +169,9 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     }
     let body_at = out.len();
     out.extend_from_slice(&buffers.body);
+    for table in &mut buffers.tables {
+        *table = table.start + body_at - start..table.end + body_at - start;
+    }
     // Self calls take the address of the function's first byte, in front of
     // the prologue that is only laid out now.
     for &rel in &buffers.self_refs {
@@ -266,9 +269,16 @@ pub struct Scratch<S: Allocator> {
     tail_refs: Vec<(usize, usize), S>,
     /// Body offsets of the rel32s (native calls) and the native function each calls.
     native_refs: Vec<(usize, usize), S>,
+    /// Jump and lookup tables inlined into the code, as body offsets until the function is laid
+    /// out, then as offsets from its first byte.
+    tables: Vec<Range<usize>, S>,
 }
 
 impl<S: Allocator + Clone> Scratch<S> {
+    pub fn tables(&self) -> &[Range<usize>] {
+        &self.tables
+    }
+
     pub fn new_in(scratch: S) -> Self {
         Self {
             body: Vec::new_in(scratch.clone()),
@@ -282,7 +292,8 @@ impl<S: Allocator + Clone> Scratch<S> {
             copies_at: Vec::new_in(scratch.clone()),
             self_refs: Vec::new_in(scratch.clone()),
             tail_refs: Vec::new_in(scratch.clone()),
-            native_refs: Vec::new_in(scratch),
+            native_refs: Vec::new_in(scratch.clone()),
+            tables: Vec::new_in(scratch),
         }
     }
 }
@@ -417,6 +428,7 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     self_refs: &'a mut Vec<usize, S>,
     tail_refs: &'a mut Vec<(usize, usize), S>,
     native_refs: &'a mut Vec<(usize, usize), S>,
+    tables: &'a mut Vec<Range<usize>, S>,
 }
 
 impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, F, S, N> {
@@ -443,6 +455,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             self_refs,
             tail_refs,
             native_refs,
+            tables,
         } = buffers;
         body.clear();
         block_offsets.clear();
@@ -451,6 +464,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self_refs.clear();
         tail_refs.clear();
         native_refs.clear();
+        tables.clear();
         Self {
             func,
             liveness,
@@ -477,6 +491,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             self_refs,
             tail_refs,
             native_refs,
+            tables,
         }
     }
 
@@ -1510,6 +1525,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 for value in slots {
                     self.out.extend_from_slice(&value.to_le_bytes());
                 }
+                self.tables.push(table..self.out.len());
 
                 let default_at = self.out.len();
                 patch_rel32(self.out, to_default, to_default + 4, default_at)
@@ -1866,6 +1882,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                     self.out.extend_from_slice(&[0; 4]);
                 }
+                self.tables.push(table..self.out.len());
 
                 let mut pad_at = Vec::with_capacity_in(pads.len(), self.scratch());
                 for (target, args) in pads {
