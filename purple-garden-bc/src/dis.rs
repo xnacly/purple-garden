@@ -407,6 +407,11 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
             }
 
             let addr = paint(color, ADDR, &format!("{pc:04x}:"));
+            let hex = self.bc[pc]
+                .encode()
+                .to_le_bytes()
+                .map(|byte| format!("{byte:02x}"))
+                .join(" ");
             let body = colorize_instr(color, instr);
             // the return-value move inherits the function's definition span; the
             // prologue already shows that line, so don't re-attach it mid-body.
@@ -416,10 +421,10 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
             {
                 let pad = " ".repeat(width.saturating_sub(instr.len()));
                 let note = paint(color, COMMENT, &format!("; {line_no}: {line}"));
-                println!("  {addr}    {body}{pad} {note}");
+                println!("  {addr}    {hex}    {body}{pad} {note}");
                 last_source_line = Some((line_no, line));
             } else {
-                println!("  {addr}    {body}");
+                println!("  {addr}    {hex}    {body}");
             }
         }
     }
