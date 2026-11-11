@@ -151,10 +151,20 @@ const TMP: u8 = SCRATCH - 1;
 const LOAD_I_BITS: u32 = 21;
 /// Bits of [`Op::JmpEqI`]'s and [`Op::JmpNeI`]'s immediate in the packed encoding.
 const JMP_IMM_BITS: u32 = 5;
+/// Bits of [`Op::LoadG`]'s index in the packed encoding.
+const LOAD_G_BITS: u32 = 21;
 
 const fn fits_signed(i: i64, bits: u32) -> bool {
     let half = 1 << (bits - 1);
     -half <= i && i < half
+}
+
+/// `pc` as a 16 bit jump target, `u16::MAX` is [`Cc::labels`]' unbound marker.
+fn jump_target(pc: usize) -> u16 {
+    u16::try_from(pc)
+        .ok()
+        .filter(|&pc| pc != u16::MAX)
+        .expect("bytecode past the 16 bit jump targets")
 }
 
 /// Every vm register but [`SCRATCH`] and [`TMP`], r0 last so xralloc2 hands out the lowest free one
@@ -277,8 +287,17 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             });
         } else {
             let idx = self.globals.intern(Const::Int(i));
-            self.emit(Op::LoadG { dst, idx });
+            self.load_global(dst, idx);
         }
+    }
+
+    /// `r[dst] = globals[idx]`.
+    fn load_global(&mut self, dst: u8, idx: u32) {
+        assert!(
+            idx < 1 << LOAD_G_BITS,
+            "globals past Op::LoadG's 21 bit index"
+        );
+        self.emit(Op::LoadG { dst, idx });
     }
 
     fn emit(&mut self, op: Op) -> usize {
@@ -562,7 +581,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         // the current function's block count and fill with the u16::MAX sentinel for
         // tombstoned/unemitted blocks.
         self.labels.clear();
-        self.labels.resize(fun.blocks.len(), u16::MAX);
+        self.labels
+            .resize(usize::from(jump_target(fun.blocks.len())), u16::MAX);
 
         self.pos = 0;
         for (idx, block) in fun.blocks.iter().enumerate() {
@@ -697,7 +717,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             native_code.push((fun.name, entry as usize, self.jit.code().to_vec()));
         }
         self.native_fns.insert(fun.id, entry);
-        let idx = self.std_fns.intern(entry) as u16;
+        let idx = u16::try_from(self.std_fns.intern(entry))
+            .expect("natives past Op::Native's 16 bit index");
         self.functions.insert(
             fun.id,
             CcFunc::Native {
@@ -809,14 +830,14 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
     /// A new jump target without a block, unbound until [`Cc::bind`].
     fn label(&mut self) -> u16 {
-        let label = self.labels.len() as u16;
+        let label = jump_target(self.labels.len());
         self.labels.push(u16::MAX);
         label
     }
 
     /// Land jumps to `label` on the next emitted op.
     fn bind(&mut self, label: u16) {
-        self.labels[label as usize] = self.buf.len() as u16;
+        self.labels[label as usize] = jump_target(self.buf.len());
     }
 
     /// The body of the function at `pc` was emitted as if it saved no registers. Lay out its frame
@@ -853,7 +874,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         self.pc_to_span[pc..].rotate_right(len);
         for at in &mut self.labels {
             if *at != u16::MAX {
-                *at += len as u16;
+                *at = jump_target(usize::from(*at) + len);
             }
         }
     }
@@ -1246,7 +1267,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let dst = self.def_register(dst.id);
                 let subject = self.ensure_register(*subject);
                 let table = u16::try_from(self.lookup_tables.len())
-                    .expect("more lookup tables than Op::Lookup indexes");
+                    .ok()
+                    .filter(|&table| table < 1 << 15)
+                    .expect("more lookup tables than Op::Lookup's 15 bit index");
                 self.lookup_tables.push(LookupTable {
                     first: first as u64,
                     values,
@@ -1272,7 +1295,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     Const::Undefined => {}
                     _ => {
                         let idx = self.intern(value);
-                        self.emit(Op::LoadG { dst, idx });
+                        self.load_global(dst, idx);
                     }
                 }
             }
@@ -1346,7 +1369,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
                 let dst = self.def_register(dst.id);
                 self.emit(Op::Sys {
-                    idx: idx as u16,
+                    idx: u16::try_from(idx).expect("syscalls past Op::Sys's 16 bit index"),
                     argc: args.len() as u8,
                 });
                 self.emit(Op::Mov { dst, src: 0 });
