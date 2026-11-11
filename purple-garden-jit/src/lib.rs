@@ -2087,7 +2087,10 @@ mod tests_x86 {
                 returns_double: false,
             },
             Op::Halt,
-        ];
+        ]
+        .into_iter()
+        .map(Op::encode)
+        .collect();
         vm.run::<false>(&syscalls).expect("vm run");
         // SAFETY: r0 exists
         assert_eq!(unsafe { vm.r(0) }.as_int(), 187);

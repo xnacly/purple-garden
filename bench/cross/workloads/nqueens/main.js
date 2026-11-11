@@ -1,6 +1,6 @@
-// 13 queens have 73712 solutions (OEIS A000170). Same encoding as the garden
+// 12 queens have 14200 solutions (OEIS A000170). Same encoding as the garden
 // version: placed queens packed into one number as base-16 digits (column + 1),
-// newest lowest, peeled with Math.floor and %. 13 digits of 4 bits stay below
+// newest lowest, peeled with Math.floor and %. 12 digits of 4 bits stay below
 // 2^53, so plain doubles are exact; bit operators would truncate to 32 bits.
 function safe(placed, col, dist) {
   while (placed !== 0) {
@@ -21,4 +21,4 @@ function solve(n, row, col, placed) {
   return solve(n, row, col + 1, placed);
 }
 
-if (solve(13, 0, 0, 0) !== 73712) process.exit(1);
+if (solve(12, 0, 0, 0) !== 14200) process.exit(1);

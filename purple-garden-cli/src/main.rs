@@ -281,7 +281,20 @@ fn pipeline<A: Pages + Clone>(
     if let Some(ctx) = ctx {
         match conf.disassemble {
             1 => {
-                let dis = bc::dis::Disassembler::new(&vm.bytecode, ctx).with_source(source);
+                // the ops vm.bytecode was encoded from, finalize appends the Halt
+                let bytecode: Vec<_> = ctx
+                    .buf
+                    .iter()
+                    .copied()
+                    .chain([purple_garden_runtime::op::Op::Halt])
+                    .collect();
+                let dis = bc::dis::Disassembler::new(
+                    &bytecode,
+                    &vm.switch_tables,
+                    &vm.lookup_tables,
+                    ctx,
+                )
+                .with_source(source);
                 dis.disassemble_bytecode();
                 dis.disassemble_native();
             }

@@ -3,7 +3,6 @@ use std::{
     alloc::{Allocator, Global},
     collections::HashMap,
     hash::RandomState,
-    ptr::NonNull,
 };
 
 pub mod dis;
@@ -108,9 +107,9 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     labels: Vec<u16, S>,
     /// Tables of the emitted [`Op::Switch`]es. Targets are block ids until the
     /// end of [`Cc::cc`] maps them to pcs, like jump targets.
-    pub switch_tables: Vec<Box<SwitchTable>>,
+    pub switch_tables: Vec<SwitchTable>,
     /// Tables of the emitted [`Op::Lookup`]s.
-    pub lookup_tables: Vec<Box<LookupTable>>,
+    pub lookup_tables: Vec<LookupTable>,
     /// Entry points of the functions compiled natively, for native callers.
     native_fns: purple_garden_jit::Natives<A>,
     /// purple gardens linear scan operating system and architecture overarching register allocator
@@ -148,6 +147,26 @@ const CALLEE_SAVED: u8 = 19;
 const SCRATCH: u8 = REGISTER_COUNT as u8 - 1;
 /// Second ephemeral register
 const TMP: u8 = SCRATCH - 1;
+
+/// Bits of [`Op::LoadI`]'s value in the packed encoding.
+const LOAD_I_BITS: u32 = 21;
+/// Bits of [`Op::JmpEqI`]'s and [`Op::JmpNeI`]'s immediate in the packed encoding.
+const JMP_IMM_BITS: u32 = 5;
+/// Bits of [`Op::LoadG`]'s index in the packed encoding.
+const LOAD_G_BITS: u32 = 21;
+
+const fn fits_signed(i: i64, bits: u32) -> bool {
+    let half = 1 << (bits - 1);
+    -half <= i && i < half
+}
+
+/// `pc` as a 16 bit jump target, `u16::MAX` is [`Cc::labels`]' unbound marker.
+fn jump_target(pc: usize) -> u16 {
+    u16::try_from(pc)
+        .ok()
+        .filter(|&pc| pc != u16::MAX)
+        .expect("bytecode past the 16 bit jump targets")
+}
 
 /// Every vm register but [`SCRATCH`] and [`TMP`], r0 last so xralloc2 hands out the lowest free one
 /// first, which also puts the caller-saved registers before the callee-saved ones.
@@ -258,6 +277,28 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
     fn intern(&mut self, constant: &'cc Const<'cc>) -> u32 {
         self.globals.intern(constant.clone())
+    }
+
+    /// `r[dst] = i`, from the globals if it doesn't fit [`Op::LoadI`].
+    fn load_int(&mut self, dst: u8, i: i64) {
+        if fits_signed(i, LOAD_I_BITS) {
+            self.emit(Op::LoadI {
+                dst,
+                value: i as i32,
+            });
+        } else {
+            let idx = self.globals.intern(Const::Int(i));
+            self.load_global(dst, idx);
+        }
+    }
+
+    /// `r[dst] = globals[idx]`.
+    fn load_global(&mut self, dst: u8, idx: u32) {
+        assert!(
+            idx < 1 << LOAD_G_BITS,
+            "globals past Op::LoadG's 21 bit index"
+        );
+        self.emit(Op::LoadG { dst, idx });
     }
 
     fn emit(&mut self, op: Op) -> usize {
@@ -541,7 +582,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         // the current function's block count and fill with the u16::MAX sentinel for
         // tombstoned/unemitted blocks.
         self.labels.clear();
-        self.labels.resize(fun.blocks.len(), u16::MAX);
+        self.labels
+            .resize(usize::from(jump_target(fun.blocks.len())), u16::MAX);
 
         self.pos = 0;
         for (idx, block) in fun.blocks.iter().enumerate() {
@@ -681,7 +723,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             ));
         }
         self.native_fns.insert(fun.id, entry);
-        let idx = self.std_fns.intern(entry) as u16;
+        let idx = u16::try_from(self.std_fns.intern(entry))
+            .expect("natives past Op::Native's 16 bit index");
         self.functions.insert(
             fun.id,
             CcFunc::Native {
@@ -793,14 +836,14 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
     /// A new jump target without a block, unbound until [`Cc::bind`].
     fn label(&mut self) -> u16 {
-        let label = self.labels.len() as u16;
+        let label = jump_target(self.labels.len());
         self.labels.push(u16::MAX);
         label
     }
 
     /// Land jumps to `label` on the next emitted op.
     fn bind(&mut self, label: u16) {
-        self.labels[label as usize] = self.buf.len() as u16;
+        self.labels[label as usize] = jump_target(self.buf.len());
     }
 
     /// The body of the function at `pc` was emitted as if it saved no registers. Lay out its frame
@@ -837,7 +880,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         self.pc_to_span[pc..].rotate_right(len);
         for at in &mut self.labels {
             if *at != u16::MAX {
-                *at += len as u16;
+                *at = jump_target(usize::from(*at) + len);
             }
         }
     }
@@ -970,11 +1013,34 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 };
                 let lhs = self.ensure_register(*lhs);
                 let imm = *imm;
-                self.branch(fun, *yes, *no, next_block, |target| Op::JmpNeI {
-                    lhs,
-                    imm,
-                    target,
-                });
+                if fits_signed(imm.into(), JMP_IMM_BITS) {
+                    self.branch(fun, *yes, *no, next_block, |target| Op::JmpNeI {
+                        lhs,
+                        imm: imm as i8,
+                        target,
+                    });
+                } else {
+                    // too wide for the fused jump, compare into a temp and branch on that
+                    let cond = self.next_tmp();
+                    if let Ok(imm) = i16::try_from(imm) {
+                        self.emit(Op::IEqI {
+                            dst: cond,
+                            lhs,
+                            imm,
+                        });
+                    } else {
+                        self.load_int(cond, imm.into());
+                        self.emit(Op::IEq {
+                            dst: cond,
+                            lhs,
+                            rhs: cond,
+                        });
+                    }
+                    self.branch(fun, *yes, *no, next_block, |target| Op::JmpF {
+                        cond,
+                        target,
+                    });
+                }
             }
             ir::Terminator::BranchCmp {
                 op,
@@ -1036,16 +1102,16 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                         edge.0.0 as u16
                     };
                 }
-                let table = Box::new(SwitchTable {
+                let table = u16::try_from(self.switch_tables.len())
+                    .expect("more switch tables than Op::Switch indexes");
+                self.switch_tables.push(SwitchTable {
                     first: first as u64,
                     targets,
                 });
-                let ptr = NonNull::from(&*table);
-                self.switch_tables.push(table);
                 self.emit(Op::Switch {
                     kind,
                     subject,
-                    table: ptr,
+                    table,
                 });
 
                 // the pads follow, so the default can't fall through once there are any
@@ -1112,7 +1178,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let base = self.ensure_register(*base);
                 self.emit(Op::Store {
                     base,
-                    offset: *offset,
+                    offset: u16::try_from(*offset).expect("record offset past Op::Store's"),
                     src,
                 });
             }
@@ -1124,7 +1190,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 self.emit(Op::Load {
                     dst,
                     base,
-                    offset: *offset,
+                    offset: u16::try_from(*offset).expect("record offset past Op::Load's"),
                 });
             }
             ir::Instr::AddrOf {
@@ -1135,7 +1201,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 self.emit(Op::AddrOf {
                     dst,
                     base,
-                    offset: *offset,
+                    offset: u16::try_from(*offset).expect("record offset past Op::AddrOf's"),
                 });
             }
             ir::Instr::Alloc {
@@ -1147,7 +1213,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let Some(kind) = AllocType::from_ty(ty) else {
                     unreachable!("alloc attempts to alloc non heap allocated value?");
                 };
-                let (size, align) = (layout.size() as u32, layout.align() as u8);
+                let size = u16::try_from(layout.size()).expect("allocation past Op::Alloc's size");
+                let align = layout.align() as u8;
                 self.emit(Op::Alloc {
                     dst,
                     kind,
@@ -1202,31 +1269,29 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 for (k, v) in entries {
                     values[slot(k)] = value(v);
                 }
-                let table = Box::new(LookupTable {
-                    first: first as u64,
-                    values,
-                    default: value(default),
-                });
+                let default = value(default);
                 let dst = self.def_register(dst.id);
                 let subject = self.ensure_register(*subject);
-                let ptr = NonNull::from(&*table);
-                self.lookup_tables.push(table);
+                let table = u16::try_from(self.lookup_tables.len())
+                    .ok()
+                    .filter(|&table| table < 1 << 15)
+                    .expect("more lookup tables than Op::Lookup's 15 bit index");
+                self.lookup_tables.push(LookupTable {
+                    first: first as u64,
+                    values,
+                    default,
+                });
                 self.emit(Op::Lookup {
                     kind,
                     dst,
                     subject,
-                    table: ptr,
+                    table,
                 });
             }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let dst = self.def_register(dst.id);
                 match value {
-                    Const::Int(i) if *i > i32::MIN as i64 && *i < i32::MAX as i64 => {
-                        self.emit(Op::LoadI {
-                            dst,
-                            value: *i as i32,
-                        });
-                    }
+                    Const::Int(i) => self.load_int(dst, *i),
                     Const::True | Const::False => {
                         // fast path for booleans
                         let value = matches!(value, Const::True) as i32;
@@ -1236,7 +1301,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     Const::Undefined => {}
                     _ => {
                         let idx = self.intern(value);
-                        self.emit(Op::LoadG { dst, idx });
+                        self.load_global(dst, idx);
                     }
                 }
             }
@@ -1310,7 +1375,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
                 let dst = self.def_register(dst.id);
                 self.emit(Op::Sys {
-                    idx: idx as u16,
+                    idx: u16::try_from(idx).expect("syscalls past Op::Sys's 16 bit index"),
                     argc: args.len() as u8,
                 });
                 self.emit(Op::Mov { dst, src: 0 });
@@ -1364,11 +1429,20 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let dst = self.def_register(dst.id);
                 let lhs = self.ensure_register(*lhs);
                 let imm = *imm;
+                // too wide for the immediate, the register form takes it from a temp
+                let wide = i16::try_from(imm).is_err().then(|| {
+                    let rhs = self.next_tmp();
+                    self.load_int(rhs, imm.into());
+                    rhs
+                });
 
                 macro_rules! emit_bin_imms {
                     ($($ir:ident => $op:ident),* $(,)?) => {
-                        match op {
-                            $(ir::BinOp::$ir => Op::$op { dst, lhs, imm },)*
+                        match (op, wide) {
+                            $(
+                                (ir::BinOp::$ir, None) => Op::$op { dst, lhs, imm: imm as i16 },
+                                (ir::BinOp::$ir, Some(rhs)) => Op::$ir { dst, lhs, rhs },
+                            )*
                             _ => unreachable!("only integer immediate binops are represented as BinImm"),
                         }
                     };
@@ -1495,9 +1569,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             .or_else(|| functions.get(&ir::Id(0)).and_then(CcFunc::pc))
             .unwrap_or_default();
 
-        vm.bytecode = buf;
-        vm.switch_tables = switch_tables;
-        vm.lookup_tables = lookup_tables;
+        vm.bytecode = buf.into_iter().map(Op::encode).collect();
+        vm.switch_tables = switch_tables.into_boxed_slice();
+        vm.lookup_tables = lookup_tables.into_boxed_slice();
 
         debug_assert_eq!(
             globals
@@ -1508,11 +1582,13 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             str_values.iter().filter(|&&v| v != Value::UNDEF).count(),
             "every string constant is laid out before lowering",
         );
-        vm.globals = globals.into_vec_map(|constant| match constant {
-            // Filled from str_values below, the closure doesn't see the slot.
-            Const::Str(_) => Value::UNDEF,
-            constant => Value::from(constant),
-        });
+        vm.globals = globals
+            .into_vec_map(|constant| match constant {
+                // Filled from str_values below, the closure doesn't see the slot.
+                Const::Str(_) => Value::UNDEF,
+                constant => Value::from(constant),
+            })
+            .into_boxed_slice();
         for (slot, &value) in str_values.iter().enumerate() {
             if value != Value::UNDEF {
                 vm.globals[slot] = value;
@@ -1562,10 +1638,10 @@ mod tests {
         let mut cc = Cc::new();
         cc.buf = vec![Op::Nop, Op::Halt, Op::Nop, Op::Ret];
         cc.pc_to_span = vec![0; cc.buf.len()];
-        cc.switch_tables.push(Box::new(SwitchTable {
+        cc.switch_tables.push(SwitchTable {
             first: 0,
             targets: Box::new([1, 3]),
-        }));
+        });
         cc.compact_nops();
         assert_eq!(cc.buf, [Op::Halt, Op::Ret]);
         assert_eq!(&*cc.switch_tables[0].targets, [0, 1]);
@@ -1706,6 +1782,60 @@ mod tests {
             "expected BinImm IAdd to lower to IAddI: {:?}",
             ops
         );
+    }
+
+    #[test]
+    fn lowers_int_load_const_past_load_i_to_load_global() {
+        for (value, global) in [(-(1 << 20), false), ((1 << 20) - 1, false), (1 << 20, true)] {
+            let ops = compile_one(entry_fun(
+                vec![Instr::LoadConst {
+                    dst: type_id(0, Type::Int),
+                    value: Const::Int(value),
+                    span: 0,
+                }],
+                Some((Id(0), Type::Int)),
+            ));
+            assert_eq!(
+                has_op(&ops, |op| matches!(op, Op::LoadG { dst: 0, .. })),
+                global,
+                "{value}: {ops:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_bin_imm_past_its_field_to_register_form() {
+        for (imm, imm_form) in [(-(1 << 15), true), ((1 << 15) - 1, true), (1 << 15, false)] {
+            let ops = compile_one(entry_fun(
+                vec![
+                    Instr::LoadConst {
+                        dst: type_id(0, Type::Int),
+                        value: Const::Int(7),
+                        span: 0,
+                    },
+                    Instr::BinImm {
+                        op: BinOp::IAdd,
+                        dst: type_id(1, Type::Int),
+                        lhs: Id(0),
+                        imm,
+                        span: 0,
+                    },
+                ],
+                Some((Id(1), Type::Int)),
+            ));
+            let lowered = if imm_form {
+                has_op(
+                    &ops,
+                    |op| matches!(op, Op::IAddI { imm: i, .. } if i32::from(*i) == imm),
+                )
+            } else {
+                has_op(
+                    &ops,
+                    |op| matches!(op, Op::LoadI { dst: SCRATCH, value } if *value == imm),
+                ) && has_op(&ops, |op| matches!(op, Op::IAdd { rhs: SCRATCH, .. }))
+            };
+            assert!(lowered, "{imm}: {ops:?}");
+        }
     }
 
     #[test]
@@ -1888,8 +2018,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn lowers_branch_cmp_imm_to_bytecode_branch() {
+    fn branch_cmp_imm_fun(imm: i32) -> Func<'static> {
         let mut fun = Func::new("entry", Id(0), Vec::new(), Some(Type::Int));
         fun.blocks = vec![
             Block {
@@ -1904,7 +2033,7 @@ mod tests {
                 term: Some(Terminator::BranchCmpImm {
                     op: BinOp::IEq,
                     lhs: Id(0),
-                    imm: 1,
+                    imm,
                     yes: (Id(1), EMPTY_PARAMS),
                     no: (Id(2), EMPTY_PARAMS),
                     span: 0,
@@ -1939,8 +2068,12 @@ mod tests {
                 }),
             },
         ];
+        fun
+    }
 
-        let ops = compile_one(fun);
+    #[test]
+    fn lowers_branch_cmp_imm_to_bytecode_branch() {
+        let ops = compile_one(branch_cmp_imm_fun(1));
 
         assert!(
             has_op(&ops, |op| matches!(
@@ -1950,5 +2083,31 @@ mod tests {
             "expected BranchCmpImm IEq to lower to an immediate compare jump: {:?}",
             ops
         );
+    }
+
+    #[test]
+    fn lowers_branch_cmp_imm_past_its_field_to_compare_and_branch() {
+        for (imm, fused) in [
+            (-16, true),
+            (15, true),
+            (16, false),
+            (-17, false),
+            (1 << 15, false),
+        ] {
+            let ops = compile_one(branch_cmp_imm_fun(imm));
+            let jmp = has_op(
+                &ops,
+                |op| matches!(op, Op::JmpNeI { imm: i, .. } if i32::from(*i) == imm),
+            );
+            let cmp = has_op(
+                &ops,
+                |op| matches!(op, Op::IEqI { imm: i, .. } if i32::from(*i) == imm),
+            ) || has_op(&ops, |op| matches!(op, Op::IEq { .. }));
+            assert_eq!(
+                (jmp, cmp && has_op(&ops, |op| matches!(op, Op::JmpF { .. }))),
+                (fused, !fused),
+                "{imm}: {ops:?}"
+            );
+        }
     }
 }

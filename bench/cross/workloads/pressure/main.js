@@ -70,5 +70,5 @@ function mix(i) {
   return mod(ints, 1000003) + mod(trunc(doubles), 1009) + mod(pa, 101) + mod(trunc(pb), 13) + c1 + c2 + c3;
 }
 let acc = 0;
-for (let i = 0; i < 5000000; i++) acc += mix(i);
-if (acc !== -2502755696872) process.exit(1);
+for (let i = 0; i < 1000000; i++) acc += mix(i);
+if (acc !== -500321797617) process.exit(1);
