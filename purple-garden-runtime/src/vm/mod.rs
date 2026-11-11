@@ -12,7 +12,7 @@ use std::{
 
 mod alloc;
 mod config;
-mod threaded;
+mod handlers;
 
 pub use alloc::VmAlloc;
 pub use config::{VmConfig, frames_in};
@@ -219,7 +219,7 @@ impl<'vm> Vm<'vm> {
         self.spilled = (&raw const spilled).cast();
         let code = self.bytecode.as_ptr();
         // SAFETY: bc ends in Halt and only jumps within bytecode, the handlers uphold the rest
-        self.pc = unsafe { threaded::enter::<BACKTRACE>((self as *mut Self).cast(), code, pc)? };
+        self.pc = unsafe { handlers::enter::<BACKTRACE>((self as *mut Self).cast(), code, pc)? };
 
         Ok(())
     }
