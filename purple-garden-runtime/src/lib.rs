@@ -1,4 +1,5 @@
 #![feature(likely_unlikely)]
+#![cfg_attr(feature = "threaded", feature(explicit_tail_calls))]
 #![feature(adt_const_params, unsized_const_params)]
 // `&'static str` const params for `Slot<"T">`
 #![allow(incomplete_features)]

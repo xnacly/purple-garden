@@ -5,6 +5,8 @@ description = "Lean scripting language, designed and implemented with a focus on
 edition = "2024"
 
 [features]
+default = ["threaded"]
+threaded = ["purple-garden-runtime/threaded"]
 trace = [
     "purple-garden-ir/trace",
     "purple-garden-frontend/trace",
@@ -22,7 +24,7 @@ trace_gc = ["purple-garden-runtime/trace_gc"]
 purple-garden-allocators = { path = "../purple-garden-allocators" }
 purple-garden-ir = { path = "../purple-garden-ir" }
 purple-garden-jit = { path = "../purple-garden-jit" }
-purple-garden-runtime = { path = "../purple-garden-runtime" }
+purple-garden-runtime = { path = "../purple-garden-runtime", default-features = false }
 purple-garden-std = { path = "../purple-garden-std" }
 purple-garden-opt = { path = "../purple-garden-opt" }
 purple-garden-bc = { path = "../purple-garden-bc" }

@@ -26,8 +26,12 @@ macro_rules! ops {
             $($name),*
         }
 
+        impl Tag {
+            pub const COUNT: usize = [$(Tag::$name),*].len();
+        }
+
         /// static assertion since tag is 6 bits, meaning 2^6=64 op codes can be represented
-        const _: () = assert!([$(Tag::$name),*].len() <= 64);
+        const _: () = assert!(Tag::COUNT <= 64);
 
         impl Op {
             pub const fn tag(&self) -> Tag {

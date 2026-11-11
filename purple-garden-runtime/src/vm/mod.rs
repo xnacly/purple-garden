@@ -104,6 +104,11 @@ pub struct Vm<'vm> {
     pub none: Value,
 
     pub config: VmConfig,
+    /// The syscalls and spill stack of the running [`Vm::run`], for threaded handlers.
+    #[cfg(feature = "threaded")]
+    syscalls: *const BuiltinFn,
+    #[cfg(feature = "threaded")]
+    spilled: *const StackAlloc<'static>,
     /// Called when allocation wants to run a collection pass.
     collect_fn: CollectFn<'vm>,
 }
@@ -117,6 +122,9 @@ macro_rules! trap_if {
         }
     };
 }
+
+#[cfg(feature = "threaded")]
+mod threaded;
 
 impl Vm<'static> {
     #[must_use]
@@ -160,6 +168,10 @@ impl<'vm> Vm<'vm> {
             native_entry_rsp: 0,
             none: Value::UNDEF,
             config,
+            #[cfg(feature = "threaded")]
+            syscalls: std::ptr::null(),
+            #[cfg(feature = "threaded")]
+            spilled: std::ptr::null(),
             collect_fn: collect,
         };
         vm.none = vm.option_box(0, Value::UNDEF);
@@ -220,25 +232,42 @@ impl<'vm> Vm<'vm> {
         }
 
         // A use of &mut self invalidates regs, so it is re-derived after each one.
+        #[cfg(not(feature = "threaded"))]
         let mut regs = self.r.as_mut_ptr();
         let instructions = self.bytecode.as_ptr();
+        #[cfg(not(feature = "threaded"))]
         let globals = self.globals.as_ptr();
+        #[cfg(not(feature = "threaded"))]
         let switch_tables = self.switch_tables.as_ptr();
+        #[cfg(not(feature = "threaded"))]
         let lookup_tables = self.lookup_tables.as_ptr();
         let syscalls = syscalls.as_ptr();
 
+        #[cfg(feature = "threaded")]
+        {
+            self.syscalls = syscalls;
+            self.spilled = (&raw const spilled).cast();
+            // SAFETY: as for the loop below
+            pc = unsafe {
+                threaded::enter::<BACKTRACE>((self as *mut Self).cast(), instructions, pc)?
+            };
+        }
+
+        #[cfg(not(feature = "threaded"))]
         macro_rules! r {
             ($n:tt) => {
                 (&*regs.add($n as usize))
             };
         }
 
+        #[cfg(not(feature = "threaded"))]
         macro_rules! r_mut {
             ($n:tt) => {
                 *regs.add($n as usize)
             };
         }
 
+        #[cfg(not(feature = "threaded"))]
         loop {
             // SAFETY: bc ends in Halt and only jumps within bytecode
             let op = unsafe { *instructions.add(pc) };

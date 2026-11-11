@@ -9,5 +9,8 @@ purple-garden-allocators = { path = "../purple-garden-allocators" }
 purple-garden-shared = { path = "../purple-garden-shared" }
 
 [features]
+default = ["threaded"]
+# tail calls between op handlers instead of a dispatch loop
+threaded = []
 trace = []
 trace_gc = ["purple-garden-shared/trace"]
