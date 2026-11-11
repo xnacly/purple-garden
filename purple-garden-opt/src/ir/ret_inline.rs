@@ -339,4 +339,113 @@ mod tests {
         assert!(matches!(&fun.blocks[0].term, Some(Terminator::Jump { .. })));
         assert!(!fun.blocks[1].tombstone);
     }
+
+    /// Nested match: the inner join b4 only forwards to the outer join b3, as
+    /// lowered for `match { c { 7 } { match { ... { 8 } } } }`. Both arms must
+    /// return directly and both joins become dead.
+    #[test]
+    fn inlines_through_forwarding_join() {
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
+        let b0_params = fun.intern_params(vec![Id(0)]);
+        let b1_params = fun.intern_params(vec![Id(1)]);
+        let b2_params = fun.intern_params(vec![Id(3)]);
+        let b3_params = fun.intern_params(vec![Id(5), Id(6)]);
+        let b4_params = fun.intern_params(vec![Id(7), Id(8)]);
+        let br_yes = fun.intern_params(vec![Id(0)]);
+        let br_no = fun.intern_params(vec![Id(0)]);
+        let jmp_from_b1 = fun.intern_params(vec![Id(2), Id(1)]);
+        let jmp_from_b2 = fun.intern_params(vec![Id(4), Id(3)]);
+        let jmp_from_b4 = fun.intern_params(vec![Id(7), Id(8)]);
+        fun.blocks = vec![
+            Block {
+                tombstone: false,
+                id: Id(0),
+                params: b0_params,
+                instructions: vec![],
+                term: Some(Terminator::Branch {
+                    cond: Id(0),
+                    yes: (Id(1), br_yes),
+                    no: (Id(2), br_no),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(1),
+                params: b1_params,
+                instructions: vec![Instr::LoadConst {
+                    dst: TypeId {
+                        id: Id(2),
+                        ty: Type::Int,
+                    },
+                    value: ir::constant::Const::Int(7),
+                    span: 0,
+                }],
+                term: Some(Terminator::Jump {
+                    id: Id(3),
+                    params: jmp_from_b1,
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(2),
+                params: b2_params,
+                instructions: vec![Instr::LoadConst {
+                    dst: TypeId {
+                        id: Id(4),
+                        ty: Type::Int,
+                    },
+                    value: ir::constant::Const::Int(8),
+                    span: 0,
+                }],
+                term: Some(Terminator::Jump {
+                    id: Id(4),
+                    params: jmp_from_b2,
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(3),
+                params: b3_params,
+                instructions: vec![],
+                term: Some(Terminator::Return {
+                    value: Some(Id(5)),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(4),
+                params: b4_params,
+                instructions: vec![],
+                term: Some(Terminator::Jump {
+                    id: Id(3),
+                    params: jmp_from_b4,
+                    span: 0,
+                }),
+            },
+        ];
+
+        ret_inline(&mut fun, &mut super::super::Scratch::default());
+
+        assert!(
+            matches!(&fun.blocks[1].term, Some(Terminator::Return { value: Some(v), .. }) if v.0 == 2)
+        );
+        assert!(
+            matches!(&fun.blocks[2].term, Some(Terminator::Return { value: Some(v), .. }) if v.0 == 4),
+            "arm jumping to the forwarding join must return directly"
+        );
+        assert!(fun.blocks[3].tombstone, "outer join is dead");
+        assert!(fun.blocks[4].tombstone, "forwarding join is dead");
+    }
 }
