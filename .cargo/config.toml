@@ -1,4 +1,0 @@
-[build]
-# tail merging folds the handler epilogues in Vm::run into shared blocks, which hides the
-# handler from the dispatch predictor: 10x the indirect mispredicts, up to +26% on the interpreter
-rustflags = ["-C", "llvm-args=-enable-tail-merge=false"]
