@@ -95,4 +95,4 @@ fn run(i:Int n:Int acc:Int) Int {
     }
 }
 
-testing.assert(run(0 5000000 0) == -2502755696872)
+testing.assert(run(0 1000000 0) == -500321797617)

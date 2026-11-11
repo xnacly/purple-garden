@@ -68,5 +68,5 @@ local function mix(i)
   return mod(ints, 1000003) + mod(trunc(doubles), 1009) + mod(pa, 101) + mod(trunc(pb), 13) + c1 + c2 + c3
 end
 local acc = 0
-for i = 0, 5000000 - 1 do acc = acc + mix(i) end
-if acc ~= -2502755696872 then os.exit(1) end
+for i = 0, 1000000 - 1 do acc = acc + mix(i) end
+if acc ~= -500321797617 then os.exit(1) end
