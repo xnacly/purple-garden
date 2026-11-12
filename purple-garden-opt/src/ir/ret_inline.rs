@@ -2,8 +2,25 @@ use std::alloc::Allocator;
 
 use purple_garden_ir as ir;
 
+/// follow the jmp chain (if there is one) to figure out what params come out of a block unchanged
+fn returned_param<F: Allocator>(fun: &ir::Func<'_, F>, id: ir::Id) -> Option<usize> {
+    let block = &fun.blocks[id.0 as usize];
+    if block.tombstone || !block.instructions.is_empty() {
+        return None;
+    }
+    let returned = match &block.term {
+        Some(ir::Terminator::Return { value: Some(v), .. }) => *v,
+        Some(ir::Terminator::Jump { id, params, .. }) => {
+            fun.params(*params)[returned_param(fun, *id)?]
+        }
+        _ => return None,
+    };
+    fun.params(block.params).iter().position(|p| *p == returned)
+}
+
 /// Rewrite `jmp b_join(v); b_join(p): ret p` as a direct `ret v` in the
-/// predecessor. Tombstones the join when every predecessor is inlined.
+/// predecessor, also through joins that only forward to another join, as a
+/// nested if/match lowers to. Tombstones the joins left without predecessors.
 /// Lets each arm of an if/match get its own Return, so the regalloc can
 /// place the result in r0 instead of routing through a join-block param.
 pub fn ret_inline<F: Allocator, S: Allocator>(
@@ -12,7 +29,6 @@ pub fn ret_inline<F: Allocator, S: Allocator>(
 ) {
     let alloc = scratch.alloc();
     let mut rewrites: Vec<(usize, ir::Id, u32), _> = Vec::new_in(alloc);
-    let mut pred_counts = super::predecessor_counts(fun, alloc);
     let mut touched_targets = Vec::with_capacity_in(fun.blocks.len(), alloc);
     touched_targets.resize(fun.blocks.len(), false);
 
@@ -24,40 +40,16 @@ pub fn ret_inline<F: Allocator, S: Allocator>(
             id: target_id,
             params: jump_params,
             span,
-        }) = fun.blocks[i].term.clone()
+        }) = fun.blocks[i].term
         else {
             continue;
         };
-
-        let target = &fun.blocks[target_id.0 as usize];
-        if target.tombstone || !target.instructions.is_empty() {
-            continue;
-        }
-        let Some(ir::Terminator::Return {
-            value: Some(ret_id),
-            ..
-        }) = &target.term
-        else {
+        let Some(k) = returned_param(fun, target_id) else {
             continue;
         };
 
-        // Only match when the join returns its first param verbatim, so
-        // substituting the jump's first arg is sound.
-        let target_params = fun.params(target.params);
-        if target_params.is_empty() || target_params[0].0 != ret_id.0 {
-            continue;
-        }
-
-        let jump_params_resolved = fun.params(jump_params);
-        if jump_params_resolved.is_empty() {
-            continue;
-        }
-        let ret_value = jump_params_resolved[0];
-
-        rewrites.push((i, ret_value, span));
-        let target_idx = target_id.0 as usize;
-        pred_counts[target_idx] = pred_counts[target_idx].saturating_sub(1);
-        touched_targets[target_idx] = true;
+        rewrites.push((i, fun.params(jump_params)[k], span));
+        touched_targets[target_id.0 as usize] = true;
     }
 
     for (i, ret_value, span) in rewrites {
@@ -68,6 +60,7 @@ pub fn ret_inline<F: Allocator, S: Allocator>(
         });
     }
 
+    let pred_counts = super::predecessor_counts(fun, alloc);
     for (target_id, touched) in touched_targets.into_iter().enumerate() {
         if touched && pred_counts[target_id] == 0 {
             purple_garden_shared::trace!(
@@ -234,7 +227,7 @@ mod tests {
         );
     }
 
-    /// A join block that returns a value NOT equal to its first param
+    /// A join block that returns a value that is none of its params
     /// (e.g. a literal it computed itself) cannot be inlined: we'd have
     /// to copy that computation into every predecessor.
     #[test]
@@ -338,5 +331,185 @@ mod tests {
 
         assert!(matches!(&fun.blocks[0].term, Some(Terminator::Jump { .. })));
         assert!(!fun.blocks[1].tombstone);
+    }
+
+    /// Nested match: the inner join b4 only forwards to the outer join b3, as
+    /// lowered for `match { c { 7 } { match { ... { 8 } } } }`. Both arms must
+    /// return directly and both joins become dead.
+    #[test]
+    fn inlines_through_forwarding_join() {
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![TypeId {
+                id: Id(0),
+                ty: Type::Int,
+            }],
+            Some(Type::Int),
+        );
+        let b0_params = fun.intern_params(vec![Id(0)]);
+        let b1_params = fun.intern_params(vec![Id(1)]);
+        let b2_params = fun.intern_params(vec![Id(3)]);
+        let b3_params = fun.intern_params(vec![Id(5), Id(6)]);
+        let b4_params = fun.intern_params(vec![Id(7), Id(8)]);
+        let br_yes = fun.intern_params(vec![Id(0)]);
+        let br_no = fun.intern_params(vec![Id(0)]);
+        let jmp_from_b1 = fun.intern_params(vec![Id(2), Id(1)]);
+        let jmp_from_b2 = fun.intern_params(vec![Id(4), Id(3)]);
+        let jmp_from_b4 = fun.intern_params(vec![Id(7), Id(8)]);
+        fun.blocks = vec![
+            Block {
+                tombstone: false,
+                id: Id(0),
+                params: b0_params,
+                instructions: vec![],
+                term: Some(Terminator::Branch {
+                    cond: Id(0),
+                    yes: (Id(1), br_yes),
+                    no: (Id(2), br_no),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(1),
+                params: b1_params,
+                instructions: vec![Instr::LoadConst {
+                    dst: TypeId {
+                        id: Id(2),
+                        ty: Type::Int,
+                    },
+                    value: ir::constant::Const::Int(7),
+                    span: 0,
+                }],
+                term: Some(Terminator::Jump {
+                    id: Id(3),
+                    params: jmp_from_b1,
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(2),
+                params: b2_params,
+                instructions: vec![Instr::LoadConst {
+                    dst: TypeId {
+                        id: Id(4),
+                        ty: Type::Int,
+                    },
+                    value: ir::constant::Const::Int(8),
+                    span: 0,
+                }],
+                term: Some(Terminator::Jump {
+                    id: Id(4),
+                    params: jmp_from_b2,
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(3),
+                params: b3_params,
+                instructions: vec![],
+                term: Some(Terminator::Return {
+                    value: Some(Id(5)),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(4),
+                params: b4_params,
+                instructions: vec![],
+                term: Some(Terminator::Jump {
+                    id: Id(3),
+                    params: jmp_from_b4,
+                    span: 0,
+                }),
+            },
+        ];
+
+        ret_inline(&mut fun, &mut super::super::Scratch::default());
+
+        assert!(
+            matches!(&fun.blocks[1].term, Some(Terminator::Return { value: Some(v), .. }) if v.0 == 2)
+        );
+        assert!(
+            matches!(&fun.blocks[2].term, Some(Terminator::Return { value: Some(v), .. }) if v.0 == 4),
+            "arm jumping to the forwarding join must return directly"
+        );
+        assert!(fun.blocks[3].tombstone, "outer join is dead");
+        assert!(fun.blocks[4].tombstone, "forwarding join is dead");
+    }
+
+    /// The returned param is tracked by position: b2 returns its second param,
+    /// which b1 fills with its first, so b1 returns %v2 and b0 returns %v0.
+    #[test]
+    fn inlines_returned_param_at_any_position() {
+        let mut fun = ir::Func::new(
+            "f",
+            Id(0),
+            vec![
+                TypeId {
+                    id: Id(0),
+                    ty: Type::Int,
+                },
+                TypeId {
+                    id: Id(1),
+                    ty: Type::Int,
+                },
+            ],
+            Some(Type::Int),
+        );
+        let b0_params = fun.intern_params(vec![Id(0), Id(1)]);
+        let b1_params = fun.intern_params(vec![Id(2), Id(3)]);
+        let b2_params = fun.intern_params(vec![Id(4), Id(5)]);
+        let jmp_from_b0 = fun.intern_params(vec![Id(0), Id(1)]);
+        let jmp_from_b1 = fun.intern_params(vec![Id(3), Id(2)]);
+        fun.blocks = vec![
+            Block {
+                tombstone: false,
+                id: Id(0),
+                params: b0_params,
+                instructions: vec![],
+                term: Some(Terminator::Jump {
+                    id: Id(1),
+                    params: jmp_from_b0,
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(1),
+                params: b1_params,
+                instructions: vec![],
+                term: Some(Terminator::Jump {
+                    id: Id(2),
+                    params: jmp_from_b1,
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(2),
+                params: b2_params,
+                instructions: vec![],
+                term: Some(Terminator::Return {
+                    value: Some(Id(5)),
+                    span: 0,
+                }),
+            },
+        ];
+
+        ret_inline(&mut fun, &mut super::super::Scratch::default());
+
+        assert!(
+            matches!(&fun.blocks[0].term, Some(Terminator::Return { value: Some(v), .. }) if v.0 == 0)
+        );
+        assert!(
+            matches!(&fun.blocks[1].term, Some(Terminator::Return { value: Some(v), .. }) if v.0 == 2)
+        );
+        assert!(fun.blocks[1].tombstone);
+        assert!(fun.blocks[2].tombstone);
     }
 }

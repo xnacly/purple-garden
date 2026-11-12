@@ -195,8 +195,10 @@ switch %v0                       %v9 = Lookup %v0 [`a` -> 1, `b` -> 2], 0
 
 `ret_inline` gives every arm of an `if`/`match` its own `ret` instead of the
 indirection of jumping to a join block containing only `ret`, the join becomes
-a tombstone once every predecessor is rewritten. `indirect_jump` points a
-branch at the target of a block that only holds a `jmp`.
+a tombstone once every predecessor is rewritten. A nested `if`/`match` lowers
+to an inner join only forwarding to the outer one, `ret_inline` follows that
+chain to the `ret`, tracking which param ends up returned. `indirect_jump`
+points a branch at the target of a block that only holds a `jmp`.
 
 ### `tailcall`
 

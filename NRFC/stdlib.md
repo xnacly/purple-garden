@@ -12,7 +12,6 @@
   - [ ] cycles
   - [x] allocs
   - [x] used
-  - [ ] type(T)->Str
 - [ ] str
   - [x] contains
   - [x] get
@@ -27,23 +26,28 @@
   - [ ] from(Array<Byte>)
   - [x] from(Int)
   - [x] from(Double)
-- [ ] arr
+- [ ] map(K,V)
+  - [ ] has(K) -> bool
+  - [ ] put(K,V)
+  - [ ] get(K) -> Option<V>
+  - [ ] len
+- [ ] arr(T)
   - [ ] range
   - [ ] join
   - [ ] sum
   - [ ] flat
-  - [ ] get
-- [ ] opt
-  - [ ] some
-  - [ ] none
-  - [ ] is_some
-  - [ ] is_none
-  - [ ] unwrap
-  - [ ] or
-- [ ] opt/cmp
-  - [ ] and
-  - [ ] or
-  - [ ] either
+  - [ ] get(idx) -> Option<T>
+- [ ] opt(T)
+  - [ ] some(T) -> Option<T>
+  - [ ] none() -> Option<()>
+  - [ ] is_some(Option<T>) -> bool
+  - [ ] is_none(Option<T>) -> bool
+  - [ ] unwrap(Option<T>) -> T
+  - [ ] or(Option<T>, T) -> T
+- [ ] cmp
+  - [ ] min(T,T) -> T
+  - [ ] max(T,T) -> T
+
     ```rust
       #[pg_pkg]
       pub mod cmp {
