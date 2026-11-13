@@ -2139,11 +2139,15 @@ mod tests_x86 {
 ))]
 mod tests_aarch64 {
     use super::Jit;
-    use purple_garden_ir::{Block, Func, Id, Terminator, ptype::Type};
+    use purple_garden_ir::{Block, Func, Id, Terminator, TypeId, ptype::Type};
 
     #[test]
     fn scaffold_falls_back_to_bytecode() {
-        let mut func = Func::new("identity", Id(0), vec![Id(0)], Some(Type::Int));
+        let param = TypeId {
+            id: Id(0),
+            ty: Type::Int,
+        };
+        let mut func = Func::new("identity", Id(0), vec![param], Some(Type::Int));
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
             tombstone: false,
