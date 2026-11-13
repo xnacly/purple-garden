@@ -786,6 +786,57 @@ mod tests_x86 {
         }
     }
 
+    /// `fn f(x:Int) Double { weight(x) * (x as Double) }` with weight's table inlined: the double
+    /// lookup borrows x's register for the table address while x is still read after it.
+    #[test]
+    fn double_lookup_keeps_a_live_subject() {
+        let ty = |id, ty| TypeId { id: Id(id), ty };
+        let mut func = Func::new("f", Id(1), vec![ty(0, Type::Int)], Some(Type::Double));
+        let params = func.intern_params([Id(0)]);
+        let entries = func.intern_entries(
+            [(0, 0.5), (1, 1.5), (2, 2.5)]
+                .map(|(k, v)| (Const::Int(k), Const::Double(f64::to_bits(v)))),
+        );
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::Lookup {
+                    dst: ty(1, Type::Double),
+                    subject: Id(0),
+                    entries,
+                    default: Const::Double(f64::to_bits(9.0)),
+                    span: 0,
+                },
+                Instr::Cast {
+                    dst: ty(2, Type::Double),
+                    from: ty(0, Type::Int),
+                    span: 0,
+                },
+                Instr::Bin {
+                    op: BinOp::DMul,
+                    dst: ty(3, Type::Double),
+                    lhs: Id(1),
+                    rhs: Id(2),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(3)),
+                span: 0,
+            }),
+        });
+
+        let mut jit = Jit::new();
+        jit.compile_func(&func).expect("jit double lookup");
+        let code = jit.code();
+        for (x, want) in [(0, 0.0), (1, 1.5), (2, 5.0), (3, 27.0), (-4, -36.0)] {
+            let got = run_double(code, [x as u64]);
+            assert_eq!(got, want, "f({x})");
+        }
+    }
+
     static MIX: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
         name: "mix",
         doc: "",

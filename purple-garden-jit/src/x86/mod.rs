@@ -1489,10 +1489,20 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     return;
                 };
 
+                let dies = self.liveness[subject.0 as usize].1 <= self.pos;
                 let subject = self.ensure_register(*subject);
                 let subject = self.gpr(subject);
                 let dst = self.def(dst);
-                let dst = self.gpr(dst);
+                // An int dst holds the table address until it holds the value. A double is read
+                // through rax into its xmm, the table address borrows subject's register, saved
+                // around the load unless the lookup is subject's last use.
+                let (base, value, save) = match dst {
+                    Preg::Gpr(_) => {
+                        let dst = self.gpr(dst);
+                        (dst, dst, false)
+                    }
+                    Preg::Fpr(_) => (subject, GPR_SCRATCH, !dies),
+                };
 
                 // rax = the subject's slot, everything outside the table wraps
                 // to a huge slot and takes the default.
@@ -1516,14 +1526,19 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 });
                 let to_default = encode::jump(self.out, Cond::AboveEq);
 
-                // dst holds the table address until it holds the value.
-                self.emit(Insn::LeaRip { dst, disp: 0 });
+                if save {
+                    self.emit(Insn::Push { reg: subject });
+                }
+                self.emit(Insn::LeaRip { dst: base, disp: 0 });
                 let lea = self.out.len() - 4;
                 self.emit(Insn::LoadScaled8 {
-                    dst,
-                    base: dst,
+                    dst: value,
+                    base,
                     index: GPR_SCRATCH,
                 });
+                if save {
+                    self.emit(Insn::Pop { reg: subject });
+                }
                 let to_done = encode::jump(self.out, Cond::Always);
 
                 while !self.out.len().is_multiple_of(8) {
@@ -1544,10 +1559,20 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let default_at = self.out.len();
                 patch_rel32(self.out, to_default, to_default + 4, default_at)
                     .expect("default follows the table");
-                self.emit(Insn::MovAbs { dst, imm: default });
+                self.emit(Insn::MovAbs {
+                    dst: value,
+                    imm: default,
+                });
                 let done = self.out.len();
                 patch_rel32(self.out, to_done, to_done + 4, done)
                     .expect("lookup ends after the default");
+                if let Preg::Fpr(_) = dst {
+                    let dst = self.xmm(dst);
+                    self.emit(Insn::MovqToXmm {
+                        dst,
+                        src: GPR_SCRATCH,
+                    });
+                }
             }
             ir::Instr::Sys { dst, fun, args, .. } => {
                 let func = self.func;

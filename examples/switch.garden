@@ -27,6 +27,22 @@ fn sparse(n:Int) Int {
     }
 }
 
+#! Doubles by index, the lookup is n's last use.
+fn weight(n:Int) Double {
+    match {
+        n == 0 { 0.5 }
+        n == 1 { 1.5 }
+        n == 2 { 2.5 }
+        n == 3 { -4.0 }
+        { 9.0 }
+    }
+}
+
+#! weight's lookup inlined, n is still read after it.
+fn scaled(n:Int) Double {
+    weight(n) * (n as Double)
+}
+
 testing.assert(keyword("alpha") == 1)
 testing.assert(keyword(opt.or(str.slice("xbetax" 1 5) "")) == 2)
 testing.assert(keyword("delta") == 4)
@@ -34,3 +50,9 @@ testing.assert(keyword("epsilon") == 0)
 testing.assert(sparse(9) == 3)
 testing.assert(sparse(42) == 4)
 testing.assert(sparse(8) == 0)
+testing.assert((weight(2) * 2.0) as Int == 5)
+testing.assert(weight(3) < -3.9)
+testing.assert((weight(-1) as Int) == 9)
+testing.assert((scaled(1) * 2.0) as Int == 3)
+testing.assert((scaled(3) as Int) == -12)
+testing.assert((scaled(9) as Int) == 81)
