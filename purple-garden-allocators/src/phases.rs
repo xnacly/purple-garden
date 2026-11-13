@@ -32,9 +32,9 @@ impl<A> Phases<A> {
 }
 
 impl<A> Phases<MetricAlloc<A>> {
-    /// Total peak sums the phase peaks, an upper bound of the real one.
-    pub fn table(&self) -> String {
-        let rows = [
+    /// The metrics of every phase, by name, in pipeline order.
+    pub fn metrics(&self) -> [(&'static str, Metrics); 8] {
+        [
             ("scratch", self.scratch.metrics()),
             ("parse", self.parse.metrics()),
             ("typecheck", self.typecheck.metrics()),
@@ -43,7 +43,12 @@ impl<A> Phases<MetricAlloc<A>> {
             ("bytecode", self.cc.metrics()),
             ("jit", self.jit.metrics()),
             ("run", self.run.metrics()),
-        ];
+        ]
+    }
+
+    /// Total peak sums the phase peaks, an upper bound of the real one.
+    pub fn table(&self) -> String {
+        let rows = self.metrics();
         let total = rows.iter().fold(Metrics::default(), |t, (_, m)| Metrics {
             allocs: t.allocs + m.allocs,
             frees: t.frees + m.frees,
