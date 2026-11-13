@@ -193,26 +193,9 @@ pub(super) fn predecessor_counts<F: Allocator, S: Allocator>(
     let mut counts = Vec::with_capacity_in(fun.blocks.len(), scratch);
     counts.resize(fun.blocks.len(), 0);
 
-    for block in &fun.blocks {
-        if block.tombstone {
-            continue;
-        }
-
-        match &block.term {
-            Some(ir::Terminator::Jump { id, .. }) => counts[id.0 as usize] += 1,
-            Some(ir::Terminator::Branch { yes, no, .. })
-            | Some(ir::Terminator::BranchCmpImm { yes, no, .. })
-            | Some(ir::Terminator::BranchCmp { yes, no, .. }) => {
-                counts[yes.0.0 as usize] += 1;
-                counts[no.0.0 as usize] += 1;
-            }
-            Some(ir::Terminator::Switch { cases, default, .. }) => {
-                for case in fun.cases(*cases) {
-                    counts[case.target.0.0 as usize] += 1;
-                }
-                counts[default.0.0 as usize] += 1;
-            }
-            _ => {}
+    for block in fun.blocks.iter().filter(|b| !b.tombstone) {
+        if let Some(term) = &block.term {
+            fun.for_each_successor(term, |id| counts[id.0 as usize] += 1);
         }
     }
 

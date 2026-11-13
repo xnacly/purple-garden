@@ -620,7 +620,6 @@ name = "purple-garden-frontend"
 version = "0.1.0"
 dependencies = [
  "purple-garden-allocators",
- "purple-garden-bc",
  "purple-garden-ir",
  "purple-garden-runtime",
  "purple-garden-shared",
