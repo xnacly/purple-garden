@@ -54,6 +54,10 @@ pub fn ir<'f, F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'f, F
             &mut scratch,
         );
 
+        // Order: before const_fold, so a load of a stored array length or record field folds
+        // through, e.g. away the bounds check of a literal array indexed by a constant
+        ir::load_store_fold(fun, &mut scratch);
+
         // Order: we constant fold before imm_folding, otherwise we have fragmented half optimised
         // constant operations, we could have fully merged together at compiletime
         ir::const_fold(fun, &mut scratch);
@@ -78,7 +82,9 @@ pub fn ir<'f, F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'f, F
         ir::indirect_jump(fun);
         ir::tailcall(fun);
         ir::addrof_fold(fun, &mut scratch);
-        ir::load_store_fold(fun);
+        // Order: again after arith_simplify and addrof_fold, which turn computed element and field
+        // addresses into the base+offset the stores used
+        ir::load_store_fold(fun, &mut scratch);
 
         // Order: dead code elimination always last, for the backends having less work (and the reg
         // allocator)
