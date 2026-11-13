@@ -149,6 +149,10 @@ fn collect_node(
             }
             collect_node(ast, typecheck, *target, analysis);
         }
+        Node::Index { target, index, .. } => {
+            collect_node(ast, typecheck, *target, analysis);
+            collect_node(ast, typecheck, *index, analysis);
+        }
         Node::Cast { lhs, rhs, .. } => {
             collect_node(ast, typecheck, *lhs, analysis);
             analysis.add_garden_hover(

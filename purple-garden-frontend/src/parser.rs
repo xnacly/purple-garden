@@ -531,6 +531,20 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
             match self.cur().t {
                 Type::Dot => {
                     self.advance()?;
+                    if self.cur().t == Type::BraketLeft {
+                        let src = self.cur().clone();
+                        self.advance()?;
+                        let index = self.parse_expr(0)?;
+                        self.expect(Type::BraketRight)?;
+                        let id = self.next_id();
+                        lhs = self.push_node(Node::Index {
+                            id,
+                            src,
+                            target: lhs,
+                            index,
+                        });
+                        continue;
+                    }
                     let field = self.expect_ident()?;
 
                     let id = self.next_id();

@@ -104,6 +104,10 @@ impl<'src> DefinitionCollector<'src> {
                 }
             }
             Node::Field { target, .. } => self.node(ast, *target),
+            Node::Index { target, index, .. } => {
+                self.node(ast, *target);
+                self.node(ast, *index);
+            }
             Node::Cast { lhs, .. } => self.node(ast, *lhs),
             Node::Import { pkgs, .. } => {
                 for pkg in *pkgs {

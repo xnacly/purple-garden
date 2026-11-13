@@ -85,6 +85,10 @@ impl<'src, 'ast> Ast<'src, 'ast> {
                 self.span(*target)?,
                 Span::from_token(name),
             ])),
+            Node::Index { target, index, .. } => Some(Self::cover_spans(&[
+                self.span(*target)?,
+                self.span(*index)?,
+            ])),
             Node::Cast { src, lhs, rhs, .. } => Some(Self::cover_spans(&[
                 self.span(*lhs)?,
                 Span::from_token(src),
@@ -153,7 +157,7 @@ impl<'src, 'ast> Ast<'src, 'ast> {
                 .first()
                 .map(|((token, _), _)| token.start)
                 .unwrap_or(default.0.start),
-            Node::Call { target, .. } | Node::Field { target, .. } => {
+            Node::Call { target, .. } | Node::Field { target, .. } | Node::Index { target, .. } => {
                 self.node_start(*target)? as usize
             }
             Node::Cast { src, .. }
@@ -276,6 +280,14 @@ pub enum Node<'src, 'ast> {
         name: Token<'src>,
     },
 
+    /// <target>.[<index>], `src` is the `[`
+    Index {
+        id: usize,
+        src: Token<'src>,
+        target: NodeId,
+        index: NodeId,
+    },
+
     /// <lhs> as <rhs>
     Cast {
         id: usize,
@@ -341,7 +353,8 @@ impl Node<'_, '_> {
             | Node::Import { id, .. }
             | Node::Extern { id, .. }
             | Node::Record { id, .. }
-            | Node::Field { id, .. } => *id,
+            | Node::Field { id, .. }
+            | Node::Index { id, .. } => *id,
         }
     }
 }
@@ -471,6 +484,13 @@ impl Ast<'_, '_> {
                 write!(f, "(field target: ")?;
                 self.fmt_node_inline(*target, f)?;
                 write!(f, " name: {})", Self::fmt_ident_token(name))
+            }
+            Node::Index { target, index, .. } => {
+                write!(f, "(index target: ")?;
+                self.fmt_node_inline(*target, f)?;
+                write!(f, " index: ")?;
+                self.fmt_node_inline(*index, f)?;
+                write!(f, ")")
             }
             Node::Let { name, rhs, .. } => {
                 write!(f, "(let {} ", Self::fmt_ident_token(name))?;
@@ -643,6 +663,16 @@ impl Ast<'_, '_> {
                 writeln!(f, "{child_pad}target:")?;
                 self.fmt_node_sexpr(*target, f, indent + 2)?;
                 writeln!(f, "{}name: {}", child_pad, Self::fmt_ident_token(name))?;
+                writeln!(f, "{pad})")
+            }
+            Node::Index { target, index, .. } => {
+                let child_pad = "  ".repeat(indent + 1);
+
+                writeln!(f, "{pad}(index")?;
+                writeln!(f, "{child_pad}target:")?;
+                self.fmt_node_sexpr(*target, f, indent + 2)?;
+                writeln!(f, "{child_pad}index:")?;
+                self.fmt_node_sexpr(*index, f, indent + 2)?;
                 writeln!(f, "{pad})")
             }
         }

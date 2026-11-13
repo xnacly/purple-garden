@@ -63,6 +63,10 @@ pub(super) fn node_span(ast: &Ast<'_, '_>, node_id: NodeId) -> Option<Span> {
         Node::Field { target, name, .. } => {
             Some(cover_spans(&[node_span(ast, *target)?, token_span(name)]))
         }
+        Node::Index { target, index, .. } => Some(cover_spans(&[
+            node_span(ast, *target)?,
+            node_span(ast, *index)?,
+        ])),
         Node::Cast { src, lhs, rhs, .. } => Some(cover_spans(&[
             node_span(ast, *lhs)?,
             token_span(src),
