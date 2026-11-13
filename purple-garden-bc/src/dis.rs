@@ -55,6 +55,25 @@ pub fn highlight_instr(s: &str) -> Highlights {
     out
 }
 
+/// One line of the bytecode listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Line {
+    /// The first op of a function is at `pc`.
+    Func {
+        pc: usize,
+        name: String,
+    },
+    /// A jump target inside a function is at `pc`.
+    Block {
+        pc: usize,
+        label: String,
+    },
+    Op {
+        pc: usize,
+        text: String,
+    },
+}
+
 pub struct Disassembler<
     'dis,
     S: std::alloc::Allocator + Clone = std::alloc::Global,
@@ -129,7 +148,20 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
         map
     }
 
-    pub fn disassemble_bytecode(&self) {
+    /// The constants in `globals`, by slot.
+    #[must_use]
+    pub fn globals(&self) -> Vec<String> {
+        self.cc
+            .globals
+            .to_vec()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    /// The bytecode listing, function and block labels in front of their first op.
+    #[must_use]
+    pub fn lines(&self) -> Vec<Line> {
         let funcs_by_pc: HashMap<u32, &crate::CcFunc> = self
             .cc
             .functions
@@ -187,7 +219,6 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
             })
             .collect();
 
-        let globals = self.cc.globals.to_vec();
         let std_fns = self.cc.std_fns.to_vec();
         let std_mapping = Self::build_fn_map();
         let target_label = |target: u16, cur_func: &crate::CcFunc| -> String {
@@ -206,19 +237,6 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                 format!("{}-0x{:0x}", cur_func.name(), base - target as usize)
             }
         };
-
-        let color = purple_garden_shared::ansi::enabled();
-
-        if !globals.is_empty() {
-            println!("{}", paint(color, Class::Section, "globals:"));
-            for (i, g) in globals.iter().enumerate() {
-                println!(
-                    "  {}:    {}",
-                    paint(color, Class::Addr, &format!("{i:04}")),
-                    paint(color, Class::Imm, &g.to_string())
-                );
-            }
-        }
 
         let render = |instr: &Op, cur_func: &crate::CcFunc| -> String {
             match instr {
@@ -368,36 +386,81 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
 
         let entry = self.cc.functions.get(&Id(0)).unwrap();
         let mut cur_func = entry;
-        let rendered: Vec<String> = self
-            .bc
+        let mut lines = Vec::with_capacity(self.bc.len() + funcs_by_pc.len());
+        for (pc, instr) in self.bc.iter().enumerate() {
+            if let Some(func) = funcs_by_pc.get(&(pc as u32)) {
+                cur_func = func;
+                lines.push(Line::Func {
+                    pc,
+                    name: func.name().to_string(),
+                });
+            }
+            if let Some(label) = block_labels.get(&pc) {
+                lines.push(Line::Block {
+                    pc,
+                    label: label.clone(),
+                });
+            }
+            lines.push(Line::Op {
+                pc,
+                text: render(instr, cur_func),
+            });
+        }
+        lines
+    }
+
+    pub fn disassemble_bytecode(&self) {
+        let color = purple_garden_shared::ansi::enabled();
+
+        let globals = self.globals();
+        if !globals.is_empty() {
+            println!("{}", paint(color, Class::Section, "globals:"));
+            for (i, g) in globals.iter().enumerate() {
+                println!(
+                    "  {}:    {}",
+                    paint(color, Class::Addr, &format!("{i:04}")),
+                    paint(color, Class::Imm, g)
+                );
+            }
+        }
+
+        let lines = self.lines();
+        let width = lines
             .iter()
-            .enumerate()
-            .map(|(pc, instr)| {
-                if let Some(func) = funcs_by_pc.get(&(pc as u32)) {
-                    cur_func = func;
-                }
-                render(instr, cur_func)
+            .filter_map(|line| match line {
+                Line::Op { text, .. } => Some(text.len()),
+                _ => None,
             })
-            .collect();
-        let width = rendered.iter().map(String::len).max().unwrap_or(0);
+            .max()
+            .unwrap_or(0);
 
         let mut last_source_line = None;
         let mut func_def_line = None;
-        for (pc, instr) in rendered.iter().enumerate() {
-            let is_entry = funcs_by_pc.contains_key(&(pc as u32));
-            if let Some(func) = funcs_by_pc.get(&(pc as u32)) {
-                println!(
-                    "\n{:08x} {}:",
-                    pc,
-                    paint(color, Class::Func, &format!("<{}>", func.name()))
-                );
-                last_source_line = None;
-                func_def_line = self.source_line(pc).map(|(n, _)| n);
-            }
-            if let Some(label) = block_labels.get(&pc) {
-                println!("{pc:08x} {}:", paint(color, Class::Block, &format!("<{label}>")));
-            }
+        let mut func_pc = None;
+        for line in &lines {
+            let (pc, instr) = match line {
+                Line::Func { pc, name } => {
+                    println!(
+                        "\n{:08x} {}:",
+                        pc,
+                        paint(color, Class::Func, &format!("<{name}>"))
+                    );
+                    last_source_line = None;
+                    func_def_line = self.source_line(*pc).map(|(n, _)| n);
+                    func_pc = Some(*pc);
+                    continue;
+                }
+                Line::Block { pc, label } => {
+                    println!(
+                        "{pc:08x} {}:",
+                        paint(color, Class::Block, &format!("<{label}>"))
+                    );
+                    continue;
+                }
+                Line::Op { pc, text } => (*pc, text),
+            };
 
+            let is_entry = func_pc == Some(pc);
             let addr = paint(color, Class::Addr, &format!("{pc:04x}:"));
             let hex = self.bc[pc]
                 .encode()
