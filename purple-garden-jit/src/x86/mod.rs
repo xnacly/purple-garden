@@ -783,7 +783,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             !matches!(
                 i,
                 ir::Instr::Un {
-                    op: UnOp::Assert,
+                    op: UnOp::Assert(_),
                     ..
                 }
             )
@@ -1616,7 +1616,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             }
             ir::Instr::Un { op, dst, src, .. } => {
                 let feature = match op {
-                    UnOp::Assert | UnOp::INot | UnOp::DSqrt => true,
+                    UnOp::Assert(_) | UnOp::INot | UnOp::DSqrt => true,
                     UnOp::IPopcnt => std::arch::is_x86_feature_detected!("popcnt"),
                     UnOp::ICtz => std::arch::is_x86_feature_detected!("bmi1"),
                     UnOp::IClz => std::arch::is_x86_feature_detected!("lzcnt"),
@@ -1627,7 +1627,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 }
                 let src = self.ensure_register(*src);
                 let insn = match op {
-                    UnOp::Assert => {
+                    UnOp::Assert(check) => {
                         let cond = self.gpr(src);
                         self.emit(Insn::Test {
                             lhs: cond,
@@ -1636,7 +1636,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         let holds = encode::jump(self.out, Cond::NotZero);
                         self.call(
                             purple_garden_runtime::jit_trap_assert as *const () as u64,
-                            &[AbiArg::Reg(VM)],
+                            &[AbiArg::Reg(VM), AbiArg::Imm(*check as u64)],
                             None,
                         );
                         let resume = self.out.len();

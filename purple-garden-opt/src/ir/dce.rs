@@ -46,9 +46,9 @@ pub fn dce<F: Allocator, S: Allocator>(fun: &mut ir::Func<'_, F>, scratch: &mut 
 
 fn removable(instr: &ir::Instr<'_>) -> bool {
     match instr {
-        ir::Instr::Call { .. }
-        | ir::Instr::Un {
-            op: ir::UnOp::Assert,
+        ir::Instr::Call { .. } => false,
+        ir::Instr::Un {
+            op: ir::UnOp::Assert(_),
             ..
         } => false,
         ir::Instr::Sys { fun, .. } => fun.pure,
@@ -81,7 +81,7 @@ mod tests {
             id: Id(0),
             params,
             instructions: vec![Instr::Un {
-                op: UnOp::Assert,
+                op: UnOp::Assert(ir::Check::Assertion),
                 dst: TypeId {
                     id: Id(1),
                     ty: Type::Void,
@@ -99,7 +99,7 @@ mod tests {
         assert!(matches!(
             fun.blocks[0].instructions[0],
             Instr::Un {
-                op: UnOp::Assert,
+                op: UnOp::Assert(_),
                 ..
             }
         ));

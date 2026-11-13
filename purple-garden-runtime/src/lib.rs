@@ -7,7 +7,7 @@
 use std::fmt::{self, Write as _};
 
 pub use purple_garden_ir::{
-    BinOp, Fn, Intrinsic, NativeFn, UnOp,
+    BinOp, Check, Fn, Intrinsic, NativeFn, UnOp,
     ptype::{Field, Type},
 };
 pub use purple_garden_shared::BuiltinFn;
@@ -44,8 +44,8 @@ pub use crate::vm::{
 #[doc(hidden)]
 pub mod embed {
     pub use super::{
-        Anomaly, BinOp, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Slot, Type,
-        UnOp, Value, Vm, VmConfig, alloc_record, copy_record, decode_record_field,
+        Anomaly, BinOp, Check, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Slot,
+        Type, UnOp, Value, Vm, VmConfig, alloc_record, copy_record, decode_record_field,
         encode_record_field,
     };
 }

@@ -441,6 +441,10 @@ impl PgFunction {
             Some(IntrinsicAttr::Bin(op)) => {
                 quote!(Some(#api::embed::Intrinsic::Bin(#api::embed::BinOp::#op)))
             }
+            // a plain Assert raises the default AssertionFailed
+            Some(IntrinsicAttr::Un(op)) if op == "Assert" => quote!(Some(
+                #api::embed::Intrinsic::Un(#api::embed::UnOp::Assert(#api::embed::Check::Assertion))
+            )),
             Some(IntrinsicAttr::Un(op)) => {
                 quote!(Some(#api::embed::Intrinsic::Un(#api::embed::UnOp::#op)))
             }

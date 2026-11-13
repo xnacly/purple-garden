@@ -1,7 +1,7 @@
 use std::{alloc::Layout, ffi::c_void};
 
 use crate::{
-    Anomaly, BuiltinFn, Vm,
+    Anomaly, BuiltinFn, Check, Vm,
     gc::{AllocType, MAX_ALLOC_SIZE},
 };
 
@@ -130,16 +130,16 @@ pub unsafe extern "C" fn jit_trap_div_zero(vm: *mut c_void) -> ! {
     unsafe { abort(vm) }
 }
 
-/// Raise an assertion failure from JIT code and leave like [`jit_trap_div_zero`].
+/// Raise the anomaly of a failed [`Check`] from JIT code and leave like [`jit_trap_div_zero`].
 ///
 /// # Safety
 ///
 /// `vm` must be a valid, uniquely borrowed pointer to a [`Vm`], called from native code
 /// entered through [`enter_native`].
-pub unsafe extern "C" fn jit_trap_assert(vm: *mut c_void) -> ! {
+pub unsafe extern "C" fn jit_trap_assert(vm: *mut c_void, check: u64) -> ! {
     // SAFETY: caller upholds # Safety
     let vm_ref = unsafe { &mut *vm.cast::<Vm>() };
-    vm_ref.trap(Anomaly::AssertionFailed { pc: vm_ref.pc });
+    vm_ref.trap(Anomaly::failed(Check::from_u32(check as u32), vm_ref.pc));
     // SAFETY: caller upholds # Safety
     unsafe { abort(vm) }
 }

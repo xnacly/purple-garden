@@ -42,3 +42,20 @@ pub(super) unsafe fn load_slot<const B: bool>(
         next!(vm, code, pc.wrapping_add(1))
     }
 }
+
+pub(super) unsafe fn assert<const B: bool>(
+    vm: V,
+    code: *const Packed,
+    pc: usize,
+    op: Packed,
+) -> usize {
+    unsafe {
+        let (cond, check) = op.ru21();
+        trap_if!(
+            vm,
+            !r!(vm, cond).as_bool(),
+            Anomaly::failed(crate::Check::from_u32(check), pc)
+        );
+        next!(vm, code, pc.wrapping_add(1))
+    }
+}

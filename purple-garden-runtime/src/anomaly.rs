@@ -8,6 +8,7 @@ pub enum Anomaly {
     AllocationFailed { pc: usize },
     StackOverflow { pc: usize },
     AssertionFailed { pc: usize },
+    IndexOutOfBounds { pc: usize },
 }
 
 impl std::fmt::Display for Anomaly {
@@ -19,6 +20,15 @@ impl std::fmt::Display for Anomaly {
 impl std::error::Error for Anomaly {}
 
 impl Anomaly {
+    /// The anomaly a failing assert with `check` raises at `pc`.
+    #[must_use]
+    pub fn failed(check: purple_garden_ir::Check, pc: usize) -> Self {
+        match check {
+            purple_garden_ir::Check::Assertion => Anomaly::AssertionFailed { pc },
+            purple_garden_ir::Check::InBounds => Anomaly::IndexOutOfBounds { pc },
+        }
+    }
+
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
@@ -26,6 +36,7 @@ impl Anomaly {
             Anomaly::AllocationFailed { .. } => "Allocation failed",
             Anomaly::StackOverflow { .. } => "Stack space exhausted",
             Anomaly::AssertionFailed { .. } => "Assertion failed",
+            Anomaly::IndexOutOfBounds { .. } => "Index out of bounds",
         }
     }
 
@@ -37,7 +48,8 @@ impl Anomaly {
             Anomaly::DivisionByZero { pc }
             | Anomaly::StackOverflow { pc }
             | Anomaly::AllocationFailed { pc }
-            | Anomaly::AssertionFailed { pc } => *pc,
+            | Anomaly::AssertionFailed { pc }
+            | Anomaly::IndexOutOfBounds { pc } => *pc,
         }
     }
 }

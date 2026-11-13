@@ -3,16 +3,16 @@ use std::{collections::HashMap, sync::OnceLock};
 extern crate self as purple_garden;
 
 pub use purple_garden_runtime::{
-    Anomaly, BinOp, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Type, UnOp, Value,
-    Vm, alloc_record, copy_record, decode_record_field, encode_record_field,
+    Anomaly, BinOp, Check, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Type, UnOp,
+    Value, Vm, alloc_record, copy_record, decode_record_field, encode_record_field,
 };
 
 /// Compatibility namespace used by embedding macros.
 #[doc(hidden)]
 pub mod embed {
     pub use super::{
-        Anomaly, BinOp, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Type, UnOp,
-        Value, Vm, alloc_record, copy_record, decode_record_field, encode_record_field,
+        Anomaly, BinOp, Check, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Type,
+        UnOp, Value, Vm, alloc_record, copy_record, decode_record_field, encode_record_field,
     };
 }
 

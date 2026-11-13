@@ -402,6 +402,7 @@ ops! {
     /// Trap with [`crate::Anomaly::AssertionFailed`] when `cond` is false.
     Assert {
         cond: u8,
+        check: crate::Check,
     },
     /// Stop the dispatch loop
     Halt,

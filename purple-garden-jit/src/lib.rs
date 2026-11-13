@@ -1498,7 +1498,7 @@ mod tests_x86 {
             id: Id(0),
             params,
             instructions: vec![Instr::Un {
-                op: UnOp::Assert,
+                op: UnOp::Assert(purple_garden_ir::Check::Assertion),
                 dst: TypeId {
                     id: Id(1),
                     ty: Type::Void,

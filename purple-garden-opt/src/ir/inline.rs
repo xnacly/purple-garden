@@ -545,7 +545,7 @@ mod tests {
                 span: 42,
             },
             Instr::Un {
-                op: UnOp::Assert,
+                op: UnOp::Assert(ir::Check::Assertion),
                 dst: TypeId {
                     id: Id(2),
                     ty: Type::Void,
@@ -563,7 +563,7 @@ mod tests {
                     i,
                     Instr::BinImm { .. }
                         | Instr::Un {
-                            op: UnOp::Assert,
+                            op: UnOp::Assert(_),
                             ..
                         }
                 )

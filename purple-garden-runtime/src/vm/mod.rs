@@ -402,8 +402,12 @@ mod ops {
 
     #[test]
     fn assert_traps_on_false_only() {
-        run(vec![Op::LoadI { dst: 0, value: 1 }, Op::Assert { cond: 0 }]);
-        let err = run_err(vec![Op::LoadI { dst: 0, value: 0 }, Op::Assert { cond: 0 }]);
+        let assert = Op::Assert {
+            cond: 0,
+            check: crate::Check::Assertion,
+        };
+        run(vec![Op::LoadI { dst: 0, value: 1 }, assert]);
+        let err = run_err(vec![Op::LoadI { dst: 0, value: 0 }, assert]);
         assert!(matches!(err, Anomaly::AssertionFailed { pc: 1 }));
     }
 

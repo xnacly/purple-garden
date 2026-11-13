@@ -84,7 +84,7 @@ impl<const B: bool> Handlers<B> {
             Tag::Load => rru16::load::<B>,
             Tag::AddrOf => rru16::addr_of::<B>,
             Tag::Ret => ret::<B>,
-            Tag::Assert => r::assert::<B>,
+            Tag::Assert => ru21::assert::<B>,
             Tag::Halt => halt::<B>,
             Tag::Nop => nop::<B>,
         }

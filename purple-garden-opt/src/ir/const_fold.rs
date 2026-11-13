@@ -331,9 +331,12 @@ fn try_const_fold<S: Allocator>(
             true
         }
         Instr::Un {
-            op: UnOp::Assert, ..
+            op: UnOp::Assert(_),
+            ..
         } => false,
-        Instr::Un { op, dst, src, span } => {
+        Instr::Un {
+            op, dst, src, span, ..
+        } => {
             let Some(value) = scratch
                 .const_def(*src)
                 .and_then(|def| const_value(previous, def))

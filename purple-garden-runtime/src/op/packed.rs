@@ -216,9 +216,9 @@ impl super::Op {
                     crate::op::Op::Ret | crate::op::Op::Halt | crate::op::Op::Nop => 0,
 
                     // r
-                    crate::op::Op::Push { src: a }
-                    | crate::op::Op::Pop { dst: a }
-                    | crate::op::Op::Assert { cond: a } => encode_packed!(r, a),
+                    crate::op::Op::Push { src: a } | crate::op::Op::Pop { dst: a } => {
+                        encode_packed!(r, a)
+                    }
 
                     // rr
                     crate::op::Op::CastToInt { dst: a, src: b }
@@ -279,6 +279,9 @@ impl super::Op {
                         encode_packed!(ru21, dst, idx)
                     }
                     crate::op::Op::LoadSlot { dst, slot } => encode_packed!(ru21, dst, slot),
+                    crate::op::Op::Assert { cond, check } => {
+                        encode_packed!(ru21, cond, check as u32)
+                    }
                     crate::op::Op::StoreSlot { slot, src } => encode_packed!(ru21, src, slot),
 
                     // t16

@@ -1397,12 +1397,15 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 self.sys(pos, dst.id, fun.ptr, &[*lhs, *rhs]);
             }
             ir::Instr::Un {
-                op: ir::UnOp::Assert,
+                op: ir::UnOp::Assert(check),
                 src,
                 ..
             } => {
                 let cond = self.ensure_register(*src);
-                self.emit(Op::Assert { cond });
+                self.emit(Op::Assert {
+                    cond,
+                    check: *check,
+                });
                 // a Void value is never read, not reserving a value for assert is fine :)
                 // self.ensure_register(dst.id);
             }
@@ -1676,7 +1679,11 @@ fn called_instead(i: &ir::Instr<'_>) -> Option<&'static ir::Fn<'static>> {
                 | ir::BinOp::IUShr),
             ..
         } => ir::Intrinsic::Bin(*op),
-        ir::Instr::Un { op, .. } if *op != ir::UnOp::Assert => ir::Intrinsic::Un(*op),
+        ir::Instr::Un {
+            op: ir::UnOp::Assert(_),
+            ..
+        } => return None,
+        ir::Instr::Un { op, .. } => ir::Intrinsic::Un(*op),
         _ => return None,
     };
     purple_garden_std::intrinsic_fn(intrinsic)
@@ -1933,7 +1940,7 @@ mod tests {
                     span: 0,
                 },
                 Instr::Un {
-                    op: UnOp::Assert,
+                    op: UnOp::Assert(ir::Check::Assertion),
                     dst: type_id(1, Type::Void),
                     src: Id(0),
                     span: 0,
@@ -1943,7 +1950,7 @@ mod tests {
         ));
 
         assert!(
-            has_op(&ops, |op| matches!(op, Op::Assert { cond: 0 })),
+            has_op(&ops, |op| matches!(op, Op::Assert { cond: 0, .. })),
             "expected UnOp::Assert to lower to Op::Assert: {ops:?}"
         );
     }

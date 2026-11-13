@@ -160,8 +160,9 @@ pub enum BinOp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnOp {
-    /// Traps with an assertion failure if the Bool operand is false, its Void value is never read
-    Assert,
+    /// Traps with the anomaly of its [`Check`] if the Bool operand is false, its Void value is
+    /// never read
+    Assert(Check),
     INot,
     IPopcnt,
     /// 64 for 0
@@ -169,6 +170,24 @@ pub enum UnOp {
     /// 64 for 0
     IClz,
     DSqrt,
+}
+
+/// What a failing [`UnOp::Assert`] checked, which anomaly it raises.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Check {
+    Assertion,
+    InBounds,
+}
+
+impl Check {
+    #[must_use]
+    pub fn from_u32(check: u32) -> Self {
+        match check {
+            0 => Check::Assertion,
+            _ => Check::InBounds,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -986,7 +1005,7 @@ mod tests {
                 span: 0,
             },
             Instr::Un {
-                op: UnOp::Assert,
+                op: UnOp::Assert(Check::Assertion),
                 dst: id(14),
                 src: Id(15),
                 span: 0,
@@ -1080,7 +1099,7 @@ mod tests {
                 span: 0,
             },
             Instr::Un {
-                op: UnOp::Assert,
+                op: UnOp::Assert(Check::Assertion),
                 dst: type_id(206),
                 src: v(),
                 span: 0,
