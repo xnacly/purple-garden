@@ -18,7 +18,8 @@ use crate::{
     lex::{self, Token, Type},
 };
 use purple_garden_ir::{
-    BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, ParamsId, Terminator, TypeId, ptype,
+    BinOp, Block, Check, Const, EMPTY_PARAMS, Func, Id, Instr, ParamsId, Terminator, TypeId, UnOp,
+    ptype,
 };
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
@@ -162,6 +163,40 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
         self.ctx.func.blocks[self.ctx.block.0 as usize]
             .instructions
             .push(i);
+    }
+
+    /// Emits `make(dst)` for a fresh value of type `ty`, returning its id.
+    fn value(
+        &mut self,
+        ty: ptype::Type<'lower>,
+        make: impl FnOnce(TypeId<'lower>) -> Instr<'lower>,
+    ) -> Id {
+        let id = self.ctx.id_store.new_value();
+        self.emit(make(TypeId { id, ty }));
+        id
+    }
+
+    /// The field of type `ty` at `base + offset`.
+    fn field(&mut self, ty: ptype::Type<'lower>, base: Id, offset: u32, span: u32) -> Id {
+        // The offset is relative to the target record, but the access
+        // mode depends on the field's type: inline nested records are
+        // represented by an interior pointer, while scalar fields are
+        // loaded as VM values.
+        if matches!(ty, ptype::Type::Record(_)) {
+            self.value(ty, |dst| Instr::AddrOf {
+                dst,
+                base,
+                offset,
+                span,
+            })
+        } else {
+            self.value(ty, |dst| Instr::Load {
+                dst,
+                base,
+                offset,
+                span,
+            })
+        }
     }
 
     fn new_block(&mut self) -> Id {
@@ -431,29 +466,73 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                     .field_offset(field_name)
                     .expect("record field was typechecked") as u32;
 
-                let field_id = self.ctx.id_store.new_value();
-                let dst = TypeId { id: field_id, ty };
-                // The offset is relative to the target record, but the access
-                // mode depends on the field's type: inline nested records are
-                // represented by an interior pointer, while scalar fields are
-                // loaded as VM values.
-                if matches!(dst.ty, ptype::Type::Record(_)) {
-                    self.emit(Instr::AddrOf {
+                Some(self.field(ty, base, offset, name.start as u32))
+            }
+            Node::Index {
+                id,
+                src,
+                target,
+                index,
+            } => {
+                use ptype::Type::{Bool, Int, Void};
+                let span = src.start as u32;
+                let base = self.lower_node(ast, *target)?.unwrap();
+                let idx = self.lower_node(ast, *index)?.unwrap();
+                let array_ty = self.types.get(ast.value_id(*target)).cloned().unwrap();
+                let ty = self.types.get(*id).cloned().unwrap();
+
+                // the length is the array's first word, see the Array lowering
+                let len = self.value(Int, |dst| Instr::Load {
+                    dst,
+                    base,
+                    offset: 0,
+                    span,
+                });
+                let minus_one = self.value(Int, |dst| Instr::LoadConst {
+                    dst,
+                    value: Const::Int(-1),
+                    span,
+                });
+                for (op, rhs) in [(BinOp::IGt, minus_one), (BinOp::ILt, len)] {
+                    let holds = self.value(Bool, |dst| Instr::Bin {
+                        op,
                         dst,
-                        base,
-                        offset,
-                        span: name.start as u32,
+                        lhs: idx,
+                        rhs,
+                        span,
                     });
-                } else {
-                    self.emit(Instr::Load {
+                    self.value(Void, |dst| Instr::Un {
+                        op: UnOp::Assert(Check::InBounds),
                         dst,
-                        base,
-                        offset,
-                        span: name.start as u32,
+                        src: holds,
+                        span,
                     });
                 }
 
-                Some(field_id)
+                // the element is a field at a computed offset, laid out like the Array lowering
+                let word_size = std::mem::size_of::<purple_garden_runtime::Value>();
+                let header = align_up(word_size, ty.align()) as u32;
+                let stride = align_up(ty.size(), ty.align()) as i64;
+                let stride = self.value(Int, |dst| Instr::LoadConst {
+                    dst,
+                    value: Const::Int(stride),
+                    span,
+                });
+                let offset = self.value(Int, |dst| Instr::Bin {
+                    op: BinOp::IMul,
+                    dst,
+                    lhs: idx,
+                    rhs: stride,
+                    span,
+                });
+                let element = self.value(array_ty, |dst| Instr::Bin {
+                    op: BinOp::IAdd,
+                    dst,
+                    lhs: base,
+                    rhs: offset,
+                    span,
+                });
+                Some(self.field(ty, element, header, span))
             }
             Node::Bin { op, lhs, rhs, id } => {
                 use BinOp::{
