@@ -578,7 +578,9 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
         | Type::LessThan
         | Type::LessEqual
         | Type::GreaterThan
-        | Type::GreaterEqual = self.cur().t
+        | Type::GreaterEqual
+        | Type::Ampersand
+        | Type::Pipe = self.cur().t
         {
             let op = self.cur().clone();
 
@@ -622,21 +624,24 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
     fn prefix_binding_power(op: &Type) -> u8 {
         // TODO: add !<expr>,?<expr>, the latter being the try operator
         match op {
-            Type::Plus | Type::Minus => 5,
+            Type::Plus | Type::Minus => 11,
             _ => unreachable!(),
         }
     }
 
     fn infix_binding_power(op: &Type) -> Option<(u8, u8)> {
         Some(match op {
-            Type::Plus | Type::Minus => (1, 2),
-            Type::Asteriks | Type::Slash | Type::Percent => (3, 4),
+            // looser than comparisons, so `a < b & c < d` joins both results
+            Type::Pipe => (0, 1),
+            Type::Ampersand => (2, 3),
             Type::DoubleEqual
             | Type::NotEqual
             | Type::GreaterThan
             | Type::GreaterEqual
             | Type::LessThan
-            | Type::LessEqual => (0, 1),
+            | Type::LessEqual => (4, 5),
+            Type::Plus | Type::Minus => (6, 7),
+            Type::Asteriks | Type::Slash | Type::Percent => (8, 9),
             _ => return None,
         })
     }

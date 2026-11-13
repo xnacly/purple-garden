@@ -46,7 +46,16 @@ Both sides of a binary operator must have the same type. There is no implicit pr
 
 <  >  <=  >=            Int      -> Bool
                         Double   -> Bool
+
+&  |                    Bool     -> Bool
 ```
+
+`&` and `|` are the logical and and or: the right side is only evaluated if the left one doesn't
+decide the result, so `n != 0 & 10 / n > 1` never divides by zero. Bitwise operations on `Int` are
+in the `bit` package.
+
+From loosest to tightest: `|`, `&`, comparisons, `+` `-`, `*` `/` `%`. So `a < b & b < c` is
+`(a < b) & (b < c)`.
 
 Equality (`==` / `!=`) is not defined on `Double` on purpose: comparing floats for exact equality is almost always a bug. Use `<` / `>` to check ordering, or wrap the comparison yourself when you really mean it.
 

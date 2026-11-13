@@ -1,5 +1,6 @@
-# <=, >= and !=, on runtime operands (parameters) and on constants the
-# optimiser folds.
+# <=, >=, !=, & and |, on runtime operands (parameters) and on constants the
+# optimiser folds. & and | are the logical and/or, they only evaluate their
+# right side if the left one doesn't decide the result.
 import "testing"
 
 fn le(a:Int b:Int) Bool { a <= b }
@@ -9,6 +10,8 @@ fn dge(a:Double b:Double) Bool { a >= b }
 fn ne(a:Int b:Int) Bool { a != b }
 fn bne(a:Bool b:Bool) Bool { a != b }
 fn sne(a:Str b:Str) Bool { a != b }
+fn and(a:Bool b:Bool) Bool { a & b }
+fn or(a:Bool b:Bool) Bool { a | b }
 fn div(a:Double b:Double) Double { a / b }
 
 fn flag(set:Bool value:Int) Int {
@@ -44,6 +47,33 @@ testing.assert(bne(true true) == false)
 testing.assert(sne("a" "b"))
 testing.assert(sne("same" "same") == false)
 
+#! Truth table of and and or as one Int, row by row in its bits.
+fn table(a:Bool b:Bool) Int {
+    flag(and(a b) 1) + flag(or(a b) 2)
+}
+testing.assert(table(false false) == 0)
+testing.assert(table(false true) == 2)
+testing.assert(table(true false) == 2)
+testing.assert(table(true true) == 3)
+
+#! The right sides trap on n == 0 unless & and | skip them.
+fn safe_and(n:Int) Bool { n != 0 & 10 / n > 1 }
+fn safe_or(n:Int) Bool { n == 0 | 10 / n > 1 }
+testing.assert(safe_and(0) == false)
+testing.assert(safe_and(2))
+testing.assert(safe_and(20) == false)
+testing.assert(safe_or(0))
+testing.assert(safe_or(2))
+testing.assert(safe_or(20) == false)
+
+# & binds tighter than |, both looser than comparisons
+fn mixed(a:Int b:Int) Bool { a < b & b < 10 | a == b }
+testing.assert(mixed(1 5))
+testing.assert(mixed(1 50) == false)
+testing.assert(mixed(7 7))
+testing.assert(true | false & false)
+testing.assert((false & true | true))
+
 # constants, folded at compile time
 testing.assert(3 <= 3)
 testing.assert(4 >= 3)
@@ -53,3 +83,5 @@ testing.assert(2.5 >= 3.0 == false)
 testing.assert(1 != 2)
 testing.assert(true != false)
 testing.assert("x" != "y")
+testing.assert(true & true)
+testing.assert(false | true)

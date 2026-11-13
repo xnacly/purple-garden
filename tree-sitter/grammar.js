@@ -1,11 +1,13 @@
 const PREC = {
   block: 1,
   cast: 1,
-  compare: 2,
-  add: 3,
-  multiply: 4,
-  unary: 5,
-  call: 6,
+  or: 2,
+  and: 3,
+  compare: 4,
+  add: 5,
+  multiply: 6,
+  unary: 7,
+  call: 8,
 };
 
 module.exports = grammar({
@@ -123,6 +125,8 @@ module.exports = grammar({
 
     binary_expression: $ => choice(
       prec.left(PREC.compare, seq($.expression, choice('==', '!=', '<', '>', '<=', '>='), $.expression)),
+      prec.left(PREC.or, seq($.expression, '|', $.expression)),
+      prec.left(PREC.and, seq($.expression, '&', $.expression)),
       prec.left(PREC.add, seq($.expression, choice('+', '-'), $.expression)),
       prec.left(PREC.multiply, seq($.expression, choice('*', '/', '%'), $.expression)),
     ),

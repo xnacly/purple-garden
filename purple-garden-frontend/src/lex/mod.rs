@@ -176,6 +176,8 @@ impl<'l> Lexer<'l> {
                     Self::make_tok(start, Type::GreaterEqual)
                 }
                 b'>' => Self::make_tok(start, Type::GreaterThan),
+                b'&' => Self::make_tok(start, Type::Ampersand),
+                b'|' => Self::make_tok(start, Type::Pipe),
                 b'!' if matches!(self.peek(), Some(b'=')) => {
                     self.pos += 1;
                     Self::make_tok(start, Type::NotEqual)
@@ -340,7 +342,7 @@ mod tests {
 
     #[test]
     fn double_char_tokens() {
-        let toks = lex("== != <= >= < >");
+        let toks = lex("== != <= >= < > & |");
         assert_eq!(
             toks,
             vec![
@@ -350,6 +352,8 @@ mod tests {
                 Type::GreaterEqual,
                 Type::LessThan,
                 Type::GreaterThan,
+                Type::Ampersand,
+                Type::Pipe,
             ]
         );
     }

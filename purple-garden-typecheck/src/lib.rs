@@ -340,6 +340,30 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                 }
                 Type::Bool
             }
+            lex::Type::Ampersand | lex::Type::Pipe => match (lhs, rhs) {
+                (Type::Bool, Type::Bool) => Type::Bool,
+                (_, _) if lhs == rhs => {
+                    return Err(Diagnostic::at_token(
+                        format!(
+                            "Unsupported type {} for {:?}, want Bool",
+                            lhs,
+                            op.t.as_str()
+                        ),
+                        op,
+                    ));
+                }
+                (_, _) => {
+                    return Err(Diagnostic::at_token(
+                        format!(
+                            "Incompatible types {} and {} for {:?}, want both sides Bool",
+                            lhs,
+                            rhs,
+                            op.t.as_str()
+                        ),
+                        op,
+                    ));
+                }
+            },
             lex::Type::LessThan
             | lex::Type::LessEqual
             | lex::Type::GreaterThan

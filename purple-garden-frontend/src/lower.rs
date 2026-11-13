@@ -245,6 +245,76 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
         Ok(last.expect("match arm must produce value"))
     }
 
+    /// `a & b` and `a | b`, which only evaluate b if a doesn't decide the result: a branches into
+    /// a block lowering b or one loading the decided result, both join like the arms of a match.
+    fn lower_short_circuit(
+        &mut self,
+        ast: &'lower Ast<'lower, 'lower>,
+        op: &lex::Token<'lower>,
+        lhs: NodeId,
+        rhs: NodeId,
+    ) -> Result<Option<Id>, Diagnostic> {
+        let span = op.start as u32;
+        let and = op.t == Type::Ampersand;
+        let Some(lhs) = self.lower_node(ast, lhs)? else {
+            unreachable!()
+        };
+
+        let eval_rhs = self.new_block();
+        let decided = self.new_block();
+        let join = self.new_block();
+        let values = self.bound_values();
+        let args = self.ctx.func.intern_params(values.iter().copied());
+        let (yes, no) = if and {
+            (eval_rhs, decided)
+        } else {
+            (decided, eval_rhs)
+        };
+        self.block_mut(self.ctx.block).term = Some(Terminator::Branch {
+            cond: lhs,
+            yes: (yes, args),
+            no: (no, args),
+            span,
+        });
+        let env = self.ctx.env.clone();
+        let scopes = self.ctx.scopes.clone();
+
+        self.enter_block(eval_rhs, &values, None);
+        let Some(rhs) = self.lower_node(ast, rhs)? else {
+            unreachable!()
+        };
+        let args = self.join_args(rhs);
+        self.block_mut(self.ctx.block).term = Some(Terminator::Jump {
+            id: join,
+            params: args,
+            span,
+        });
+        self.ctx.env.clone_from(&env);
+        self.ctx.scopes.clone_from(&scopes);
+
+        self.enter_block(decided, &values, None);
+        let result = self.ctx.id_store.new_value();
+        self.emit(Instr::LoadConst {
+            dst: TypeId {
+                id: result,
+                ty: ptype::Type::Bool,
+            },
+            value: if and { Const::False } else { Const::True },
+            span,
+        });
+        let args = self.join_args(result);
+        self.block_mut(self.ctx.block).term = Some(Terminator::Jump {
+            id: join,
+            params: args,
+            span,
+        });
+
+        let result = self.ctx.id_store.new_value();
+        let values = self.bound_values();
+        self.enter_block(join, &values, Some(result));
+        Ok(Some(result))
+    }
+
     /// The args of an arm's jump into the join: its result, then every bound value.
     fn join_args(&mut self, result: Id) -> ParamsId {
         let values = self.bound_values();
@@ -390,6 +460,9 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                     BEq, DAdd, DDiv, DGe, DGt, DLe, DLt, DMul, DSub, IAdd, IDiv, IEq, IGe, IGt,
                     ILe, ILt, IMod, IMul, ISub, SEq,
                 };
+                if matches!(op.t, Type::Ampersand | Type::Pipe) {
+                    return self.lower_short_circuit(ast, op, *lhs, *rhs);
+                }
                 let src_type = self.types.get(ast.value_id(*lhs)).cloned().unwrap();
                 let span = op.start as u32;
 
