@@ -97,6 +97,8 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     /// `origins[pc]` is where the op at `pc` came from, parallel to `self.buf`. Its spans are
     /// threaded into Vm by `Cc::finalize` so runtime traps can be rendered with <file:line:col>.
     pub origins: Vec<Origin>,
+    /// Where every value of every bytecode function lives, kept only if `Some` when compiling.
+    pub locations: Option<Vec<FuncLocations>>,
     /// `labels[label]` is the absolute pc a jump to `label` lands on, after lowering. Labels below
     /// the function's block count are its block ids, the rest come from [`Cc::label`] for code
     /// without a block. `u16::MAX` marks blocks that weren't emitted (e.g.,
@@ -192,6 +194,14 @@ pub struct Origin {
     pub row: u32,
 }
 
+/// Where [`Cc::prealloc`] placed every value of a bytecode function.
+#[derive(Debug, Clone)]
+pub struct FuncLocations {
+    pub func: Id,
+    /// Indexed by value id, `None` for values without a live interval.
+    pub locations: Vec<Option<Location>>,
+}
+
 /// Emit batched Push ops for `regs` in order, packing into Push3/Push2/Push.
 /// Free function so callers can pass `&self.scratch` alongside `&mut self.buf`
 /// without a whole-struct borrow.
@@ -259,6 +269,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         Self {
             buf: Vec::with_capacity(64),
             origins: Vec::with_capacity(64),
+            locations: None,
             globals: Interner::new(),
             std_fns: Interner::new(),
             functions: HashMap::new_in(alloc.clone()),
@@ -585,6 +596,14 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
         fun.arg_hints_into(&mut self.arg_hints);
         self.prealloc(fun);
+        if let Some(locations) = &mut self.locations {
+            locations.push(FuncLocations {
+                func: fun.id,
+                locations: (0..self.live_set.len())
+                    .map(|id| self.regalloc.location(id))
+                    .collect(),
+            });
+        }
 
         // binding the id of a function to its context
         let pc = self.buf.len();
