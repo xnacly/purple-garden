@@ -365,6 +365,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 
 [[package]]
+name = "iced-x86"
+version = "1.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c23ad4d19dca41180e835ef6fbd2c1ee655777eca086ad80dd517e0513322879"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "id-arena"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -423,6 +432,12 @@ dependencies = [
  "once_cell",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "lazy_static"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "leb128fmt"
@@ -624,6 +639,25 @@ dependencies = [
  "purple-garden-runtime",
  "purple-garden-shared",
  "purple-garden-std",
+]
+
+[[package]]
+name = "purple-garden-inspect"
+version = "0.1.0"
+dependencies = [
+ "iced-x86",
+ "purple-garden-allocators",
+ "purple-garden-bc",
+ "purple-garden-frontend",
+ "purple-garden-ir",
+ "purple-garden-jit",
+ "purple-garden-opt",
+ "purple-garden-runtime",
+ "purple-garden-shared",
+ "purple-garden-std",
+ "purple-garden-typecheck",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
