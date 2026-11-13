@@ -1,4 +1,6 @@
-use purple_garden_allocators::metric::{MetricAlloc, Metrics};
+//! One allocator per pipeline phase, so their usage can be told apart.
+
+use crate::metric::{MetricAlloc, Metrics};
 
 #[derive(Debug, Default)]
 pub struct Phases<A> {

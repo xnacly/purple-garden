@@ -22,11 +22,10 @@ mod frontend;
 mod help;
 mod input;
 mod lsp;
-mod stats;
 
 use cli::{Cli, Command};
 use input::Input;
-use stats::Phases;
+use purple_garden_allocators::phases::Phases;
 
 pub const BUILD_INFO: &str = concat!(
     "version=",
