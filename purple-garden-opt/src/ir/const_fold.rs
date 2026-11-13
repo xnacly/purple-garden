@@ -1,7 +1,7 @@
 use std::alloc::Allocator;
 
 use crate::ir::Scratch;
-use purple_garden_ir::{self as ir, BinOp, Instr, TypeId, constant::Const, ptype::Type};
+use purple_garden_ir::{self as ir, BinOp, Instr, TypeId, UnOp, constant::Const, ptype::Type};
 
 /// constant fold all SSA values consisting fully of constant SSA values in a local block
 ///
@@ -272,6 +272,27 @@ fn try_const_fold<S: Allocator>(
                 // PERF: is this an issue?
                 dst: dst.clone(),
                 value: result,
+                span: *span,
+            };
+            true
+        }
+        Instr::Un {
+            op: UnOp::Assert, ..
+        } => false,
+        Instr::Un { op, dst, src, span } => {
+            let Some(value) = scratch
+                .const_def(*src)
+                .and_then(|def| const_value(previous, def))
+            else {
+                return false;
+            };
+            let value = match (*op, value) {
+                (UnOp::DSqrt, Const::Double(n)) => f64::from_bits(*n).sqrt().into(),
+                _ => unreachable!("the typechecker typed {op:?}'s operand"),
+            };
+            *instr = Instr::LoadConst {
+                dst: dst.clone(),
+                value,
                 span: *span,
             };
             true

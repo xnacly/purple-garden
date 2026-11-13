@@ -3,16 +3,16 @@ use std::{collections::HashMap, sync::OnceLock};
 extern crate self as purple_garden;
 
 pub use purple_garden_runtime::{
-    Anomaly, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Type, Value, Vm,
-    alloc_record, copy_record, decode_record_field, encode_record_field,
+    Anomaly, BinOp, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Type, UnOp, Value,
+    Vm, alloc_record, copy_record, decode_record_field, encode_record_field,
 };
 
 /// Compatibility namespace used by embedding macros.
 #[doc(hidden)]
 pub mod embed {
     pub use super::{
-        Anomaly, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Type, Value, Vm,
-        alloc_record, copy_record, decode_record_field, encode_record_field,
+        Anomaly, BinOp, Field, Fn, FromVm, IntoVm, Intrinsic, NativeFn, PgType, Pkg, Type, UnOp,
+        Value, Vm, alloc_record, copy_record, decode_record_field, encode_record_field,
     };
 }
 
@@ -40,6 +40,15 @@ pub fn resolve_pkg_in<'pkg>(pkgs: &'pkg [Pkg], query: &str) -> Option<&'pkg Pkg>
     }
 
     resolve_pkg_in(pkg.pkgs, tail)
+}
+
+/// The std fn declaring `intrinsic`, for a backend without an op of its own for it to call instead
+#[must_use]
+pub fn intrinsic_fn(intrinsic: Intrinsic) -> Option<&'static Fn<'static>> {
+    std_pkg_index()
+        .values()
+        .flat_map(|pkg| pkg.fns)
+        .find(|fun| fun.intrinsic == Some(intrinsic))
 }
 
 fn std_pkg_index() -> &'static HashMap<String, &'static Pkg> {

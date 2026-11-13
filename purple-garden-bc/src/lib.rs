@@ -389,7 +389,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             pos += 1;
 
             for instruction in &block.instructions {
-                if let ir::Instr::Call { .. } | ir::Instr::Sys { .. } = instruction {
+                if matches!(instruction, ir::Instr::Call { .. } | ir::Instr::Sys { .. })
+                    || called_instead(instruction).is_some()
+                {
                     self.live_across[pos as usize] = self
                         .regalloc
                         .live_after(pos)
@@ -734,6 +736,43 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             },
         );
         true
+    }
+
+    /// Call the builtin `ptr` on `args` at `pos`, its result into `dst`.
+    fn sys(&mut self, pos: u32, dst: Id, ptr: BuiltinFn, args: &[Id]) {
+        let idx = self.std_fns.intern(ptr);
+
+        // Syscall convention: shuffle writes r0..r{argcount-1}, syscall
+        // body writes r0 (return slot). Clobber range is r0..r{clobber_end-1}
+        // (clobber_end = args.len().max(1)). Builtins never touch higher
+        // registers, so only spill alive-across values inside that range.
+        let clobber_end = args.len().max(1) as u8;
+        self.scratch.clear();
+        let live = self.live_across[pos as usize];
+        self.scratch
+            .extend((0..clobber_end).filter(|r| live & 1 << r != 0));
+        pack_push(
+            &mut self.buf,
+            &mut self.pc_to_span,
+            self.cur_span,
+            &self.scratch,
+        );
+
+        self.emit_arg_shuffle(args, self.scratch.len() as u16);
+
+        let dst = self.def_register(dst);
+        self.emit(Op::Sys {
+            idx: u16::try_from(idx).expect("syscalls past Op::Sys's 16 bit index"),
+            argc: args.len() as u8,
+        });
+        self.emit(Op::Mov { dst, src: 0 });
+        self.scratch.reverse();
+        pack_pop(
+            &mut self.buf,
+            &mut self.pc_to_span,
+            self.cur_span,
+            &self.scratch,
+        );
     }
 
     /// Move `args[i]` into the i-th argument register (`r0..r{N-1}`) for a call
@@ -1352,46 +1391,21 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 );
             }
             ir::Instr::Sys { dst, fun, args, .. } => {
-                let args = owner.params(*args);
-                let idx = self.std_fns.intern(fun.ptr);
-
-                // Syscall convention: shuffle writes r0..r{argcount-1}, syscall
-                // body writes r0 (return slot). Clobber range is r0..r{clobber_end-1}
-                // (clobber_end = args.len().max(1)). Builtins never touch higher
-                // registers, so only spill alive-across values inside that range.
-                let clobber_end = args.len().max(1) as u8;
-                self.scratch.clear();
-                let live = self.live_across[pos as usize];
-                self.scratch
-                    .extend((0..clobber_end).filter(|r| live & 1 << r != 0));
-                pack_push(
-                    &mut self.buf,
-                    &mut self.pc_to_span,
-                    self.cur_span,
-                    &self.scratch,
-                );
-
-                self.emit_arg_shuffle(args, self.scratch.len() as u16);
-
-                let dst = self.def_register(dst.id);
-                self.emit(Op::Sys {
-                    idx: u16::try_from(idx).expect("syscalls past Op::Sys's 16 bit index"),
-                    argc: args.len() as u8,
-                });
-                self.emit(Op::Mov { dst, src: 0 });
-                self.scratch.reverse();
-                pack_pop(
-                    &mut self.buf,
-                    &mut self.pc_to_span,
-                    self.cur_span,
-                    &self.scratch,
-                );
+                self.sys(pos, dst.id, fun.ptr, owner.params(*args));
             }
-            ir::Instr::Assert { cond, .. } => {
-                let cond = self.ensure_register(*cond);
+            ir::Instr::Un {
+                op: ir::UnOp::Assert,
+                src,
+                ..
+            } => {
+                let cond = self.ensure_register(*src);
                 self.emit(Op::Assert { cond });
                 // a Void value is never read, not reserving a value for assert is fine :)
                 // self.ensure_register(dst.id);
+            }
+            ir::Instr::Un { dst, src, .. } => {
+                let fun = called_instead(i).expect("every other UnOp is called");
+                self.sys(pos, dst.id, fun.ptr, &[*src]);
             }
             ir::Instr::Noop {} => {}
             ir::Instr::Bin {
@@ -1625,10 +1639,19 @@ impl Default for Cc<'_> {
     }
 }
 
+/// The builtin to call for `i`, an ir op the bytecode has no op for.
+fn called_instead(i: &ir::Instr<'_>) -> Option<&'static ir::Fn<'static>> {
+    let intrinsic = match i {
+        ir::Instr::Un { op, .. } if *op != ir::UnOp::Assert => ir::Intrinsic::Un(*op),
+        _ => return None,
+    };
+    purple_garden_std::intrinsic_fn(intrinsic)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ir::BinOp;
+    use ir::{BinOp, UnOp};
     use ir::{Block, EMPTY_PARAMS, Instr, Terminator, ptype::Type};
     use purple_garden_allocators::page::PageAlloc;
     use std::alloc::Layout;
@@ -1875,9 +1898,10 @@ mod tests {
                     value: Const::True,
                     span: 0,
                 },
-                Instr::Assert {
+                Instr::Un {
+                    op: UnOp::Assert,
                     dst: type_id(1, Type::Void),
-                    cond: Id(0),
+                    src: Id(0),
                     span: 0,
                 },
             ],
@@ -1886,7 +1910,7 @@ mod tests {
 
         assert!(
             has_op(&ops, |op| matches!(op, Op::Assert { cond: 0 })),
-            "expected Instr::Assert to lower to Op::Assert: {ops:?}"
+            "expected UnOp::Assert to lower to Op::Assert: {ops:?}"
         );
     }
 

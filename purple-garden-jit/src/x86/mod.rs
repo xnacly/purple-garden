@@ -25,7 +25,7 @@ use encode::{
     Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBP, RBX, RCX, RDI, RDX, RSI, RSP, Reg,
     patch_rel32,
 };
-use purple_garden_ir::{self as ir, BinOp};
+use purple_garden_ir::{self as ir, BinOp, UnOp};
 use purple_garden_runtime::{BuiltinFn, Value, string};
 
 /// Bail out of [`compile_func`] (returning `None`) and, under the `trace`
@@ -775,7 +775,15 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             self.give_back_copies(start);
         }
         // a Void value is never read, see the Assert lowering
-        let dst = ir::Func::typed_def_of(i).filter(|_| !matches!(i, ir::Instr::Assert { .. }));
+        let dst = ir::Func::typed_def_of(i).filter(|_| {
+            !matches!(
+                i,
+                ir::Instr::Un {
+                    op: UnOp::Assert,
+                    ..
+                }
+            )
+        });
         if let Some(dst) = dst {
             self.alloc(dst.id, Class::from(&dst.ty), pos);
         }
@@ -999,24 +1007,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         src: Xmm(src),
                     },
                 });
-            }
-            ir::Instr::Assert { cond, .. } => {
-                let cond = self.ensure_register(*cond);
-                let cond = self.gpr(cond);
-                self.emit(Insn::Test {
-                    lhs: cond,
-                    rhs: cond,
-                });
-                let holds = encode::jump(self.out, Cond::NotZero);
-                self.call(
-                    purple_garden_runtime::jit_trap_assert as *const () as u64,
-                    &[AbiArg::Reg(VM)],
-                    None,
-                );
-                let resume = self.out.len();
-                patch_rel32(self.out, holds, holds + 4, resume).expect("short forward jump");
-                // a Void value is never read, we dont reserve a reg
-                // self.def(dst);
             }
             ir::Instr::Load {
                 dst, base, offset, ..
@@ -1535,23 +1525,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 patch_rel32(self.out, to_done, to_done + 4, done)
                     .expect("lookup ends after the default");
             }
-            ir::Instr::Sys {
-                dst,
-                fun:
-                    ir::Fn {
-                        intrinsic: Some(ir::Intrinsic::Sqrt),
-                        ..
-                    },
-                args,
-                ..
-            } => {
-                let src = self.func.params(*args)[0];
-                let src = self.ensure_register(src);
-                let src = self.xmm(src);
-                let dst = self.def(dst);
-                let dst = self.xmm(dst);
-                self.emit(Insn::VSqrtSd { dst, src });
-            }
             ir::Instr::Sys { dst, fun, args, .. } => {
                 let func = self.func;
                 let args = func.params(*args);
@@ -1580,6 +1553,37 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 };
                 let func = self.func;
                 self.call_native(callee, func.params(*args), dst);
+            }
+            ir::Instr::Un { op, dst, src, .. } => {
+                let src = self.ensure_register(*src);
+                let insn = match op {
+                    UnOp::Assert => {
+                        let cond = self.gpr(src);
+                        self.emit(Insn::Test {
+                            lhs: cond,
+                            rhs: cond,
+                        });
+                        let holds = encode::jump(self.out, Cond::NotZero);
+                        self.call(
+                            purple_garden_runtime::jit_trap_assert as *const () as u64,
+                            &[AbiArg::Reg(VM)],
+                            None,
+                        );
+                        let resume = self.out.len();
+                        patch_rel32(self.out, holds, holds + 4, resume)
+                            .expect("short forward jump");
+                        // a Void value is never read, we dont reserve a reg
+                        return;
+                    }
+                    UnOp::DSqrt => {
+                        let dst = self.def(dst);
+                        Insn::VSqrtSd {
+                            dst: self.xmm(dst),
+                            src: self.xmm(src),
+                        }
+                    }
+                };
+                self.emit(insn);
             }
             _ => bail!(self, "unsupported instruction {i:?}"),
         }

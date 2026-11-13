@@ -164,7 +164,7 @@ mod tests {
     use super::{MAX_INSTRUCTIONS, inlinable, inline};
     use crate::ir::Scratch;
     use purple_garden_ir::{
-        self as ir, BinOp, Block, Id, Instr, ParamsId, Terminator, TypeId, constant::Const,
+        self as ir, BinOp, Block, Id, Instr, ParamsId, Terminator, TypeId, UnOp, constant::Const,
         ptype::Type,
     };
 
@@ -544,12 +544,13 @@ mod tests {
                 imm: 0,
                 span: 42,
             },
-            Instr::Assert {
+            Instr::Un {
+                op: UnOp::Assert,
                 dst: TypeId {
                     id: Id(2),
                     ty: Type::Void,
                 },
-                cond: Id(1),
+                src: Id(1),
                 span: 43,
             },
         ];
@@ -557,7 +558,16 @@ mod tests {
         assert_eq!(calls(&fun), 0);
         let spans: Vec<_> = instructions(&fun)
             .into_iter()
-            .filter(|i| matches!(i, Instr::BinImm { .. } | Instr::Assert { .. }))
+            .filter(|i| {
+                matches!(
+                    i,
+                    Instr::BinImm { .. }
+                        | Instr::Un {
+                            op: UnOp::Assert,
+                            ..
+                        }
+                )
+            })
             .map(Instr::span)
             .collect();
         assert_eq!(spans, [42, 43]);

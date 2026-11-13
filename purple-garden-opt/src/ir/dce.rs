@@ -46,7 +46,11 @@ pub fn dce<F: Allocator, S: Allocator>(fun: &mut ir::Func<'_, F>, scratch: &mut 
 
 fn removable(instr: &ir::Instr<'_>) -> bool {
     match instr {
-        ir::Instr::Call { .. } | ir::Instr::Assert { .. } => false,
+        ir::Instr::Call { .. }
+        | ir::Instr::Un {
+            op: ir::UnOp::Assert,
+            ..
+        } => false,
         ir::Instr::Sys { fun, .. } => fun.pure,
         ir::Instr::Noop => false,
         _ => true,
@@ -57,7 +61,7 @@ fn removable(instr: &ir::Instr<'_>) -> bool {
 mod tests {
     use super::dce;
     use crate::ir::Scratch;
-    use purple_garden_ir::{self as ir, Block, Id, Instr, Terminator, TypeId, ptype::Type};
+    use purple_garden_ir::{self as ir, Block, Id, Instr, Terminator, TypeId, UnOp, ptype::Type};
 
     /// Nothing reads an assert's Void value, its trap still has to happen.
     #[test]
@@ -76,12 +80,13 @@ mod tests {
             tombstone: false,
             id: Id(0),
             params,
-            instructions: vec![Instr::Assert {
+            instructions: vec![Instr::Un {
+                op: UnOp::Assert,
                 dst: TypeId {
                     id: Id(1),
                     ty: Type::Void,
                 },
-                cond: Id(0),
+                src: Id(0),
                 span: 0,
             }],
             term: Some(Terminator::Return {
@@ -93,7 +98,10 @@ mod tests {
         dce(&mut fun, &mut Scratch::default());
         assert!(matches!(
             fun.blocks[0].instructions[0],
-            Instr::Assert { .. }
+            Instr::Un {
+                op: UnOp::Assert,
+                ..
+            }
         ));
     }
 }

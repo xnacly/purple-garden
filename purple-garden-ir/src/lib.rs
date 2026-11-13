@@ -59,14 +59,13 @@ pub struct Fn<'f> {
     pub native: Option<NativeFn>,
 }
 
-/// Builtins with a lowering of their own instead of a call: the frontend lowers some to IR, the jit
-/// lowers others to instructions while the interpreter still calls them through [`Instr::Sys`]
+/// Builtins the frontend lowers to IR instead of a call
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intrinsic {
-    /// [`Instr::Assert`] on the Bool argument, lowered by the frontend
-    Assert,
-    /// `vsqrtsd` in the jit, still an [`Instr::Sys`] call in the IR and the interpreter
-    Sqrt,
+    /// [`Instr::Bin`] on the two arguments, lowered by the frontend
+    Bin(BinOp),
+    /// [`Instr::Un`] on the argument, lowered by the frontend
+    Un(UnOp),
 }
 
 impl<'f> Fn<'f> {
@@ -148,6 +147,13 @@ pub enum BinOp {
     SEq,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnOp {
+    /// Traps with an assertion failure if the Bool operand is false, its Void value is never read
+    Assert,
+    DSqrt,
+}
+
 #[derive(Debug, Clone)]
 pub enum Instr<'i> {
     Bin {
@@ -165,6 +171,12 @@ pub enum Instr<'i> {
         dst: TypeId<'i>,
         lhs: Id,
         imm: i32,
+        span: u32,
+    },
+    Un {
+        op: UnOp,
+        dst: TypeId<'i>,
+        src: Id,
         span: u32,
     },
     LoadConst {
@@ -199,12 +211,6 @@ pub enum Instr<'i> {
         src: Id,
         base: Id,
         offset: u32,
-        span: u32,
-    },
-    /// Traps with an assertion failure if the Bool `cond` is false, `dst` is the call's Void value.
-    Assert {
-        dst: TypeId<'i>,
-        cond: Id,
         span: u32,
     },
     Load {
@@ -246,6 +252,10 @@ impl Instr<'_> {
                 f(&mut dst.id);
                 f(lhs);
             }
+            Instr::Un { dst, src, .. } => {
+                f(&mut dst.id);
+                f(src);
+            }
             Instr::Cast { dst, from, .. } => {
                 f(&mut dst.id);
                 f(&mut from.id);
@@ -253,10 +263,6 @@ impl Instr<'_> {
             Instr::Lookup { dst, subject, .. } => {
                 f(&mut dst.id);
                 f(subject);
-            }
-            Instr::Assert { dst, cond, .. } => {
-                f(&mut dst.id);
-                f(cond);
             }
             Instr::Load { dst, base, .. } | Instr::AddrOf { dst, base, .. } => {
                 f(&mut dst.id);
@@ -280,12 +286,12 @@ impl Instr<'_> {
     pub fn span(&self) -> u32 {
         match self {
             Instr::Store { span, .. }
-            | Instr::Assert { span, .. }
             | Instr::Load { span, .. }
             | Instr::AddrOf { span, .. }
             | Instr::Bin { span, .. }
             | Instr::Alloc { span, .. }
             | Instr::BinImm { span, .. }
+            | Instr::Un { span, .. }
             | Instr::LoadConst { span, .. }
             | Instr::Call { span, .. }
             | Instr::Sys { span, .. }
@@ -580,12 +586,12 @@ impl Func<'_> {
             | Instr::AddrOf { dst, .. }
             | Instr::Bin { dst, .. }
             | Instr::BinImm { dst, .. }
+            | Instr::Un { dst, .. }
             | Instr::LoadConst { dst, .. }
             | Instr::Call { dst, .. }
             | Instr::Sys { dst, .. }
             | Instr::Cast { dst, .. }
-            | Instr::Lookup { dst, .. }
-            | Instr::Assert { dst, .. } => Some(dst),
+            | Instr::Lookup { dst, .. } => Some(dst),
             Instr::Store { .. } | Instr::Noop => None,
         }
     }
@@ -621,6 +627,7 @@ impl<A: Allocator> Func<'_, A> {
                 f(*rhs);
             }
             Instr::BinImm { lhs, .. } => f(*lhs),
+            Instr::Un { src, .. } => f(*src),
             Instr::Call { args, .. } | Instr::Sys { args, .. } => {
                 for &a in self.params(*args) {
                     f(a);
@@ -632,7 +639,6 @@ impl<A: Allocator> Func<'_, A> {
                 f(*src);
                 f(*base);
             }
-            Instr::Assert { cond, .. } => f(*cond),
             Instr::Load { base, .. } | Instr::AddrOf { base, .. } => f(*base),
             Instr::LoadConst { .. } | Instr::Noop | Instr::Alloc { .. } => {}
         }
@@ -732,13 +738,13 @@ impl<A: Allocator> Func<'_, A> {
                         replace(rhs);
                     }
                     Instr::BinImm { lhs, .. } => replace(lhs),
+                    Instr::Un { src, .. } => replace(src),
                     Instr::Cast { from, .. } => replace(&mut from.id),
                     Instr::Lookup { subject, .. } => replace(subject),
                     Instr::Store { src, base, .. } => {
                         replace(src);
                         replace(base);
                     }
-                    Instr::Assert { cond, .. } => replace(cond),
                     Instr::Load { base, .. } | Instr::AddrOf { base, .. } => replace(base),
                     Instr::Call { .. }
                     | Instr::Sys { .. }
@@ -962,9 +968,10 @@ mod tests {
                 offset: 0,
                 span: 0,
             },
-            Instr::Assert {
+            Instr::Un {
+                op: UnOp::Assert,
                 dst: id(14),
-                cond: Id(15),
+                src: Id(15),
                 span: 0,
             },
             Instr::Load {
@@ -1055,9 +1062,10 @@ mod tests {
                 offset: 0,
                 span: 0,
             },
-            Instr::Assert {
+            Instr::Un {
+                op: UnOp::Assert,
                 dst: type_id(206),
-                cond: v(),
+                src: v(),
                 span: 0,
             },
             Instr::Load {

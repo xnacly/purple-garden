@@ -14,9 +14,9 @@ pub mod testing {
     ///
     /// testing.assert(1 + 1 == 2)
     /// ```
-    #[pg_fn(intrinsic = Assert)]
+    #[pg_fn(intrinsic = Un(Assert))]
     pub fn assert(condition: bool) {
         let _ = condition;
-        unreachable!("lowered to Instr::Assert")
+        unreachable!("lowered to UnOp::Assert")
     }
 }

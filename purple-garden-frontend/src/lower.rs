@@ -657,15 +657,24 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                             .expect("typechecker should have typed the call");
                         let span = name.start as u32;
                         match fun.intrinsic {
-                            Some(purple_garden_ir::Intrinsic::Assert) => {
-                                self.emit(Instr::Assert {
+                            Some(purple_garden_ir::Intrinsic::Bin(op)) => {
+                                self.emit(Instr::Bin {
+                                    op,
                                     dst,
-                                    cond: a[0],
+                                    lhs: a[0],
+                                    rhs: a[1],
                                     span,
                                 });
                             }
-                            // lowered by the jit, a call everywhere else
-                            Some(purple_garden_ir::Intrinsic::Sqrt) | None => {
+                            Some(purple_garden_ir::Intrinsic::Un(op)) => {
+                                self.emit(Instr::Un {
+                                    op,
+                                    dst,
+                                    src: a[0],
+                                    span,
+                                });
+                            }
+                            None => {
                                 let args = self.ctx.func.intern_params(a);
                                 self.emit(Instr::Sys {
                                     dst,

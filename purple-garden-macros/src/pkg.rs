@@ -20,7 +20,7 @@ struct PgFunction {
     pure: bool,
     specialises: Option<String>,
     with_slots: bool,
-    intrinsic: Option<Ident>,
+    intrinsic: Option<IntrinsicAttr>,
     args: Vec<FunctionArg>,
     ret: Type,
     raw: bool,
@@ -186,6 +186,20 @@ impl PgFunction {
         } else {
             parse_args(&fun.sig.inputs)?
         };
+
+        let arity = match attrs.intrinsic {
+            Some(IntrinsicAttr::Bin(_)) => Some(2),
+            Some(IntrinsicAttr::Un(_)) => Some(1),
+            None => None,
+        };
+        if let Some(arity) = arity
+            && args.len() != arity
+        {
+            return Err(syn::Error::new(
+                ident.span(),
+                format!("pg_fn(intrinsic) lowering to an ir op takes {arity} arguments"),
+            ));
+        }
 
         Ok(Self {
             wrapper: format_ident!("__pg_wrapper_{ident}"),
@@ -424,7 +438,12 @@ impl PgFunction {
         };
         let with_slots = self.with_slots;
         let intrinsic = match &self.intrinsic {
-            Some(intrinsic) => quote!(Some(#api::embed::Intrinsic::#intrinsic)),
+            Some(IntrinsicAttr::Bin(op)) => {
+                quote!(Some(#api::embed::Intrinsic::Bin(#api::embed::BinOp::#op)))
+            }
+            Some(IntrinsicAttr::Un(op)) => {
+                quote!(Some(#api::embed::Intrinsic::Un(#api::embed::UnOp::#op)))
+            }
             None => quote!(None),
         };
         let ret_ty = &self.ret;
@@ -593,9 +612,13 @@ struct PgFnAttrs {
     /// `#[pg_fn(with_slots)]`: the signature uses `embed::Slot<"T">` generics, bound per call
     /// by the typechecker
     with_slots: bool,
-    /// `#[pg_fn(intrinsic = Name)]`: lowered instead of being called, by the frontend or the jit,
-    /// see `Intrinsic`
-    intrinsic: Option<Ident>,
+    /// `#[pg_fn(intrinsic = Bin(Op))]` or `Un(Op)`: lowered to that ir op instead of being called
+    intrinsic: Option<IntrinsicAttr>,
+}
+
+enum IntrinsicAttr {
+    Bin(Ident),
+    Un(Ident),
 }
 
 impl PgFnAttrs {
@@ -668,26 +691,35 @@ fn take_pg_fn_attrs(attrs: &mut Vec<Attribute>) -> syn::Result<PgFnAttrs> {
     Ok(pg_fn_attrs)
 }
 
-fn parse_intrinsic_option(meta: Meta) -> syn::Result<Ident> {
+fn parse_intrinsic_option(meta: Meta) -> syn::Result<IntrinsicAttr> {
     let Meta::NameValue(name_value) = meta else {
         return Err(syn::Error::new(
             meta.span(),
-            "`intrinsic` must be `intrinsic = Name`",
+            "`intrinsic` must be `intrinsic = Bin(BinOp)` or `intrinsic = Un(UnOp)`",
         ));
     };
-
-    let syn::Expr::Path(path) = &name_value.value else {
-        return Err(syn::Error::new(
-            name_value.value.span(),
-            "`intrinsic` must name an `Intrinsic` variant",
-        ));
-    };
-    path.path.get_ident().cloned().ok_or_else(|| {
+    let invalid = || {
         syn::Error::new(
             name_value.value.span(),
-            "`intrinsic` must name an `Intrinsic` variant",
+            "`intrinsic` must be `Bin(BinOp)` or `Un(UnOp)`",
         )
-    })
+    };
+    let ident = |expr: &syn::Expr| match expr {
+        syn::Expr::Path(path) => path.path.get_ident().cloned().ok_or_else(invalid),
+        _ => Err(invalid()),
+    };
+
+    match &name_value.value {
+        syn::Expr::Call(call) if call.args.len() == 1 => {
+            let op = ident(&call.args[0])?;
+            match ident(&call.func)?.to_string().as_str() {
+                "Bin" => Ok(IntrinsicAttr::Bin(op)),
+                "Un" => Ok(IntrinsicAttr::Un(op)),
+                _ => Err(invalid()),
+            }
+        }
+        _ => Err(invalid()),
+    }
 }
 
 fn parse_specialises_option(meta: Meta) -> syn::Result<String> {

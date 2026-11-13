@@ -158,7 +158,7 @@ mod tests_x86 {
     use super::Jit;
     use super::mem::CodeArena;
     use purple_garden_ir::{
-        BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId,
+        BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, Terminator, TypeId, UnOp,
         ptype::{Field, Type},
     };
     use std::collections::HashMap;
@@ -745,40 +745,23 @@ mod tests_x86 {
         a + 1
     }
 
-    static SQRT: purple_garden_ir::Fn<'static> = purple_garden_ir::Fn {
-        name: "sqrt",
-        doc: "",
-        ptr: no_wrapper,
-        pure: true,
-        eval: None,
-        arg_names: &["n"],
-        args: &[Type::Double],
-        ret: Type::Double,
-        specialises: None,
-        with_slots: false,
-        intrinsic: Some(purple_garden_ir::Intrinsic::Sqrt),
-        native: None,
-    };
-
     /// `fn f(x:Double) Double { math.sqrt(x) }`: one vsqrtsd, no call, rounded like `f64::sqrt`.
     #[test]
-    fn lowers_the_sqrt_intrinsic_to_vsqrtsd() {
+    fn lowers_dsqrt_to_vsqrtsd() {
         let double = |id| TypeId {
             id: Id(id),
             ty: Type::Double,
         };
         let mut func = Func::new("f", Id(1), vec![double(0)], Some(Type::Double));
         let params = func.intern_params([Id(0)]);
-        let args = func.intern_params([Id(0)]);
         func.blocks.push(Block {
             tombstone: false,
             id: Id(0),
             params,
-            instructions: vec![Instr::Sys {
+            instructions: vec![Instr::Un {
+                op: UnOp::DSqrt,
                 dst: double(1),
-                path: "math",
-                fun: &SQRT,
-                args,
+                src: Id(0),
                 span: 0,
             }],
             term: Some(Terminator::Return {
@@ -1463,12 +1446,13 @@ mod tests_x86 {
             tombstone: false,
             id: Id(0),
             params,
-            instructions: vec![Instr::Assert {
+            instructions: vec![Instr::Un {
+                op: UnOp::Assert,
                 dst: TypeId {
                     id: Id(1),
                     ty: Type::Void,
                 },
-                cond: Id(0),
+                src: Id(0),
                 span: 0,
             }],
             term: Some(Terminator::Return {
