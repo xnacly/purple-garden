@@ -365,7 +365,11 @@ fn arith(op: BinOp, dst: Reg, src: Reg) -> Insn {
         BinOp::ISub => Insn::Sub { dst, src },
         BinOp::IMul => Insn::Imul { dst, src },
         BinOp::IAnd => Insn::And { dst, src },
-        _ => unreachable!("only IAdd, ISub, IMul and IAnd lower to two-operand arithmetic"),
+        BinOp::IOr => Insn::Or { dst, src },
+        BinOp::IXor => Insn::Xor { dst, src },
+        _ => unreachable!(
+            "only IAdd, ISub, IMul, IAnd, IOr and IXor lower to two-operand arithmetic"
+        ),
     }
 }
 
@@ -1302,7 +1306,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let rhs = self.ensure_register(*rhs);
                 let rhs = self.gpr(rhs);
                 match op {
-                    BinOp::IAdd | BinOp::ISub | BinOp::IMul | BinOp::IAnd => {
+                    BinOp::IAdd
+                    | BinOp::ISub
+                    | BinOp::IMul
+                    | BinOp::IAnd
+                    | BinOp::IOr
+                    | BinOp::IXor => {
                         let dst = self.def(dst);
                         let dst = self.gpr(dst);
 
@@ -1318,9 +1327,24 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                             self.emit(Insn::Sub { dst, src: lhs });
                             self.emit(Insn::Neg { reg: dst });
                         } else {
-                            // add, mul and and commute.
+                            // add, mul, and, or and xor commute.
                             self.emit(arith(*op, dst, lhs));
                         }
+                    }
+                    // the bmi2 forms take the count from any register, mod 64 like the ir op
+                    BinOp::IShl | BinOp::IShr | BinOp::IUShr => {
+                        if !std::arch::is_x86_feature_detected!("bmi2") {
+                            bail!(self, "{op:?} needs bmi2");
+                            return;
+                        }
+                        let dst = self.def(dst);
+                        let dst = self.gpr(dst);
+                        let (src, count) = (lhs, rhs);
+                        self.emit(match op {
+                            BinOp::IShl => Insn::Shlx { dst, src, count },
+                            BinOp::IShr => Insn::Sarx { dst, src, count },
+                            _ => Insn::Shrx { dst, src, count },
+                        });
                     }
                     // Strings are interned: equal contents share one pointer.
                     BinOp::IEq | BinOp::BEq | BinOp::SEq | BinOp::ILt | BinOp::IGt => {
@@ -1555,6 +1579,16 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 self.call_native(callee, func.params(*args), dst);
             }
             ir::Instr::Un { op, dst, src, .. } => {
+                let feature = match op {
+                    UnOp::Assert | UnOp::INot | UnOp::DSqrt => true,
+                    UnOp::IPopcnt => std::arch::is_x86_feature_detected!("popcnt"),
+                    UnOp::ICtz => std::arch::is_x86_feature_detected!("bmi1"),
+                    UnOp::IClz => std::arch::is_x86_feature_detected!("lzcnt"),
+                };
+                if !feature {
+                    bail!(self, "{op:?} is missing its cpu feature");
+                    return;
+                }
                 let src = self.ensure_register(*src);
                 let insn = match op {
                     UnOp::Assert => {
@@ -1575,16 +1609,41 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         // a Void value is never read, we dont reserve a reg
                         return;
                     }
+                    UnOp::INot => {
+                        let dst = self.def(dst);
+                        let (dst, src) = (self.gpr(dst), self.gpr(src));
+                        if dst != src {
+                            self.emit(Insn::Mov { dst, src });
+                        }
+                        Insn::Not { reg: dst }
+                    }
+                    UnOp::IPopcnt => {
+                        let dst = self.def(dst);
+                        Insn::Popcnt {
+                            dst: self.gpr(dst),
+                            src: self.gpr(src),
+                        }
+                    }
+                    UnOp::ICtz => {
+                        let dst = self.def(dst);
+                        Insn::Tzcnt {
+                            dst: self.gpr(dst),
+                            src: self.gpr(src),
+                        }
+                    }
+                    UnOp::IClz => {
+                        let dst = self.def(dst);
+                        Insn::Lzcnt {
+                            dst: self.gpr(dst),
+                            src: self.gpr(src),
+                        }
+                    }
                     UnOp::DSqrt => {
                         let dst = self.def(dst);
                         Insn::VSqrtSd {
                             dst: self.xmm(dst),
                             src: self.xmm(src),
                         }
-                    }
-                    _ => {
-                        bail!(self, "unsupported un op {op:?}");
-                        return;
                     }
                 };
                 self.emit(insn);
