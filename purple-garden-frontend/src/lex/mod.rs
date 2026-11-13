@@ -166,7 +166,15 @@ impl<'l> Lexer<'l> {
                     Self::make_tok(start, Type::DoubleEqual)
                 }
                 b'=' => Self::make_tok(start, Type::Equal),
+                b'<' if matches!(self.peek(), Some(b'=')) => {
+                    self.pos += 1;
+                    Self::make_tok(start, Type::LessEqual)
+                }
                 b'<' => Self::make_tok(start, Type::LessThan),
+                b'>' if matches!(self.peek(), Some(b'=')) => {
+                    self.pos += 1;
+                    Self::make_tok(start, Type::GreaterEqual)
+                }
                 b'>' => Self::make_tok(start, Type::GreaterThan),
                 b'!' if matches!(self.peek(), Some(b'=')) => {
                     self.pos += 1;
@@ -332,8 +340,18 @@ mod tests {
 
     #[test]
     fn double_char_tokens() {
-        let toks = lex("== !=");
-        assert_eq!(toks, vec![Type::DoubleEqual, Type::NotEqual]);
+        let toks = lex("== != <= >= < >");
+        assert_eq!(
+            toks,
+            vec![
+                Type::DoubleEqual,
+                Type::NotEqual,
+                Type::LessEqual,
+                Type::GreaterEqual,
+                Type::LessThan,
+                Type::GreaterThan,
+            ]
+        );
     }
 
     #[test]

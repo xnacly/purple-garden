@@ -387,8 +387,8 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
             }
             Node::Bin { op, lhs, rhs, id } => {
                 use BinOp::{
-                    BEq, DAdd, DDiv, DGt, DLt, DMul, DSub, IAdd, IDiv, IEq, IGt, ILt, IMod, IMul,
-                    ISub, SEq,
+                    BEq, DAdd, DDiv, DGe, DGt, DLe, DLt, DMul, DSub, IAdd, IDiv, IEq, IGe, IGt,
+                    ILe, ILt, IMod, IMul, ISub, SEq,
                 };
                 let src_type = self.types.get(ast.value_id(*lhs)).cloned().unwrap();
                 let span = op.start as u32;
@@ -406,13 +406,15 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                     ty: self.types.get(*id).cloned().unwrap(),
                 };
 
+                // `a != b` is `(a == b) == false`, its == is lowered as for `a == b`
+                let negate = op.t == Type::NotEqual;
                 let op = match src_type {
                     ptype::Type::Bool => match op.t {
-                        Type::DoubleEqual => BEq,
+                        Type::DoubleEqual | Type::NotEqual => BEq,
                         _ => unreachable!(),
                     },
                     ptype::Type::Str => match op.t {
-                        Type::DoubleEqual => SEq,
+                        Type::DoubleEqual | Type::NotEqual => SEq,
                         _ => unreachable!(),
                     },
                     ptype::Type::Int => match op.t {
@@ -421,9 +423,11 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                         Type::Asteriks => IMul,
                         Type::Slash => IDiv,
                         Type::Percent => IMod,
-                        Type::DoubleEqual => IEq,
+                        Type::DoubleEqual | Type::NotEqual => IEq,
                         Type::LessThan => ILt,
+                        Type::LessEqual => ILe,
                         Type::GreaterThan => IGt,
+                        Type::GreaterEqual => IGe,
                         _ => unreachable!(),
                     },
                     ptype::Type::Double => match op.t {
@@ -432,17 +436,50 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                         Type::Asteriks => DMul,
                         Type::Slash => DDiv,
                         Type::LessThan => DLt,
+                        Type::LessEqual => DLe,
                         Type::GreaterThan => DGt,
+                        Type::GreaterEqual => DGe,
                         _ => unreachable!(),
                     },
                     _ => todo!("{:#?}", src_type),
                 };
 
+                if !negate {
+                    self.emit(Instr::Bin {
+                        op,
+                        dst,
+                        lhs,
+                        rhs,
+                        span,
+                    });
+                    return Ok(Some(dst_id));
+                }
+                let eq = TypeId {
+                    id: self.ctx.id_store.new_value(),
+                    ty: ptype::Type::Bool,
+                };
+                let no = TypeId {
+                    id: self.ctx.id_store.new_value(),
+                    ty: ptype::Type::Bool,
+                };
+                let (eq_id, no_id) = (eq.id, no.id);
                 self.emit(Instr::Bin {
                     op,
-                    dst,
+                    dst: eq,
                     lhs,
                     rhs,
+                    span,
+                });
+                self.emit(Instr::LoadConst {
+                    dst: no,
+                    value: Const::False,
+                    span,
+                });
+                self.emit(Instr::Bin {
+                    op: BEq,
+                    dst,
+                    lhs: eq_id,
+                    rhs: no_id,
                     span,
                 });
 

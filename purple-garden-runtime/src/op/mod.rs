@@ -187,6 +187,17 @@ ops! {
         lhs: u8,
         rhs: u8,
     },
+    /// Int `<=` is `!(>)`, a NaN makes that wrong for doubles.
+    DLe {
+        dst: u8,
+        lhs: u8,
+        rhs: u8,
+    },
+    DGe {
+        dst: u8,
+        lhs: u8,
+        rhs: u8,
+    },
     BEq {
         dst: u8,
         lhs: u8,

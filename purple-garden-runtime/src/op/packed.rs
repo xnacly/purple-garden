@@ -249,6 +249,8 @@ impl super::Op {
                     | crate::op::Op::DDiv { dst, lhs, rhs }
                     | crate::op::Op::DLt { dst, lhs, rhs }
                     | crate::op::Op::DGt { dst, lhs, rhs }
+                    | crate::op::Op::DLe { dst, lhs, rhs }
+                    | crate::op::Op::DGe { dst, lhs, rhs }
                     | crate::op::Op::BEq { dst, lhs, rhs }
                     | crate::op::Op::SEq { dst, lhs, rhs } => encode_packed!(rrr, dst, lhs, rhs),
 

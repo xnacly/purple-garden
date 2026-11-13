@@ -248,7 +248,9 @@ fn simplify<'i, F: Allocator, S: Allocator>(
         | (BinOp::DMul, Some(Const::Double(ONE)), _)
         | (BinOp::DAdd, Some(Const::Double(NEG_ZERO)), _) => same(*rhs),
         (BinOp::ISub, ..) if lhs == rhs => load(Const::Int(0)),
-        (BinOp::IEq | BinOp::BEq | BinOp::SEq, ..) if lhs == rhs => load(Const::True),
+        (BinOp::IEq | BinOp::ILe | BinOp::IGe | BinOp::BEq | BinOp::SEq, ..) if lhs == rhs => {
+            load(Const::True)
+        }
         (BinOp::ILt | BinOp::IGt | BinOp::DLt | BinOp::DGt, ..) if lhs == rhs => load(Const::False),
         _ => return None,
     })

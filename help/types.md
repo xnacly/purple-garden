@@ -38,10 +38,13 @@ Both sides of a binary operator must have the same type. There is no implicit pr
 +  -  *  /              Int      -> Int
                         Double   -> Double
 
+%                       Int      -> Int
+
 ==  !=                  Int      -> Bool
                         Bool     -> Bool
+                        Str      -> Bool
 
-<  >                    Int      -> Bool
+<  >  <=  >=            Int      -> Bool
                         Double   -> Bool
 ```
 

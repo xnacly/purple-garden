@@ -573,9 +573,12 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
         | Type::Slash
         | Type::Percent
         | Type::DoubleEqual
+        | Type::NotEqual
         | Type::As
         | Type::LessThan
-        | Type::GreaterThan = self.cur().t
+        | Type::LessEqual
+        | Type::GreaterThan
+        | Type::GreaterEqual = self.cur().t
         {
             let op = self.cur().clone();
 
@@ -628,7 +631,12 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
         Some(match op {
             Type::Plus | Type::Minus => (1, 2),
             Type::Asteriks | Type::Slash | Type::Percent => (3, 4),
-            Type::DoubleEqual | Type::NotEqual | Type::GreaterThan | Type::LessThan => (0, 1),
+            Type::DoubleEqual
+            | Type::NotEqual
+            | Type::GreaterThan
+            | Type::GreaterEqual
+            | Type::LessThan
+            | Type::LessEqual => (0, 1),
             _ => return None,
         })
     }

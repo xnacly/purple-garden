@@ -240,11 +240,23 @@ fn try_const_fold<S: Allocator>(
                     };
                     (lhs < rhs).into()
                 }
+                BinOp::ILe => {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
+                        unreachable!();
+                    };
+                    (lhs <= rhs).into()
+                }
                 BinOp::IGt => {
                     let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     (lhs > rhs).into()
+                }
+                BinOp::IGe => {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
+                        unreachable!();
+                    };
+                    (lhs >= rhs).into()
                 }
                 BinOp::IEq => {
                     let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
@@ -282,11 +294,23 @@ fn try_const_fold<S: Allocator>(
                     };
                     (f64::from_bits(*lhs) < f64::from_bits(*rhs)).into()
                 }
+                BinOp::DLe => {
+                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_value, rhs_value) else {
+                        unreachable!();
+                    };
+                    (f64::from_bits(*lhs) <= f64::from_bits(*rhs)).into()
+                }
                 BinOp::DGt => {
                     let (Const::Double(lhs), Const::Double(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
                     };
                     (f64::from_bits(*lhs) > f64::from_bits(*rhs)).into()
+                }
+                BinOp::DGe => {
+                    let (Const::Double(lhs), Const::Double(rhs)) = (lhs_value, rhs_value) else {
+                        unreachable!();
+                    };
+                    (f64::from_bits(*lhs) >= f64::from_bits(*rhs)).into()
                 }
                 BinOp::BEq | BinOp::SEq => (lhs_value == rhs_value).into(),
             };

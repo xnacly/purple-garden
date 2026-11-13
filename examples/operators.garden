@@ -1,0 +1,55 @@
+# <=, >= and !=, on runtime operands (parameters) and on constants the
+# optimiser folds.
+import "testing"
+
+fn le(a:Int b:Int) Bool { a <= b }
+fn ge(a:Int b:Int) Bool { a >= b }
+fn dle(a:Double b:Double) Bool { a <= b }
+fn dge(a:Double b:Double) Bool { a >= b }
+fn ne(a:Int b:Int) Bool { a != b }
+fn bne(a:Bool b:Bool) Bool { a != b }
+fn sne(a:Str b:Str) Bool { a != b }
+fn div(a:Double b:Double) Double { a / b }
+
+fn flag(set:Bool value:Int) Int {
+    match {
+        set { value }
+        { 0 }
+    }
+}
+
+#! Every comparison of a against b, as one Int: le ge dle dge ne in its bits.
+fn compare(a:Int b:Int) Int {
+    let x = a as Double
+    let y = b as Double
+    flag(le(a b) 1) + flag(ge(a b) 2) + flag(dle(x y) 4) + flag(dge(x y) 8) + flag(ne(a b) 16)
+}
+
+testing.assert(compare(1 2) == 21)
+testing.assert(compare(2 1) == 26)
+testing.assert(compare(3 3) == 15)
+testing.assert(compare(-5 -4) == 21)
+testing.assert(le(-9223372036854775807 - 1 9223372036854775807))
+testing.assert(ge(9223372036854775807 -9223372036854775807 - 1))
+
+let nan = div(0.0 0.0)
+testing.assert(dle(nan 1.0) == false)
+testing.assert(dge(nan 1.0) == false)
+testing.assert(dle(nan nan) == false)
+testing.assert(dle(-0.0 0.0))
+testing.assert(dge(0.0 -0.0))
+
+testing.assert(bne(true false))
+testing.assert(bne(true true) == false)
+testing.assert(sne("a" "b"))
+testing.assert(sne("same" "same") == false)
+
+# constants, folded at compile time
+testing.assert(3 <= 3)
+testing.assert(4 >= 3)
+testing.assert(4 <= 3 == false)
+testing.assert(2.5 <= 2.5)
+testing.assert(2.5 >= 3.0 == false)
+testing.assert(1 != 2)
+testing.assert(true != false)
+testing.assert("x" != "y")

@@ -122,7 +122,7 @@ module.exports = grammar({
     )),
 
     binary_expression: $ => choice(
-      prec.left(PREC.compare, seq($.expression, choice('==', '!=', '<', '>'), $.expression)),
+      prec.left(PREC.compare, seq($.expression, choice('==', '!=', '<', '>', '<=', '>='), $.expression)),
       prec.left(PREC.add, seq($.expression, choice('+', '-'), $.expression)),
       prec.left(PREC.multiply, seq($.expression, choice('*', '/', '%'), $.expression)),
     ),

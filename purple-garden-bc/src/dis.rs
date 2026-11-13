@@ -255,6 +255,8 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                 Op::DMul { dst, lhs, rhs } => format!("dmul r{dst}, r{lhs}, r{rhs}"),
                 Op::DDiv { dst, lhs, rhs } => format!("ddiv r{dst}, r{lhs}, r{rhs}"),
                 Op::DLt { dst, lhs, rhs } => format!("dlt r{dst}, r{lhs}, r{rhs}"),
+                Op::DLe { dst, lhs, rhs } => format!("dle r{dst}, r{lhs}, r{rhs}"),
+                Op::DGe { dst, lhs, rhs } => format!("dge r{dst}, r{lhs}, r{rhs}"),
                 Op::DGt { dst, lhs, rhs } => format!("dgt r{dst}, r{lhs}, r{rhs}"),
                 Op::BEq { dst, lhs, rhs } => format!("beq r{dst}, r{lhs}, r{rhs}"),
                 Op::SEq { dst, lhs, rhs } => format!("seq r{dst}, r{lhs}, r{rhs}"),

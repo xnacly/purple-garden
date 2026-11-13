@@ -1270,7 +1270,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 });
             }
             ir::Instr::Bin {
-                op: op @ (BinOp::DLt | BinOp::DGt),
+                op: op @ (BinOp::DLt | BinOp::DGt | BinOp::DLe | BinOp::DGe),
                 dst,
                 lhs,
                 rhs,
@@ -1285,17 +1285,20 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let dst = self.def(dst);
                 let dst = self.gpr(dst);
 
-                // ucomisd reports `<` like a NaN, via CF, but `>` only when
-                // ordered, so `<` is lowered as the swapped `>`: false for NaN
+                // ucomisd reports `<` like a NaN, via CF, but `>` and `>=` only when
+                // ordered, so `<` and `<=` are lowered as the swapped `>` and `>=`: false for NaN
                 // like the VM.
-                let (lhs, rhs) = if *op == BinOp::DLt {
+                let (lhs, rhs) = if matches!(op, BinOp::DLt | BinOp::DLe) {
                     (rhs, lhs)
                 } else {
                     (lhs, rhs)
                 };
                 self.emit(Insn::Ucomisd { lhs, rhs });
                 self.emit(Insn::MovImm { dst, imm: 0 });
-                self.emit(Insn::Seta { dst });
+                self.emit(match op {
+                    BinOp::DLt | BinOp::DGt => Insn::Seta { dst },
+                    _ => Insn::Setae { dst },
+                });
             }
             ir::Instr::Bin {
                 op, dst, lhs, rhs, ..
@@ -1347,14 +1350,22 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         });
                     }
                     // Strings are interned: equal contents share one pointer.
-                    BinOp::IEq | BinOp::BEq | BinOp::SEq | BinOp::ILt | BinOp::IGt => {
+                    BinOp::IEq
+                    | BinOp::BEq
+                    | BinOp::SEq
+                    | BinOp::ILt
+                    | BinOp::ILe
+                    | BinOp::IGt
+                    | BinOp::IGe => {
                         let dst = self.def(dst);
                         let dst = self.gpr(dst);
                         self.emit(Insn::Cmp { lhs, rhs });
                         self.emit(Insn::MovImm { dst, imm: 0 });
                         self.emit(match op {
                             BinOp::ILt => Insn::Setl { dst },
+                            BinOp::ILe => Insn::Setle { dst },
                             BinOp::IGt => Insn::Setg { dst },
+                            BinOp::IGe => Insn::Setge { dst },
                             _ => Insn::Sete { dst },
                         });
                     }

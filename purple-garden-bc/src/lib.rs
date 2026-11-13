@@ -1411,6 +1411,27 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 self.sys(pos, dst.id, fun.ptr, &[*src]);
             }
             ir::Instr::Noop {} => {}
+            // no ops of their own, an int `<=` is `!(>)`
+            ir::Instr::Bin {
+                op: op @ (ir::BinOp::ILe | ir::BinOp::IGe),
+                dst,
+                lhs,
+                rhs,
+                ..
+            } => {
+                let dst = self.def_register(dst.id);
+                let lhs = self.ensure_register(*lhs);
+                let rhs = self.ensure_register(*rhs);
+                self.emit(match op {
+                    ir::BinOp::ILe => Op::IGt { dst, lhs, rhs },
+                    _ => Op::ILt { dst, lhs, rhs },
+                });
+                self.emit(Op::IEqI {
+                    dst,
+                    lhs: dst,
+                    imm: 0,
+                });
+            }
             ir::Instr::Bin {
                 op, dst, lhs, rhs, ..
             } => {
@@ -1437,7 +1458,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
                 self.emit(emit_bins! {
                     IAdd, ISub, IMul, IDiv, IMod, IAnd, ILt, IGt, IEq,
-                    DAdd, DSub, DMul, DDiv, DLt, DGt,
+                    DAdd, DSub, DMul, DDiv, DLt, DGt, DLe, DGe,
                     BEq, SEq
                 });
             }

@@ -142,14 +142,18 @@ pub enum BinOp {
     /// Logical, see [`BinOp::IShl`]
     IUShr,
     ILt,
+    ILe,
     IGt,
+    IGe,
     IEq,
     DAdd,
     DSub,
     DMul,
     DDiv,
     DLt,
+    DLe,
     DGt,
+    DGe,
     BEq,
     SEq,
 }

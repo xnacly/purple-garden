@@ -48,6 +48,8 @@ impl<const B: bool> Handlers<B> {
             Tag::DDiv => rrr::d_div::<B>,
             Tag::DLt => rrr::d_lt::<B>,
             Tag::DGt => rrr::d_gt::<B>,
+            Tag::DLe => rrr::d_le::<B>,
+            Tag::DGe => rrr::d_ge::<B>,
             Tag::BEq => rrr::b_eq::<B>,
             Tag::SEq => rrr::s_eq::<B>,
             Tag::Mov => rr::mov::<B>,

@@ -340,7 +340,10 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                 }
                 Type::Bool
             }
-            lex::Type::LessThan | lex::Type::GreaterThan => {
+            lex::Type::LessThan
+            | lex::Type::LessEqual
+            | lex::Type::GreaterThan
+            | lex::Type::GreaterEqual => {
                 match (lhs, rhs) {
                     (Type::Double, Type::Double) | (Type::Int, Type::Int) => {}
                     (_, _) if lhs == rhs => {

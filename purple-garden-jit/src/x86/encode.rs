@@ -263,6 +263,18 @@ pub enum Insn {
     Setg {
         dst: Reg,
     },
+    /// `setle r{dst}b`; signed less than or equal.
+    Setle {
+        dst: Reg,
+    },
+    /// `setge r{dst}b`; signed greater than or equal.
+    Setge {
+        dst: Reg,
+    },
+    /// `setae r{dst}b`; unsigned `>=`, how [`Insn::Ucomisd`] reports an ordered `>=`.
+    Setae {
+        dst: Reg,
+    },
     /// `seta r{dst}b`; unsigned greater than, how [`Insn::Ucomisd`] reports `>`.
     Seta {
         dst: Reg,
@@ -505,6 +517,9 @@ impl Insn {
             Insn::Setl { dst } => setcc(code, 0x9c, dst),
             Insn::Setg { dst } => setcc(code, 0x9f, dst),
             Insn::Seta { dst } => setcc(code, 0x97, dst),
+            Insn::Setle { dst } => setcc(code, 0x9e, dst),
+            Insn::Setge { dst } => setcc(code, 0x9d, dst),
+            Insn::Setae { dst } => setcc(code, 0x93, dst),
             Insn::Setne { dst } => setcc(code, 0x95, dst),
             // REX.W 0F 43/4A /r = `cmovae/cmovp r64, r/m64`, ModRM.reg is dst.
             Insn::Cmovae { dst, src } => {
@@ -1097,6 +1112,9 @@ mod tests {
         assert_eq!(enc(Insn::Setg { dst: R8 }), [0x41, 0x0f, 0x9f, 0xc0]); // setg r8b
         assert_eq!(enc(Insn::Sete { dst: RSI }), [0x40, 0x0f, 0x94, 0xc6]); // sete sil
         assert_eq!(enc(Insn::Seta { dst: R8 }), [0x41, 0x0f, 0x97, 0xc0]); // seta r8b
+        assert_eq!(enc(Insn::Setle { dst: RSI }), [0x40, 0x0f, 0x9e, 0xc6]); // setle sil
+        assert_eq!(enc(Insn::Setge { dst: R8 }), [0x41, 0x0f, 0x9d, 0xc0]); // setge r8b
+        assert_eq!(enc(Insn::Setae { dst: RSI }), [0x40, 0x0f, 0x93, 0xc6]); // setae sil
         assert_eq!(enc(Insn::Setne { dst: RSI }), [0x40, 0x0f, 0x95, 0xc6]); // setne sil
         assert_eq!(enc(Insn::Setne { dst: R8 }), [0x41, 0x0f, 0x95, 0xc0]); // setne r8b
         assert_eq!(
