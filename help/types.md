@@ -24,6 +24,7 @@ let ready = true
 let label = "garden"
 let user = { name: "xnacly" age: 23 }
 let jobs = ["senior software engineer" "thinker"]
+let first = jobs.[0]
 
 fn print_once(message:Str) Void {
     io.println(message)

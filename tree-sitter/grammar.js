@@ -114,6 +114,7 @@ module.exports = grammar({
       $.unary_expression,
       $.call_expression,
       $.field_expression,
+      $.index_expression,
       $.primary_expression,
     ),
 
@@ -150,6 +151,14 @@ module.exports = grammar({
       $.expression,
       '.',
       $.identifier,
+    )),
+
+    index_expression: $ => prec.left(PREC.call, seq(
+      $.expression,
+      '.',
+      '[',
+      $.expression,
+      ']',
     )),
 
     primary_expression: $ => choice(

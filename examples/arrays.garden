@@ -1,0 +1,20 @@
+# xs.[i]: the element at a computed offset, read like a record field. Out of
+# bounds traps with "Index out of bounds".
+import "testing"
+
+fn at(xs:Array<Int> i:Int) Int { xs.[i] }
+fn dat(xs:Array<Double> i:Int) Double { xs.[i] }
+fn sat(xs:Array<Str> i:Int) Str { xs.[i] }
+fn pt(ps:Array<Record<x:Int y:Double>> i:Int) Record<x:Int y:Double> { ps.[i] }
+
+let xs = [10 20 30]
+testing.assert(at(xs 0) == 10)
+testing.assert(at(xs 2) == 30)
+testing.assert(xs.[1] + xs.[2] == 50)
+testing.assert(at([7] 0) == 7)
+testing.assert((dat([1.5 2.5] 1) * 2.0) as Int == 5)
+testing.assert(sat(["a" "bc"] 1) == "bc")
+let ps = [{x: 1 y: 1.5} {x: 2 y: 2.5} {x: 3 y: 3.5}]
+testing.assert(pt(ps 2).x == 3)
+testing.assert((pt(ps 1).y * 2.0) as Int == 5)
+testing.assert(ps.[0].x + ps.[1].x == 3)
