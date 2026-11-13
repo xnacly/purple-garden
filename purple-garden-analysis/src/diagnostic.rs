@@ -1,9 +1,9 @@
 use lsp_types::{DiagnosticSeverity, NumberOrString};
 use purple_garden_frontend::diagnostic::Diagnostic as FrontendDiagnostic;
 
-use super::source::range_for_span;
+use crate::source::range_for_span;
 
-pub(super) fn diagnostic_for_lsp(
+pub(crate) fn diagnostic_for_lsp(
     diagnostic: &FrontendDiagnostic,
     source: &str,
 ) -> lsp_types::Diagnostic {

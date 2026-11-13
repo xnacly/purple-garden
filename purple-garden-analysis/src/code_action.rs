@@ -6,12 +6,12 @@ use lsp_types::{
 };
 use purple_garden_frontend::diagnostic::Diagnostic as FrontendDiagnostic;
 
-use super::{
+use crate::{
     diagnostic::diagnostic_for_lsp,
     source::{range_for_edit, range_for_span},
 };
 
-pub(super) fn actions_for(
+pub(crate) fn actions_for(
     uri: Uri,
     source: &str,
     diagnostics: &[FrontendDiagnostic],

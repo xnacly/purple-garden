@@ -166,6 +166,52 @@ Producing:
   32:	c3                   	ret
 ```
 
+### Reports
+
+`purple-garden-inspect` compiles a program and writes every stage of it to a
+single self-contained html file, no server or network needed, to attach to a
+pull request or an issue. The program itself isn't run.
+
+```bash
+cargo run -p purple-garden-inspect -- examples/fib.garden -o fib.html
+# the data behind it instead
+cargo run -p purple-garden-inspect -- examples/fib.garden --json -o fib.json
+```
+
+| tab       | shows                                                                                          |
+| --------- | ---------------------------------------------------------------------------------------------- |
+| IR        | the IR after any optimisation pass, diffed against the pass before it                          |
+| CFG       | control flow graphs laid out like iongraph, a function's or the whole program's with its calls |
+| Registers | a lane per register and stack slot, bars spanning each value's live interval                   |
+| Bytecode  | the `-D` listing                                                                               |
+| x86-64    | what the x86-64 backend emits, or why a function stays bytecode; on any host                   |
+| AST/Types | the `-A` and `-T`/`-TT` dumps                                                                  |
+| Memory    | time and allocations of every compile phase, the `-a` table                                    |
+| Output    | the diagnostics                                                                                |
+
+Hovering an IR row, op, instruction, block or register highlights everything
+lowered from the same instruction, the source line included. The url's
+fragment holds what a report shows, so a link like
+`fib.html#tab=cfg&f=1&pass=6&row=1:17` opens the CFG of `f1` after the 7th
+pass with row 17 highlighted. `[` and `]` step through the passes, `1` to `9`
+pick a tab.
+
+### Visualizer
+
+`purple-garden-viz` is an editor next to the views of the reports, recompiled
+as you type, that also runs the program (`⌘R`) and exports the open file as a
+report (`⌘E`). It is built on [gpui](https://www.gpui.rs/) and kept out of the
+workspace, so neither the lockfile nor CI pull gpui in:
+
+```bash
+cargo run --release --manifest-path purple-garden-viz/Cargo.toml -- examples/fib.garden
+```
+
+Compiling and running happen in a child process, so a compiler crash or a
+program that never halts can't take the editor down. Built with
+`--features screenshot`, it writes the window to `PG_VIZ_SCREENSHOT=<png>` and
+quits, see `purple-garden-viz/src/main.rs` for the other `PG_VIZ_*` switches.
+
 ### Benchmarks
 
 > These may take a while

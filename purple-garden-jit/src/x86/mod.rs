@@ -17,30 +17,14 @@ mod encode;
 
 use std::{alloc::Allocator, collections::HashMap, ops::Range};
 
-use crate::{
-    arch::encode::Xmm,
-    xralloc2::{Class, Location, Reg as Preg, Xralloc2},
-};
+use crate::Unsupported;
+use crate::xralloc2::{Class, Location, Reg as Preg, Xralloc2};
 use encode::{
     Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBP, RBX, RCX, RDI, RDX, RSI, RSP, Reg,
-    patch_rel32,
+    Xmm, patch_rel32,
 };
 use purple_garden_ir::{self as ir, BinOp, UnOp};
-use purple_garden_runtime::{BuiltinFn, Value, string};
-
-/// Bail out of [`compile_func`] (returning `None`) and, under the `trace`
-/// feature, log why. The reason is only formatted inside `trace!`, so it costs
-/// nothing when the feature is off; the whole diagnostic is trace-guarded.
-macro_rules! skip {
-    ($func:expr, $($reason:tt)*) => {{
-        purple_garden_shared::trace!(
-            "[jit::x86] skipped {}: {}",
-            $func.name,
-            format_args!($($reason)*)
-        );
-        return None;
-    }};
-}
+use purple_garden_runtime::{Value, string};
 
 /// `rbx` holds `*mut Vm` == `&vm.r[0]`, base for slot loads/stores. Callee saved, so Rust keeps
 /// it across calls, `enter_native` sets it.
@@ -89,8 +73,8 @@ const XMM_POOL_SPILLING: &[u8] = &[12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
 /// The [`GPR_TEMPS`] of doubles.
 const XMM_TEMPS: [Xmm; 2] = [Xmm(14), Xmm(13)];
 
-/// Compile one IR function into x86-64 machine code, returning `None` if unsupported constructs are
-/// included
+/// Compile one IR function into x86-64 machine code, the reason it can't be compiled if it includes
+/// unsupported constructs
 pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     func: &ir::Func<'ir, F>,
     out: &mut Vec<u8, S>,
@@ -101,9 +85,9 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     at: usize,
     ra: &mut Xralloc2<S>,
     buffers: &mut Scratch<S>,
-) -> Option<()> {
+) -> Result<(), Unsupported<'ir>> {
     let Some(entry) = func.blocks.iter().find(|b| !b.tombstone).map(|b| b.id) else {
-        skip!(func, "empty function");
+        return Err(Unsupported::EmptyFunction);
     };
 
     let calls = Lowering::new(
@@ -223,8 +207,12 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
         }
     }
 
+    for row in &mut buffers.rows {
+        row.1 += body_at - start;
+    }
+
     purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
-    Some(())
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,6 +260,46 @@ pub struct Scratch<S: Allocator> {
     /// Jump and lookup tables inlined into the code, as body offsets until the function is laid
     /// out, then as offsets from its first byte.
     tables: Vec<Range<usize>, S>,
+    /// `(pos, offset)` of every [`ir::Func::live_set_into`] row the body emitted code for, as body
+    /// offsets until the function is laid out, then as offsets from its first byte.
+    rows: Vec<(u32, usize), S>,
+    features: Features,
+}
+
+/// The optional x86-64 extensions lowering may use, see [`Features::host`].
+#[derive(Clone, Copy, Debug)]
+pub struct Features {
+    /// Double arithmetic is only lowered to the three-operand AVX forms.
+    pub avx: bool,
+    /// `tzcnt`
+    pub bmi1: bool,
+    /// `shlx`/`shrx`/`sarx`, taking the count from any register
+    pub bmi2: bool,
+    pub lzcnt: bool,
+    pub popcnt: bool,
+}
+
+impl Features {
+    /// The running cpu's on an x86-64 host. Off one nothing executes the code, it is only
+    /// inspected, so it is lowered for x86-64-v3, the level every extension here is part of.
+    pub fn host() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        return Self {
+            avx: std::arch::is_x86_feature_detected!("avx"),
+            bmi1: std::arch::is_x86_feature_detected!("bmi1"),
+            bmi2: std::arch::is_x86_feature_detected!("bmi2"),
+            lzcnt: std::arch::is_x86_feature_detected!("lzcnt"),
+            popcnt: std::arch::is_x86_feature_detected!("popcnt"),
+        };
+        #[cfg(not(target_arch = "x86_64"))]
+        Self {
+            avx: true,
+            bmi1: true,
+            bmi2: true,
+            lzcnt: true,
+            popcnt: true,
+        }
+    }
 }
 
 impl<S: Allocator + Clone> Scratch<S> {
@@ -279,8 +307,16 @@ impl<S: Allocator + Clone> Scratch<S> {
         &self.tables
     }
 
+    /// `(pos, offset)` of the first byte of every [`ir::Func::live_set_into`] row of the most
+    /// recently compiled function, ascending.
+    pub fn rows(&self) -> &[(u32, usize)] {
+        &self.rows
+    }
+
     pub fn new_in(scratch: S) -> Self {
         Self {
+            rows: Vec::new_in(scratch.clone()),
+            features: Features::host(),
             body: Vec::new_in(scratch.clone()),
             block_offsets: Vec::new_in(scratch.clone()),
             patches: Vec::new_in(scratch.clone()),
@@ -302,7 +338,7 @@ impl<S: Allocator + Clone> Scratch<S> {
 #[derive(Clone, Copy)]
 enum Callee {
     /// A natively compiled function.
-    Native(BuiltinFn),
+    Native(usize),
     /// The function being compiled, whose address isn't known yet.
     This,
 }
@@ -373,17 +409,14 @@ fn arith(op: BinOp, dst: Reg, src: Reg) -> Insn {
     }
 }
 
-/// Mark the function as not compilable. [`Lowering::lower`] stops after the
-/// current instruction; until then lowering continues on placeholder
-/// registers and the output is discarded.
+/// Record the first reason the function can't be compiled. [`Lowering::lower`] stops after the
+/// current instruction; until then lowering continues on placeholder registers and the output is
+/// discarded.
 macro_rules! bail {
-    ($self:expr, $($reason:tt)*) => {{
-        purple_garden_shared::trace!(
-            "[jit::x86] skipped {}: {}",
-            $self.func.name,
-            format_args!($($reason)*)
-        );
-        $self.unsupported = true;
+    ($self:expr, $reason:expr) => {{
+        if $self.unsupported.is_none() {
+            $self.unsupported = Some($reason);
+        }
     }};
 }
 
@@ -411,9 +444,9 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     pos: u32,
     /// Set once a helper or native function is called; the prologue then aligns the stack.
     calls: bool,
-    unsupported: bool,
-    /// Double arithmetic is only lowered to the three-operand AVX forms.
-    avx: bool,
+    /// Why the function can't be compiled, the first reason found.
+    unsupported: Option<Unsupported<'ir>>,
+    features: Features,
     /// `block_offsets[block_id]` is the body offset of the block's first byte,
     /// `usize::MAX` for blocks not emitted.
     block_offsets: &'a mut Vec<usize, S>,
@@ -433,6 +466,7 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     tail_refs: &'a mut Vec<(usize, usize), S>,
     native_refs: &'a mut Vec<(usize, usize), S>,
     tables: &'a mut Vec<Range<usize>, S>,
+    rows: &'a mut Vec<(u32, usize), S>,
 }
 
 impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, F, S, N> {
@@ -460,8 +494,11 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             tail_refs,
             native_refs,
             tables,
+            rows,
+            features,
         } = buffers;
         body.clear();
+        rows.clear();
         block_offsets.clear();
         block_offsets.resize(func.blocks.len(), usize::MAX);
         patches.clear();
@@ -482,8 +519,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             pos: 0,
             calls: false,
             temps: [0; 2],
-            unsupported: false,
-            avx: std::arch::is_x86_feature_detected!("avx"),
+            unsupported: None,
+            features: *features,
             block_offsets,
             patches,
             move_pairs,
@@ -496,6 +533,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             tail_refs,
             native_refs,
             tables,
+            rows,
         }
     }
 
@@ -504,16 +542,16 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     }
 
     /// Emit the body, ending where the epilogue is appended. Returns whether
-    /// it calls helpers, `None` if the function can't be compiled.
-    fn lower(mut self) -> Option<bool> {
+    /// it calls helpers, why not if the function can't be compiled.
+    fn lower(mut self) -> Result<bool, Unsupported<'ir>> {
         self.prealloc(GPR_POOL, XMM_POOL);
         // values in slots need temps to be read and written, only a function that spills pays for
         // them, with registers it was short of anyway
-        if !self.unsupported && self.ra.slots() > 0 {
+        if self.unsupported.is_none() && self.ra.slots() > 0 {
             self.prealloc(GPR_POOL_SPILLING, XMM_POOL_SPILLING);
         }
-        if self.unsupported {
-            return None;
+        if let Some(reason) = self.unsupported.take() {
+            return Err(reason);
         }
 
         // Native calls recurse on the machine stack: trap like the interpreter
@@ -578,14 +616,16 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 continue;
             }
             self.block_offsets[block.id.0 as usize] = self.out.len();
+            self.rows.push((self.pos, self.out.len()));
             self.block = block.id;
             self.pos += 1;
 
             for instruction in &block.instructions {
                 self.temps = [0; 2];
+                self.rows.push((self.pos, self.out.len()));
                 self.instr(instruction);
-                if self.unsupported {
-                    return None;
+                if let Some(reason) = self.unsupported.take() {
+                    return Err(reason);
                 }
                 if let Some(dst) = ir::Func::def_of(instruction) {
                     self.spill(dst);
@@ -598,15 +638,19 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 .find(|b| !b.tombstone)
                 .map(|b| b.id);
             self.temps = [0; 2];
+            self.rows.push((self.pos, self.out.len()));
             self.term(block.term.as_ref(), next);
-            if self.unsupported {
-                return None;
+            if let Some(reason) = self.unsupported.take() {
+                return Err(reason);
             }
             self.pos += 1;
         }
 
         self.patch_jumps();
-        (!self.unsupported).then_some(self.calls)
+        match self.unsupported.take() {
+            Some(reason) => Err(reason),
+            None => Ok(self.calls),
+        }
     }
 
     fn emit(&mut self, insn: Insn) {
@@ -618,7 +662,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         if let Preg::Gpr(gpr) = reg {
             Reg(gpr)
         } else {
-            bail!(self, "gpr called on a value thats not a gpr");
+            bail!(self, Unsupported::NotGpr);
             GPR_SCRATCH
         }
     }
@@ -628,7 +672,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         if let Preg::Fpr(fpr) = reg {
             Xmm(fpr)
         } else {
-            bail!(self, "xmm called on a value thats not a fpr");
+            bail!(self, Unsupported::NotFpr);
             XMM_SCRATCH
         }
     }
@@ -671,7 +715,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 Class::Fpr => Preg::Fpr(i as u8),
             };
             if self.ra.try_alloc_at(param.id, reg, last_use).is_none() {
-                bail!(self, "param register {reg:?} is taken");
+                bail!(self, Unsupported::ParamRegisterTaken(reg));
                 return;
             }
         }
@@ -910,7 +954,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             Some(Location::Reg(reg)) => reg,
             Some(Location::Stack(_)) => temp(self.classes[id.0 as usize], 0),
             None => {
-                bail!(self, "%v{} has no register", id.0);
+                bail!(self, Unsupported::NoRegister(id));
                 Preg::Gpr(GPR_SCRATCH.0)
             }
         }
@@ -924,7 +968,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let class = self.classes[id.0 as usize];
                 let taken = &mut self.temps[class as usize];
                 if *taken == GPR_TEMPS.len() {
-                    bail!(self, "more operands in slots than temps at %v{}", id.0);
+                    bail!(self, Unsupported::OutOfTemps(id));
                     return Preg::Gpr(GPR_SCRATCH.0);
                 }
                 let reg = temp(class, *taken);
@@ -933,7 +977,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 reg
             }
             None => {
-                bail!(self, "use of %v{} before its definition", id.0);
+                bail!(self, Unsupported::UseBeforeDefinition(id));
                 Preg::Gpr(GPR_SCRATCH.0)
             }
         }
@@ -944,7 +988,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         match self.ra.location(id) {
             Some(location) => location,
             None => {
-                bail!(self, "use of %v{} before its definition", id.0);
+                bail!(self, Unsupported::UseBeforeDefinition(id));
                 Location::Reg(Preg::Gpr(GPR_SCRATCH.0))
             }
         }
@@ -1051,7 +1095,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 ..
             } => {
                 let Some(kind) = purple_garden_runtime::AllocType::from_ty(ty) else {
-                    bail!(self, "unsupported allocation type");
+                    bail!(self, Unsupported::AllocationType);
                     return;
                 };
                 let saves = self.save_clobbered();
@@ -1079,7 +1123,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     .get(value)
                     .and_then(|&slot| self.strings.get(slot as usize))
                 else {
-                    bail!(self, "string constant missing from the const pool");
+                    bail!(self, Unsupported::MissingConstant("string constant"));
                     return;
                 };
                 let dst = self.def(dst);
@@ -1119,7 +1163,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     ir::Const::Int(i) => Some(*i),
                     _ => None,
                 }) else {
-                    bail!(self, "const is not a bool or i32");
+                    bail!(self, Unsupported::ConstNotBoolOrI32);
                     return;
                 };
 
@@ -1236,7 +1280,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                             });
                         }
                     }
-                    _ => bail!(self, "unsupported binimm op {op:?}"),
+                    _ => bail!(self, Unsupported::BinImmOp(*op)),
                 }
             }
             ir::Instr::Bin {
@@ -1246,11 +1290,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 rhs,
                 ..
             } => {
-                if !self.avx {
-                    bail!(
-                        self,
-                        "double bin ops need avx, your shitty ass system is too old :^)"
-                    );
+                if !self.features.avx {
+                    bail!(self, Unsupported::NeedsAvx);
                 }
 
                 let lhs = self.ensure_register(*lhs);
@@ -1336,8 +1377,8 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                     // the bmi2 forms take the count from any register, mod 64 like the ir op
                     BinOp::IShl | BinOp::IShr | BinOp::IUShr => {
-                        if !std::arch::is_x86_feature_detected!("bmi2") {
-                            bail!(self, "{op:?} needs bmi2");
+                        if !self.features.bmi2 {
+                            bail!(self, Unsupported::NeedsBmi2(*op));
                             return;
                         }
                         let dst = self.def(dst);
@@ -1388,7 +1429,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                         }
                         self.div(*op, dst.id, lhs, Divisor::Reg(rhs));
                     }
-                    _ => bail!(self, "unsupported bin op {op:?}"),
+                    _ => bail!(self, Unsupported::BinOp(*op)),
                 }
             }
             ir::Instr::Cast { dst, from, .. } => {
@@ -1454,7 +1495,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                             self.emit(Insn::Mov { dst, src });
                         }
                     }
-                    _ => bail!(self, "unsupported cast from {} to {}", from.ty, dst.ty),
+                    _ => bail!(
+                        self,
+                        Unsupported::Cast {
+                            from: from.ty.clone(),
+                            to: dst.ty.clone(),
+                        }
+                    ),
                 }
             }
             ir::Instr::Lookup {
@@ -1480,7 +1527,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                                 .get(c)
                                 .and_then(|&slot| self.strings.get(slot as usize))
                             else {
-                                bail!(self, "lookup string missing from the const pool");
+                                bail!(self, Unsupported::MissingConstant("lookup string"));
                                 return;
                             };
                             value
@@ -1496,7 +1543,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let slot = |key: i64| ((key - first) / step) as usize;
                 let len = pairs.iter().map(|&(key, _)| slot(key)).max().unwrap() + 1;
                 let Ok(len_imm) = i32::try_from(len) else {
-                    bail!(self, "lookup table of {len} slots");
+                    bail!(
+                        self,
+                        Unsupported::TableSize {
+                            table: "lookup",
+                            len,
+                        }
+                    );
                     return;
                 };
 
@@ -1589,7 +1642,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let func = self.func;
                 let args = func.params(*args);
                 let Some(native) = fun.native else {
-                    bail!(self, "{} has no native entry", fun.name);
+                    bail!(self, Unsupported::NoNativeEntry(fun.name));
                     return;
                 };
                 let Some(moves) = self.native_entry_moves(fun, args) else {
@@ -1608,7 +1661,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 } else if let Some(&f) = self.natives.get(callee) {
                     Callee::Native(f)
                 } else {
-                    bail!(self, "f{} is not compiled natively", callee.0);
+                    bail!(self, Unsupported::NotCompiledNatively(*callee));
                     return;
                 };
                 let func = self.func;
@@ -1617,12 +1670,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ir::Instr::Un { op, dst, src, .. } => {
                 let feature = match op {
                     UnOp::Assert(_) | UnOp::INot | UnOp::DSqrt => true,
-                    UnOp::IPopcnt => std::arch::is_x86_feature_detected!("popcnt"),
-                    UnOp::ICtz => std::arch::is_x86_feature_detected!("bmi1"),
-                    UnOp::IClz => std::arch::is_x86_feature_detected!("lzcnt"),
+                    UnOp::IPopcnt => self.features.popcnt,
+                    UnOp::ICtz => self.features.bmi1,
+                    UnOp::IClz => self.features.lzcnt,
                 };
                 if !feature {
-                    bail!(self, "{op:?} is missing its cpu feature");
+                    bail!(self, Unsupported::MissingCpuFeature(*op));
                     return;
                 }
                 let src = self.ensure_register(*src);
@@ -1684,7 +1737,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 };
                 self.emit(insn);
             }
-            _ => bail!(self, "unsupported instruction {i:?}"),
+            _ => bail!(self, Unsupported::Instruction(i.clone())),
         }
     }
 
@@ -1817,12 +1870,12 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 func: callee, args, ..
             } => {
                 let Some(&f) = self.natives.get(callee) else {
-                    bail!(self, "f{} is not compiled natively", callee.0);
+                    bail!(self, Unsupported::NotCompiledNatively(*callee));
                     return;
                 };
                 let args = func.params(*args);
                 if args.len() > ARG_GPRS.len() {
-                    bail!(self, "{} args, more than argument registers", args.len());
+                    bail!(self, Unsupported::TooManyArgs(args.len()));
                     return;
                 }
                 // nothing outlives a tail call, the arguments are all that is left to move
@@ -1836,7 +1889,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                 }
                 self.parallel_move(moves);
-                self.jump(Cond::Always, Target::Tail(f as usize));
+                self.jump(Cond::Always, Target::Tail(f));
             }
             ir::Terminator::Switch {
                 subject,
@@ -1862,7 +1915,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                                 .get(key)
                                 .and_then(|&slot| self.strings.get(slot as usize))
                             else {
-                                bail!(self, "switch key missing from the const pool");
+                                bail!(self, Unsupported::MissingConstant("switch key"));
                                 return;
                             };
                             value.0 as i64
@@ -1876,7 +1929,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let slot = |key: i64| ((key - first) / step) as usize;
                 let len = keys.iter().map(|&(key, ..)| slot(key)).max().unwrap() + 1;
                 let Ok(len_imm) = i32::try_from(len) else {
-                    bail!(self, "switch table of {len} slots");
+                    bail!(
+                        self,
+                        Unsupported::TableSize {
+                            table: "switch",
+                            len,
+                        }
+                    );
                     return;
                 };
 
@@ -2001,10 +2060,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 if let (Some(rel), Err(pad)) = (to_default_pad, default_entry)
                     && patch_rel32(self.out, rel, rel + 4, pad_at[pad]).is_none()
                 {
-                    bail!(self, "switch default pad out of rel32 range");
+                    bail!(self, Unsupported::OutOfRel32("switch default pad"));
                 }
             }
-            _ => bail!(self, "unsupported terminator"),
+            _ => bail!(self, Unsupported::Terminator),
         }
     }
 
@@ -2032,7 +2091,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             self.jump(Cond::Always, Target::Block(first.0));
             let last_at = self.out.len();
             if patch_rel32(self.out, to_last_at, to_last_at + 4, last_at).is_none() {
-                bail!(self, "edge moves out of rel32 range");
+                bail!(self, Unsupported::OutOfRel32("edge moves"));
             }
             self.edge_moves(last.1, last.2);
             if Some(last.0) != next {
@@ -2292,7 +2351,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// arguments than registers would need the stack and stay bytecode.
     fn call_native(&mut self, callee: Callee, args: &[ir::Id], dst: &ir::TypeId<'ir>) {
         if args.len() > ARG_GPRS.len() {
-            bail!(self, "{} args, more than argument registers", args.len());
+            bail!(self, Unsupported::TooManyArgs(args.len()));
             return;
         }
         let mut moves = std::mem::replace(self.move_pairs, Vec::new_in(self.scratch()));
@@ -2309,7 +2368,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         match callee {
             Callee::Native(f) => {
                 self.emit(Insn::CallRel { disp: 0 });
-                self.native_refs.push((self.out.len() - 4, f as usize));
+                self.native_refs.push((self.out.len() - 4, f));
             }
             Callee::This => {
                 self.emit(Insn::CallRel { disp: 0 });
@@ -2365,7 +2424,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 Class::Fpr => xmms.next().map(Preg::Fpr),
             };
             let Some(dst) = dst else {
-                bail!(self, "{} args, more than argument registers", args.len());
+                bail!(self, Unsupported::TooManyArgs(args.len()));
                 return None;
             };
             assert!(
@@ -2471,7 +2530,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 Target::Block(id) => self.block_offsets[id.0 as usize].min(end),
             };
             if patch_rel32(self.out, rel, from, offset).is_none() {
-                bail!(self, "jump out of rel32 range");
+                bail!(self, Unsupported::OutOfRel32("jump"));
             }
         }
     }

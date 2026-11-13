@@ -29,6 +29,7 @@ pub mod ptype;
 use std::alloc::{Allocator, Global, Layout};
 
 pub use crate::constant::Const;
+pub use crate::display::{Row, highlight_row};
 pub use crate::facts::Facts;
 use crate::ptype::Type;
 use purple_garden_shared::BuiltinFn;
@@ -198,7 +199,7 @@ pub enum Instr<'i> {
         lhs: Id,
         rhs: Id,
         /// Byte offset into the source of the originating AST node. Threaded
-        /// through to `bc::Cc::pc_to_span` so runtime traps render with the
+        /// through to `bc::Cc::origins` so runtime traps render with the
         /// right `file:line:col`. See `Vm::pc_to_span`.
         span: u32,
     },
@@ -677,6 +678,26 @@ impl<A: Allocator> Func<'_, A> {
             }
             Instr::Load { base, .. } | Instr::AddrOf { base, .. } => f(*base),
             Instr::LoadConst { .. } | Instr::Noop | Instr::Alloc { .. } => {}
+        }
+    }
+
+    /// Call f(block) with every edge's target of `term`, in the order the terminator lists them.
+    pub fn for_each_successor(&self, term: &Terminator, mut f: impl FnMut(Id)) {
+        match term {
+            Terminator::Jump { id, .. } => f(*id),
+            Terminator::Branch { yes, no, .. }
+            | Terminator::BranchCmpImm { yes, no, .. }
+            | Terminator::BranchCmp { yes, no, .. } => {
+                f(yes.0);
+                f(no.0);
+            }
+            Terminator::Switch { cases, default, .. } => {
+                for case in self.cases(*cases) {
+                    f(case.target.0);
+                }
+                f(default.0);
+            }
+            Terminator::Return { .. } | Terminator::Tail { .. } => {}
         }
     }
 

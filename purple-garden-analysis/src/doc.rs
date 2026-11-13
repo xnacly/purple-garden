@@ -1,23 +1,21 @@
 use purple_garden_std::{self as pstd, Pkg};
 
 #[must_use]
-pub(crate) fn command(query: &str) -> String {
+pub fn command(query: &str) -> String {
     format!("purple-garden doc {query}")
 }
 
 #[must_use]
-pub(crate) fn language_doc(
-    query: &str,
-) -> Option<&'static purple_garden_frontend::lex::KeywordDoc> {
+pub fn language_doc(query: &str) -> Option<&'static purple_garden_frontend::lex::KeywordDoc> {
     purple_garden_frontend::lex::keyword_doc(query)
 }
 
 #[must_use]
-pub(crate) fn type_doc(query: &str) -> Option<&'static purple_garden_frontend::lex::TypeDoc> {
+pub fn type_doc(query: &str) -> Option<&'static purple_garden_frontend::lex::TypeDoc> {
     purple_garden_frontend::lex::type_doc(query)
 }
 
-pub(crate) fn render_query(query: Option<&str>) -> Result<String, String> {
+pub fn render_query(query: Option<&str>) -> Result<String, String> {
     let Some(query) = query else {
         return Ok(render_index());
     };
@@ -54,7 +52,7 @@ pub(crate) fn render_query(query: Option<&str>) -> Result<String, String> {
     Ok(render_package(path, pkg))
 }
 
-pub(crate) fn render_function(name: &str, variants: &[&purple_garden_runtime::Fn<'_>]) -> String {
+pub fn render_function(name: &str, variants: &[&purple_garden_runtime::Fn<'_>]) -> String {
     let mut out = String::new();
     purple_garden_runtime::print_overload_group(name, variants, &mut out)
         .expect("writing to a String cannot fail");

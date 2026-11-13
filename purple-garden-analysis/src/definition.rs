@@ -6,10 +6,10 @@ use purple_garden_frontend::{
     lex::Token,
 };
 
-use super::{analysis::DefinitionEntry, source::token_span};
+use crate::{analysis::DefinitionEntry, source::token_span};
 
 #[derive(Debug, Default)]
-pub(super) struct DefinitionCollector<'src> {
+pub(crate) struct DefinitionCollector<'src> {
     scopes: Vec<HashMap<&'src str, Span>>,
     functions: HashMap<&'src str, Span>,
     imports: HashMap<&'src str, Span>,
@@ -17,7 +17,7 @@ pub(super) struct DefinitionCollector<'src> {
 }
 
 impl<'src> DefinitionCollector<'src> {
-    pub(super) fn collect(ast: &Ast<'src, '_>) -> Vec<DefinitionEntry> {
+    pub(crate) fn collect(ast: &Ast<'src, '_>) -> Vec<DefinitionEntry> {
         let mut collector = Self::default();
         collector.scopes.push(HashMap::new());
 

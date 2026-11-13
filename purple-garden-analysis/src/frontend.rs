@@ -5,14 +5,14 @@ use purple_garden_typecheck::{TypecheckOutput, Typechecker};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-pub(crate) struct FrontendAnalysis<'a, 'src> {
-    pub(crate) ast: Option<&'a Ast<'src, 'a>>,
-    pub(crate) typecheck: Option<&'a TypecheckOutput<'a, &'a BumpAlloc>>,
-    pub(crate) diagnostics: &'a [Diagnostic],
-    pub(crate) source: &'src [u8],
+pub struct FrontendAnalysis<'a, 'src> {
+    pub ast: Option<&'a Ast<'src, 'a>>,
+    pub typecheck: Option<&'a TypecheckOutput<'a, &'a BumpAlloc>>,
+    pub diagnostics: &'a [Diagnostic],
+    pub source: &'src [u8],
 }
 
-pub(crate) fn analyze<'src, R>(
+pub fn analyze<'src, R>(
     source: &'src [u8],
     libs: Vec<&'src Pkg>,
     stdlib: &'src [Pkg],
@@ -49,7 +49,7 @@ pub(crate) fn analyze<'src, R>(
     })
 }
 
-pub(crate) fn analyze_path<R>(
+pub fn analyze_path<R>(
     source_path: &Path,
     source: &[u8],
     libs: Vec<&Pkg>,
@@ -60,7 +60,7 @@ pub(crate) fn analyze_path<R>(
     analyze(&source, libs, stdlib, f)
 }
 
-pub(crate) fn source_with_extern<'src>(source_path: &Path, source: &'src [u8]) -> Cow<'src, [u8]> {
+pub fn source_with_extern<'src>(source_path: &Path, source: &'src [u8]) -> Cow<'src, [u8]> {
     let Some(extern_path) = find_extern_garden(source_path) else {
         return Cow::Borrowed(source);
     };
@@ -79,7 +79,7 @@ pub(crate) fn source_with_extern<'src>(source_path: &Path, source: &'src [u8]) -
     Cow::Owned(combined)
 }
 
-pub(crate) fn find_extern_garden(source_path: &Path) -> Option<PathBuf> {
+pub fn find_extern_garden(source_path: &Path) -> Option<PathBuf> {
     let source_path = source_path
         .canonicalize()
         .unwrap_or_else(|_| source_path.to_owned());

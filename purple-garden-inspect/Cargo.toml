@@ -1,0 +1,24 @@
+[package]
+name = "purple-garden-inspect"
+version = "0.1.0"
+description = "Records every stage of compiling a purple garden program: diagnostics, the IR after each optimisation pass, register allocation, bytecode and x86-64 machine code"
+edition = "2024"
+
+[dependencies]
+# MPL-2.0, the iongraph layout (SpiderMonkey's CFG viewer) ported to Rust
+ion-layout = { git = "https://github.com/jimmyhmiller/ion-layout", rev = "c146557c3038901d8df4952b75eb6d33697e0d90" }
+iced-x86 = { version = "1.22.0", default-features = false, features = ["std", "decoder", "intel"] }
+purple-garden-allocators = { path = "../purple-garden-allocators" }
+purple-garden-bc = { path = "../purple-garden-bc" }
+purple-garden-frontend = { path = "../purple-garden-frontend" }
+purple-garden-ir = { path = "../purple-garden-ir" }
+purple-garden-jit = { path = "../purple-garden-jit" }
+purple-garden-opt = { path = "../purple-garden-opt" }
+purple-garden-runtime = { path = "../purple-garden-runtime" }
+purple-garden-shared = { path = "../purple-garden-shared", features = ["serde"] }
+purple-garden-std = { path = "../purple-garden-std" }
+purple-garden-typecheck = { path = "../purple-garden-typecheck" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+similar = "3.2.1"
+

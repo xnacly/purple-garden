@@ -15,8 +15,7 @@ use lsp_types::{
     request::{Completion, DocumentDiagnosticRequest, GotoDefinition, HoverRequest},
 };
 
-use super::analysis::DocumentState;
-use super::source::apply_content_changes;
+use purple_garden_analysis::{DocumentState, apply_content_changes};
 
 type LspResult<T> = Result<T, Box<dyn std::error::Error>>;
 

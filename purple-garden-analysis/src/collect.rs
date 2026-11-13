@@ -6,7 +6,7 @@ use purple_garden_frontend::ast::{Ast, Node, NodeId};
 use purple_garden_ir::ptype::Type;
 use purple_garden_typecheck::TypecheckOutput;
 
-use super::{
+use crate::{
     analysis::{DocumentAnalysis, PackageDoc, PackageFunctionCompletion},
     completion,
     definition::DefinitionCollector,
@@ -17,7 +17,7 @@ use super::{
     source::{node_span, token_span, type_expr_span},
 };
 
-pub(super) fn collect_frontend_analysis(
+pub(crate) fn collect_frontend_analysis(
     frontend: crate::frontend::FrontendAnalysis<'_, '_>,
     analysis: &mut DocumentAnalysis,
 ) {

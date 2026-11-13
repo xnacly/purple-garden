@@ -5,7 +5,9 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.5.54", features = ["derive"], optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
 
 [features]
 cli = ["dep:clap"]
+serde = ["dep:serde"]
 trace = []

@@ -7,7 +7,7 @@ use lsp_types::{
 use purple_garden_frontend::diagnostic::{Diagnostic as FrontendDiagnostic, Span};
 use purple_garden_ir::ptype::Type;
 
-use super::{
+use crate::{
     completion::{self, CompletionEntry, RecordCompletion},
     diagnostic::diagnostic_for_lsp,
     hover::{AnalysisHover, HoverMarkup},
@@ -15,47 +15,47 @@ use super::{
 };
 
 #[derive(Default)]
-pub(super) struct DocumentState {
+pub struct DocumentState {
     text: String,
     analysis: DocumentAnalysis,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct DocumentAnalysis {
-    pub(super) diagnostics: Vec<FrontendDiagnostic>,
-    pub(super) hovers: Vec<HoverEntry>,
-    pub(super) definitions: Vec<DefinitionEntry>,
+pub(crate) struct DocumentAnalysis {
+    pub(crate) diagnostics: Vec<FrontendDiagnostic>,
+    pub(crate) hovers: Vec<HoverEntry>,
+    pub(crate) definitions: Vec<DefinitionEntry>,
     declaration_docs: Vec<DeclarationDoc>,
-    pub(super) package_docs: HashMap<String, PackageDoc>,
-    pub(super) imported_packages: Vec<String>,
-    pub(super) completions: Vec<CompletionEntry>,
-    pub(super) record_completions: HashMap<String, RecordCompletion>,
+    pub(crate) package_docs: HashMap<String, PackageDoc>,
+    pub(crate) imported_packages: Vec<String>,
+    pub(crate) completions: Vec<CompletionEntry>,
+    pub(crate) record_completions: HashMap<String, RecordCompletion>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct PackageDoc {
-    pub(super) hover: String,
-    pub(super) functions: HashMap<String, String>,
-    pub(super) completions: HashMap<String, PackageFunctionCompletion>,
+pub(crate) struct PackageDoc {
+    pub(crate) hover: String,
+    pub(crate) functions: HashMap<String, String>,
+    pub(crate) completions: HashMap<String, PackageFunctionCompletion>,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct PackageFunctionCompletion {
-    pub(super) detail: String,
-    pub(super) documentation: Option<String>,
+pub(crate) struct PackageFunctionCompletion {
+    pub(crate) detail: String,
+    pub(crate) documentation: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct HoverEntry {
-    pub(super) span: Span,
-    pub(super) contents: String,
-    pub(super) priority: HoverPriority,
+pub(crate) struct HoverEntry {
+    pub(crate) span: Span,
+    pub(crate) contents: String,
+    pub(crate) priority: HoverPriority,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct DefinitionEntry {
-    pub(super) reference: Span,
-    pub(super) definition: Span,
+pub(crate) struct DefinitionEntry {
+    pub(crate) reference: Span,
+    pub(crate) definition: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -65,16 +65,16 @@ struct DeclarationDoc {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum HoverPriority {
+pub(crate) enum HoverPriority {
     Resolved,
     Lexical,
     Type,
 }
 
 impl DocumentState {
-    pub(super) fn analyze(path: Option<PathBuf>, text: String) -> Self {
+    pub fn analyze(path: Option<PathBuf>, text: String) -> Self {
         let mut analysis = DocumentAnalysis::new();
-        super::hover::collect_lexical_hovers(&text, &mut analysis);
+        crate::hover::collect_lexical_hovers(&text, &mut analysis);
 
         if let Some(path) = path.as_deref() {
             crate::frontend::analyze_path(
@@ -83,7 +83,7 @@ impl DocumentState {
                 Vec::new(),
                 purple_garden_std::STD,
                 |frontend| {
-                    super::collect::collect_frontend_analysis(frontend, &mut analysis);
+                    crate::collect::collect_frontend_analysis(frontend, &mut analysis);
                 },
             );
         } else {
@@ -92,7 +92,7 @@ impl DocumentState {
                 Vec::new(),
                 purple_garden_std::STD,
                 |frontend| {
-                    super::collect::collect_frontend_analysis(frontend, &mut analysis);
+                    crate::collect::collect_frontend_analysis(frontend, &mut analysis);
                 },
             );
         }
@@ -100,7 +100,7 @@ impl DocumentState {
         Self { text, analysis }
     }
 
-    pub(super) fn diagnostics(&self) -> Vec<lsp_types::Diagnostic> {
+    pub fn diagnostics(&self) -> Vec<lsp_types::Diagnostic> {
         self.analysis
             .diagnostics
             .iter()
@@ -109,19 +109,19 @@ impl DocumentState {
             .collect()
     }
 
-    pub(super) fn text(&self) -> &str {
+    pub fn text(&self) -> &str {
         &self.text
     }
 
-    pub(super) fn code_actions(
+    pub fn code_actions(
         &self,
         uri: lsp_types::Uri,
         range: lsp_types::Range,
     ) -> lsp_types::CodeActionResponse {
-        super::code_action::actions_for(uri, &self.text, &self.analysis.diagnostics, range)
+        crate::code_action::actions_for(uri, &self.text, &self.analysis.diagnostics, range)
     }
 
-    pub(super) fn hover_at(&self, position: Position) -> Option<Hover> {
+    pub fn hover_at(&self, position: Position) -> Option<Hover> {
         let offset = offset_for_position(&self.text, position);
         let entry = self
             .analysis
@@ -140,11 +140,7 @@ impl DocumentState {
         })
     }
 
-    pub(super) fn definition_at(
-        &self,
-        uri: Uri,
-        position: Position,
-    ) -> Option<GotoDefinitionResponse> {
+    pub fn definition_at(&self, uri: Uri, position: Position) -> Option<GotoDefinitionResponse> {
         let offset = offset_for_position(&self.text, position);
         let entry = self
             .analysis
@@ -160,7 +156,7 @@ impl DocumentState {
         )))
     }
 
-    pub(super) fn completions_at(&self, position: Position) -> Vec<CompletionItem> {
+    pub fn completions_at(&self, position: Position) -> Vec<CompletionItem> {
         let offset = offset_for_position(&self.text, position);
         completion::items_at(
             &self.analysis.completions,
@@ -181,11 +177,11 @@ impl DocumentAnalysis {
         }
     }
 
-    pub(super) fn add_garden_hover(&mut self, span: Span, contents: impl Into<String>) {
+    pub(crate) fn add_garden_hover(&mut self, span: Span, contents: impl Into<String>) {
         self.add_garden_hover_with_priority(span, contents, HoverPriority::Type);
     }
 
-    pub(super) fn add_garden_hover_with_priority(
+    pub(crate) fn add_garden_hover_with_priority(
         &mut self,
         span: Span,
         contents: impl Into<String>,
@@ -193,20 +189,20 @@ impl DocumentAnalysis {
     ) {
         self.hovers.push(HoverEntry {
             span,
-            contents: super::hover::garden_block(contents.into()),
+            contents: crate::hover::garden_block(contents.into()),
             priority,
         });
     }
 
-    pub(super) fn add_markdown_hover(&mut self, span: Span, contents: impl Into<String>) {
+    pub(crate) fn add_markdown_hover(&mut self, span: Span, contents: impl Into<String>) {
         self.add_markdown_hover_with_priority(span, contents, HoverPriority::Lexical);
     }
 
-    pub(super) fn add_resolved_markdown_hover(&mut self, span: Span, contents: impl Into<String>) {
+    pub(crate) fn add_resolved_markdown_hover(&mut self, span: Span, contents: impl Into<String>) {
         self.add_markdown_hover_with_priority(span, contents, HoverPriority::Resolved);
     }
 
-    pub(super) fn add_markdown_hover_with_priority(
+    pub(crate) fn add_markdown_hover_with_priority(
         &mut self,
         span: Span,
         contents: impl Into<String>,
@@ -219,14 +215,14 @@ impl DocumentAnalysis {
         });
     }
 
-    pub(super) fn add_hover(&mut self, hover: AnalysisHover) {
+    pub(crate) fn add_hover(&mut self, hover: AnalysisHover) {
         match hover.markup {
             HoverMarkup::Garden(contents) => self.add_garden_hover(hover.span, contents),
             HoverMarkup::Markdown(contents) => self.add_markdown_hover(hover.span, contents),
         }
     }
 
-    pub(super) fn add_completion(
+    pub(crate) fn add_completion(
         &mut self,
         label: impl Into<String>,
         kind: CompletionItemKind,
@@ -236,13 +232,13 @@ impl DocumentAnalysis {
             .push(CompletionEntry::local(label, kind, detail));
     }
 
-    pub(super) fn add_record_completion(&mut self, name: impl Into<String>, ty: &Type<'_>) {
+    pub(crate) fn add_record_completion(&mut self, name: impl Into<String>, ty: &Type<'_>) {
         if let Some(record) = RecordCompletion::from_type(ty) {
             self.record_completions.insert(name.into(), record);
         }
     }
 
-    pub(super) fn add_imported_package(&mut self, pkg: &str) {
+    pub(crate) fn add_imported_package(&mut self, pkg: &str) {
         if !self
             .imported_packages
             .iter()
@@ -252,14 +248,14 @@ impl DocumentAnalysis {
         }
     }
 
-    pub(super) fn add_declaration_doc(&mut self, definition: Span, contents: String) {
+    pub(crate) fn add_declaration_doc(&mut self, definition: Span, contents: String) {
         self.declaration_docs.push(DeclarationDoc {
             definition,
             contents,
         });
     }
 
-    pub(super) fn add_reference_doc_hovers(&mut self) {
+    pub(crate) fn add_reference_doc_hovers(&mut self) {
         let mut hovers = Vec::new();
         for entry in &self.definitions {
             if entry.reference == entry.definition {
