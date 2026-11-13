@@ -676,6 +676,7 @@ name = "purple-garden-shared"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "serde",
 ]
 
 [[package]]

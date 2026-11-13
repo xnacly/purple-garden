@@ -7,6 +7,7 @@ use std::{io::IsTerminal, ops::Range};
 pub type Highlights = Vec<(Range<usize>, Class)>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Class {
     /// pc / addresses
     Addr,
