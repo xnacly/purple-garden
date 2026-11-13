@@ -33,9 +33,10 @@
 )))]
 compile_error!("purple-garden-jit currently supports only Linux or macOS on x86_64 or aarch64");
 
+/// The x86-64 backend, compiled on every host: off x86-64 its code is only inspected, never run.
+pub mod x86;
 #[cfg(target_arch = "x86_64")]
-#[path = "x86/mod.rs"]
-mod arch;
+use x86 as arch;
 #[cfg(target_arch = "aarch64")]
 #[path = "aarch64/mod.rs"]
 mod arch;
@@ -157,6 +158,74 @@ impl<S: Allocator + Clone> Jit<S> {
     #[must_use]
     pub fn rows(&self) -> &[(u32, usize)] {
         self.scratch.rows()
+    }
+}
+
+/// The x86-64 backend lowers on any host, the code is only inspected here, never run.
+#[cfg(test)]
+mod tests_x86_any_host {
+    use super::{Natives, x86};
+    use purple_garden_ir::{Block, Func, Id, Terminator, TypeId, ptype::Type};
+    use purple_garden_shared::xralloc2::Xralloc2;
+    use std::{alloc::Global, collections::HashMap};
+
+    /// `fn identity(a:Int) Int { a }`
+    fn identity() -> Func<'static> {
+        let param = TypeId {
+            id: Id(0),
+            ty: Type::Int,
+        };
+        let mut func = Func::new("identity", Id(0), vec![param], Some(Type::Int));
+        let params = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![],
+            term: Some(Terminator::Return {
+                value: Some(Id(0)),
+                span: 0,
+            }),
+        });
+        func
+    }
+
+    #[test]
+    fn lowers_on_every_host() {
+        let func = identity();
+        let mut liveness = Vec::new();
+        func.live_set_into(&mut liveness);
+        let mut code = Vec::new();
+        let mut buffers = x86::Scratch::new_in(Global);
+        x86::compile_func(
+            &func,
+            &mut code,
+            &liveness,
+            &HashMap::new(),
+            &[],
+            &Natives::<Global>::new(),
+            0x1000,
+            &mut Xralloc2::new_in(Global),
+            &mut buffers,
+        )
+        .expect("identity lowers");
+        assert_eq!(code.last(), Some(&0xc3), "ends in ret: {code:02x?}");
+        let positions: Vec<u32> = buffers.rows().iter().map(|&(pos, _)| pos).collect();
+        assert_eq!(positions, [0, 1]);
+    }
+
+    /// Off x86-64 nothing runs the code, it is lowered for x86-64-v3 and so for every extension.
+    #[cfg(not(target_arch = "x86_64"))]
+    #[test]
+    fn assumes_x86_64_v3_off_x86_64() {
+        let x86::Features {
+            avx,
+            bmi1,
+            bmi2,
+            lzcnt,
+            popcnt,
+        } = x86::Features::host();
+        assert!(avx && bmi1 && bmi2 && lzcnt && popcnt);
     }
 }
 

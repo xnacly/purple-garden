@@ -18,13 +18,10 @@ mod encode;
 use std::{alloc::Allocator, collections::HashMap, ops::Range};
 
 use crate::Unsupported;
-use crate::{
-    arch::encode::Xmm,
-    xralloc2::{Class, Location, Reg as Preg, Xralloc2},
-};
+use crate::xralloc2::{Class, Location, Reg as Preg, Xralloc2};
 use encode::{
     Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBP, RBX, RCX, RDI, RDX, RSI, RSP, Reg,
-    patch_rel32,
+    Xmm, patch_rel32,
 };
 use purple_garden_ir::{self as ir, BinOp, UnOp};
 use purple_garden_runtime::{Value, string};
@@ -266,6 +263,43 @@ pub struct Scratch<S: Allocator> {
     /// `(pos, offset)` of every [`ir::Func::live_set_into`] row the body emitted code for, as body
     /// offsets until the function is laid out, then as offsets from its first byte.
     rows: Vec<(u32, usize), S>,
+    features: Features,
+}
+
+/// The optional x86-64 extensions lowering may use, see [`Features::host`].
+#[derive(Clone, Copy, Debug)]
+pub struct Features {
+    /// Double arithmetic is only lowered to the three-operand AVX forms.
+    pub avx: bool,
+    /// `tzcnt`
+    pub bmi1: bool,
+    /// `shlx`/`shrx`/`sarx`, taking the count from any register
+    pub bmi2: bool,
+    pub lzcnt: bool,
+    pub popcnt: bool,
+}
+
+impl Features {
+    /// The running cpu's on an x86-64 host. Off one nothing executes the code, it is only
+    /// inspected, so it is lowered for x86-64-v3, the level every extension here is part of.
+    pub fn host() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        return Self {
+            avx: std::arch::is_x86_feature_detected!("avx"),
+            bmi1: std::arch::is_x86_feature_detected!("bmi1"),
+            bmi2: std::arch::is_x86_feature_detected!("bmi2"),
+            lzcnt: std::arch::is_x86_feature_detected!("lzcnt"),
+            popcnt: std::arch::is_x86_feature_detected!("popcnt"),
+        };
+        #[cfg(not(target_arch = "x86_64"))]
+        Self {
+            avx: true,
+            bmi1: true,
+            bmi2: true,
+            lzcnt: true,
+            popcnt: true,
+        }
+    }
 }
 
 impl<S: Allocator + Clone> Scratch<S> {
@@ -282,6 +316,7 @@ impl<S: Allocator + Clone> Scratch<S> {
     pub fn new_in(scratch: S) -> Self {
         Self {
             rows: Vec::new_in(scratch.clone()),
+            features: Features::host(),
             body: Vec::new_in(scratch.clone()),
             block_offsets: Vec::new_in(scratch.clone()),
             patches: Vec::new_in(scratch.clone()),
@@ -411,8 +446,7 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     calls: bool,
     /// Why the function can't be compiled, the first reason found.
     unsupported: Option<Unsupported<'ir>>,
-    /// Double arithmetic is only lowered to the three-operand AVX forms.
-    avx: bool,
+    features: Features,
     /// `block_offsets[block_id]` is the body offset of the block's first byte,
     /// `usize::MAX` for blocks not emitted.
     block_offsets: &'a mut Vec<usize, S>,
@@ -461,6 +495,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             native_refs,
             tables,
             rows,
+            features,
         } = buffers;
         body.clear();
         rows.clear();
@@ -485,7 +520,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             calls: false,
             temps: [0; 2],
             unsupported: None,
-            avx: std::arch::is_x86_feature_detected!("avx"),
+            features: *features,
             block_offsets,
             patches,
             move_pairs,
@@ -1255,7 +1290,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 rhs,
                 ..
             } => {
-                if !self.avx {
+                if !self.features.avx {
                     bail!(self, Unsupported::NeedsAvx);
                 }
 
@@ -1342,7 +1377,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                     // the bmi2 forms take the count from any register, mod 64 like the ir op
                     BinOp::IShl | BinOp::IShr | BinOp::IUShr => {
-                        if !std::arch::is_x86_feature_detected!("bmi2") {
+                        if !self.features.bmi2 {
                             bail!(self, Unsupported::NeedsBmi2(*op));
                             return;
                         }
@@ -1635,9 +1670,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             ir::Instr::Un { op, dst, src, .. } => {
                 let feature = match op {
                     UnOp::Assert(_) | UnOp::INot | UnOp::DSqrt => true,
-                    UnOp::IPopcnt => std::arch::is_x86_feature_detected!("popcnt"),
-                    UnOp::ICtz => std::arch::is_x86_feature_detected!("bmi1"),
-                    UnOp::IClz => std::arch::is_x86_feature_detected!("lzcnt"),
+                    UnOp::IPopcnt => self.features.popcnt,
+                    UnOp::ICtz => self.features.bmi1,
+                    UnOp::IClz => self.features.lzcnt,
                 };
                 if !feature {
                     bail!(self, Unsupported::MissingCpuFeature(*op));
