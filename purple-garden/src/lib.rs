@@ -19,7 +19,7 @@ use purple_garden_frontend::{
     diagnostic::{Diagnostic, Span},
     lex, lower, parser,
 };
-use purple_garden_runtime::{Anomaly, BuiltinFn, Value};
+use purple_garden_runtime::{Anomaly, BuiltinFn, DebugInfo, Value};
 pub use purple_garden_shared::config;
 use purple_garden_shared::trace;
 use purple_garden_std::PgType;
@@ -283,6 +283,8 @@ pub struct Program<'p> {
     entry: usize,
     entry_native: Option<BuiltinFn>,
     syscalls: Vec<BuiltinFn>,
+    /// Maps the pcs of anomalies back to the source, see [`Program::diagnostic`].
+    debug: DebugInfo,
     /// Keeps the native functions referenced by `syscalls` mapped.
     jit: Option<CodeArena>,
     funcs: HashMap<&'p str, (CcCallTarget, FunctionType<'p>)>,
@@ -395,13 +397,14 @@ where
 }
 
 impl<'p> Program<'p> {
-    fn from_vm(vm: Vm<'p>, syscalls: Vec<BuiltinFn>) -> Self {
+    fn from_vm(vm: Vm<'p>, syscalls: Vec<BuiltinFn>, debug: DebugInfo) -> Self {
         let entry = vm.pc;
         Self {
             vm,
             entry,
             entry_native: None,
             syscalls,
+            debug,
             jit: None,
             funcs: HashMap::new(),
             signatures: BumpAlloc::new(),
@@ -411,6 +414,27 @@ impl<'p> Program<'p> {
     fn with_entry_native(mut self, entry_native: Option<BuiltinFn>) -> Self {
         self.entry_native = entry_native;
         self
+    }
+
+    /// `anomaly` located in the source the program was compiled from, render it with
+    /// [`Diagnostic::render`]. Located through the bytecode's debug info: natively compiled code
+    /// has none yet, its traps point at the start of the source.
+    ///
+    /// ```
+    /// use purple_garden::{Pg, config::Config};
+    ///
+    /// let source = b"let zero = 0\n1 / zero";
+    /// let mut config = Config::default();
+    /// config.no_jit = true;
+    /// let mut program = Pg::new().config(config).compile(source)?;
+    /// let anomaly = program.run().unwrap_err();
+    /// let rendered = program.diagnostic(anomaly).render("script.garden", source);
+    /// assert!(rendered.starts_with("script.garden:2:"), "{rendered}");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn diagnostic(&self, anomaly: Anomaly) -> Diagnostic {
+        Diagnostic::from_anomaly(anomaly, &self.debug)
     }
 
     /// Executes the top-level script and ignores its return register.
@@ -761,7 +785,7 @@ fn compile<'i, A: Allocator + Clone + 'i>(
             })
             .collect();
 
-    let (vm, syscalls, _debug, entry_native_idx) = cc.finalize(
+    let (vm, syscalls, debug, entry_native_idx) = cc.finalize(
         VmConfig {
             backtrace: config.backtrace,
             no_gc: config.no_gc,
@@ -770,7 +794,7 @@ fn compile<'i, A: Allocator + Clone + 'i>(
         alloc,
     );
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
-    let mut program = Program::from_vm(vm, syscalls).with_entry_native(entry_native);
+    let mut program = Program::from_vm(vm, syscalls, debug).with_entry_native(entry_native);
     program.funcs = funcs;
     program.signatures = signatures;
     program.jit = arena;
