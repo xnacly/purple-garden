@@ -478,7 +478,6 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                 let span = src.start as u32;
                 let base = self.lower_node(ast, *target)?.unwrap();
                 let idx = self.lower_node(ast, *index)?.unwrap();
-                let array_ty = self.types.get(ast.value_id(*target)).cloned().unwrap();
                 let ty = self.types.get(*id).cloned().unwrap();
 
                 // the length is the array's first word, see the Array lowering
@@ -525,7 +524,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                     rhs: stride,
                     span,
                 });
-                let element = self.value(array_ty, |dst| Instr::Bin {
+                let element = self.value(ptype::Type::Ptr, |dst| Instr::Bin {
                     op: BinOp::IAdd,
                     dst,
                     lhs: base,
