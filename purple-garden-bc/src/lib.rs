@@ -736,17 +736,20 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         liveness: &[(u32, u32)],
         arena: &mut purple_garden_jit::CodeArena<impl Pages>,
     ) -> bool {
-        let Some(()) = self.jit.compile_func_with_liveness(
+        if let Err(_reason) = self.jit.compile_func_with_liveness(
             fun,
             liveness,
             &self.globals.map,
             &self.str_values,
             &self.native_fns,
             arena.next_entry(),
-        ) else {
-            purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
+        ) {
+            purple_garden_shared::trace!(
+                "[bc::Cc::cc] native skipped function {}: {_reason}",
+                fun.name
+            );
             return false;
-        };
+        }
         let Some(entry) = arena.push(self.jit.code()) else {
             purple_garden_shared::trace!(
                 "[bc::Cc::cc] code arena full, {} stays bytecode",

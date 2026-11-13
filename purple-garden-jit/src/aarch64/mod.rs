@@ -17,8 +17,8 @@ impl<S> Scratch<S> {
     }
 }
 
-pub fn compile_func<F: Allocator, S: Allocator, N: Allocator>(
-    _func: &ir::Func<'_, F>,
+pub fn compile_func<'ir, F: Allocator, S: Allocator, N: Allocator>(
+    _func: &ir::Func<'ir, F>,
     _: &mut Vec<u8, S>,
     _: &[(u32, u32)],
     _: &std::collections::HashMap<ir::Const<'_>, u32>,
@@ -27,7 +27,6 @@ pub fn compile_func<F: Allocator, S: Allocator, N: Allocator>(
     _: usize,
     _: &mut crate::xralloc2::Xralloc2<S>,
     _: &mut Scratch<S>,
-) -> Option<()> {
-    purple_garden_shared::trace!("[jit::aarch64] skipped: backend scaffold only");
-    None
+) -> Result<(), crate::Unsupported<'ir>> {
+    Err(crate::Unsupported::Scaffold)
 }

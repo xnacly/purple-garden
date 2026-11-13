@@ -40,6 +40,7 @@ mod arch;
 #[path = "aarch64/mod.rs"]
 mod arch;
 pub mod mem;
+mod unsupported;
 
 pub use mem::CodeArena;
 use purple_garden_ir as ir;
@@ -50,6 +51,7 @@ use std::{
     collections::HashMap,
     hash::RandomState,
 };
+pub use unsupported::Unsupported;
 
 /// Entry points of the functions already compiled natively, in any allocator.
 pub type Natives<A> = HashMap<ir::Id, BuiltinFn, RandomState, A>;
@@ -87,8 +89,11 @@ impl<S: Allocator + Clone> Jit<S> {
         }
     }
 
-    /// Lower and encode `func`, returning `None` when unsupported.
-    pub fn compile_func<F: Allocator>(&mut self, func: &ir::Func<'_, F>) -> Option<()> {
+    /// Lower and encode `func`, returning why not when unsupported.
+    pub fn compile_func<'ir, F: Allocator>(
+        &mut self,
+        func: &ir::Func<'ir, F>,
+    ) -> Result<(), Unsupported<'ir>> {
         self.liveness.clear();
         func.live_set_into(&mut self.liveness);
         let scratch = self.liveness.allocator().clone();
@@ -117,7 +122,7 @@ impl<S: Allocator + Clone> Jit<S> {
         strings: &[Value],
         natives: &Natives<impl Allocator>,
         at: usize,
-    ) -> Option<()> {
+    ) -> Result<(), Unsupported<'ir>> {
         self.code.clear();
         let result = arch::compile_func(
             func,
@@ -130,7 +135,7 @@ impl<S: Allocator + Clone> Jit<S> {
             &mut self.regalloc,
             &mut self.scratch,
         );
-        if result.is_none() {
+        if result.is_err() {
             self.code.clear();
         }
         result
@@ -1777,7 +1782,7 @@ mod tests_x86 {
             }),
         });
 
-        assert!(Jit::new().compile_func(&func).is_none());
+        assert!(Jit::new().compile_func(&func).is_err());
     }
 
     /// `fn f() Double { lhs <op> rhs }`, the operands loaded as constants.
@@ -2161,7 +2166,7 @@ mod tests_aarch64 {
         });
 
         let mut jit = Jit::new();
-        assert!(jit.compile_func(&func).is_none());
+        assert!(jit.compile_func(&func).is_err());
         assert!(jit.code().is_empty());
     }
 }
