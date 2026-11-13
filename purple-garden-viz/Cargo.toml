@@ -1,0 +1,26 @@
+[package]
+name = "purple-garden-viz"
+version = "0.1.0"
+description = "Live editor visualizing every stage of the purple garden compiler: IR per optimisation pass, control flow graphs, register allocation, bytecode and x86-64"
+edition = "2024"
+
+[[bin]]
+name = "purple-garden-viz"
+path = "src/main.rs"
+
+[features]
+# Renders a window to a png and quits, see `PG_VIZ_SCREENSHOT` in main.rs
+screenshot = ["gpui-kit/test-support"]
+
+[dependencies]
+gpui-kit = { version = "0.9.1", features = ["tree-sitter"] }
+anyhow = "1"
+lsp-types = "0.97.0"
+purple-garden = { path = "../purple-garden" }
+purple-garden-analysis = { path = "../purple-garden-analysis" }
+purple-garden-bc = { path = "../purple-garden-bc" }
+purple-garden-frontend = { path = "../purple-garden-frontend" }
+purple-garden-inspect = { path = "../purple-garden-inspect" }
+purple-garden-ir = { path = "../purple-garden-ir" }
+purple-garden-shared = { path = "../purple-garden-shared" }
+serde_json = "1.0"
