@@ -199,7 +199,7 @@ pub enum Instr<'i> {
         lhs: Id,
         rhs: Id,
         /// Byte offset into the source of the originating AST node. Threaded
-        /// through to `bc::Cc::pc_to_span` so runtime traps render with the
+        /// through to `bc::Cc::origins` so runtime traps render with the
         /// right `file:line:col`. See `Vm::pc_to_span`.
         span: u32,
     },

@@ -94,11 +94,9 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     /// [`Value::UNDEF`] for other constants.
     const_pool: Box<[u32]>,
     str_values: Vec<Value>,
-    /// `pc_to_span[pc]` is the byte offset into the source of the AST node
-    /// that produced the op at `pc`. Threaded into Vm by `Cc::finalize` so
-    /// runtime traps can be rendered with <file:line:col>. Parallel to
-    /// `self.buf`.
-    pub pc_to_span: Vec<u32>,
+    /// `origins[pc]` is where the op at `pc` came from, parallel to `self.buf`. Its spans are
+    /// threaded into Vm by `Cc::finalize` so runtime traps can be rendered with <file:line:col>.
+    pub origins: Vec<Origin>,
     /// `labels[label]` is the absolute pc a jump to `label` lands on, after lowering. Labels below
     /// the function's block count are its block ids, the rest come from [`Cc::label`] for code
     /// without a block. `u16::MAX` marks blocks that weren't emitted (e.g.,
@@ -185,10 +183,19 @@ fn take<T, S: Allocator + Clone>(v: &mut Vec<T, S>) -> Vec<T, S> {
     std::mem::replace(v, Vec::new_in(scratch))
 }
 
+/// Where an op came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Origin {
+    /// Byte offset into the source of the AST node that produced the op.
+    pub span: u32,
+    /// The [`Func::live_set_into`] row of the IR the op was lowered from.
+    pub row: u32,
+}
+
 /// Emit batched Push ops for `regs` in order, packing into Push3/Push2/Push.
 /// Free function so callers can pass `&self.scratch` alongside `&mut self.buf`
 /// without a whole-struct borrow.
-fn pack_push(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
+fn pack_push(buf: &mut Vec<Op>, origins: &mut Vec<Origin>, origin: Origin, regs: &[u8]) {
     let mut i = 0;
     while i + 3 <= regs.len() {
         buf.push(Op::Push3 {
@@ -196,7 +203,7 @@ fn pack_push(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
             b: regs[i + 1],
             c: regs[i + 2],
         });
-        spans.push(span);
+        origins.push(origin);
         i += 3;
     }
     if i + 2 <= regs.len() {
@@ -204,17 +211,17 @@ fn pack_push(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
             a: regs[i],
             b: regs[i + 1],
         });
-        spans.push(span);
+        origins.push(origin);
         i += 2;
     }
     if i < regs.len() {
         buf.push(Op::Push { src: regs[i] });
-        spans.push(span);
+        origins.push(origin);
     }
 }
 
 /// Emit batched Pop ops for `regs` in order, packing into Pop3/Pop2/Pop.
-fn pack_pop(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
+fn pack_pop(buf: &mut Vec<Op>, origins: &mut Vec<Origin>, origin: Origin, regs: &[u8]) {
     let mut i = 0;
     while i + 3 <= regs.len() {
         buf.push(Op::Pop3 {
@@ -222,7 +229,7 @@ fn pack_pop(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
             b: regs[i + 1],
             c: regs[i + 2],
         });
-        spans.push(span);
+        origins.push(origin);
         i += 3;
     }
     if i + 2 <= regs.len() {
@@ -230,12 +237,12 @@ fn pack_pop(buf: &mut Vec<Op>, spans: &mut Vec<u32>, span: u32, regs: &[u8]) {
             a: regs[i],
             b: regs[i + 1],
         });
-        spans.push(span);
+        origins.push(origin);
         i += 2;
     }
     if i < regs.len() {
         buf.push(Op::Pop { dst: regs[i] });
-        spans.push(span);
+        origins.push(origin);
     }
 }
 
@@ -251,7 +258,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     pub fn new_in(scratch: S, alloc: A) -> Self {
         Self {
             buf: Vec::with_capacity(64),
-            pc_to_span: Vec::with_capacity(64),
+            origins: Vec::with_capacity(64),
             globals: Interner::new(),
             std_fns: Interner::new(),
             functions: HashMap::new_in(alloc.clone()),
@@ -301,10 +308,17 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         self.emit(Op::LoadG { dst, idx });
     }
 
+    fn origin(&self) -> Origin {
+        Origin {
+            span: self.cur_span,
+            row: self.pos,
+        }
+    }
+
     fn emit(&mut self, op: Op) -> usize {
         let pc = self.buf.len();
         self.buf.push(op);
-        self.pc_to_span.push(self.cur_span);
+        self.origins.push(self.origin());
         pc
     }
 
@@ -751,12 +765,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         let live = self.live_across[pos as usize];
         self.scratch
             .extend((0..clobber_end).filter(|r| live & 1 << r != 0));
-        pack_push(
-            &mut self.buf,
-            &mut self.pc_to_span,
-            self.cur_span,
-            &self.scratch,
-        );
+        let origin = self.origin();
+        pack_push(&mut self.buf, &mut self.origins, origin, &self.scratch);
 
         self.emit_arg_shuffle(args, self.scratch.len() as u16);
 
@@ -767,12 +777,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         });
         self.emit(Op::Mov { dst, src: 0 });
         self.scratch.reverse();
-        pack_pop(
-            &mut self.buf,
-            &mut self.pc_to_span,
-            self.cur_span,
-            &self.scratch,
-        );
+        let origin = self.origin();
+        pack_pop(&mut self.buf, &mut self.origins, origin, &self.scratch);
     }
 
     /// Move `args[i]` into the i-th argument register (`r0..r{N-1}`) for a call
@@ -865,12 +871,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         }
         self.scratch
             .extend(std::iter::repeat_n(SCRATCH, slots as usize));
-        pack_push(
-            &mut self.buf,
-            &mut self.pc_to_span,
-            self.cur_span,
-            &self.scratch,
-        );
+        let origin = self.origin();
+        pack_push(&mut self.buf, &mut self.origins, origin, &self.scratch);
     }
 
     /// A new jump target without a block, unbound until [`Cc::bind`].
@@ -916,7 +918,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         self.emit_prologue(max_reg, slots);
         let len = self.buf.len() - end;
         self.buf[pc..].rotate_right(len);
-        self.pc_to_span[pc..].rotate_right(len);
+        self.origins[pc..].rotate_right(len);
         for at in &mut self.labels {
             if *at != u16::MAX {
                 *at = jump_target(usize::from(*at) + len);
@@ -933,12 +935,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         if let Some(max_reg) = max_reg {
             self.scratch.extend((CALLEE_SAVED..=max_reg).rev());
         }
-        pack_pop(
-            &mut self.buf,
-            &mut self.pc_to_span,
-            self.cur_span,
-            &self.scratch,
-        );
+        let origin = self.origin();
+        pack_pop(&mut self.buf, &mut self.origins, origin, &self.scratch);
     }
 
     /// Lower a conditional branch, `jump_no(target)` leaves for `target` if the condition fails.
@@ -1361,12 +1359,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     purple_garden_shared::trace!("[bc] spilled r{} at call_idx={}", reg, pos);
                     self.scratch.push(reg);
                 }
-                pack_push(
-                    &mut self.buf,
-                    &mut self.pc_to_span,
-                    self.cur_span,
-                    &self.scratch,
-                );
+                let origin = self.origin();
+                pack_push(&mut self.buf, &mut self.origins, origin, &self.scratch);
 
                 self.emit_arg_shuffle(args, self.scratch.len() as u16);
 
@@ -1383,12 +1377,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 };
                 self.emit(Op::Mov { dst, src: 0 });
                 self.scratch.reverse();
-                pack_pop(
-                    &mut self.buf,
-                    &mut self.pc_to_span,
-                    self.cur_span,
-                    &self.scratch,
-                );
+                let origin = self.origin();
+                pack_pop(&mut self.buf, &mut self.origins, origin, &self.scratch);
             }
             ir::Instr::Sys { dst, fun, args, .. } => {
                 self.sys(pos, dst.id, fun.ptr, owner.params(*args));
@@ -1557,12 +1547,12 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             }
             if !matches!(op, Op::Nop) {
                 bc[w] = op;
-                self.pc_to_span[w] = self.pc_to_span[r];
+                self.origins[w] = self.origins[r];
                 w += 1;
             }
         }
         bc.truncate(w);
-        self.pc_to_span.truncate(w);
+        self.origins.truncate(w);
 
         for table in &mut self.switch_tables {
             for target in &mut table.targets {
@@ -1591,7 +1581,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             std_fns,
             functions,
             entry_native_idx,
-            mut pc_to_span,
+            origins,
             const_pool,
             str_values,
             switch_tables,
@@ -1601,7 +1591,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
         // entry is lowered last, we halt after its Ret. Enables omitting bounds check in dispatch loop
         buf.push(Op::Halt);
-        pc_to_span.push(0);
+        let pc_to_span = origins
+            .iter()
+            .map(|origin| origin.span)
+            .chain([0])
+            .collect::<Box<[u32]>>();
 
         let mut vm = Vm::new_in(config, alloc);
         // A native entry runs directly from its native page; a bytecode entry
@@ -1643,7 +1637,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         (
             vm,
             std_fns.into_vec(),
-            DebugInfo::new(pc_to_span.into_boxed_slice()),
+            DebugInfo::new(pc_to_span),
             entry_native_idx,
         )
     }
@@ -1701,7 +1695,7 @@ mod tests {
     fn compact_nops_remaps_switch_targets() {
         let mut cc = Cc::new();
         cc.buf = vec![Op::Nop, Op::Halt, Op::Nop, Op::Ret];
-        cc.pc_to_span = vec![0; cc.buf.len()];
+        cc.origins = vec![Origin::default(); cc.buf.len()];
         cc.switch_tables.push(SwitchTable {
             first: 0,
             targets: Box::new([1, 3]),

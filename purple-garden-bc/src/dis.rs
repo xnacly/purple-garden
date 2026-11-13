@@ -511,7 +511,7 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
 
     fn source_line(&self, pc: usize) -> Option<(usize, &'dis str)> {
         let source = self.source?;
-        let span = *self.cc.pc_to_span.get(pc)?;
+        let span = self.cc.origins.get(pc)?.span;
         let offset = span as usize;
         if offset >= source.len() {
             return None;
