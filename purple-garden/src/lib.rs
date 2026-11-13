@@ -812,7 +812,9 @@ mod tests {
 
     #[test]
     fn compile_collects_signatures_for_bytecode_and_native_targets() {
-        for (no_jit, want_native) in [(true, false), (false, true)] {
+        // only the x86-64 backend compiles natively, aarch64 is a scaffold
+        let jits = cfg!(target_arch = "x86_64");
+        for (no_jit, want_native) in [(true, false), (false, jits)] {
             let mut config = config::Config::default();
             config.no_jit = no_jit;
             let program = Pg::new()
