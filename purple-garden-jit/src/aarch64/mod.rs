@@ -1,5 +1,7 @@
 //! see https://support.arm.com/documentation/ddi0487/mc/-Part-C-The-AArch64-Instruction-Set?lang=en
 
+use std::alloc::Allocator;
+
 use purple_garden_ir as ir;
 
 #[derive(Debug, Clone)]
@@ -13,10 +15,14 @@ impl<S> Scratch<S> {
     pub fn tables(&self) -> &[std::ops::Range<usize>] {
         &[]
     }
+
+    pub fn rows(&self) -> &[(u32, usize)] {
+        &[]
+    }
 }
 
-pub fn compile_func<F: Allocator, S: std::alloc::Allocator, N: std::alloc::Allocator>(
-    _func: &ir::Func<'_, F>,
+pub fn compile_func<'ir, F: Allocator, S: Allocator, N: Allocator>(
+    _func: &ir::Func<'ir, F>,
     _: &mut Vec<u8, S>,
     _: &[(u32, u32)],
     _: &std::collections::HashMap<ir::Const<'_>, u32>,
@@ -25,7 +31,6 @@ pub fn compile_func<F: Allocator, S: std::alloc::Allocator, N: std::alloc::Alloc
     _: usize,
     _: &mut crate::xralloc2::Xralloc2<S>,
     _: &mut Scratch<S>,
-) -> Option<()> {
-    purple_garden_shared::trace!("[jit::aarch64] skipped: backend scaffold only");
-    None
+) -> Result<(), crate::Unsupported<'ir>> {
+    Err(crate::Unsupported::Scaffold)
 }

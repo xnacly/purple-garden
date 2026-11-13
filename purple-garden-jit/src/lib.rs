@@ -33,26 +33,29 @@
 )))]
 compile_error!("purple-garden-jit currently supports only Linux or macOS on x86_64 or aarch64");
 
+/// The x86-64 backend, compiled on every host: off x86-64 its code is only inspected, never run.
+pub mod x86;
 #[cfg(target_arch = "x86_64")]
-#[path = "x86/mod.rs"]
-mod arch;
+use x86 as arch;
 #[cfg(target_arch = "aarch64")]
 #[path = "aarch64/mod.rs"]
 mod arch;
 pub mod mem;
+mod unsupported;
 
 pub use mem::CodeArena;
 use purple_garden_ir as ir;
-use purple_garden_runtime::{BuiltinFn, Value};
+use purple_garden_runtime::Value;
 use purple_garden_shared::xralloc2;
 use std::{
     alloc::{Allocator, Global},
     collections::HashMap,
     hash::RandomState,
 };
+pub use unsupported::Unsupported;
 
-/// Entry points of the functions already compiled natively, in any allocator.
-pub type Natives<A> = HashMap<ir::Id, BuiltinFn, RandomState, A>;
+/// Entry addresses of the functions already compiled natively, in any allocator.
+pub type Natives<A> = HashMap<ir::Id, usize, RandomState, A>;
 
 /// Reusable JIT codegen state, every buffer lives in the scratch allocator `S`.
 #[derive(Debug, Clone)]
@@ -87,8 +90,11 @@ impl<S: Allocator + Clone> Jit<S> {
         }
     }
 
-    /// Lower and encode `func`, returning `None` when unsupported.
-    pub fn compile_func<F: Allocator>(&mut self, func: &ir::Func<'_, F>) -> Option<()> {
+    /// Lower and encode `func`, returning why not when unsupported.
+    pub fn compile_func<'ir, F: Allocator>(
+        &mut self,
+        func: &ir::Func<'ir, F>,
+    ) -> Result<(), Unsupported<'ir>> {
         self.liveness.clear();
         func.live_set_into(&mut self.liveness);
         let scratch = self.liveness.allocator().clone();
@@ -117,7 +123,7 @@ impl<S: Allocator + Clone> Jit<S> {
         strings: &[Value],
         natives: &Natives<impl Allocator>,
         at: usize,
-    ) -> Option<()> {
+    ) -> Result<(), Unsupported<'ir>> {
         self.code.clear();
         let result = arch::compile_func(
             func,
@@ -130,7 +136,7 @@ impl<S: Allocator + Clone> Jit<S> {
             &mut self.regalloc,
             &mut self.scratch,
         );
-        if result.is_none() {
+        if result.is_err() {
             self.code.clear();
         }
         result
@@ -146,6 +152,80 @@ impl<S: Allocator + Clone> Jit<S> {
     #[must_use]
     pub fn tables(&self) -> &[std::ops::Range<usize>] {
         self.scratch.tables()
+    }
+
+    /// `(pos, offset)` of the first byte in [`Jit::code`] of every [`ir::Func::live_set_into`] row.
+    #[must_use]
+    pub fn rows(&self) -> &[(u32, usize)] {
+        self.scratch.rows()
+    }
+}
+
+/// The x86-64 backend lowers on any host, the code is only inspected here, never run.
+#[cfg(test)]
+mod tests_x86_any_host {
+    use super::{Natives, x86};
+    use purple_garden_ir::{Block, Func, Id, Terminator, TypeId, ptype::Type};
+    use purple_garden_shared::xralloc2::Xralloc2;
+    use std::{alloc::Global, collections::HashMap};
+
+    /// `fn identity(a:Int) Int { a }`
+    fn identity() -> Func<'static> {
+        let param = TypeId {
+            id: Id(0),
+            ty: Type::Int,
+        };
+        let mut func = Func::new("identity", Id(0), vec![param], Some(Type::Int));
+        let params = func.intern_params([Id(0)]);
+        func.blocks.push(Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![],
+            term: Some(Terminator::Return {
+                value: Some(Id(0)),
+                span: 0,
+            }),
+        });
+        func
+    }
+
+    #[test]
+    fn lowers_on_every_host() {
+        let func = identity();
+        let mut liveness = Vec::new();
+        func.live_set_into(&mut liveness);
+        let mut code = Vec::new();
+        let mut buffers = x86::Scratch::new_in(Global);
+        x86::compile_func(
+            &func,
+            &mut code,
+            &liveness,
+            &HashMap::new(),
+            &[],
+            &Natives::<Global>::new(),
+            0x1000,
+            &mut Xralloc2::new_in(Global),
+            &mut buffers,
+        )
+        .expect("identity lowers");
+        assert_eq!(code.last(), Some(&0xc3), "ends in ret: {code:02x?}");
+        let positions: Vec<u32> = buffers.rows().iter().map(|&(pos, _)| pos).collect();
+        assert_eq!(positions, [0, 1]);
+    }
+
+    /// Off x86-64 nothing runs the code, it is lowered for x86-64-v3 and so for every extension.
+    #[cfg(not(target_arch = "x86_64"))]
+    #[test]
+    fn assumes_x86_64_v3_off_x86_64() {
+        let x86::Features {
+            avx,
+            bmi1,
+            bmi2,
+            lzcnt,
+            popcnt,
+        } = x86::Features::host();
+        assert!(avx && bmi1 && bmi2 && lzcnt && popcnt);
     }
 }
 
@@ -178,7 +258,7 @@ mod tests_x86 {
     fn enter_with(
         code: &[u8],
         vm: &mut purple_garden_runtime::Vm,
-        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, purple_garden_runtime::BuiltinFn),
     ) {
         enter_in(CodeArena::new().expect("code arena"), code, vm, enter);
     }
@@ -188,7 +268,7 @@ mod tests_x86 {
         mut arena: CodeArena,
         code: &[u8],
         vm: &mut purple_garden_runtime::Vm,
-        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, purple_garden_runtime::BuiltinFn),
     ) {
         let entry = arena.push(code).expect("code fits the arena");
         arena.seal().expect("seal the code arena");
@@ -214,7 +294,7 @@ mod tests_x86 {
     fn run_with<const N: usize>(
         code: &[u8],
         args: [u64; N],
-        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, purple_garden_runtime::BuiltinFn),
     ) -> [u64; N] {
         run_in(CodeArena::new().expect("code arena"), code, args, enter)
     }
@@ -224,7 +304,7 @@ mod tests_x86 {
         arena: CodeArena,
         code: &[u8],
         args: [u64; N],
-        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, purple_garden_runtime::BuiltinFn),
     ) -> [u64; N] {
         use purple_garden_runtime::{Value, Vm, VmConfig};
 
@@ -441,8 +521,9 @@ mod tests_x86 {
         assert_eq!(payload, &[1, 2, 3, 255]);
     }
 
-    #[test]
-    fn compiles_tail_recursive_factorial_loop() {
+    /// `fn factorial(n acc) Int { match { n == 0 { acc } { factorial(n - 1 n * acc) } } }`, three
+    /// blocks: the branch, the return and the tail call.
+    fn factorial_loop() -> Func<'static> {
         let mut func = Func::new(
             "factorial",
             Id(0),
@@ -528,6 +609,43 @@ mod tests_x86 {
                 }),
             },
         ];
+        func
+    }
+
+    /// Every `live_set_into` row, block headers, instructions and terminators, in order, at
+    /// ascending offsets into the function's code.
+    #[test]
+    fn records_the_code_offset_of_every_row() {
+        let mut jit = Jit::new();
+        jit.compile_func(&factorial_loop()).expect("jit function");
+        let rows = jit.rows();
+        // b0: header, ieq, br | b1: header, ret | b2: header, isub, imul, tail
+        let positions: Vec<u32> = rows.iter().map(|&(pos, _)| pos).collect();
+        assert_eq!(positions, (0..9).collect::<Vec<_>>());
+        assert!(rows.windows(2).all(|w| w[0].1 <= w[1].1), "{rows:?}");
+        assert!(
+            rows.iter().all(|&(_, offset)| offset < jit.code().len()),
+            "{rows:?}"
+        );
+
+        // the rows are the latest function's only
+        let mut func = factorial_loop();
+        func.blocks.truncate(2);
+        let acc = func.intern_params([Id(1)]);
+        func.blocks[0].term = Some(Terminator::Jump {
+            id: Id(1),
+            params: acc,
+            span: 0,
+        });
+        func.blocks[0].instructions.clear();
+        jit.compile_func(&func).expect("jit function");
+        let positions: Vec<u32> = jit.rows().iter().map(|&(pos, _)| pos).collect();
+        assert_eq!(positions, (0..4).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn compiles_tail_recursive_factorial_loop() {
+        let func = factorial_loop();
 
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");
@@ -1177,7 +1295,7 @@ mod tests_x86 {
 
         let code = compile_with(
             &func,
-            &HashMap::from_iter([(Id(1), inc)]),
+            &HashMap::from_iter([(Id(1), inc as usize)]),
             arena.next_entry(),
         );
         let ret = run_in(arena, &code, [5], purple_garden_runtime::enter_native);
@@ -1226,7 +1344,7 @@ mod tests_x86 {
                 span: 0,
             }),
         });
-        let natives = HashMap::from_iter([(Id(1), inc)]);
+        let natives = HashMap::from_iter([(Id(1), inc as usize)]);
         let code = compile_with(&func, &natives, arena.next_entry());
         assert!(
             !code
@@ -1270,7 +1388,7 @@ mod tests_x86 {
 
         let code = compile_with(
             &func,
-            &HashMap::from_iter([(Id(1), half)]),
+            &HashMap::from_iter([(Id(1), half as usize)]),
             arena.next_entry(),
         );
         let args = [1f64.to_bits(), 9f64.to_bits()];
@@ -1612,7 +1730,7 @@ mod tests_x86 {
 
         let code = compile_with(
             &func,
-            &HashMap::from_iter([(Id(1), half)]),
+            &HashMap::from_iter([(Id(1), half as usize)]),
             arena.next_entry(),
         );
         let ret = run_in(
@@ -1777,7 +1895,7 @@ mod tests_x86 {
             }),
         });
 
-        assert!(Jit::new().compile_func(&func).is_none());
+        assert!(Jit::new().compile_func(&func).is_err());
     }
 
     /// `fn f() Double { lhs <op> rhs }`, the operands loaded as constants.
@@ -2139,11 +2257,15 @@ mod tests_x86 {
 ))]
 mod tests_aarch64 {
     use super::Jit;
-    use purple_garden_ir::{Block, Func, Id, Terminator, ptype::Type};
+    use purple_garden_ir::{Block, Func, Id, Terminator, TypeId, ptype::Type};
 
     #[test]
     fn scaffold_falls_back_to_bytecode() {
-        let mut func = Func::new("identity", Id(0), vec![Id(0)], Some(Type::Int));
+        let param = TypeId {
+            id: Id(0),
+            ty: Type::Int,
+        };
+        let mut func = Func::new("identity", Id(0), vec![param], Some(Type::Int));
         let params = func.intern_params(vec![Id(0)]);
         func.blocks.push(Block {
             tombstone: false,
@@ -2157,7 +2279,7 @@ mod tests_aarch64 {
         });
 
         let mut jit = Jit::new();
-        assert!(jit.compile_func(&func).is_none());
+        assert!(jit.compile_func(&func).is_err());
         assert!(jit.code().is_empty());
     }
 }

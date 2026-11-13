@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt::Display};
 
-use purple_garden_shared::ansi::{BLOCK, COMMENT, FLOW, FUNC, IMM, LABEL, MNEM, REG, TYPE, paint};
+use purple_garden_shared::ansi::{Class, Highlights, paint, paint_highlights};
 
 use crate::{Const, Func, Id, Instr, Terminator, TypeId};
 
@@ -179,23 +179,39 @@ fn format_ids(ids: &[crate::Id]) -> String {
         .join(", ")
 }
 
-/// One line of the `Func` dump. `pos` is the [`Func::live_set_into`]
-/// position of the row, so the liveness view can line intervals up with it.
-struct Row {
-    pos: Option<u32>,
-    indent: usize,
-    text: String,
+/// One line of the `Func` dump.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    /// The [`Func::live_set_into`] position of the row, so the liveness view can line intervals
+    /// up with it. `None` for rows outside of live blocks.
+    pub pos: Option<u32>,
+    pub indent: usize,
+    pub text: String,
+    /// The block the row is part of.
+    pub block: Option<Id>,
+    /// Byte offset into the source of the instruction or terminator of the row.
+    pub span: Option<u32>,
 }
 
 impl<A: std::alloc::Allocator> Func<'_, A> {
-    fn rows(&self) -> Vec<Row> {
+    /// The lines of the `-I` dump.
+    #[must_use]
+    pub fn rows(&self) -> Vec<Row> {
         let mut rows = Vec::new();
-        let mut push = |pos, indent, text| rows.push(Row { pos, indent, text });
+        let mut push = |pos, indent, text, block, span| {
+            rows.push(Row {
+                pos,
+                indent,
+                text,
+                block,
+                span,
+            });
+        };
 
         if self.unused {
-            push(None, 0, "// unused; not lowered".to_string());
+            push(None, 0, "// unused; not lowered".to_string(), None, None);
         }
-        push(None, 0, format!("// {}", self.name));
+        push(None, 0, format!("// {}", self.name), None, None);
         push(
             None,
             0,
@@ -211,10 +227,13 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                     .as_ref()
                     .map_or_else(|| "Void".to_string(), std::string::ToString::to_string)
             ),
+            None,
+            Some(self.span),
         );
 
         let mut pos = 0;
         for block in &self.blocks {
+            let id = Some(block.id);
             let params = self
                 .params(block.params)
                 .iter()
@@ -227,20 +246,21 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                 .join(", ");
             let label = format!("b{}({params}):", block.id.0);
             if block.tombstone {
-                push(None, 1, label);
-                push(None, 2, "<tombstone>".to_string());
+                push(None, 1, label, id, None);
+                push(None, 2, "<tombstone>".to_string(), id, None);
                 continue;
             }
-            push(Some(pos), 1, label);
+            push(Some(pos), 1, label, id, None);
             pos += 1;
 
             for ins in &block.instructions {
                 if !matches!(ins, Instr::Noop) {
-                    push(Some(pos), 2, self.instr_display(ins));
+                    push(Some(pos), 2, self.instr_display(ins), id, Some(ins.span()));
                 }
                 pos += 1;
             }
 
+            let span = block.term.as_ref().map(Terminator::span);
             match &block.term {
                 Some(Terminator::Switch {
                     subject,
@@ -248,7 +268,7 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                     default,
                     ..
                 }) => {
-                    push(Some(pos), 2, format!("switch %v{}", subject.0));
+                    push(Some(pos), 2, format!("switch %v{}", subject.0), id, span);
                     let arms: Vec<(String, String)> = self
                         .cases(*cases)
                         .iter()
@@ -261,16 +281,16 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                         .max()
                         .unwrap_or(0);
                     for (key, target) in arms {
-                        push(Some(pos), 3, format!("{key:<width$} -> {target}"));
+                        push(Some(pos), 3, format!("{key:<width$} -> {target}"), id, span);
                     }
                 }
-                Some(term) => push(Some(pos), 2, self.term_display(term)),
+                Some(term) => push(Some(pos), 2, self.term_display(term), id, span),
                 None => {}
             }
             pos += 1;
         }
 
-        push(None, 0, "}".to_string());
+        push(None, 0, "}".to_string(), None, None);
         rows
     }
 
@@ -391,18 +411,18 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
         let mut out = String::new();
         for (i, row) in rows.iter().enumerate() {
             out.push_str(&indent.repeat(row.indent));
-            if color {
-                out.push_str(&colorize(&row.text));
-            } else {
-                out.push_str(&row.text);
-            }
+            out.push_str(&paint_highlights(
+                color,
+                &row.text,
+                &highlight_row(&row.text),
+            ));
             if !liveness {
                 out.push('\n');
                 continue;
             }
 
             let gutter: Option<Vec<String>> = if i == 1 {
-                Some(labels.iter().map(|l| paint(color, REG, l)).collect())
+                Some(labels.iter().map(|l| paint(color, Class::Reg, l)).collect())
             } else {
                 row.pos.map(|p| {
                     intervals
@@ -413,7 +433,7 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                             if def == u32::MAX || def > p || last < p {
                                 format!(" {pad}")
                             } else if def != last {
-                                format!("{}{pad}", paint(color, REG, "|"))
+                                format!("{}{pad}", paint(color, Class::Reg, "|"))
                             } else {
                                 format!(" {pad}")
                             }
@@ -432,25 +452,26 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
     }
 }
 
-/// Colors one rendered row without changing its visible width.
-fn colorize(text: &str) -> String {
+/// Highlights of one rendered row of [`Func::rows`].
+#[must_use]
+pub fn highlight_row(text: &str) -> Highlights {
     const FLOWS: &[&str] = &[
         "br", "br_cmp", "br_imm", "jmp", "ret", "tail", "switch", "Call", "Sys",
     ];
 
     if text.starts_with("//") || text == "<tombstone>" {
-        return paint(true, COMMENT, text);
+        return vec![(0..text.len(), Class::Comment)];
     }
 
     let word_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '.');
-    let mut out = String::with_capacity(text.len() * 2);
+    let mut out = Vec::new();
     let mut i = 0;
     while let Some(c) = text[i..].chars().next() {
         let rest = &text[i..];
         let before = &text[..i];
         if c == '`' {
             let end = rest[1..].find('`').map_or(text.len(), |j| i + j + 2);
-            out.push_str(&paint(true, IMM, &text[i..end]));
+            out.push((i..end, Class::Imm));
             i = end;
         } else if c == '%' {
             let end = i
@@ -458,18 +479,17 @@ fn colorize(text: &str) -> String {
                 + rest[1..]
                     .find(|c: char| !word_char(c))
                     .unwrap_or(rest.len() - 1);
-            out.push_str(&paint(true, REG, &text[i..end]));
+            out.push((i..end, Class::Reg));
             i = end;
             // a param's facts, `%v1[nonzero]`
             if text[i..].starts_with('[') {
                 let end = text[i..].find(']').map_or(text.len(), |j| i + j + 1);
-                out.push_str(&paint(true, COMMENT, &text[i..end]));
+                out.push((i..end, Class::Comment));
                 i = end;
             }
             if text[i..].starts_with(':') {
                 let end = text[i..].find(' ').map_or(text.len(), |j| i + j);
-                out.push(':');
-                out.push_str(&paint(true, TYPE, &text[i + 1..end]));
+                out.push((i + 1..end, Class::Type));
                 i = end;
             }
         } else if word_char(c)
@@ -488,31 +508,28 @@ fn colorize(text: &str) -> String {
                     && word.starts_with(p)
                     && word[1..].bytes().all(|b| b.is_ascii_digit())
             };
-            let code = if numbered('b') {
-                if i == 0 { BLOCK } else { LABEL }
+            let class = if numbered('b') {
+                Some(if i == 0 { Class::Block } else { Class::Label })
             } else if numbered('f') || word == "fn" {
-                FUNC
+                Some(Class::Func)
             } else if FLOWS.contains(&word) {
-                FLOW
+                Some(Class::Flow)
             } else if matches!(word, "true" | "false") || !c.is_ascii_alphabetic() {
-                IMM
+                Some(Class::Imm)
             } else if c.is_ascii_uppercase() && before.trim_end().ends_with(['<', '>']) {
-                TYPE
+                Some(Class::Type)
             } else if c.is_ascii_uppercase() {
-                MNEM
+                Some(Class::Mnem)
             } else if word.contains('.') {
-                LABEL
+                Some(Class::Label)
             } else {
-                ""
+                None
             };
-            if code.is_empty() {
-                out.push_str(word);
-            } else {
-                out.push_str(&paint(true, code, word));
+            if let Some(class) = class {
+                out.push((i..end, class));
             }
             i = end;
         } else {
-            out.push(c);
             i += c.len_utf8();
         }
     }

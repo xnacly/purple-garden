@@ -8,4 +8,5 @@
 pub mod bump;
 pub mod metric;
 pub mod page;
+pub mod phases;
 pub mod stack;
