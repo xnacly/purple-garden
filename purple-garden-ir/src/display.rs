@@ -179,23 +179,39 @@ fn format_ids(ids: &[crate::Id]) -> String {
         .join(", ")
 }
 
-/// One line of the `Func` dump. `pos` is the [`Func::live_set_into`]
-/// position of the row, so the liveness view can line intervals up with it.
-struct Row {
-    pos: Option<u32>,
-    indent: usize,
-    text: String,
+/// One line of the `Func` dump.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    /// The [`Func::live_set_into`] position of the row, so the liveness view can line intervals
+    /// up with it. `None` for rows outside of live blocks.
+    pub pos: Option<u32>,
+    pub indent: usize,
+    pub text: String,
+    /// The block the row is part of.
+    pub block: Option<Id>,
+    /// Byte offset into the source of the instruction or terminator of the row.
+    pub span: Option<u32>,
 }
 
 impl<A: std::alloc::Allocator> Func<'_, A> {
-    fn rows(&self) -> Vec<Row> {
+    /// The lines of the `-I` dump.
+    #[must_use]
+    pub fn rows(&self) -> Vec<Row> {
         let mut rows = Vec::new();
-        let mut push = |pos, indent, text| rows.push(Row { pos, indent, text });
+        let mut push = |pos, indent, text, block, span| {
+            rows.push(Row {
+                pos,
+                indent,
+                text,
+                block,
+                span,
+            });
+        };
 
         if self.unused {
-            push(None, 0, "// unused; not lowered".to_string());
+            push(None, 0, "// unused; not lowered".to_string(), None, None);
         }
-        push(None, 0, format!("// {}", self.name));
+        push(None, 0, format!("// {}", self.name), None, None);
         push(
             None,
             0,
@@ -211,10 +227,13 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                     .as_ref()
                     .map_or_else(|| "Void".to_string(), std::string::ToString::to_string)
             ),
+            None,
+            Some(self.span),
         );
 
         let mut pos = 0;
         for block in &self.blocks {
+            let id = Some(block.id);
             let params = self
                 .params(block.params)
                 .iter()
@@ -227,20 +246,21 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                 .join(", ");
             let label = format!("b{}({params}):", block.id.0);
             if block.tombstone {
-                push(None, 1, label);
-                push(None, 2, "<tombstone>".to_string());
+                push(None, 1, label, id, None);
+                push(None, 2, "<tombstone>".to_string(), id, None);
                 continue;
             }
-            push(Some(pos), 1, label);
+            push(Some(pos), 1, label, id, None);
             pos += 1;
 
             for ins in &block.instructions {
                 if !matches!(ins, Instr::Noop) {
-                    push(Some(pos), 2, self.instr_display(ins));
+                    push(Some(pos), 2, self.instr_display(ins), id, Some(ins.span()));
                 }
                 pos += 1;
             }
 
+            let span = block.term.as_ref().map(Terminator::span);
             match &block.term {
                 Some(Terminator::Switch {
                     subject,
@@ -248,7 +268,7 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                     default,
                     ..
                 }) => {
-                    push(Some(pos), 2, format!("switch %v{}", subject.0));
+                    push(Some(pos), 2, format!("switch %v{}", subject.0), id, span);
                     let arms: Vec<(String, String)> = self
                         .cases(*cases)
                         .iter()
@@ -261,16 +281,16 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                         .max()
                         .unwrap_or(0);
                     for (key, target) in arms {
-                        push(Some(pos), 3, format!("{key:<width$} -> {target}"));
+                        push(Some(pos), 3, format!("{key:<width$} -> {target}"), id, span);
                     }
                 }
-                Some(term) => push(Some(pos), 2, self.term_display(term)),
+                Some(term) => push(Some(pos), 2, self.term_display(term), id, span),
                 None => {}
             }
             pos += 1;
         }
 
-        push(None, 0, "}".to_string());
+        push(None, 0, "}".to_string(), None, None);
         rows
     }
 

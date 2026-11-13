@@ -29,6 +29,7 @@ pub mod ptype;
 use std::alloc::{Allocator, Global, Layout};
 
 pub use crate::constant::Const;
+pub use crate::display::{Row, highlight_row};
 pub use crate::facts::Facts;
 use crate::ptype::Type;
 use purple_garden_shared::BuiltinFn;
