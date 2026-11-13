@@ -1,0 +1,14 @@
+[package]
+name = "purple-garden-analysis"
+version = "0.1.0"
+description = "Frontend analysis of purple garden documents for editors: diagnostics, hovers, definitions and completions"
+edition = "2024"
+
+[dependencies]
+lsp-types = "0.97.0"
+purple-garden-allocators = { path = "../purple-garden-allocators" }
+purple-garden-frontend = { path = "../purple-garden-frontend" }
+purple-garden-ir = { path = "../purple-garden-ir" }
+purple-garden-runtime = { path = "../purple-garden-runtime" }
+purple-garden-std = { path = "../purple-garden-std" }
+purple-garden-typecheck = { path = "../purple-garden-typecheck" }

@@ -5,7 +5,7 @@ use purple_garden_frontend::{
     lex::Token,
 };
 
-pub(super) fn node_span(ast: &Ast<'_, '_>, node_id: NodeId) -> Option<Span> {
+pub(crate) fn node_span(ast: &Ast<'_, '_>, node_id: NodeId) -> Option<Span> {
     let node = ast.node(node_id);
     match node {
         Node::Atom { raw, .. } | Node::Ident { name: raw, .. } => Some(token_span(raw)),
@@ -92,33 +92,33 @@ pub(super) fn node_span(ast: &Ast<'_, '_>, node_id: NodeId) -> Option<Span> {
     }
 }
 
-pub(super) fn type_expr_span(ast: &Ast<'_, '_>, id: TypeExprId) -> Span {
+pub(crate) fn type_expr_span(ast: &Ast<'_, '_>, id: TypeExprId) -> Span {
     token_span(ast.type_token(id))
 }
 
-pub(super) fn token_span(token: &Token<'_>) -> Span {
+pub(crate) fn token_span(token: &Token<'_>) -> Span {
     Span::from_token(token)
 }
 
-pub(super) fn span_contains(span: Span, offset: usize) -> bool {
+pub(crate) fn span_contains(span: Span, offset: usize) -> bool {
     let end = span.start.saturating_add(span.len.max(1));
     span.start <= offset && offset < end
 }
 
-pub(super) fn range_for_span(source: &str, span: Span) -> Range {
+pub fn range_for_span(source: &str, span: Span) -> Range {
     let start = position_for_offset(source, span.start);
     let end_offset = span.start.saturating_add(span.len.max(1));
     let end = position_for_offset(source, end_offset);
     Range { start, end }
 }
 
-pub(super) fn range_for_edit(source: &str, span: Span) -> Range {
+pub(crate) fn range_for_edit(source: &str, span: Span) -> Range {
     let start = position_for_offset(source, span.start);
     let end = position_for_offset(source, span.start.saturating_add(span.len));
     Range { start, end }
 }
 
-pub(super) fn offset_for_position(source: &str, position: Position) -> usize {
+pub fn offset_for_position(source: &str, position: Position) -> usize {
     let mut line_start = 0;
     for _ in 0..position.line {
         let Some(next_newline) = source[line_start..].find('\n') else {
@@ -141,10 +141,7 @@ pub(super) fn offset_for_position(source: &str, position: Position) -> usize {
     line_end
 }
 
-pub(super) fn apply_content_changes(
-    source: &mut String,
-    changes: Vec<TextDocumentContentChangeEvent>,
-) {
+pub fn apply_content_changes(source: &mut String, changes: Vec<TextDocumentContentChangeEvent>) {
     for change in changes {
         if let Some(range) = change.range {
             let start = offset_for_position(source, range.start);
@@ -179,7 +176,7 @@ fn cover_spans(spans: &[Span]) -> Span {
     Span::new(start, end.saturating_sub(start))
 }
 
-fn position_for_offset(source: &str, offset: usize) -> Position {
+pub fn position_for_offset(source: &str, offset: usize) -> Position {
     let clamped = offset.min(source.len());
     let prefix = &source[..clamped];
     let line = prefix.bytes().filter(|&b| b == b'\n').count() as u32;

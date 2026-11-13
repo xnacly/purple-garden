@@ -16,9 +16,7 @@ use purple_garden_typecheck::Typechecker;
 use std::{collections::HashMap, ops::Range, path::Path};
 
 mod cli;
-mod doc;
 mod elf;
-mod frontend;
 mod help;
 mod input;
 mod lsp;
@@ -117,7 +115,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
             Command::Doc { pkg_or_function } => {
                 print!(
                     "{}",
-                    doc::render_query(pkg_or_function.as_deref())
+                    purple_garden_analysis::doc::render_query(pkg_or_function.as_deref())
                         .map_err(Box::<dyn std::error::Error>::from)?
                 );
                 std::process::exit(0);
@@ -371,7 +369,7 @@ fn check_frontend(
     stdlib: &'static [purple_garden_runtime::Pkg],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source_path = Path::new(input_source);
-    let failed = frontend::analyze_path(
+    let failed = purple_garden_analysis::frontend::analyze_path(
         source_path,
         input.as_bytes(),
         Vec::new(),
@@ -406,7 +404,7 @@ fn stdlib_packages(cli: &Cli) -> &'static [purple_garden_runtime::Pkg] {
 
 fn print_standalone_extern_diagnostic(input_source: &str, source: &[u8]) {
     let source_path = Path::new(input_source);
-    let Some(extern_path) = frontend::find_extern_garden(source_path) else {
+    let Some(extern_path) = purple_garden_analysis::frontend::find_extern_garden(source_path) else {
         return;
     };
 

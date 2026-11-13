@@ -602,6 +602,19 @@ name = "purple-garden-allocators"
 version = "0.1.0"
 
 [[package]]
+name = "purple-garden-analysis"
+version = "0.1.0"
+dependencies = [
+ "lsp-types",
+ "purple-garden-allocators",
+ "purple-garden-frontend",
+ "purple-garden-ir",
+ "purple-garden-runtime",
+ "purple-garden-std",
+ "purple-garden-typecheck",
+]
+
+[[package]]
 name = "purple-garden-bc"
 version = "0.1.0"
 dependencies = [
@@ -632,6 +645,7 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "purple-garden-allocators",
+ "purple-garden-analysis",
  "purple-garden-bc",
  "purple-garden-frontend",
  "purple-garden-ir",

@@ -6,19 +6,19 @@ use purple_garden_frontend::{
 };
 use purple_garden_typecheck::TypecheckOutput;
 
-use super::{analysis::DocumentAnalysis, source::token_span};
+use crate::{analysis::DocumentAnalysis, source::token_span};
 
-pub(super) struct AnalysisHover {
-    pub(super) span: Span,
-    pub(super) markup: HoverMarkup,
+pub(crate) struct AnalysisHover {
+    pub(crate) span: Span,
+    pub(crate) markup: HoverMarkup,
 }
 
-pub(super) enum HoverMarkup {
+pub(crate) enum HoverMarkup {
     Garden(String),
     Markdown(String),
 }
 
-pub(super) fn collect_lexical_hovers(source: &str, analysis: &mut DocumentAnalysis) {
+pub(crate) fn collect_lexical_hovers(source: &str, analysis: &mut DocumentAnalysis) {
     let mut lexer = Lexer::new(source.as_bytes());
     loop {
         let token = lexer.one();
@@ -91,7 +91,7 @@ fn language_doc_query(token: &Token<'_>) -> Option<(LanguageDocKind, &'static st
     })
 }
 
-pub(super) fn fn_detail(
+pub(crate) fn fn_detail(
     ast: &Ast<'_, '_>,
     name: &Token<'_>,
     args: &[(Token<'_>, TypeExprId)],
@@ -110,7 +110,7 @@ pub(super) fn fn_detail(
     )
 }
 
-pub(super) fn add_decl_hover(
+pub(crate) fn add_decl_hover(
     analysis: &mut DocumentAnalysis,
     span: Span,
     detail: String,
@@ -125,11 +125,11 @@ pub(super) fn add_decl_hover(
     }
 }
 
-pub(super) fn doc_hover(detail: &str, docs: &[Token<'_>]) -> String {
+pub(crate) fn doc_hover(detail: &str, docs: &[Token<'_>]) -> String {
     format!("{}\n\n{}", garden_block(detail), doc_text(docs))
 }
 
-pub(super) fn declaration_hover(detail: &str, docs: &[Token<'_>], query: &str) -> String {
+pub(crate) fn declaration_hover(detail: &str, docs: &[Token<'_>], query: &str) -> String {
     let body = if docs.is_empty() {
         garden_block(detail)
     } else {
@@ -145,7 +145,7 @@ fn doc_text(docs: &[Token<'_>]) -> String {
         .join("\n")
 }
 
-pub(super) fn call_hover(
+pub(crate) fn call_hover(
     ast: &Ast<'_, '_>,
     target: NodeId,
     analysis: &DocumentAnalysis,
@@ -172,7 +172,7 @@ pub(super) fn call_hover(
     }
 }
 
-pub(super) fn ident_hover(
+pub(crate) fn ident_hover(
     ast: &Ast<'_, '_>,
     typecheck: &TypecheckOutput<'_, &BumpAlloc>,
     node_id: NodeId,
@@ -227,11 +227,11 @@ fn function_hover(pkg_name: &str, fn_name: &str, analysis: &DocumentAnalysis) ->
     Some(overload_detail(&format!("{pkg_name}.{fn_name}"), &variants))
 }
 
-pub(super) fn import_hover(pkg: &Token<'_>, analysis: &DocumentAnalysis) -> Option<String> {
+pub(crate) fn import_hover(pkg: &Token<'_>, analysis: &DocumentAnalysis) -> Option<String> {
     package_hover(pkg.t.as_str(), analysis)
 }
 
-pub(super) fn package_target_hover(
+pub(crate) fn package_target_hover(
     ast: &Ast<'_, '_>,
     target: NodeId,
     analysis: &DocumentAnalysis,
@@ -261,11 +261,11 @@ fn package_hover(pkg_name: &str, analysis: &DocumentAnalysis) -> Option<String> 
     }
 }
 
-pub(super) fn garden_block(contents: impl std::fmt::Display) -> String {
+pub(crate) fn garden_block(contents: impl std::fmt::Display) -> String {
     format!("```garden\n{}\n```", contents)
 }
 
-pub(super) fn type_for_node(
+pub(crate) fn type_for_node(
     ast: &Ast<'_, '_>,
     typecheck: &TypecheckOutput<'_, &BumpAlloc>,
     node_id: NodeId,

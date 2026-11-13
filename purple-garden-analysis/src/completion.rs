@@ -3,16 +3,16 @@ use std::{collections::HashMap, sync::OnceLock};
 use lsp_types::{CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind};
 use purple_garden_ir::ptype::Type;
 
-use super::analysis::PackageDoc;
+use crate::analysis::PackageDoc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) enum CompletionScope {
+pub(crate) enum CompletionScope {
     Global,
     Local,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct CompletionEntry {
+pub(crate) struct CompletionEntry {
     label: String,
     kind: CompletionItemKind,
     detail: Option<String>,
@@ -21,7 +21,7 @@ pub(super) struct CompletionEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RecordCompletion {
+pub(crate) struct RecordCompletion {
     fields: Vec<RecordFieldCompletion>,
 }
 
@@ -48,7 +48,7 @@ struct RecordFieldCompletion {
 }
 
 impl RecordCompletion {
-    pub(super) fn from_type(ty: &Type<'_>) -> Option<Self> {
+    pub(crate) fn from_type(ty: &Type<'_>) -> Option<Self> {
         let Type::Record(fields) = ty else {
             return None;
         };
@@ -71,7 +71,7 @@ impl RecordCompletion {
 }
 
 impl CompletionEntry {
-    pub(super) fn local(
+    pub(crate) fn local(
         label: impl Into<String>,
         kind: CompletionItemKind,
         detail: Option<String>,
@@ -86,12 +86,12 @@ impl CompletionEntry {
     }
 }
 
-pub(super) fn global_completions() -> &'static [CompletionEntry] {
+pub(crate) fn global_completions() -> &'static [CompletionEntry] {
     static COMPLETIONS: OnceLock<Vec<CompletionEntry>> = OnceLock::new();
     COMPLETIONS.get_or_init(build_global_completions)
 }
 
-pub(super) fn items_at(
+pub(crate) fn items_at(
     completions: &[CompletionEntry],
     record_completions: &HashMap<String, RecordCompletion>,
     package_docs: &HashMap<String, PackageDoc>,
@@ -289,7 +289,7 @@ fn member_access_at(source: &str, offset: usize) -> Option<(&str, &str)> {
     Some((target_path, &line[dot + 1..]))
 }
 
-pub(super) fn function_signature(name: &str, fun: &purple_garden_runtime::Fn<'_>) -> String {
+pub(crate) fn function_signature(name: &str, fun: &purple_garden_runtime::Fn<'_>) -> String {
     let args = fun
         .args
         .iter()
@@ -440,7 +440,7 @@ fn function_doc(name: &str, variants: &[&purple_garden_runtime::Fn<'_>]) -> Opti
     Some(format!("{}\n{command}", garden_block(doc.trim_end())))
 }
 
-pub(super) fn garden_block(contents: impl std::fmt::Display) -> String {
+pub(crate) fn garden_block(contents: impl std::fmt::Display) -> String {
     format!("```garden\n{}\n```", contents)
 }
 
@@ -497,7 +497,7 @@ fn completion_sort_key(entry: &CompletionEntry) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lsp::analysis::PackageFunctionCompletion;
+    use crate::analysis::PackageFunctionCompletion;
 
     fn record(fields: Vec<(&'static str, Type<'static>)>) -> Type<'static> {
         Type::Record(
