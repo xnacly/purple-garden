@@ -1,5 +1,5 @@
-//! What the views of an inspection show, computed once for every frontend: the visualizer's gpui
-//! window and the html report draw the same lines, graphs and lanes.
+//! What the views of an inspection show, computed once for every frontend: the html report, and
+//! anything else drawing an inspection, show the same lines, graphs and lanes.
 
 pub mod cfg;
 pub mod listing;

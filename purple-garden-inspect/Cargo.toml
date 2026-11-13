@@ -19,8 +19,6 @@ purple-garden-shared = { path = "../purple-garden-shared", features = ["serde"] 
 purple-garden-std = { path = "../purple-garden-std" }
 purple-garden-typecheck = { path = "../purple-garden-typecheck" }
 serde = { version = "1.0", features = ["derive"] }
-similar = "3.2.1"
-
-[dev-dependencies]
 serde_json = "1.0"
+similar = "3.2.1"
 

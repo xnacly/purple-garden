@@ -3,6 +3,7 @@
 //! allocation and the x86-64 machine code. The program itself isn't run.
 
 pub mod model;
+pub mod report;
 pub mod view;
 mod x86;
 
