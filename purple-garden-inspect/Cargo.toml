@@ -5,6 +5,8 @@ description = "Records every stage of compiling a purple garden program: diagnos
 edition = "2024"
 
 [dependencies]
+# MPL-2.0, the iongraph layout (SpiderMonkey's CFG viewer) ported to Rust
+ion-layout = { git = "https://github.com/jimmyhmiller/ion-layout", rev = "c146557c3038901d8df4952b75eb6d33697e0d90" }
 iced-x86 = { version = "1.22.0", default-features = false, features = ["std", "decoder", "intel"] }
 purple-garden-allocators = { path = "../purple-garden-allocators" }
 purple-garden-bc = { path = "../purple-garden-bc" }

@@ -402,6 +402,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "ion-layout"
+version = "0.1.0"
+source = "git+https://github.com/jimmyhmiller/ion-layout?rev=c146557c3038901d8df4952b75eb6d33697e0d90#c146557c3038901d8df4952b75eb6d33697e0d90"
+
+[[package]]
 name = "is-terminal"
 version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -656,6 +661,7 @@ name = "purple-garden-inspect"
 version = "0.1.0"
 dependencies = [
  "iced-x86",
+ "ion-layout",
  "purple-garden-allocators",
  "purple-garden-bc",
  "purple-garden-frontend",
