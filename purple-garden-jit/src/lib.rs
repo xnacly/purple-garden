@@ -44,7 +44,7 @@ mod unsupported;
 
 pub use mem::CodeArena;
 use purple_garden_ir as ir;
-use purple_garden_runtime::{BuiltinFn, Value};
+use purple_garden_runtime::Value;
 use purple_garden_shared::xralloc2;
 use std::{
     alloc::{Allocator, Global},
@@ -53,8 +53,8 @@ use std::{
 };
 pub use unsupported::Unsupported;
 
-/// Entry points of the functions already compiled natively, in any allocator.
-pub type Natives<A> = HashMap<ir::Id, BuiltinFn, RandomState, A>;
+/// Entry addresses of the functions already compiled natively, in any allocator.
+pub type Natives<A> = HashMap<ir::Id, usize, RandomState, A>;
 
 /// Reusable JIT codegen state, every buffer lives in the scratch allocator `S`.
 #[derive(Debug, Clone)]
@@ -189,7 +189,7 @@ mod tests_x86 {
     fn enter_with(
         code: &[u8],
         vm: &mut purple_garden_runtime::Vm,
-        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, purple_garden_runtime::BuiltinFn),
     ) {
         enter_in(CodeArena::new().expect("code arena"), code, vm, enter);
     }
@@ -199,7 +199,7 @@ mod tests_x86 {
         mut arena: CodeArena,
         code: &[u8],
         vm: &mut purple_garden_runtime::Vm,
-        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, purple_garden_runtime::BuiltinFn),
     ) {
         let entry = arena.push(code).expect("code fits the arena");
         arena.seal().expect("seal the code arena");
@@ -225,7 +225,7 @@ mod tests_x86 {
     fn run_with<const N: usize>(
         code: &[u8],
         args: [u64; N],
-        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, purple_garden_runtime::BuiltinFn),
     ) -> [u64; N] {
         run_in(CodeArena::new().expect("code arena"), code, args, enter)
     }
@@ -235,7 +235,7 @@ mod tests_x86 {
         arena: CodeArena,
         code: &[u8],
         args: [u64; N],
-        enter: unsafe extern "C" fn(*mut std::ffi::c_void, super::BuiltinFn),
+        enter: unsafe extern "C" fn(*mut std::ffi::c_void, purple_garden_runtime::BuiltinFn),
     ) -> [u64; N] {
         use purple_garden_runtime::{Value, Vm, VmConfig};
 
@@ -1226,7 +1226,7 @@ mod tests_x86 {
 
         let code = compile_with(
             &func,
-            &HashMap::from_iter([(Id(1), inc)]),
+            &HashMap::from_iter([(Id(1), inc as usize)]),
             arena.next_entry(),
         );
         let ret = run_in(arena, &code, [5], purple_garden_runtime::enter_native);
@@ -1275,7 +1275,7 @@ mod tests_x86 {
                 span: 0,
             }),
         });
-        let natives = HashMap::from_iter([(Id(1), inc)]);
+        let natives = HashMap::from_iter([(Id(1), inc as usize)]);
         let code = compile_with(&func, &natives, arena.next_entry());
         assert!(
             !code
@@ -1319,7 +1319,7 @@ mod tests_x86 {
 
         let code = compile_with(
             &func,
-            &HashMap::from_iter([(Id(1), half)]),
+            &HashMap::from_iter([(Id(1), half as usize)]),
             arena.next_entry(),
         );
         let args = [1f64.to_bits(), 9f64.to_bits()];
@@ -1661,7 +1661,7 @@ mod tests_x86 {
 
         let code = compile_with(
             &func,
-            &HashMap::from_iter([(Id(1), half)]),
+            &HashMap::from_iter([(Id(1), half as usize)]),
             arena.next_entry(),
         );
         let ret = run_in(

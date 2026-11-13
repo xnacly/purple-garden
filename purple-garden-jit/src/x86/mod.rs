@@ -27,7 +27,7 @@ use encode::{
     patch_rel32,
 };
 use purple_garden_ir::{self as ir, BinOp, UnOp};
-use purple_garden_runtime::{BuiltinFn, Value, string};
+use purple_garden_runtime::{Value, string};
 
 /// `rbx` holds `*mut Vm` == `&vm.r[0]`, base for slot loads/stores. Callee saved, so Rust keeps
 /// it across calls, `enter_native` sets it.
@@ -303,7 +303,7 @@ impl<S: Allocator + Clone> Scratch<S> {
 #[derive(Clone, Copy)]
 enum Callee {
     /// A natively compiled function.
-    Native(BuiltinFn),
+    Native(usize),
     /// The function being compiled, whose address isn't known yet.
     This,
 }
@@ -1854,7 +1854,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                 }
                 self.parallel_move(moves);
-                self.jump(Cond::Always, Target::Tail(f as usize));
+                self.jump(Cond::Always, Target::Tail(f));
             }
             ir::Terminator::Switch {
                 subject,
@@ -2333,7 +2333,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         match callee {
             Callee::Native(f) => {
                 self.emit(Insn::CallRel { disp: 0 });
-                self.native_refs.push((self.out.len() - 4, f as usize));
+                self.native_refs.push((self.out.len() - 4, f));
             }
             Callee::This => {
                 self.emit(Insn::CallRel { disp: 0 });

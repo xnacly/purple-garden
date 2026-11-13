@@ -767,7 +767,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 self.jit.tables().to_vec(),
             ));
         }
-        self.native_fns.insert(fun.id, entry);
+        self.native_fns.insert(fun.id, entry as usize);
         let idx = u16::try_from(self.std_fns.intern(entry))
             .expect("natives past Op::Native's 16 bit index");
         self.functions.insert(
