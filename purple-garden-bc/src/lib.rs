@@ -293,6 +293,13 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         }
     }
 
+    /// `str_values()[slot]` is the string constant in `globals` slot `slot`, laid out by
+    /// [`Cc::compile`] before any function is lowered.
+    #[must_use]
+    pub fn str_values(&self) -> &[Value] {
+        &self.str_values
+    }
+
     fn intern(&mut self, constant: &'cc Const<'cc>) -> u32 {
         self.globals.intern(constant.clone())
     }
