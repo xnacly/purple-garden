@@ -15,6 +15,10 @@ impl<S> Scratch<S> {
     pub fn tables(&self) -> &[std::ops::Range<usize>] {
         &[]
     }
+
+    pub fn rows(&self) -> &[(u32, usize)] {
+        &[]
+    }
 }
 
 pub fn compile_func<'ir, F: Allocator, S: Allocator, N: Allocator>(

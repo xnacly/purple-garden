@@ -152,6 +152,12 @@ impl<S: Allocator + Clone> Jit<S> {
     pub fn tables(&self) -> &[std::ops::Range<usize>] {
         self.scratch.tables()
     }
+
+    /// `(pos, offset)` of the first byte in [`Jit::code`] of every [`ir::Func::live_set_into`] row.
+    #[must_use]
+    pub fn rows(&self) -> &[(u32, usize)] {
+        self.scratch.rows()
+    }
 }
 
 #[cfg(all(
@@ -446,8 +452,9 @@ mod tests_x86 {
         assert_eq!(payload, &[1, 2, 3, 255]);
     }
 
-    #[test]
-    fn compiles_tail_recursive_factorial_loop() {
+    /// `fn factorial(n acc) Int { match { n == 0 { acc } { factorial(n - 1 n * acc) } } }`, three
+    /// blocks: the branch, the return and the tail call.
+    fn factorial_loop() -> Func<'static> {
         let mut func = Func::new(
             "factorial",
             Id(0),
@@ -533,6 +540,43 @@ mod tests_x86 {
                 }),
             },
         ];
+        func
+    }
+
+    /// Every `live_set_into` row, block headers, instructions and terminators, in order, at
+    /// ascending offsets into the function's code.
+    #[test]
+    fn records_the_code_offset_of_every_row() {
+        let mut jit = Jit::new();
+        jit.compile_func(&factorial_loop()).expect("jit function");
+        let rows = jit.rows();
+        // b0: header, ieq, br | b1: header, ret | b2: header, isub, imul, tail
+        let positions: Vec<u32> = rows.iter().map(|&(pos, _)| pos).collect();
+        assert_eq!(positions, (0..9).collect::<Vec<_>>());
+        assert!(rows.windows(2).all(|w| w[0].1 <= w[1].1), "{rows:?}");
+        assert!(
+            rows.iter().all(|&(_, offset)| offset < jit.code().len()),
+            "{rows:?}"
+        );
+
+        // the rows are the latest function's only
+        let mut func = factorial_loop();
+        func.blocks.truncate(2);
+        let acc = func.intern_params([Id(1)]);
+        func.blocks[0].term = Some(Terminator::Jump {
+            id: Id(1),
+            params: acc,
+            span: 0,
+        });
+        func.blocks[0].instructions.clear();
+        jit.compile_func(&func).expect("jit function");
+        let positions: Vec<u32> = jit.rows().iter().map(|&(pos, _)| pos).collect();
+        assert_eq!(positions, (0..4).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn compiles_tail_recursive_factorial_loop() {
+        let func = factorial_loop();
 
         let mut jit = Jit::new();
         jit.compile_func(&func).expect("jit function");

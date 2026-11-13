@@ -210,6 +210,10 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
         }
     }
 
+    for row in &mut buffers.rows {
+        row.1 += body_at - start;
+    }
+
     purple_garden_shared::trace!("[jit::x86] compiled {} ({} bytes)", func.name, out.len());
     Ok(())
 }
@@ -259,6 +263,9 @@ pub struct Scratch<S: Allocator> {
     /// Jump and lookup tables inlined into the code, as body offsets until the function is laid
     /// out, then as offsets from its first byte.
     tables: Vec<Range<usize>, S>,
+    /// `(pos, offset)` of every [`ir::Func::live_set_into`] row the body emitted code for, as body
+    /// offsets until the function is laid out, then as offsets from its first byte.
+    rows: Vec<(u32, usize), S>,
 }
 
 impl<S: Allocator + Clone> Scratch<S> {
@@ -266,8 +273,15 @@ impl<S: Allocator + Clone> Scratch<S> {
         &self.tables
     }
 
+    /// `(pos, offset)` of the first byte of every [`ir::Func::live_set_into`] row of the most
+    /// recently compiled function, ascending.
+    pub fn rows(&self) -> &[(u32, usize)] {
+        &self.rows
+    }
+
     pub fn new_in(scratch: S) -> Self {
         Self {
+            rows: Vec::new_in(scratch.clone()),
             body: Vec::new_in(scratch.clone()),
             block_offsets: Vec::new_in(scratch.clone()),
             patches: Vec::new_in(scratch.clone()),
@@ -418,6 +432,7 @@ struct Lowering<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> {
     tail_refs: &'a mut Vec<(usize, usize), S>,
     native_refs: &'a mut Vec<(usize, usize), S>,
     tables: &'a mut Vec<Range<usize>, S>,
+    rows: &'a mut Vec<(u32, usize), S>,
 }
 
 impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir, F, S, N> {
@@ -445,8 +460,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             tail_refs,
             native_refs,
             tables,
+            rows,
         } = buffers;
         body.clear();
+        rows.clear();
         block_offsets.clear();
         block_offsets.resize(func.blocks.len(), usize::MAX);
         patches.clear();
@@ -481,6 +498,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             tail_refs,
             native_refs,
             tables,
+            rows,
         }
     }
 
@@ -563,11 +581,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 continue;
             }
             self.block_offsets[block.id.0 as usize] = self.out.len();
+            self.rows.push((self.pos, self.out.len()));
             self.block = block.id;
             self.pos += 1;
 
             for instruction in &block.instructions {
                 self.temps = [0; 2];
+                self.rows.push((self.pos, self.out.len()));
                 self.instr(instruction);
                 if let Some(reason) = self.unsupported.take() {
                     return Err(reason);
@@ -583,6 +603,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 .find(|b| !b.tombstone)
                 .map(|b| b.id);
             self.temps = [0; 2];
+            self.rows.push((self.pos, self.out.len()));
             self.term(block.term.as_ref(), next);
             if let Some(reason) = self.unsupported.take() {
                 return Err(reason);
