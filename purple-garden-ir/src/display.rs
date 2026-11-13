@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt::Display};
 
-use purple_garden_shared::ansi::{BLOCK, COMMENT, FLOW, FUNC, IMM, LABEL, MNEM, REG, TYPE, paint};
+use purple_garden_shared::ansi::{Class, Highlights, paint, paint_highlights};
 
 use crate::{Const, Func, Id, Instr, Terminator, TypeId};
 
@@ -391,18 +391,18 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
         let mut out = String::new();
         for (i, row) in rows.iter().enumerate() {
             out.push_str(&indent.repeat(row.indent));
-            if color {
-                out.push_str(&colorize(&row.text));
-            } else {
-                out.push_str(&row.text);
-            }
+            out.push_str(&paint_highlights(
+                color,
+                &row.text,
+                &highlight_row(&row.text),
+            ));
             if !liveness {
                 out.push('\n');
                 continue;
             }
 
             let gutter: Option<Vec<String>> = if i == 1 {
-                Some(labels.iter().map(|l| paint(color, REG, l)).collect())
+                Some(labels.iter().map(|l| paint(color, Class::Reg, l)).collect())
             } else {
                 row.pos.map(|p| {
                     intervals
@@ -413,7 +413,7 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
                             if def == u32::MAX || def > p || last < p {
                                 format!(" {pad}")
                             } else if def != last {
-                                format!("{}{pad}", paint(color, REG, "|"))
+                                format!("{}{pad}", paint(color, Class::Reg, "|"))
                             } else {
                                 format!(" {pad}")
                             }
@@ -432,25 +432,26 @@ impl<A: std::alloc::Allocator> Func<'_, A> {
     }
 }
 
-/// Colors one rendered row without changing its visible width.
-fn colorize(text: &str) -> String {
+/// Highlights of one rendered row of [`Func::rows`].
+#[must_use]
+pub fn highlight_row(text: &str) -> Highlights {
     const FLOWS: &[&str] = &[
         "br", "br_cmp", "br_imm", "jmp", "ret", "tail", "switch", "Call", "Sys",
     ];
 
     if text.starts_with("//") || text == "<tombstone>" {
-        return paint(true, COMMENT, text);
+        return vec![(0..text.len(), Class::Comment)];
     }
 
     let word_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '.');
-    let mut out = String::with_capacity(text.len() * 2);
+    let mut out = Vec::new();
     let mut i = 0;
     while let Some(c) = text[i..].chars().next() {
         let rest = &text[i..];
         let before = &text[..i];
         if c == '`' {
             let end = rest[1..].find('`').map_or(text.len(), |j| i + j + 2);
-            out.push_str(&paint(true, IMM, &text[i..end]));
+            out.push((i..end, Class::Imm));
             i = end;
         } else if c == '%' {
             let end = i
@@ -458,18 +459,17 @@ fn colorize(text: &str) -> String {
                 + rest[1..]
                     .find(|c: char| !word_char(c))
                     .unwrap_or(rest.len() - 1);
-            out.push_str(&paint(true, REG, &text[i..end]));
+            out.push((i..end, Class::Reg));
             i = end;
             // a param's facts, `%v1[nonzero]`
             if text[i..].starts_with('[') {
                 let end = text[i..].find(']').map_or(text.len(), |j| i + j + 1);
-                out.push_str(&paint(true, COMMENT, &text[i..end]));
+                out.push((i..end, Class::Comment));
                 i = end;
             }
             if text[i..].starts_with(':') {
                 let end = text[i..].find(' ').map_or(text.len(), |j| i + j);
-                out.push(':');
-                out.push_str(&paint(true, TYPE, &text[i + 1..end]));
+                out.push((i + 1..end, Class::Type));
                 i = end;
             }
         } else if word_char(c)
@@ -488,31 +488,28 @@ fn colorize(text: &str) -> String {
                     && word.starts_with(p)
                     && word[1..].bytes().all(|b| b.is_ascii_digit())
             };
-            let code = if numbered('b') {
-                if i == 0 { BLOCK } else { LABEL }
+            let class = if numbered('b') {
+                Some(if i == 0 { Class::Block } else { Class::Label })
             } else if numbered('f') || word == "fn" {
-                FUNC
+                Some(Class::Func)
             } else if FLOWS.contains(&word) {
-                FLOW
+                Some(Class::Flow)
             } else if matches!(word, "true" | "false") || !c.is_ascii_alphabetic() {
-                IMM
+                Some(Class::Imm)
             } else if c.is_ascii_uppercase() && before.trim_end().ends_with(['<', '>']) {
-                TYPE
+                Some(Class::Type)
             } else if c.is_ascii_uppercase() {
-                MNEM
+                Some(Class::Mnem)
             } else if word.contains('.') {
-                LABEL
+                Some(Class::Label)
             } else {
-                ""
+                None
             };
-            if code.is_empty() {
-                out.push_str(word);
-            } else {
-                out.push_str(&paint(true, code, word));
+            if let Some(class) = class {
+                out.push((i..end, class));
             }
             i = end;
         } else {
-            out.push(c);
             i += c.len_utf8();
         }
     }
