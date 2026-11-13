@@ -22,51 +22,93 @@ use purple_garden_ir as ir;
 ///     b3:
 ///     b4:
 /// ```
+///
+/// b2's params are only bound by the edge into it, so the jmp's args are rewritten in terms of
+/// the br's args; b2 is tombstoned once no edge leads into it anymore.
 pub fn indirect_jump<F: Allocator>(fun: &mut ir::Func<'_, F>) {
+    let mut preds = vec![0u32; fun.blocks.len()];
+    for block in fun.blocks.iter().filter(|block| !block.tombstone) {
+        for_each_target(fun, &block.term, |target| preds[target as usize] += 1);
+    }
+
     for i in 0..fun.blocks.len() {
+        if fun.blocks[i].tombstone {
+            continue;
+        }
         let Some((yes, yes_params, no, no_params)) = branch_edges(&fun.blocks[i].term) else {
             continue;
         };
+        let yes_edge = forward(fun, &mut preds, yes, yes_params);
+        let no_edge = forward(fun, &mut preds, no, no_params);
+        rewrite_branch_edges(&mut fun.blocks[i].term, yes_edge, no_edge);
+    }
+}
 
-        let yes_target = &mut fun.blocks[yes as usize];
-        let yes_edge = if yes_target.instructions.is_empty() {
-            if let Some(ir::Terminator::Jump { id, params, .. }) = &yes_target.term {
-                yes_target.tombstone = true;
-                Some((*id, *params))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+/// The edge into `target(args)`, taken straight to the jmp's destination if `target` is empty
+/// but for that jmp.
+fn forward<F: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    preds: &mut [u32],
+    target: u32,
+    args: ir::ParamsId,
+) -> (ir::Id, ir::ParamsId) {
+    let block = &fun.blocks[target as usize];
+    let (true, Some(ir::Terminator::Jump { id, params, .. })) =
+        (block.instructions.is_empty(), &block.term)
+    else {
+        return (ir::Id(target), args);
+    };
+    let (dest, jump_args, block_params) = (*id, *params, block.params);
+    if dest.0 == target {
+        return (ir::Id(target), args);
+    }
 
-        let no_target = &mut fun.blocks[no as usize];
-        let no_edge = if no_target.instructions.is_empty() {
-            if let Some(ir::Terminator::Jump { id, params, .. }) = &no_target.term {
-                no_target.tombstone = true;
-                Some((*id, *params))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+    let block_params = fun.params(block_params);
+    let incoming = fun.params(args);
+    let forwarded: Vec<ir::Id> = fun
+        .params(jump_args)
+        .iter()
+        .map(|arg| {
+            block_params
+                .iter()
+                .position(|param| param == arg)
+                .map_or(*arg, |i| incoming[i])
+        })
+        .collect();
+    let forwarded = fun.intern_params(forwarded);
 
-        #[cfg(feature = "trace")]
-        if yes_edge.is_some() {
-            purple_garden_shared::trace!("[opt::ir::indirect_jump] b{yes} is now a tombstone");
+    preds[dest.0 as usize] += 1;
+    preds[target as usize] -= 1;
+    if preds[target as usize] == 0 {
+        purple_garden_shared::trace!("[opt::ir::indirect_jump] b{target} is now a tombstone");
+        fun.blocks[target as usize].tombstone = true;
+        preds[dest.0 as usize] -= 1;
+    }
+    (dest, forwarded)
+}
+
+fn for_each_target<F: Allocator>(
+    fun: &ir::Func<'_, F>,
+    term: &Option<ir::Terminator>,
+    mut f: impl FnMut(u32),
+) {
+    match term {
+        Some(ir::Terminator::Jump { id, .. }) => f(id.0),
+        Some(
+            ir::Terminator::Branch { yes, no, .. }
+            | ir::Terminator::BranchCmpImm { yes, no, .. }
+            | ir::Terminator::BranchCmp { yes, no, .. },
+        ) => {
+            f(yes.0.0);
+            f(no.0.0);
         }
-
-        #[cfg(feature = "trace")]
-        if no_edge.is_some() {
-            purple_garden_shared::trace!("[opt::ir::indirect_jump] b{no} is now a tombstone");
+        Some(ir::Terminator::Switch { cases, default, .. }) => {
+            for case in fun.cases(*cases) {
+                f(case.target.0.0);
+            }
+            f(default.0.0);
         }
-
-        rewrite_branch_edges(
-            &mut fun.blocks[i].term,
-            yes_edge.unwrap_or((ir::Id(yes), yes_params)),
-            no_edge.unwrap_or((ir::Id(no), no_params)),
-        );
+        Some(ir::Terminator::Return { .. } | ir::Terminator::Tail { .. }) | None => {}
     }
 }
 
@@ -276,5 +318,93 @@ mod tests {
             "yes edge must stay on b1 (it has instructions)"
         );
         assert!(!fun.blocks[1].tombstone);
+    }
+
+    /// b0 branches into b1(%v0) and b2; b1(%v1) only jumps to b3(%v1), b2 jumps to b1(%v2).
+    fn forwarding_params() -> ir::Func<'static> {
+        let int = |id| TypeId {
+            id: Id(id),
+            ty: Type::Int,
+        };
+        let mut fun = ir::Func::new("f", Id(0), vec![int(0)], Some(Type::Int));
+        let b0_params = fun.intern_params([Id(0)]);
+        let b1_params = fun.intern_params([Id(1)]);
+        let b3_params = fun.intern_params([Id(3)]);
+        let into_b1 = fun.intern_params([Id(0)]);
+        let b2_into_b1 = fun.intern_params([Id(2)]);
+        let into_b3 = fun.intern_params([Id(1)]);
+        fun.blocks = vec![
+            Block {
+                tombstone: false,
+                id: Id(0),
+                params: b0_params,
+                instructions: vec![],
+                term: Some(Terminator::Branch {
+                    cond: Id(0),
+                    yes: (Id(1), into_b1),
+                    no: (Id(2), ir::EMPTY_PARAMS),
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(1),
+                params: b1_params,
+                instructions: vec![],
+                term: Some(Terminator::Jump {
+                    id: Id(3),
+                    params: into_b3,
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(2),
+                params: ir::EMPTY_PARAMS,
+                instructions: vec![ir::Instr::LoadConst {
+                    dst: int(2),
+                    value: ir::constant::Const::Int(7),
+                    span: 0,
+                }],
+                term: Some(Terminator::Jump {
+                    id: Id(1),
+                    params: b2_into_b1,
+                    span: 0,
+                }),
+            },
+            Block {
+                tombstone: false,
+                id: Id(3),
+                params: b3_params,
+                instructions: vec![],
+                term: Some(Terminator::Return {
+                    value: Some(Id(3)),
+                    span: 0,
+                }),
+            },
+        ];
+        fun
+    }
+
+    #[test]
+    fn forwards_the_branch_args_not_the_skipped_params() {
+        let mut fun = forwarding_params();
+        indirect_jump(&mut fun);
+
+        let Some(Terminator::Branch {
+            yes: (Id(3), args), ..
+        }) = fun.blocks[0].term
+        else {
+            panic!("yes edge should retarget to b3: {:?}", fun.blocks[0].term);
+        };
+        assert_eq!(fun.params(args), [Id(0)], "%v1 is only bound inside b1");
+    }
+
+    #[test]
+    fn keeps_a_skipped_block_other_edges_still_reach() {
+        let mut fun = forwarding_params();
+        indirect_jump(&mut fun);
+
+        assert!(!fun.blocks[1].tombstone, "b2 still jumps into b1");
     }
 }

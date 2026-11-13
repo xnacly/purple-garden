@@ -370,3 +370,29 @@ testing.assert(spill_switch(3) == 1812)
 testing.assert(spill_switch(4) == 2664)
 testing.assert(spill_switch(5) == 3015)
 testing.assert(spill_switch(9) == 5427)
+
+#! indirect_jump forwarding a branch through an empty jmp block: the first
+#! arm only passes ans through, its block's params must become the branch's
+#! args or the join reads a value nothing defines (-O1 and up).
+fn jump_minus_one(j:Int) Int {
+    match {
+        j == 3 { -1 }
+        { j }
+    }
+}
+
+fn forward_walk(j:Int ans:Int) Int {
+    match {
+        j == 5 { ans }
+        {
+            let next = jump_minus_one(j)
+            let found = match {
+                next < 0 { ans }
+                j == 4 { ans + 100 }
+                { ans + next }
+            }
+            forward_walk(j + 1 found)
+        }
+    }
+}
+testing.assert(forward_walk(0 0) == 103)
