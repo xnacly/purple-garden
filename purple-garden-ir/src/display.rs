@@ -55,7 +55,6 @@ impl Display for Instr<'_> {
             Instr::Store {
                 src, base, offset, ..
             } => write!(f, "Store %v{}+{}, %v{}", base, offset, src)?,
-            Instr::Assert { dst, cond, .. } => write!(f, "%v{dst} = Assert %v{cond}")?,
             Instr::Load {
                 dst, base, offset, ..
             } => write!(f, "%v{dst} = Load %v{}+{}", base, offset)?,
@@ -76,6 +75,7 @@ impl Display for Instr<'_> {
             Instr::BinImm {
                 op, dst, lhs, imm, ..
             } => write!(f, "%v{} = {:?} %v{}, {}", dst, op, lhs.0, imm)?,
+            Instr::Un { op, dst, src, .. } => write!(f, "%v{} = {:?} %v{}", dst, op, src.0)?,
             Instr::LoadConst { dst, value, .. } => write!(f, "%v{dst} = {value}")?,
             Instr::Noop => (),
             Instr::Call {

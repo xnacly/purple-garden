@@ -153,6 +153,48 @@ pub enum Insn {
         dst: Reg,
         src: Reg,
     },
+    /// `xor r{dst}, r{src}`
+    Xor {
+        dst: Reg,
+        src: Reg,
+    },
+    /// `not r{reg}`
+    Not {
+        reg: Reg,
+    },
+    /// `shlx r{dst}, r{src}, r{count}`, BMI2: count mod 64, flags untouched.
+    Shlx {
+        dst: Reg,
+        src: Reg,
+        count: Reg,
+    },
+    /// `sarx r{dst}, r{src}, r{count}`, BMI2: count mod 64, flags untouched.
+    Sarx {
+        dst: Reg,
+        src: Reg,
+        count: Reg,
+    },
+    /// `shrx r{dst}, r{src}, r{count}`, BMI2: count mod 64, flags untouched.
+    Shrx {
+        dst: Reg,
+        src: Reg,
+        count: Reg,
+    },
+    /// `popcnt r{dst}, r{src}`
+    Popcnt {
+        dst: Reg,
+        src: Reg,
+    },
+    /// `tzcnt r{dst}, r{src}`, BMI1: 64 for 0.
+    Tzcnt {
+        dst: Reg,
+        src: Reg,
+    },
+    /// `lzcnt r{dst}, r{src}`, LZCNT: 64 for 0.
+    Lzcnt {
+        dst: Reg,
+        src: Reg,
+    },
     /// `sub r{dst}, r{src}`
     Sub {
         dst: Reg,
@@ -412,6 +454,18 @@ impl Insn {
             Insn::Sub { dst, src } => reg_reg(code, 0x29, src.0, dst.0),
             Insn::And { dst, src } => reg_reg(code, 0x21, src.0, dst.0),
             Insn::Or { dst, src } => reg_reg(code, 0x09, src.0, dst.0),
+            Insn::Xor { dst, src } => reg_reg(code, 0x31, src.0, dst.0),
+            Insn::Not { reg } => {
+                code.push(rex(0, reg.0));
+                code.extend_from_slice(&[0xf7, modrm(2, reg.0)]);
+            }
+            Insn::Shlx { dst, src, count } => vex_bmi2(code, 0b01, dst.0, count.0, src.0),
+            Insn::Sarx { dst, src, count } => vex_bmi2(code, 0b10, dst.0, count.0, src.0),
+            Insn::Shrx { dst, src, count } => vex_bmi2(code, 0b11, dst.0, count.0, src.0),
+            // f3 REX.W 0f b8/bc/bd /r, ModRM.reg is dst
+            Insn::Popcnt { dst, src } => f3_0f(code, 0xb8, dst.0, src.0),
+            Insn::Tzcnt { dst, src } => f3_0f(code, 0xbc, dst.0, src.0),
+            Insn::Lzcnt { dst, src } => f3_0f(code, 0xbd, dst.0, src.0),
             // 0x0f 0xaf = `imul r64, r/m64`.
             // Here ModRM.reg is dst and ModRM.r/m is src, opposite of add/sub.
             Insn::Imul { dst, src } => {
@@ -653,6 +707,23 @@ fn sse_ps<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, rm: u8) {
 /// c5 [R vvvv L pp]
 /// c4 [R X B mmmmm] [W vvvv L pp]
 /// ```
+fn f3_0f<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, rm: u8) {
+    code.extend_from_slice(&[0xf3, rex(reg, rm), 0x0f, opcode, modrm(reg, rm)]);
+}
+
+/// `VEX.LZ.pp.0F38.W1 F7 /r`, the shlx/sarx/shrx family: `pp` picks the shift (01 shlx, 10 sarx,
+/// 11 shrx), `vvvv` holds the count.
+fn vex_bmi2<A: Allocator>(code: &mut Vec<u8, A>, pp: u8, reg: u8, vvvv: u8, rm: u8) {
+    let rxb = (u8::from(reg < 8) << 7) | 0x40 | (u8::from(rm < 8) << 5);
+    code.extend_from_slice(&[
+        0xc4,
+        rxb | 0b00010,
+        0x80 | ((!vvvv & 0xf) << 3) | pp,
+        0xf7,
+        modrm(reg, rm),
+    ]);
+}
+
 fn vex_sd<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, reg: u8, vvvv: u8, rm: u8) {
     let r = u8::from(reg < 8) << 7;
     let vvvv_pp = ((!vvvv & 0xf) << 3) | 0b11;
@@ -1274,5 +1345,54 @@ mod tests {
             enc(Insn::CallRel { disp: -0x40 }),
             [0xe8, 0xc0, 0xff, 0xff, 0xff]
         );
+    }
+
+    #[test]
+    /// The bit op encodings, bytes as objdump decodes them.
+    fn bit_encodings() {
+        use super::{R8, R9, R10, RCX, RDI, RDX, RSI};
+        let cases: [(Insn, &[u8]); 8] = [
+            (
+                Insn::Shlx {
+                    dst: RDI,
+                    src: RSI,
+                    count: RDX,
+                },
+                &[0xc4, 0xe2, 0xe9, 0xf7, 0xfe],
+            ), // shlx rdi,rsi,rdx
+            (
+                Insn::Sarx {
+                    dst: R8,
+                    src: RCX,
+                    count: R8,
+                },
+                &[0xc4, 0x62, 0xba, 0xf7, 0xc1],
+            ), // sarx r8,rcx,r8
+            (
+                Insn::Shrx {
+                    dst: R9,
+                    src: R9,
+                    count: R10,
+                },
+                &[0xc4, 0x42, 0xab, 0xf7, 0xc9],
+            ), // shrx r9,r9,r10
+            (Insn::Xor { dst: R8, src: R9 }, &[0x4d, 0x31, 0xc8]), // xor r8,r9
+            (Insn::Not { reg: R9 }, &[0x49, 0xf7, 0xd1]),          // not r9
+            (
+                Insn::Popcnt { dst: RSI, src: RSI },
+                &[0xf3, 0x48, 0x0f, 0xb8, 0xf6],
+            ), // popcnt rsi,rsi
+            (
+                Insn::Tzcnt { dst: R8, src: RDX },
+                &[0xf3, 0x4c, 0x0f, 0xbc, 0xc2],
+            ), // tzcnt r8,rdx
+            (
+                Insn::Lzcnt { dst: R8, src: RCX },
+                &[0xf3, 0x4c, 0x0f, 0xbd, 0xc1],
+            ), // lzcnt r8,rcx
+        ];
+        for (insn, bytes) in cases {
+            assert_eq!(enc(insn), bytes, "{insn:?}");
+        }
     }
 }

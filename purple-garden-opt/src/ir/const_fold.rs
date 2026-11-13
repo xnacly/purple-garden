@@ -1,7 +1,7 @@
 use std::alloc::Allocator;
 
 use crate::ir::Scratch;
-use purple_garden_ir::{self as ir, BinOp, Instr, TypeId, constant::Const, ptype::Type};
+use purple_garden_ir::{self as ir, BinOp, Instr, TypeId, UnOp, constant::Const, ptype::Type};
 
 /// constant fold all SSA values consisting fully of constant SSA values in a local block
 ///
@@ -204,6 +204,36 @@ fn try_const_fold<S: Allocator>(
                     };
                     (lhs & rhs).into()
                 }
+                BinOp::IOr => {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
+                        unreachable!();
+                    };
+                    (lhs | rhs).into()
+                }
+                BinOp::IXor => {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
+                        unreachable!();
+                    };
+                    (lhs ^ rhs).into()
+                }
+                BinOp::IShl => {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
+                        unreachable!();
+                    };
+                    (lhs.wrapping_shl(*rhs as u32)).into()
+                }
+                BinOp::IShr => {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
+                        unreachable!();
+                    };
+                    (lhs.wrapping_shr(*rhs as u32)).into()
+                }
+                BinOp::IUShr => {
+                    let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
+                        unreachable!();
+                    };
+                    ((*lhs as u64).wrapping_shr(*rhs as u32) as i64).into()
+                }
                 BinOp::ILt => {
                     let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
                         unreachable!();
@@ -272,6 +302,31 @@ fn try_const_fold<S: Allocator>(
                 // PERF: is this an issue?
                 dst: dst.clone(),
                 value: result,
+                span: *span,
+            };
+            true
+        }
+        Instr::Un {
+            op: UnOp::Assert, ..
+        } => false,
+        Instr::Un { op, dst, src, span } => {
+            let Some(value) = scratch
+                .const_def(*src)
+                .and_then(|def| const_value(previous, def))
+            else {
+                return false;
+            };
+            let value = match (*op, value) {
+                (UnOp::INot, Const::Int(n)) => (!n).into(),
+                (UnOp::IPopcnt, Const::Int(n)) => i64::from(n.count_ones()).into(),
+                (UnOp::ICtz, Const::Int(n)) => i64::from(n.trailing_zeros()).into(),
+                (UnOp::IClz, Const::Int(n)) => i64::from(n.leading_zeros()).into(),
+                (UnOp::DSqrt, Const::Double(n)) => f64::from_bits(*n).sqrt().into(),
+                _ => unreachable!("the typechecker typed {op:?}'s operand"),
+            };
+            *instr = Instr::LoadConst {
+                dst: dst.clone(),
+                value,
                 span: *span,
             };
             true
