@@ -330,10 +330,26 @@ fn try_const_fold<S: Allocator>(
             };
             true
         }
+        // Assert(true) is dead and dumb, remove
         Instr::Un {
             op: UnOp::Assert(_),
-            ..
-        } => false,
+            dst,
+            src,
+            span,
+        } => {
+            let Some(Const::True) = scratch
+                .const_def(*src)
+                .and_then(|def| const_value(previous, def))
+            else {
+                return false;
+            };
+            *instr = Instr::LoadConst {
+                dst: dst.clone(),
+                value: Const::Undefined,
+                span: *span,
+            };
+            true
+        }
         Instr::Un {
             op, dst, src, span, ..
         } => {
@@ -379,7 +395,8 @@ mod tests {
     use super::const_fold;
     use crate::ir::Scratch;
     use purple_garden_ir::{
-        self as ir, BinOp, Block, Id, Instr, Terminator, TypeId, constant::Const, ptype::Type,
+        self as ir, BinOp, Block, Check, Id, Instr, Terminator, TypeId, UnOp, constant::Const,
+        ptype::Type,
     };
 
     fn int(id: u32) -> TypeId<'static> {
@@ -429,6 +446,60 @@ mod tests {
             } => false,
             other => panic!("expected LoadConst Bool, got {other:?}"),
         }
+    }
+
+    /// `%v0 = cond; %v1 = Assert %v0`, the assert after const_fold.
+    fn folded_assert(cond: Const<'static>) -> Instr<'static> {
+        let mut fun = ir::Func::new("f", Id(0), vec![], Some(Type::Void));
+        let params = fun.intern_params(vec![]);
+        fun.blocks = vec![Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions: vec![
+                Instr::LoadConst {
+                    dst: TypeId {
+                        id: Id(0),
+                        ty: Type::Bool,
+                    },
+                    value: cond,
+                    span: 0,
+                },
+                Instr::Un {
+                    op: UnOp::Assert(Check::InBounds),
+                    dst: TypeId {
+                        id: Id(1),
+                        ty: Type::Void,
+                    },
+                    src: Id(0),
+                    span: 0,
+                },
+            ],
+            term: Some(Terminator::Return {
+                value: Some(Id(1)),
+                span: 0,
+            }),
+        }];
+        const_fold(&mut fun, &mut Scratch::default());
+        fun.blocks[0].instructions[1].clone()
+    }
+
+    #[test]
+    fn drops_an_assert_that_always_holds() {
+        assert!(matches!(
+            folded_assert(Const::True),
+            Instr::LoadConst {
+                value: Const::Undefined,
+                ..
+            }
+        ));
+        assert!(matches!(
+            folded_assert(Const::False),
+            Instr::Un {
+                op: UnOp::Assert(_),
+                ..
+            }
+        ));
     }
 
     #[test]
