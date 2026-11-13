@@ -680,6 +680,26 @@ impl<A: Allocator> Func<'_, A> {
         }
     }
 
+    /// Call f(block) with every edge's target of `term`, in the order the terminator lists them.
+    pub fn for_each_successor(&self, term: &Terminator, mut f: impl FnMut(Id)) {
+        match term {
+            Terminator::Jump { id, .. } => f(*id),
+            Terminator::Branch { yes, no, .. }
+            | Terminator::BranchCmpImm { yes, no, .. }
+            | Terminator::BranchCmp { yes, no, .. } => {
+                f(yes.0);
+                f(no.0);
+            }
+            Terminator::Switch { cases, default, .. } => {
+                for case in self.cases(*cases) {
+                    f(case.target.0);
+                }
+                f(default.0);
+            }
+            Terminator::Return { .. } | Terminator::Tail { .. } => {}
+        }
+    }
+
     pub fn for_each_use_of_term(&self, term: &Terminator, mut f: impl FnMut(Id)) {
         match term {
             Terminator::Return {
