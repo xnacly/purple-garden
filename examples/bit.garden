@@ -1,0 +1,30 @@
+# The bit package on runtime operands and, once inlined and folded, on constants.
+# Shift counts are taken mod 64; ctz and clz of 0 are 64.
+import "testing"
+import "bit"
+
+fn check(a:Int b:Int and:Int or:Int xor:Int not:Int shl:Int shr:Int ushr:Int popcount:Int ctz:Int clz:Int) Int {
+    testing.assert(bit.and(a b) == and)
+    testing.assert(bit.or(a b) == or)
+    testing.assert(bit.xor(a b) == xor)
+    testing.assert(bit.not(a) == not)
+    testing.assert(bit.shl(a b) == shl)
+    testing.assert(bit.shr(a b) == shr)
+    testing.assert(bit.ushr(a b) == ushr)
+    testing.assert(bit.popcount(a) == popcount)
+    testing.assert(bit.ctz(a) == ctz)
+    testing.assert(bit.clz(a) == clz)
+    0
+}
+
+check(12 10 8 14 6 -13 12288 0 0 2 2 60)
+check(0 0 0 0 0 -1 0 0 0 0 64 64)
+check(-16 2 0 -14 -14 15 -64 -4 4611686018427387900 60 4 0)
+check(1 64 0 65 65 -2 1 1 1 1 0 63)
+check(1 -1 1 -1 -2 -2 -9223372036854775807 - 1 0 0 1 0 63)
+check(-1 63 63 -1 -64 0 -9223372036854775807 - 1 -1 1 64 0 0)
+check(-1 60 60 -1 -61 0 -1152921504606846976 -1 15 64 0 0)
+check(9223372036854775807 1 1 9223372036854775807 9223372036854775806 -9223372036854775807 - 1 -2 4611686018427387903 4611686018427387903 63 0 1)
+check(-9223372036854775807 65 1 -9223372036854775743 -9223372036854775744 9223372036854775806 2 -4611686018427387904 4611686018427387904 2 0 0)
+check(-987654321 7 7 -987654321 -987654328 987654320 -126419753088 -7716050 144115188068139822 48 0 0)
+check(255 8 8 255 247 -256 65280 0 0 8 0 56)

@@ -1582,6 +1582,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                             src: self.xmm(src),
                         }
                     }
+                    _ => {
+                        bail!(self, "unsupported un op {op:?}");
+                        return;
+                    }
                 };
                 self.emit(insn);
             }

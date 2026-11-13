@@ -1393,6 +1393,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             ir::Instr::Sys { dst, fun, args, .. } => {
                 self.sys(pos, dst.id, fun.ptr, owner.params(*args));
             }
+            ir::Instr::Bin { dst, lhs, rhs, .. } if let Some(fun) = called_instead(i) => {
+                self.sys(pos, dst.id, fun.ptr, &[*lhs, *rhs]);
+            }
             ir::Instr::Un {
                 op: ir::UnOp::Assert,
                 src,
@@ -1427,6 +1430,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                                     }
                                 },
                             )*
+                            _ => unreachable!("{op:?} has no op, see called_instead"),
                         }
                     };
                 }
@@ -1642,6 +1646,15 @@ impl Default for Cc<'_> {
 /// The builtin to call for `i`, an ir op the bytecode has no op for.
 fn called_instead(i: &ir::Instr<'_>) -> Option<&'static ir::Fn<'static>> {
     let intrinsic = match i {
+        ir::Instr::Bin {
+            op:
+                op @ (ir::BinOp::IOr
+                | ir::BinOp::IXor
+                | ir::BinOp::IShl
+                | ir::BinOp::IShr
+                | ir::BinOp::IUShr),
+            ..
+        } => ir::Intrinsic::Bin(*op),
         ir::Instr::Un { op, .. } if *op != ir::UnOp::Assert => ir::Intrinsic::Un(*op),
         _ => return None,
     };

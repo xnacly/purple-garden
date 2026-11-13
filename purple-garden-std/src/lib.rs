@@ -16,6 +16,7 @@ pub mod embed {
     };
 }
 
+mod bit;
 mod io;
 mod math;
 mod opt;
@@ -77,6 +78,7 @@ fn insert_pkg(index: &mut HashMap<String, &'static Pkg>, parent: String, pkg: &'
 }
 
 pub static SAFE_STD: &[Pkg] = &[
+    bit::PACKAGE,
     io::PACKAGE,
     math::PACKAGE,
     opt::PACKAGE,
@@ -85,6 +87,7 @@ pub static SAFE_STD: &[Pkg] = &[
 ];
 
 pub static STD: &[Pkg] = &[
+    bit::PACKAGE,
     io::PACKAGE,
     math::PACKAGE,
     opt::PACKAGE,
@@ -99,6 +102,7 @@ mod tests {
 
     #[test]
     fn resolves_root_packages() {
+        assert_eq!(resolve_pkg("bit").unwrap().name, "bit");
         assert_eq!(resolve_pkg("io").unwrap().name, "io");
         assert_eq!(resolve_pkg("math").unwrap().name, "math");
         assert_eq!(resolve_pkg("str").unwrap().name, "str");

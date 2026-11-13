@@ -132,8 +132,15 @@ pub enum BinOp {
     IMul,
     IDiv,
     IMod,
-    /// Bitwise and, only produced by the optimiser
     IAnd,
+    IOr,
+    IXor,
+    /// Shifts take the count mod 64
+    IShl,
+    /// Arithmetic, see [`BinOp::IShl`]
+    IShr,
+    /// Logical, see [`BinOp::IShl`]
+    IUShr,
     ILt,
     IGt,
     IEq,
@@ -151,6 +158,12 @@ pub enum BinOp {
 pub enum UnOp {
     /// Traps with an assertion failure if the Bool operand is false, its Void value is never read
     Assert,
+    INot,
+    IPopcnt,
+    /// 64 for 0
+    ICtz,
+    /// 64 for 0
+    IClz,
     DSqrt,
 }
 
