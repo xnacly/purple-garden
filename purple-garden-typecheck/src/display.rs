@@ -163,6 +163,13 @@ impl<'t, A: Allocator> TypecheckOutput<'t, A> {
                 );
                 self.render_node(ast, *target, indent + 1, out);
             }
+            Node::Index {
+                id, target, index, ..
+            } => {
+                self.render_value(indent, ".[]", self.type_at(*id), out);
+                self.render_node(ast, *target, indent + 1, out);
+                self.render_node(ast, *index, indent + 1, out);
+            }
             Node::Cast { id, lhs, rhs, .. } => {
                 self.render_value(
                     indent,

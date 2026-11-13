@@ -987,6 +987,35 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                 let t = field.ty;
                 self.set_known(*id, t)
             }
+            Node::Index {
+                id,
+                src,
+                target,
+                index,
+            } => {
+                let target = self.node(*target).known();
+                let index = self.node(*index).known();
+                let (Some(target), Some(index)) = (target, index) else {
+                    return TcType::Poison;
+                };
+                let &Type::Array(element) = self.ty(target) else {
+                    let err = Diagnostic::at_token(
+                        format!("{} can not be indexed, want an Array", self.ty(target)),
+                        src,
+                    );
+                    self.report(err);
+                    return TcType::Poison;
+                };
+                if *self.ty(index) != Type::Int {
+                    let err = Diagnostic::at_token(
+                        format!("An index must be Int, got {}", self.ty(index)),
+                        src,
+                    );
+                    self.report(err);
+                    return TcType::Poison;
+                }
+                self.set_known(*id, *element)
+            }
             Node::Call { id, target, args } => match self.ast.node(*target) {
                 Node::Field { target, name, .. } => self.resolve_pkg_call(*id, *target, name, args),
                 Node::Ident { name, .. } => self.resolve_call(*id, name, args),
