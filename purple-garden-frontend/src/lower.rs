@@ -388,15 +388,51 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
         let Some(src) = self.lower_node(ast, node_id)? else {
             unreachable!("node lowered into memory must produce a value");
         };
-
-        self.emit(Instr::Store {
-            src,
-            base,
-            offset,
-            span,
-        });
-
+        if matches!(ty, ptype::Type::Record(_)) {
+            self.copy_record(ty, src, 0, base, offset, span);
+        } else {
+            self.emit(Instr::Store {
+                src,
+                base,
+                offset,
+                span,
+            });
+        }
         Ok(())
+    }
+
+    /// Copy the record of type `ty` at `src + src_offset` into `base + offset`, leaf field by leaf
+    /// field. A record value is a pointer to its inline fields: storing that pointer instead would
+    /// leave an address in the first word and the remaining words unwritten.
+    fn copy_record(
+        &mut self,
+        ty: &ptype::Type<'lower>,
+        src: Id,
+        src_offset: u32,
+        base: Id,
+        offset: u32,
+        span: u32,
+    ) {
+        let ptype::Type::Record(fields) = ty else {
+            unreachable!("copy_record copies records")
+        };
+        for field in *fields {
+            let field_offset = ty
+                .field_offset(field.name)
+                .expect("field of its own record") as u32;
+            let (src_offset, offset) = (src_offset + field_offset, offset + field_offset);
+            if matches!(field.ty, ptype::Type::Record(_)) {
+                self.copy_record(&field.ty, src, src_offset, base, offset, span);
+            } else {
+                let value = self.field(field.ty, src, src_offset, span);
+                self.emit(Instr::Store {
+                    src: value,
+                    base,
+                    offset,
+                    span,
+                });
+            }
+        }
     }
 
     fn lower_node(

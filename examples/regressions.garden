@@ -396,3 +396,19 @@ fn forward_walk(j:Int ans:Int) Int {
     }
 }
 testing.assert(forward_walk(0 0) == 103)
+
+#! Records are stored inline, so a record value nested into a record or array
+#! literal is copied field by field. Storing its pointer instead put an
+#! address into the first word and left the others unwritten: reading a Str
+#! field through the copy dereferenced whatever the fresh block held.
+fn named(n:Int) Record<n: Int s: Str d: Double> { { n: n s: "named" d: 0.5 } }
+fn nested_record_values_are_copied(n:Int) Int {
+    let inner = named(n)
+    let outer = { first: inner second: { inner: inner tag: n + 1 } }
+    let rows = [outer { first: named(n + 2) second: outer.second }]
+    testing.assert(str.len(rows.[0].first.s) == 5)
+    testing.assert(str.len(rows.[1].second.inner.s) == 5)
+    testing.assert(rows.[1].second.inner.d < 1.0)
+    rows.[0].first.n + rows.[1].first.n * 10 + rows.[1].second.tag * 100
+}
+testing.assert(nested_record_values_are_copied(1) == 231)
