@@ -44,6 +44,58 @@ boundary.
 - Prefer focused unit tests around pass contracts and backend instruction
   lowering, plus integration tests for user-visible behavior.
 
+## Finding Memory Bugs
+
+The runtime, the allocators and the JIT use `unsafe` heavily. Three tools check
+it beyond the regular test suite; none of them runs in CI.
+
+### Miri
+
+```sh
+rustup +nightly component add miri
+MIRIFLAGS=-Zmiri-disable-isolation cargo miri test -p purple-garden-runtime
+```
+
+Miri interprets the tests and reports undefined behaviour: aliasing violations,
+use after free, out of bounds and misaligned accesses. Under `cfg(miri)` the
+page allocator hands out its pages from the global allocator, because Miri
+neither knows `getpagesize` nor models a partial `munmap`, so every crate that
+allocates through `PageAlloc` runs.
+
+- Run it per crate; it is slow (minutes to tens of minutes per crate).
+- Add `-Zmiri-ignore-leaks` for tests that leak arenas on purpose.
+- It cannot run native JIT code, inline assembly or the CLI tests. On x86-64
+  the runtime's assembly trampolines are tested too; skip them with
+  `cargo miri test -p purple-garden-runtime -- --skip jit_helpers`.
+- The GC turns integers into pointers, so Miri may miss bugs through GC
+  object pointers; the GC stress mode below covers those.
+
+### AddressSanitizer
+
+```sh
+RUSTFLAGS=-Zsanitizer=address cargo test --workspace --target aarch64-apple-darwin
+```
+
+Pass the host target explicitly (`x86_64-unknown-linux-gnu`,
+`x86_64-apple-darwin`, ...), otherwise build scripts and proc macros get
+instrumented too. Use an x86-64 target to cover the JIT. ASan sees heap
+memory from the Rust allocator, but not GC objects, which live in pages the
+GC maps itself.
+
+### GC stress
+
+```sh
+cargo test --workspace --features purple-garden-runtime/gc_stress
+cargo run --features gc_stress -- examples/arrays.garden
+```
+
+The `gc_stress` feature runs the collect hook before every allocation and
+places every GC object in a mapping of its own, its payload flush against a
+`PROT_NONE` guard page. A read or write past an object faults at once instead
+of corrupting its neighbour. It covers the bytecode VM, the builtins and
+jitted code alike, and turns every allocation into a collection point for the
+day `collect` frees memory.
+
 ## Compiler Pipeline
 
 The broad pipeline is:
