@@ -1498,8 +1498,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let first = pairs.iter().map(|&(key, _)| key).min().unwrap();
                 let slot = |key: i64| ((key - first) / step) as usize;
                 let len = pairs.iter().map(|&(key, _)| slot(key)).max().unwrap() + 1;
-                let Ok(len_imm) = i32::try_from(len) else {
-                    bail!(self, "lookup table of {len} slots");
+                let key_slots = entries.iter().map(|(k, _)| string::key_slots(k)).sum();
+                // a table this sparse only bytecode lowers, as compares
+                let (true, Ok(len_imm)) = (ir::dense_table(len, key_slots), i32::try_from(len)) else {
+                    bail!(self, "lookup table of {len} slots for {key_slots} key slots");
                     return;
                 };
 
@@ -1878,8 +1880,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let first = keys.iter().map(|&(key, ..)| key).min().unwrap();
                 let slot = |key: i64| ((key - first) / step) as usize;
                 let len = keys.iter().map(|&(key, ..)| slot(key)).max().unwrap() + 1;
-                let Ok(len_imm) = i32::try_from(len) else {
-                    bail!(self, "switch table of {len} slots");
+                let key_slots = cases.iter().map(|case| string::key_slots(&case.key)).sum();
+                // a table this sparse only bytecode lowers, as compares
+                let (true, Ok(len_imm)) = (ir::dense_table(len, key_slots), i32::try_from(len)) else {
+                    bail!(self, "switch table of {len} slots for {key_slots} key slots");
                     return;
                 };
 

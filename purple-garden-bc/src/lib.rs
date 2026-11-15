@@ -334,6 +334,84 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         }
     }
 
+    /// `r[dst] = value`.
+    fn load_const(&mut self, dst: u8, value: &'cc Const<'cc>) {
+        match value {
+            Const::Int(i) => self.load_int(dst, *i),
+            Const::True | Const::False => {
+                // fast path for booleans
+                let value = matches!(value, Const::True) as i32;
+                self.emit(Op::LoadI { dst, value });
+            }
+            // a Void value is never read, whatever the register holds will do
+            Const::Undefined => {}
+            _ => {
+                let idx = self.intern(value);
+                self.load_global(dst, idx);
+            }
+        }
+    }
+
+    /// `r[dst] = key`, a switch or lookup key: an Int, or a Str laid out before lowering.
+    fn load_key(&mut self, dst: u8, key: &Const<'_>) {
+        match key {
+            Const::Int(i) => self.load_int(dst, *i),
+            Const::Str(_) => {
+                let idx = self.globals.map[key];
+                self.load_global(dst, idx);
+            }
+            _ => unreachable!("switch_fold only folds Str and Int keys"),
+        }
+    }
+
+    /// Jump to `target` if `r[subject]` equals `r[key]`, which may be overwritten.
+    fn jump_if_equal(&mut self, kind: SwitchKind, subject: u8, key: u8, target: u16) {
+        match kind {
+            SwitchKind::Str => self.emit(Op::JmpSEq {
+                lhs: subject,
+                rhs: key,
+                target,
+            }),
+            SwitchKind::Int => {
+                self.emit(Op::IEq {
+                    dst: key,
+                    lhs: subject,
+                    rhs: key,
+                });
+                self.emit(Op::JmpT { cond: key, target })
+            }
+        };
+    }
+
+    /// [`ir::Instr::Lookup`] as compares in turn, for a table too sparse to build: `dst` is the
+    /// value of the first entry whose key equals `subject`, `default` if none does.
+    fn lookup_chain(
+        &mut self,
+        kind: SwitchKind,
+        dst: Id,
+        subject: Id,
+        entries: &'cc [(Const<'cc>, Const<'cc>)],
+        default: &'cc Const<'cc>,
+    ) {
+        let dst = self.def_register(dst);
+        let subject = self.ensure_register(subject);
+        let key_reg = if subject == TMP { SCRATCH } else { TMP };
+        let done = self.label();
+        for (key, value) in entries {
+            let found = self.label();
+            let next = self.label();
+            self.load_key(key_reg, key);
+            self.jump_if_equal(kind, subject, key_reg, found);
+            self.emit(Op::Jmp { target: next });
+            self.bind(found);
+            self.load_const(dst, value);
+            self.emit(Op::Jmp { target: done });
+            self.bind(next);
+        }
+        self.load_const(dst, default);
+        self.bind(done);
+    }
+
     /// `r[dst] = globals[idx]`.
     fn load_global(&mut self, dst: u8, idx: u32) {
         let idx = self.fit(idx as usize, GLOBALS, "more than 2097152 distinct constants");
@@ -1212,36 +1290,51 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let first = cases.iter().map(key).min().unwrap();
                 let slot = |case: &ir::Case| ((key(case) - first) / step) as usize;
                 let len = cases.iter().map(slot).max().unwrap() + 1;
-
-                let mut slots = Vec::with_capacity(cases.len());
-                slots.extend(cases.iter().map(|case| (slot(case), case.target)));
+                let key_slots = cases.iter().map(|case| string::key_slots(&case.key)).sum();
+                let dense = ir::dense_table(len, key_slots);
+                let slots: Vec<usize> = cases.iter().map(slot).collect();
 
                 // A case whose edge moves gets a pad doing so, laid out after the switch.
-                let mut targets = vec![default; len].into_boxed_slice();
                 let mut pads = Vec::new();
-                for (slot, edge) in slots {
-                    targets[slot] = if self.has_moves(fun, edge) {
+                let mut targets = Vec::with_capacity(cases.len());
+                for (case, slot) in cases.iter().zip(slots) {
+                    let target = if self.has_moves(fun, case.target) {
                         let pad = self.label();
-                        pads.push((pad, edge));
+                        pads.push((pad, case.target));
                         pad
                     } else {
-                        edge.0.0 as u16
+                        case.target.0.0 as u16
                     };
+                    targets.push((slot, target));
                 }
-                let table = self.fit(
-                    self.switch_tables.len(),
-                    SWITCH_TABLES,
-                    "more than 65536 switch tables",
-                );
-                self.switch_tables.push(SwitchTable {
-                    first: first as u64,
-                    targets,
-                });
-                self.emit(Op::Switch {
-                    kind,
-                    subject,
-                    table,
-                });
+
+                if dense {
+                    let mut table = vec![default; len].into_boxed_slice();
+                    for (slot, target) in targets {
+                        table[slot] = target;
+                    }
+                    let index = self.fit(
+                        self.switch_tables.len(),
+                        SWITCH_TABLES,
+                        "more than 65536 switch tables",
+                    );
+                    self.switch_tables.push(SwitchTable {
+                        first: first as u64,
+                        targets: table,
+                    });
+                    self.emit(Op::Switch {
+                        kind,
+                        subject,
+                        table: index,
+                    });
+                } else {
+                    // a table spanning the string pool between far apart keys: compare in turn
+                    let key_reg = if subject == TMP { SCRATCH } else { TMP };
+                    for (case, (_, target)) in cases.iter().zip(targets) {
+                        self.load_key(key_reg, &case.key);
+                        self.jump_if_equal(kind, subject, key_reg, target);
+                    }
+                }
 
                 // the pads follow, so the default can't fall through once there are any
                 let next_block = next_block.filter(|_| pads.is_empty());
@@ -1393,6 +1486,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let first = entries.iter().map(|(k, _)| key(k)).min().unwrap();
                 let slot = |k: &Const<'cc>| ((key(k) - first) / step) as usize;
                 let len = entries.iter().map(|(k, _)| slot(k)).max().unwrap() + 1;
+                if !ir::dense_table(len, entries.iter().map(|(k, _)| string::key_slots(k)).sum()) {
+                    self.lookup_chain(kind, dst.id, *subject, entries, default);
+                    return;
+                }
                 let mut values = vec![value(default); len].into_boxed_slice();
                 for (k, v) in entries {
                     values[slot(k)] = value(v);
@@ -1419,20 +1516,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let dst = self.def_register(dst.id);
-                match value {
-                    Const::Int(i) => self.load_int(dst, *i),
-                    Const::True | Const::False => {
-                        // fast path for booleans
-                        let value = matches!(value, Const::True) as i32;
-                        self.emit(Op::LoadI { dst, value });
-                    }
-                    // a Void value is never read, whatever the register holds will do
-                    Const::Undefined => {}
-                    _ => {
-                        let idx = self.intern(value);
-                        self.load_global(dst, idx);
-                    }
-                }
+                self.load_const(dst, value);
             }
             ir::Instr::Call {
                 dst, func, args, ..
@@ -1760,6 +1844,7 @@ impl Default for Cc<'_> {
 }
 
 /// The builtin to call for `i`, an ir op the bytecode has no op for.
+
 fn called_instead(i: &ir::Instr<'_>) -> Option<&'static ir::Fn<'static>> {
     let intrinsic = match i {
         ir::Instr::Bin {

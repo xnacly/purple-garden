@@ -353,3 +353,71 @@ fn repeat_counts_are_bounded() {
         }
     }
 }
+
+/// A string switch's table has a slot per pool address between its keys. Keys far apart in the
+/// pool, here across a large string laid out between them, made one table per switch as large as
+/// that string; a table that sparse is a chain of compares instead, still matching every key.
+#[test]
+fn sparse_string_tables_are_compares() {
+    let switches = 50;
+    let mut source = format!(
+        "import \"str\"
+fn id(s:Str) Str {{ s }}
+fn n(x:Int) Int {{ x }}
+fn pre() Int {{ match {{ str.contains(id(\"k0\") id(\"{}\")) {{ 1 }} {{ 0 }} }} }}\n",
+        "x".repeat(200_000)
+    );
+    for i in 0..switches {
+        // constant arms become a lookup, computed ones a switch
+        source += &format!(
+            "fn look{i}(s:Str) Int {{ match {{ s == \"k0\" {{ 1 }} s == \"a{i}\" {{ 2 }} s == \"b{i}\" {{ 3 }} s == \"c{i}\" {{ 4 }} {{ 0 }} }} }}
+fn jump{i}(s:Str) Int {{ match {{ s == \"k0\" {{ n(1) }} s == \"a{i}\" {{ n(2) }} s == \"b{i}\" {{ n(3) }} s == \"c{i}\" {{ n(4) }} {{ n(0) }} }} }}\n"
+        );
+    }
+    source += "pre()\n0";
+    for i in (0..switches).step_by(7) {
+        for f in ["look", "jump"] {
+            source += &format!(
+                " + {f}{i}(id(\"k0\")) + {f}{i}(id(\"b{i}\")) * 10 + {f}{i}(id(\"c{i}\")) * 100 + {f}{i}(id(\"zz\")) * 1000"
+            );
+        }
+    }
+    let calls = (0..switches).step_by(7).count() as i64;
+    assert_runs(&source, calls * 2 * (1 + 30 + 400));
+    for opt in 1..=3 {
+        // 4 short keys per table: a dense one has a few dozen slots, one spanning the large
+        // string 50 000
+        let slots = bytecode_table_slots(&source, opt);
+        assert!(slots < 64 * 2 * switches, "O{opt}: {slots} table slots");
+    }
+}
+
+/// The slots of every switch and lookup table `source` compiles to in bytecode at `opt`.
+fn bytecode_table_slots(source: &str, opt: usize) -> usize {
+    use purple_garden_allocators::{bump::BumpAlloc, page::PageAlloc};
+    use purple_garden_frontend::{lex::Lexer, lower::Lower, parser::Parser};
+    use purple_garden_typecheck::Typechecker;
+
+    let (arena, scratch, types, ir_arena) =
+        (BumpAlloc::new(), BumpAlloc::new(), BumpAlloc::new(), BumpAlloc::new());
+    let ast = Parser::new(Lexer::new(source.as_bytes()), &arena, &scratch)
+        .parse()
+        .unwrap();
+    let typecheck = Typechecker::new(&ast, &types, &scratch)
+        .with_stdlib(purple_garden_std::STD)
+        .check();
+    assert!(typecheck.diagnostics.is_empty(), "{:?}", typecheck.diagnostics);
+    let mut ir = Lower::new_in(&scratch)
+        .with_stdlib(purple_garden_std::STD)
+        .ir_from_types(&ast, typecheck.types, &ir_arena)
+        .unwrap();
+    purple_garden_opt::ir(&mut ir, &scratch);
+    let mut config = Config::default();
+    config.opt = opt;
+    config.no_jit = true;
+    let mut cc = purple_garden_bc::Cc::new();
+    cc.compile(&config, &ir, PageAlloc {}).unwrap();
+    let switch: usize = cc.switch_tables.iter().map(|t| t.targets.len()).sum();
+    let lookup: usize = cc.lookup_tables.iter().map(|t| t.values.len()).sum();
+    switch + lookup
+}

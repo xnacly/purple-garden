@@ -12,6 +12,23 @@ pub const ALIGN: usize = std::mem::align_of::<StrHeader>();
 /// Longest string in bytes, its header holds the length in a `u32`.
 pub const MAX_LEN: usize = u32::MAX as usize;
 
+/// The [`ALIGN`] sized slots a string of `len` bytes takes in a pool of them, the unit of a string
+/// switch's table, see `purple_garden_ir::dense_table`.
+#[must_use]
+pub const fn pool_slots(len: usize) -> usize {
+    padded_size(len) / ALIGN
+}
+
+/// The slots a switch or lookup key takes in its table: one for an Int, a string its
+/// [`pool_slots`].
+#[must_use]
+pub fn key_slots(key: &purple_garden_ir::Const<'_>) -> usize {
+    match key {
+        purple_garden_ir::Const::Str(s) => pool_slots(s.len()),
+        _ => 1,
+    }
+}
+
 #[inline]
 pub const fn payload_size(len: usize) -> usize {
     HEADER_SIZE + len

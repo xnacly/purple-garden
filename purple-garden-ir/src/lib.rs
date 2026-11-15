@@ -392,6 +392,21 @@ pub enum Terminator {
     },
 }
 
+/// A [`Terminator::Switch`] or [`Instr::Lookup`] runs on a table with a slot for every key value
+/// from its lowest to its highest key. A table may have this many slots per slot its keys take
+/// themselves (one per Int, a string key its size in the string pool, where it is its address),
+/// past that it is mostly holes.
+pub const MAX_SLOTS_PER_KEY_SLOT: usize = 4;
+
+/// Whether a table of `slots` slots for keys taking `key_slots` slots is dense enough to build,
+/// see [`MAX_SLOTS_PER_KEY_SLOT`]. `opt` keeps sparser integer chains as compares; string keys are
+/// laid out only by the backends, which lower a sparse string table as compares too, so its size
+/// stays proportional to its keys however the pool places them.
+#[must_use]
+pub fn dense_table(slots: usize, key_slots: usize) -> bool {
+    slots <= MAX_SLOTS_PER_KEY_SLOT.saturating_mul(key_slots)
+}
+
 impl Terminator {
     #[must_use]
     pub fn span(&self) -> u32 {
