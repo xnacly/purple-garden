@@ -1,0 +1,44 @@
+[package]
+name = "purple-garden-fuzz-targets"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = "1.4"
+libfuzzer-sys = "0.4"
+purple-garden = { path = "../purple-garden" }
+purple-garden-allocators = { path = "../purple-garden-allocators" }
+purple-garden-frontend = { path = "../purple-garden-frontend" }
+purple-garden-fuzz = { path = "../purple-garden-fuzz" }
+
+# its own workspace, the main one excludes it: `cargo build --workspace` needs no libFuzzer
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "parse"
+path = "fuzz_targets/parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "compile"
+path = "fuzz_targets/compile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "diff"
+path = "fuzz_targets/diff.rs"
+test = false
+doc = false
+bench = false

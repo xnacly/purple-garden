@@ -1,0 +1,10 @@
+[package]
+name = "purple-garden-fuzz"
+version = "0.1.0"
+description = "Generator of well-typed, terminating Purple Garden programs and the differential oracle comparing the bytecode VM and the JIT at every optimisation level"
+edition = "2024"
+publish = false
+
+[dependencies]
+arbitrary = "1.4"
+purple-garden = { path = "../purple-garden" }
