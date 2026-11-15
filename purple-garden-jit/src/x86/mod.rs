@@ -352,6 +352,12 @@ fn pow2(imm: i32) -> bool {
     imm > 1 && imm.count_ones() == 1
 }
 
+/// Immediate divisors that take an `idiv`: zero traps, -1 negates (`idiv` faults on
+/// `i64::MIN / -1`), powers of two shift.
+fn idiv_imm(imm: i32) -> bool {
+    imm != 0 && imm != -1 && !pow2(imm)
+}
+
 #[derive(Clone, Copy)]
 enum Divisor {
     Reg(Reg),
@@ -766,7 +772,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 op: BinOp::IDiv | BinOp::IMod,
                 imm,
                 ..
-            } if *imm != 0 && !pow2(*imm) => (Some(IDIV_STAGED), false),
+            } if idiv_imm(*imm) => (Some(IDIV_STAGED), false),
             _ => (None, false),
         };
 
@@ -1146,7 +1152,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 lhs,
                 imm,
                 ..
-            } if *imm != 0 && !pow2(*imm) => {
+            } if idiv_imm(*imm) => {
                 let lhs = self.ensure_register(*lhs);
                 let lhs = self.gpr(lhs);
                 self.div(*op, dst.id, lhs, Divisor::Imm(*imm));
@@ -1194,6 +1200,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                     BinOp::IDiv | BinOp::IMod if imm == 0 => {
                         self.trap_div_zero();
+                    }
+                    // x / -1 is -x, wrapping i64::MIN to itself, and x % -1 is 0
+                    BinOp::IDiv if imm == -1 => {
+                        self.emit(Insn::ImulImm { dst, src: lhs, imm });
+                    }
+                    BinOp::IMod if imm == -1 => {
+                        self.emit(Insn::MovImm { dst, imm: 0 });
                     }
                     BinOp::IDiv | BinOp::IMod => {
                         // Shifts round down, division truncates: bias a negative x by imm - 1
@@ -2249,14 +2262,17 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// clobbers `rdx`. A divisor without a usable register (an immediate, or
     /// one living in `rdx`) is staged in `rcx`.
     ///
-    /// `i64::MIN % -1` faults in `idiv` (#DE); the bytecode VM panics on the
-    /// same input via Rust's checked `%`, so neither path is lenient here.
+    /// `idiv` faults (#DE) on `i64::MIN / -1`, whose quotient doesn't fit. Like the VM's
+    /// `wrapping_div`/`wrapping_rem` a -1 divisor negates instead, wrapping `i64::MIN` to
+    /// itself, and leaves a remainder of 0. Immediate -1 divisors never get here, see
+    /// [`idiv_imm`].
     fn div(&mut self, op: BinOp, dst: ir::Id, lhs: Reg, divisor: Divisor) {
         let saves = self.save_clobbered();
         let dst = self.def_id(dst);
         let dst = self.gpr(dst);
 
         self.emit(Insn::Mov { dst: RAX, src: lhs });
+        let divisor_kind = divisor;
         let divisor = match divisor {
             Divisor::Reg(r) if r != RDX => r,
             Divisor::Reg(r) => {
@@ -2279,6 +2295,23 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         });
         self.emit(Insn::ShrImm { dst: RDX, imm: 32 });
         let narrow = encode::jump(self.out, Cond::Zero);
+        // a -1 divisor has its high bits set, it only takes the wide path
+        let negated = matches!(divisor_kind, Divisor::Reg(_)).then(|| {
+            self.emit(Insn::CmpImm {
+                reg: divisor,
+                imm: -1,
+            });
+            let wide = encode::jump(self.out, Cond::NotZero);
+            if op == BinOp::IDiv {
+                self.emit(Insn::Neg { reg: RAX });
+            } else {
+                self.emit(Insn::MovImm { dst: RDX, imm: 0 });
+            }
+            let negated = encode::jump(self.out, Cond::Always);
+            let idiv = self.out.len();
+            patch_rel32(self.out, wide, wide + 4, idiv).expect("short forward jump");
+            negated
+        });
         self.emit(Insn::Cqo);
         self.emit(Insn::Idiv { divisor });
         let done = encode::jump(self.out, Cond::Always);
@@ -2286,7 +2319,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         patch_rel32(self.out, narrow, narrow + 4, fast).expect("short forward jump");
         self.emit(Insn::Div32 { divisor });
         let end = self.out.len();
-        patch_rel32(self.out, done, done + 4, end).expect("short forward jump");
+        for skip in std::iter::once(done).chain(negated) {
+            patch_rel32(self.out, skip, skip + 4, end).expect("short forward jump");
+        }
         let src = if op == BinOp::IDiv { RAX } else { RDX };
         self.emit(Insn::Mov { dst, src });
 

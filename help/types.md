@@ -51,6 +51,10 @@ Both sides of a binary operator must have the same type. There is no implicit pr
 &  |                    Bool     -> Bool
 ```
 
+`Int` arithmetic wraps around on overflow (two's complement): `9223372036854775807 + 1` is the
+smallest `Int`, the smallest `Int` divided by `-1` is itself and its remainder `0`. Only a zero
+divisor traps, with "Division by zero".
+
 `&` and `|` are the logical and and or: the right side is only evaluated if the left one doesn't
 decide the result, so `n != 0 & 10 / n > 1` never divides by zero. Bitwise operations on `Int` are
 in the `bit` package.
@@ -66,7 +70,8 @@ The `as` keyword converts between primitive types. Only these directions are per
 
 ```text
 Int    as Double        widens to f64
-Double as Int           truncates toward zero
+Double as Int           truncates toward zero, saturating: NaN is 0, beyond the Int range
+                        the closest bound
 Int    as Bool          0 becomes false, anything else true
 Bool   as Int           false becomes 0, true becomes 1
 ```
