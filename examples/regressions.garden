@@ -487,3 +487,16 @@ testing.assert(((outer_rec.a.y + held_recs.[1].y) * 2.0) as Int == 10)
 let greek = [{s: "beta"} {s: "gamma"}]
 let swapped = [greek.[1] greek.[0]]
 testing.assert(swapped.[1].s == "beta")
+
+#! A & or | in a match's first condition ends in blocks created after the arms' blocks, so it
+#! branches back to them by index. The x86 JIT took a block param's register class only from
+#! forward edges: `d` stayed a gpr in the arm and the call into math.abs' native entry, which
+#! takes a Double in xmm0, panicked ("typecheck lets a Gpr through as Double").
+fn abs_in_arm(d:Double x:Int) Double {
+    match {
+        (x > 0) & (x < 10) { math.abs(d) }
+        { d }
+    }
+}
+testing.assert(abs_in_arm(0.0 - 2.5 3) > 2.4)
+testing.assert(abs_in_arm(0.0 - 2.5 30) < 0.0)

@@ -56,49 +56,51 @@ impl<A: Allocator> Func<'_, A> {
                 }
             });
             result?;
+            let mut result = Ok(());
             self.for_each_edge(term, |target, args| {
+                if result.is_err() {
+                    return;
+                }
                 let Some(target_block) = self.blocks.get(target.0 as usize) else {
-                    return Err(at(format!("edge to b{} which doesn't exist", target.0)));
+                    result = Err(at(format!("edge to b{} which doesn't exist", target.0)));
+                    return;
                 };
                 if target_block.tombstone {
-                    return Err(at(format!("edge to the dead b{}", target.0)));
+                    result = Err(at(format!("edge to the dead b{}", target.0)));
+                    return;
                 }
                 let (passed, taken) = (
                     self.params(args).len(),
                     self.params(target_block.params).len(),
                 );
                 if passed != taken {
-                    return Err(at(format!(
+                    result = Err(at(format!(
                         "edge to b{} passes {passed} args, it takes {taken} params",
                         target.0
                     )));
                 }
-                Ok(())
-            })?;
+            });
+            result?;
         }
         Ok(())
     }
 
-    /// Calls `f` with the target and args of every edge out of `term`, stops at the first error.
-    fn for_each_edge(
-        &self,
-        term: &Terminator,
-        mut f: impl FnMut(Id, ParamsId) -> Result<(), String>,
-    ) -> Result<(), String> {
+    /// Calls `f` with the target block and the args of every edge out of `term`.
+    pub fn for_each_edge(&self, term: &Terminator, mut f: impl FnMut(Id, ParamsId)) {
         match term {
-            Terminator::Return { .. } | Terminator::Tail { .. } => Ok(()),
+            Terminator::Return { .. } | Terminator::Tail { .. } => {}
             Terminator::Jump { id, params, .. } => f(*id, *params),
             Terminator::Branch { yes, no, .. }
             | Terminator::BranchCmpImm { yes, no, .. }
             | Terminator::BranchCmp { yes, no, .. } => {
-                f(yes.0, yes.1)?;
-                f(no.0, no.1)
+                f(yes.0, yes.1);
+                f(no.0, no.1);
             }
             Terminator::Switch { cases, default, .. } => {
                 for case in self.cases(*cases) {
-                    f(case.target.0, case.target.1)?;
+                    f(case.target.0, case.target.1);
                 }
-                f(default.0, default.1)
+                f(default.0, default.1);
             }
         }
     }

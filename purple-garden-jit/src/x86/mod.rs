@@ -642,6 +642,46 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         }
     }
 
+    /// The register class of every value: a param's and a definition's from its type, a block
+    /// param's from the args its edges pass, it has no type of its own. Edges from later blocks
+    /// count too (the optimiser creates them, `switch_fold` and `indirect_jump` for instance), so
+    /// this runs to a fixed point. Taking the class from the forward edges allocation walks over
+    /// left a param only ever reached from a later block a Gpr, also when it carries a Double.
+    fn classify(&mut self) {
+        let func = self.func;
+        self.classes.clear();
+        self.classes.resize(self.liveness.len(), Class::Gpr);
+        for param in &func.params {
+            self.classes[param.id.0 as usize] = Class::from(&param.ty);
+        }
+        let live = || func.blocks.iter().filter(|b| !b.tombstone);
+        for dst in live()
+            .flat_map(|b| &b.instructions)
+            .filter_map(ir::Func::typed_def_of)
+        {
+            self.classes[dst.id.0 as usize] = Class::from(&dst.ty);
+        }
+        // Every edge into a block passes values of the same types, so a param is Fpr if any arg
+        // is. Classes only rise from the Gpr default to Fpr, this terminates.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for term in live().filter_map(|b| b.term.as_ref()) {
+                func.for_each_edge(term, |target, args| {
+                    let params = func.params(func.blocks[target.0 as usize].params);
+                    for (&src, &dst) in func.params(args).iter().zip(params) {
+                        if self.classes[src.0 as usize] == Class::Fpr
+                            && self.classes[dst.0 as usize] != Class::Fpr
+                        {
+                            self.classes[dst.0 as usize] = Class::Fpr;
+                            changed = true;
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     /// Give every value its register before lowering, walking the rows of
     /// [`ir::Func::live_set_into`]. An instruction overwriting registers besides its dst gets
     /// free registers planned for the values living there, see [`Lowering::save_clobbered`].
@@ -656,8 +696,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.ra.reset(self.liveness.len(), gprs, fprs);
         self.hints.clear();
         self.hints.resize(self.liveness.len(), None);
-        self.classes.clear();
-        self.classes.resize(self.liveness.len(), Class::Gpr);
+        self.classify();
         self.copies.clear();
         self.copies_at.clear();
 
@@ -669,8 +708,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             else {
                 continue;
             };
-            let class = Class::from(&param.ty);
-            self.classes[param.id.0 as usize] = class;
+            let class = self.classes[param.id.0 as usize];
             if i >= ARG_GPRS.len() {
                 self.alloc(param.id, class, 0);
                 continue;
@@ -710,7 +748,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 }
                 let dst = func.params(func.blocks[target.0 as usize].params);
                 for (&src, &dst) in func.params(params).iter().zip(dst) {
-                    self.classes[dst.0 as usize] = self.classes[src.0 as usize];
                     if let Some(reg) = self.ra.reg(src) {
                         self.hints[dst.0 as usize] = Some(reg);
                     }
@@ -811,9 +848,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     fn hint_uses(&mut self, idx: usize) {
         let func = self.func;
         let block = &func.blocks[idx];
-        for dst in block.instructions.iter().filter_map(ir::Func::typed_def_of) {
-            self.classes[dst.id.0 as usize] = Class::from(&dst.ty);
-        }
         for instr in &block.instructions {
             match instr {
                 ir::Instr::Call { args, .. } => self.hint_args(func.params(*args)),
