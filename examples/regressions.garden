@@ -500,3 +500,19 @@ fn abs_in_arm(d:Double x:Int) Double {
 }
 testing.assert(abs_in_arm(0.0 - 2.5 3) > 2.4)
 testing.assert(abs_in_arm(0.0 - 2.5 30) < 0.0)
+
+#! A repeated key's arm is unreachable once switch_fold made the chain a switch, but its block
+#! stayed: nothing passed its params, the x86 JIT left the Double `d` in a gpr there and
+#! panicked at str.from's native entry. dce now removes blocks the entry can't reach.
+fn dup_key(s:Str d:Double) Int {
+    match {
+        s == "a" { 1 }
+        s == "a" { str.len(str.from(d)) }
+        s == "b" { 2 }
+        s == "c" { 3 }
+        s == "d" { 4 }
+        { 0 }
+    }
+}
+testing.assert(dup_key("a" 1.5) == 1)
+testing.assert(dup_key("c" 1.5) == 3)
