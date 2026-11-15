@@ -143,16 +143,21 @@ fn reduce(src: &str) -> String {
     }
 }
 
+/// The last lines of a generated program, `let checksum = ...` and `checksum`, stay: without
+/// them the program's value is whatever register 0 holds, which differs between backends.
+const KEPT_TAIL: usize = 2;
+
 fn drop_lines(mut best: String, keeps: &impl Fn(&str) -> bool) -> String {
     let mut chunk = best.lines().count().max(1);
     while chunk >= 1 {
         let mut i = 0;
         loop {
             let lines: Vec<&str> = best.lines().collect();
-            if i >= lines.len() {
+            let droppable = lines.len().saturating_sub(KEPT_TAIL);
+            if i >= droppable {
                 break;
             }
-            let end = (i + chunk).min(lines.len());
+            let end = (i + chunk).min(droppable);
             let candidate: String = lines[..i]
                 .iter()
                 .chain(&lines[end..])
@@ -172,11 +177,23 @@ fn drop_lines(mut best: String, keeps: &impl Fn(&str) -> bool) -> String {
 
 const LITERALS: &[&str] = &["0", "1", "0.0", "true", "\"\"", "\"a\""];
 
+const CHECKSUM: &str = "let checksum = ";
+
 /// Replaces each parenthesised group or word with each of [`LITERALS`], the first that keeps
-/// the verdict wins.
+/// the verdict wins. The final `checksum` and the whole of its definition stay, a literal of
+/// another type there would make the program's value a pointer, see [`KEPT_TAIL`].
 fn replace_exprs(mut best: String, keeps: &impl Fn(&str) -> bool) -> String {
     let mut start = 0;
-    while start < best.len() {
+    loop {
+        let protected = best.rfind(CHECKSUM).map(|at| at + CHECKSUM.len());
+        let last_line = best.trim_end().rfind('\n').map_or(0, |at| at + 1);
+        if start >= last_line {
+            return best;
+        }
+        if Some(start) == protected {
+            start += 1;
+            continue;
+        }
         let bytes = best.as_bytes();
         let end = match bytes[start] {
             b'(' | b'[' | b'{' => matching(bytes, start),
@@ -194,22 +211,24 @@ fn replace_exprs(mut best: String, keeps: &impl Fn(&str) -> bool) -> String {
             continue;
         };
         let original = &best[start..end];
+        // a literal is as small as it gets, replacing it by another one would never end
+        if LITERALS.contains(&original) {
+            start = end;
+            continue;
+        }
         let replaced = LITERALS.iter().find_map(|lit| {
-            if *lit == original {
-                return None;
-            }
             let candidate = format!("{}{lit}{}", &best[..start], &best[end..]);
-            keeps(&candidate).then_some(candidate)
+            keeps(&candidate).then_some((candidate, lit.len()))
         });
         match replaced {
-            Some(candidate) => {
+            Some((candidate, len)) => {
                 eprintln!("replaced {original:.40}");
                 best = candidate;
+                start += len;
             }
             None => start += 1,
         }
     }
-    best
 }
 
 fn is_word(c: u8) -> bool {
