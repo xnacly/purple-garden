@@ -128,6 +128,14 @@ pub struct Diagnostic {
     pub helps: Vec<Help>,
 }
 
+/// The bytecode compiler's error, at the code that exceeded one of its limits.
+impl From<purple_garden_bc::Error> for Diagnostic {
+    fn from(error: purple_garden_bc::Error) -> Self {
+        let span = error.span.map_or(Span::new(0, 0), |at| Span::new(at as usize, 1));
+        Diagnostic::new(error.message, span)
+    }
+}
+
 impl From<&Token<'_>> for Diagnostic {
     fn from(value: &Token) -> Self {
         Diagnostic::new(String::new(), Span::from_token(value))

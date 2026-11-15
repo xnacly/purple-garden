@@ -103,6 +103,8 @@ pub struct Xralloc2<S: Allocator = Global> {
     free_slots: Vec<u16, S>,
     /// Slots opened since [`Xralloc2::reset`], the frame holds this many.
     slots: u16,
+    /// A value needed a slot after all `u16` slots were open, see [`Xralloc2::slots`].
+    exhausted: bool,
 }
 
 impl Default for Xralloc2 {
@@ -122,6 +124,7 @@ impl<S: Allocator + Clone> Xralloc2<S> {
             used: [0; 2],
             free_slots: Vec::new_in(scratch),
             slots: 0,
+            exhausted: false,
         }
     }
 
@@ -138,6 +141,7 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         self.used = [0; 2];
         self.free_slots.clear();
         self.slots = 0;
+        self.exhausted = false;
     }
 
     pub fn location(&self, id: impl Into<usize>) -> Option<Location> {
@@ -152,9 +156,10 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         }
     }
 
-    /// Slots opened since [`Xralloc2::reset`]
-    pub fn slots(&self) -> u16 {
-        self.slots
+    /// Slots opened since [`Xralloc2::reset`], `None` if more values needed one at once than a
+    /// `u16` counts: some share a slot, so code using these locations must be discarded.
+    pub fn slots(&self) -> Option<u16> {
+        (!self.exhausted).then_some(self.slots)
     }
 
     /// Assign `id` a register of `class`, reusing those of values whose last
@@ -286,12 +291,18 @@ impl<S: Allocator + Clone> Xralloc2<S> {
         self.free[reg.class() as usize] |= 1u64 << reg.num();
     }
 
-    /// Take a free slot until [`Xralloc2::give_back_slot`], opening one if none is.
+    /// Take a free slot until [`Xralloc2::give_back_slot`], opening one if none is. Once every
+    /// `u16` slot is open the allocation is [`Xralloc2::slots`]' `None` and this hands out slot 0.
     pub fn take_slot(&mut self) -> u16 {
-        self.free_slots.pop().unwrap_or_else(|| {
-            self.slots += 1;
-            self.slots - 1
-        })
+        if let Some(slot) = self.free_slots.pop() {
+            return slot;
+        }
+        let Some(slots) = self.slots.checked_add(1) else {
+            self.exhausted = true;
+            return 0;
+        };
+        self.slots = slots;
+        slots - 1
     }
 
     pub fn give_back_slot(&mut self, slot: u16) {
@@ -377,7 +388,7 @@ mod tests {
         assert_eq!(ra.alloc(2usize, Class::Gpr, 2, 6), Location::Stack(1));
         assert_eq!(ra.alloc(3usize, Class::Gpr, 3, 6), Location::Stack(0));
         assert_eq!(ra.reg(3usize), None);
-        assert_eq!(ra.slots(), 2);
+        assert_eq!(ra.slots(), Some(2));
         assert_eq!(ra.live_after(4).collect::<Vec<_>>(), [Reg::Gpr(0)]);
     }
 
@@ -405,6 +416,22 @@ mod tests {
                 n - 1 - i
             );
         }
-        assert_eq!(ra.slots(), n as u16);
+        assert_eq!(ra.slots(), Some(n as u16));
+    }
+
+    /// Past the slots a `u16` counts the allocation is unusable, not silently sharing slot 0.
+    #[test]
+    fn running_out_of_slots_is_reported() {
+        let n = usize::from(u16::MAX) + 1;
+        let mut ra = Xralloc2::default();
+        ra.reset(n, &[], &[]);
+        for i in 0..n - 1 {
+            ra.alloc(i, Class::Gpr, 0, 1);
+        }
+        assert_eq!(ra.slots(), Some(u16::MAX));
+        assert_eq!(ra.alloc(n - 1, Class::Gpr, 0, 1), Location::Stack(0));
+        assert_eq!(ra.slots(), None);
+        ra.reset(1, &[], &[]);
+        assert_eq!(ra.slots(), Some(0));
     }
 }

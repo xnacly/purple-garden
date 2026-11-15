@@ -21,7 +21,7 @@ use purple_garden_allocators::{
 };
 use purple_garden_bc::{self as bc, CcCallTarget};
 use purple_garden_frontend::{
-    diagnostic::{Diagnostic, Span},
+    diagnostic::Diagnostic,
     lex, lower, parser,
 };
 use purple_garden_runtime::{Anomaly, BuiltinFn, Value};
@@ -768,9 +768,7 @@ fn compile<'i, A: Allocator + Clone + 'i>(
     }
 
     let mut cc = bc::Cc::new_in(&scratch, alloc.clone());
-    let arena = cc
-        .compile(config, &ir, PageAlloc {})
-        .map_err(|msg| Diagnostic::new(msg, Span::new(0, 0)))?;
+    let arena = cc.compile(config, &ir, PageAlloc {})?;
     if config.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);
         cc.compact_nops();

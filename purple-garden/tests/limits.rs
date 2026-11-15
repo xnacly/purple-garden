@@ -228,3 +228,84 @@ fn types_growing_through_bindings_are_rejected() {
         assert!(started.elapsed().as_secs() < 5, "{shape} took {:?}", started.elapsed());
     }
 }
+
+fn bytecode_config(opt: usize) -> Config {
+    let mut config = Config::default();
+    config.opt = opt;
+    config.no_jit = true;
+    config
+}
+
+/// Compiling `source` to bytecode fails with a diagnostic containing `message`, at `at` in the
+/// source.
+fn assert_bytecode_rejects(source: &str, message: &str, at: &str) {
+    for opt in [0, 1] {
+        let pg = Pg::new().with_stdlib().config(bytecode_config(opt));
+        let err = pg
+            .compile(source.as_bytes())
+            .err()
+            .unwrap_or_else(|| panic!("O{opt}: compiled although past a limit"));
+        assert!(err.message.contains(message), "O{opt}: {}", err.message);
+        let start = err.primary.span.start;
+        assert!(
+            source[start..].starts_with(at),
+            "O{opt}: reported at `{}`",
+            &source[start..(start + 20).min(source.len())]
+        );
+    }
+}
+
+/// `n` statements printing a call's result, a few bytecode instructions each.
+fn statements(n: usize) -> String {
+    (0..n).map(|i| format!("    io.println(id({i}))\n")).collect()
+}
+
+/// Jumps encode a 16 bit pc: a function far into the bytecode may run straight through, but a
+/// jump landing past the first 65536 instructions is rejected, as are more values live at once
+/// than spill slots and literals larger than an allocation encodes. None panics or wraps.
+#[test]
+fn bytecode_limits_are_diagnosed() {
+    let prelude = "import \"io\"\nfn id(x:Int) Int { x }\n";
+    let big = format!(
+        "fn big(x:Int) Int {{\n    let y = match {{ x == 0 {{ 1 }} {{ 2 }} }}\n{}    y\n}}\n",
+        statements(30_000),
+    );
+    let branchy = "fn branchy(x:Int) Int { match { x == 3 { 33 } { 44 } } }\n";
+    let call = "big(id(0)) + branchy(id(3))";
+    // functions are laid out in order, branchy's jump lands past the long one
+    let far = format!("{prelude}{big}{branchy}{call}");
+    assert_bytecode_rejects(&far, "a jump lands past the first 65536 instructions", "x == 3");
+
+    // before the long function its jumps land early, and the long one runs straight through
+    let early = format!("{prelude}{branchy}{big}{call}");
+    for opt in [0, 1] {
+        let pg = Pg::new().with_stdlib().config(bytecode_config(opt));
+        let mut program = pg
+            .compile(early.as_bytes())
+            .unwrap_or_else(|err| panic!("O{opt}: {err}"));
+        assert_eq!(program.run_take::<i64>().unwrap(), 1 + 33, "O{opt}");
+    }
+
+    let live = (0..usize::from(u16::MAX) + 64)
+        .map(|i| format!("let v{i} = id({i})\n"))
+        .collect::<String>();
+    let uses = (0..usize::from(u16::MAX) + 64)
+        .map(|i| format!("io.println(v{i})\n"))
+        .collect::<String>();
+    assert_bytecode_rejects(
+        &format!("{prelude}fn f() {{\n{live}{uses}}}\nf()"),
+        "more than 65535 values live at once",
+        // at a use or at the function, depending on which runs out first
+        "",
+    );
+
+    let array = |n: usize| format!("{prelude}let a = [{}]\na.[{}]", list(n, |i| format!("id({i})")), n - 1);
+    let fits = array(8190);
+    let mut program = Pg::new()
+        .with_stdlib()
+        .config(bytecode_config(1))
+        .compile(fits.as_bytes())
+        .unwrap();
+    assert_eq!(program.run_take::<i64>().unwrap(), 8189);
+    assert_bytecode_rejects(&array(8191), "an array literal holds at most 8190 words", "[id(0)");
+}

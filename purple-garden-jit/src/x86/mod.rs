@@ -130,7 +130,7 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     // that (our caller pushed the return address) and every push flips it, so
     // an even number of pushes leaves it misaligned. Only matters if the body
     // calls helpers.
-    let slots = u32::from(ra.slots());
+    let slots = u32::from(ra.slots().expect("lower bails once the slots run out"));
     let pad = calls && (saved.clone().count() as u32 + slots).is_multiple_of(2);
     let frame = 8 * (slots + u32::from(pad));
     let frameless = frame == 0 && saved.clone().next().is_none();
@@ -509,7 +509,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.prealloc(GPR_POOL, XMM_POOL);
         // values in slots need temps to be read and written, only a function that spills pays for
         // them, with registers it was short of anyway
-        if !self.unsupported && self.ra.slots() > 0 {
+        if !self.unsupported && self.ra.slots() != Some(0) {
             self.prealloc(GPR_POOL_SPILLING, XMM_POOL_SPILLING);
         }
         if self.unsupported {
@@ -605,6 +605,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             self.pos += 1;
         }
 
+        if self.ra.slots().is_none() {
+            bail!(self, "more values live at once than slots");
+        }
         self.patch_jumps();
         (!self.unsupported).then_some(self.calls)
     }
@@ -729,7 +732,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         }
         self.copies_at.push(self.copies.len() as u32);
         purple_garden_shared::trace!(
-            "[jit::x86] prealloc {}: {} slots",
+            "[jit::x86] prealloc {}: {:?} slots",
             func.name,
             self.ra.slots()
         );

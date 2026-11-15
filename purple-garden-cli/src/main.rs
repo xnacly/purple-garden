@@ -236,7 +236,13 @@ fn pipeline<A: Pages + Clone>(
     }
 
     let mut cc = bc::Cc::new_in(&scratch, allocs.cc);
-    let native_pages = cc.compile(conf, &ir, allocs.jit)?;
+    let native_pages = match cc.compile(conf, &ir, allocs.jit) {
+        Ok(native_pages) => native_pages,
+        Err(err) => {
+            eprintln!("{}", Diagnostic::from(err).render(input_source, source));
+            std::process::exit(1);
+        }
+    };
 
     purple_garden_shared::trace!("[main] Lowered IR to bytecode");
 
