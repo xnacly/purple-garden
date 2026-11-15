@@ -2,6 +2,7 @@
 import "testing"
 import "opt"
 import "str"
+import "math"
 
 #! Branch successor-param liveness: if the param-shuffle into the join
 #! block's parameter register lands on cond's register, JmpF reads the
@@ -412,3 +413,77 @@ fn nested_record_values_are_copied(n:Int) Int {
     rows.[0].first.n + rows.[1].first.n * 10 + rows.[1].second.tag * 100
 }
 testing.assert(nested_record_values_are_copied(1) == 231)
+
+#! Ints wrap on overflow, `i64::MIN / -1` is `i64::MIN` and `i64::MIN % -1` is 0. The VM
+#! panicked on all three (only debug builds on + - *), const_fold on the division at compile
+#! time and the JIT's idiv faulted (#DE), on a register divisor, an immediate one and constants.
+fn wrap_div(a:Int b:Int) Int { a / b }
+fn wrap_rem(a:Int b:Int) Int { a % b }
+fn wrap_div_imm(a:Int) Int { a / (-1) }
+fn wrap_rem_imm(a:Int) Int { a % (-1) }
+fn wrap_add(a:Int b:Int) Int { a + b }
+fn wrap_neg(a:Int) Int { -a }
+let int_min = -9223372036854775807 - 1
+testing.assert(wrap_div(int_min 0 - 1) == int_min)
+testing.assert(wrap_rem(int_min 0 - 1) == 0)
+testing.assert(wrap_div_imm(int_min) == int_min)
+testing.assert(wrap_rem_imm(int_min) == 0)
+testing.assert(wrap_div_imm(7) == -7)
+testing.assert(wrap_add(9223372036854775807 1) == int_min)
+testing.assert(wrap_neg(int_min) == int_min)
+testing.assert((-9223372036854775807 - 1) / (-1) == int_min)
+testing.assert((-9223372036854775807 - 1) % (-1) == 0)
+testing.assert(math.abs(int_min) == int_min)
+
+# Builtins are total: math.clamp panicked on lo > hi (and NaN bounds), also when folded at
+# compile time. str.repeat's bounds are in tests/limits.rs.
+testing.assert(math.clamp(5 10 0) == 0)
+testing.assert(str.repeat("ab" (-1)) == "")
+
+#! The statements after a top-level match, & or | were lowered into the entry block again,
+#! which had its terminator already, reading the join's params where nothing defines them.
+let top_level_a = 5
+let top_level_b = false & true
+testing.assert(top_level_a == 5)
+let top_level_r = {x: 41}
+let top_level_m = match {
+    top_level_a > 1 { 1 }
+    { 2 }
+}
+testing.assert(top_level_r.x + top_level_m == 42)
+
+#! Operands lowered before a & or | in a later operand live across its blocks: a call's
+#! earlier arguments, a binary lhs, an indexed array and a literal's allocation are passed
+#! through the join, they were used there undefined.
+fn first_arg(a:Int b:Bool) Int { a }
+testing.assert(first_arg(5 (true & false)) == 5)
+fn arg_across(x:Int) Int { first_arg(x + 1 (x > 0 | x < -5)) }
+testing.assert(arg_across(5) == 6)
+fn lhs_across(x:Int) Int { x * 10 + ((x > 0 & x < 10) as Int) }
+testing.assert(lhs_across(4) == 41)
+fn index_across(xs:Array<Int> i:Int) Int { xs.[((i > 0) & (i < 3)) as Int] }
+testing.assert(index_across([7 8] 1) == 8)
+fn literal_across(x:Int) Record<a:Int b:Bool> { {a: x b: (x > 0 | x < 0)} }
+testing.assert(literal_across(3).a == 3)
+
+#! A match condition with & or | ends in the short circuit's join, the branch has to pass the
+#! values as named there, not as named before the condition.
+fn cond_across(x:Int y:Int) Int {
+    match {
+        (x > 0) & (y > 0) { x + 100 }
+        { y }
+    }
+}
+testing.assert(cond_across(5 7) == 105)
+testing.assert(cond_across(-5 7) == 7)
+
+#! nested_record_values_are_copied above at the top level, and with records copied out of
+#! array elements (interior pointers into the array) into a new array.
+let inner_rec = {x: 1 y: 2.5}
+let outer_rec = {a: inner_rec b: 7}
+let held_recs = [inner_rec outer_rec.a {x: 3 y: 4.5}]
+testing.assert(outer_rec.a.x + held_recs.[1].x + held_recs.[0].x + held_recs.[2].x == 6)
+testing.assert(((outer_rec.a.y + held_recs.[1].y) * 2.0) as Int == 10)
+let greek = [{s: "beta"} {s: "gamma"}]
+let swapped = [greek.[1] greek.[0]]
+testing.assert(swapped.[1].s == "beta")

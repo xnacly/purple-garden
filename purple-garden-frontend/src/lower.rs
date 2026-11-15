@@ -53,6 +53,18 @@ struct LowerCtx<'lower, S: Allocator, I: Allocator> {
     /// `env` of every enclosing match arm, restored once the arm is lowered. Their values are still
     /// needed after the arm, so blocks receive them as params too, see [`Lower::bound_values`].
     scopes: Vec<Map<&'lower str, Id, S>, S>,
+    /// Operands of expressions still being lowered, like a call's earlier arguments while a later
+    /// one is lowered. A `&` or `|` in that later one branches, so its blocks receive them as
+    /// params too, see [`Lower::lower_holding`].
+    pending: Vec<Id, S>,
+}
+
+/// What [`Lower::bound_values`] collects, saved before lowering one of several alternative
+/// blocks and restored before the next, see [`Lower::bindings`].
+struct Bindings<'lower, S: Allocator> {
+    env: Map<&'lower str, Id, S>,
+    scopes: Vec<Map<&'lower str, Id, S>, S>,
+    pending: Vec<Id, S>,
 }
 
 impl<S: Allocator + Clone, I: Allocator + Clone> LowerCtx<'_, S, I> {
@@ -62,7 +74,8 @@ impl<S: Allocator + Clone, I: Allocator + Clone> LowerCtx<'_, S, I> {
             block: Id::default(),
             id_store: IdStore::default(),
             env: Map::new_in(scratch.clone()),
-            scopes: Vec::new_in(scratch),
+            scopes: Vec::new_in(scratch.clone()),
+            pending: Vec::new_in(scratch),
         }
     }
 }
@@ -223,17 +236,51 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
         self.ctx.block = id;
     }
 
-    /// Every value bound in `env` or in an enclosing arm's scope, sorted and deduplicated. A block
-    /// only uses its own params, so these are what an edge into a block of a match passes on.
+    /// Every value bound in `env` or in an enclosing arm's scope and every pending operand,
+    /// sorted and deduplicated. A block only uses its own params (see
+    /// [`purple_garden_ir::Func::verify`]), so these are what an edge into a block of a match or a
+    /// short circuit passes on.
     fn bound_values(&self) -> Vec<Id, S> {
         let mut values = Vec::new_in(self.scratch.clone());
         values.extend(self.ctx.env.values().copied());
         for scope in &self.ctx.scopes {
             values.extend(scope.values().copied());
         }
+        values.extend_from_slice(&self.ctx.pending);
         values.sort_unstable();
         values.dedup();
         values
+    }
+
+    fn bindings(&self) -> Bindings<'lower, S> {
+        Bindings {
+            env: self.ctx.env.clone(),
+            scopes: self.ctx.scopes.clone(),
+            pending: self.ctx.pending.clone(),
+        }
+    }
+
+    fn restore(&mut self, bindings: &Bindings<'lower, S>) {
+        self.ctx.env.clone_from(&bindings.env);
+        self.ctx.scopes.clone_from(&bindings.scopes);
+        self.ctx.pending.clone_from(&bindings.pending);
+    }
+
+    /// Lowers `node` while `held`, operands already lowered for an expression that isn't complete
+    /// yet, stay live: a `&` or `|` in `node` ends in a join block, which receives them as params.
+    /// `held` is updated to the ids they have in the block `node` ends in.
+    fn lower_holding(
+        &mut self,
+        ast: &'lower Ast<'lower, 'lower>,
+        node: NodeId,
+        held: &mut [Id],
+    ) -> Result<Option<Id>, Diagnostic> {
+        let mark = self.ctx.pending.len();
+        self.ctx.pending.extend_from_slice(held);
+        let lowered = self.lower_node(ast, node)?;
+        held.copy_from_slice(&self.ctx.pending[mark..]);
+        self.ctx.pending.truncate(mark);
+        Ok(lowered)
     }
 
     /// Switches to `block`, giving it `result` (if any) and a fresh param for each of the sorted
@@ -252,6 +299,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
         for scope in &mut self.ctx.scopes {
             scope.values_mut().for_each(rebind);
         }
+        self.ctx.pending.iter_mut().for_each(rebind);
 
         let params = self
             .ctx
@@ -311,8 +359,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
             no: (no, args),
             span,
         });
-        let env = self.ctx.env.clone();
-        let scopes = self.ctx.scopes.clone();
+        let bindings = self.bindings();
 
         self.enter_block(eval_rhs, &values, None);
         let Some(rhs) = self.lower_node(ast, rhs)? else {
@@ -324,8 +371,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
             params: args,
             span,
         });
-        self.ctx.env.clone_from(&env);
-        self.ctx.scopes.clone_from(&scopes);
+        self.restore(&bindings);
 
         self.enter_block(decided, &values, None);
         let result = self.ctx.id_store.new_value();
@@ -363,10 +409,10 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
         ast: &'lower Ast<'lower, 'lower>,
         node_id: NodeId,
         ty: &ptype::Type<'lower>,
-        base: Id,
+        mut base: Id,
         offset: u32,
         span: u32,
-    ) -> Result<(), Diagnostic> {
+    ) -> Result<Id, Diagnostic> {
         if let Node::Record { fields, .. } = ast.node(node_id) {
             let ptype::Type::Record(_) = ty else {
                 unreachable!("record literal was typechecked as non-record")
@@ -379,15 +425,24 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                 let field_offset =
                     offset + ty.field_offset(name).expect("record field was typechecked") as u32;
                 let field_ty = self.types.get(ast.value_id(*value)).cloned().unwrap();
-                self.lower_node_into(ast, *value, &field_ty, base, field_offset, tok.start as u32)?;
+                base = self.lower_node_into(
+                    ast,
+                    *value,
+                    &field_ty,
+                    base,
+                    field_offset,
+                    tok.start as u32,
+                )?;
             }
 
-            return Ok(());
+            return Ok(base);
         }
 
-        let Some(src) = self.lower_node(ast, node_id)? else {
+        let mut held = [base];
+        let Some(src) = self.lower_holding(ast, node_id, &mut held)? else {
             unreachable!("node lowered into memory must produce a value");
         };
+        let [base] = held;
         if matches!(ty, ptype::Type::Record(_)) {
             self.copy_record(ty, src, 0, base, offset, span);
         } else {
@@ -398,7 +453,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                 span,
             });
         }
-        Ok(())
+        Ok(base)
     }
 
     /// Copy the record of type `ty` at `src + src_offset` into `base + offset`, leaf field by leaf
@@ -512,8 +567,9 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
             } => {
                 use ptype::Type::{Bool, Int, Void};
                 let span = src.start as u32;
-                let base = self.lower_node(ast, *target)?.unwrap();
-                let idx = self.lower_node(ast, *index)?.unwrap();
+                let mut held = [self.lower_node(ast, *target)?.unwrap()];
+                let idx = self.lower_holding(ast, *index, &mut held)?.unwrap();
+                let [base] = held;
                 let ty = self.types.get(*id).cloned().unwrap();
 
                 // the length is the array's first word, see the Array lowering
@@ -583,9 +639,11 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                 let Some(lhs) = self.lower_node(ast, *lhs)? else {
                     unreachable!()
                 };
-                let Some(rhs) = self.lower_node(ast, *rhs)? else {
+                let mut held = [lhs];
+                let Some(rhs) = self.lower_holding(ast, *rhs, &mut held)? else {
                     unreachable!()
                 };
+                let [lhs] = held;
 
                 let dst_id = self.ctx.id_store.new_value();
                 let dst = TypeId {
@@ -815,7 +873,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
             Node::Call { target, args, id } => {
                 let mut a = Vec::new_in(self.scratch.clone());
                 for &arg in *args {
-                    let Some(id) = self.lower_node(ast, arg)? else {
+                    let Some(id) = self.lower_holding(ast, arg, &mut a)? else {
                         unreachable!();
                     };
                     a.push(id);
@@ -1025,8 +1083,6 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                 // match takes the same number of params in the same order.
                 let mut check_values = self.bound_values();
                 let mut check_args = self.ctx.func.intern_params(check_values.iter().copied());
-                let mut check_env = self.ctx.env.clone();
-                let mut check_scopes = self.ctx.scopes.clone();
                 if cases.is_empty() {
                     self.block_mut(entry).term = Some(Terminator::Jump {
                         id: default_block,
@@ -1038,17 +1094,18 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                 for (i, ((case_tok, condition), body)) in cases.iter().enumerate() {
                     let case_span = case_tok.start as u32;
                     if i != 0 {
-                        check_args = self.enter_block(check_blocks[i], &check_values, None);
-                        check_values.clear();
-                        check_values.extend_from_slice(self.ctx.func.params(check_args));
-                        check_env = self.ctx.env.clone();
-                        check_scopes = self.ctx.scopes.clone();
+                        self.enter_block(check_blocks[i], &check_values, None);
                     }
                     let Some(cond) = self.lower_node(ast, *condition)? else {
                         unreachable!(
                             "Compiler bug, match cases MUST have a condition returning a value"
                         );
                     };
+                    // A `&` or `|` in the condition ends it in a join block of its own: the
+                    // branch passes on the values as named in the block it ends in.
+                    check_values = self.bound_values();
+                    check_args = self.ctx.func.intern_params(check_values.iter().copied());
+                    let check_bindings = self.bindings();
 
                     let no_target = if i + 1 < cases.len() {
                         check_blocks[i + 1]
@@ -1075,8 +1132,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                         span: case_span,
                     });
 
-                    self.ctx.env.clone_from(&check_env);
-                    self.ctx.scopes.clone_from(&check_scopes);
+                    self.restore(&check_bindings);
                 }
 
                 // the typechecker checked we have a default case, so this is safe
@@ -1144,9 +1200,10 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                     span: src.start as u32,
                 });
 
+                let mut array_id = array_id;
                 for (i, member) in members.iter().enumerate() {
                     let offset = header_size + member_size * i;
-                    self.lower_node_into(
+                    array_id = self.lower_node_into(
                         ast,
                         *member,
                         &inner,
@@ -1170,7 +1227,7 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                     span: src.start as u32,
                 });
 
-                let base = id;
+                let mut base = id;
                 for (tok, value) in *fields {
                     let lex::Type::Ident(name) = tok.t else {
                         unreachable!();
@@ -1180,7 +1237,14 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                         .expect("record field was typechecked")
                         as u32;
                     let field_ty = self.types.get(ast.value_id(*value)).cloned().unwrap();
-                    self.lower_node_into(ast, *value, &field_ty, base, offset, tok.start as u32)?;
+                    base = self.lower_node_into(
+                        ast,
+                        *value,
+                        &field_ty,
+                        base,
+                        offset,
+                        tok.start as u32,
+                    )?;
                 }
 
                 Some(base)
@@ -1231,22 +1295,29 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
         let mut last = None;
         let last_span = ast.entry_span().unwrap_or(0);
         let mut prev = None;
+        // A function declaration lowers in a context of its own and restores this one. Control
+        // flow (match, & and |) leaves the current block at its join, the next root continues
+        // there: the bindings before it are the join's params now.
         for &node in ast.roots {
             self.root_nodes = prev.map_or(node.0 + 1, |prev: NodeId| node.0 - prev.0);
             prev = Some(node);
             last = self.lower_node(ast, node)?;
-            // reset to the main entry point block to keep emitting nodes into the correct conext
-            self.switch_to_block(entry);
         }
 
-        if last.is_some() {
-            self.block_mut(self.ctx.block).term = Some(Terminator::Return {
-                value: last,
-                span: last_span,
-            });
-        }
+        // also without a value (the last root declares a function): every block is terminated
+        self.block_mut(self.ctx.block).term = Some(Terminator::Return {
+            value: last,
+            span: last_span,
+        });
 
         self.functions.push(self.ctx.func);
+
+        #[cfg(debug_assertions)]
+        for func in &self.functions {
+            if let Err(violation) = func.verify() {
+                panic!("lowering broke the IR: {violation}");
+            }
+        }
 
         Ok(self.functions)
     }

@@ -25,6 +25,7 @@ mod display;
 mod facts;
 mod live;
 pub mod ptype;
+mod verify;
 
 use std::alloc::{Allocator, Global, Layout};
 
