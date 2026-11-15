@@ -413,10 +413,10 @@ fn stdlib_packages(cli: &Cli) -> &'static [purple_garden_runtime::Pkg] {
         return &[];
     }
 
-    if cli.no_unsafe {
-        purple_garden_std::SAFE_STD
-    } else {
+    if cli.unsafe_std {
         purple_garden_std::STD
+    } else {
+        purple_garden_std::SAFE_STD
     }
 }
 
@@ -456,7 +456,23 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::read_source;
+    use super::{Cli, read_source, stdlib_packages};
+    use clap::Parser;
+
+    fn packages(args: &[&str]) -> Vec<&'static str> {
+        let cli = Cli::try_parse_from([&["purple-garden"], args].concat()).unwrap();
+        stdlib_packages(&cli).iter().map(|pkg| pkg.name).collect()
+    }
+
+    /// Source is untrusted unless the user says otherwise, `unsafe/` reaches into the runtime.
+    #[test]
+    fn the_unsafe_namespace_is_opt_in() {
+        assert!(!packages(&["x.garden"]).contains(&"unsafe"));
+        assert!(packages(&["x.garden"]).contains(&"io"));
+        assert!(packages(&["--unsafe", "x.garden"]).contains(&"unsafe"));
+        assert!(packages(&["--unsafe", "--no-std", "x.garden"]).is_empty());
+        assert!(!packages(&["check", "x.garden"]).contains(&"unsafe"));
+    }
 
     fn scratch_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("pg-read-source-{}-{name}", std::process::id()))

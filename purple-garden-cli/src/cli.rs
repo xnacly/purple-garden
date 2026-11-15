@@ -14,9 +14,11 @@ pub struct Cli {
     #[arg(long)]
     pub no_std: bool,
 
-    /// Disable the unsafe/ standard library namespace
-    #[arg(long)]
-    pub no_unsafe: bool,
+    /// Enable the unsafe/ standard library namespace.
+    ///
+    /// Its packages reach into the runtime, only pass this for source you trust.
+    #[arg(long = "unsafe")]
+    pub unsafe_std: bool,
 
     /// Skip importing of env variables
     #[arg(long)]
