@@ -113,6 +113,9 @@ fn dead_allocs<F: Allocator, S: Allocator, A: Allocator>(
     changed
 }
 
+/// Whether `instr` only produces its value: no call, no trap. A division traps on a zero divisor
+/// even when nothing reads its quotient, `x * 0` folding to `0` leaves exactly such a division
+/// behind. An immediate divisor is only zero if the program divides by a literal zero.
 fn removable(instr: &ir::Instr<'_>) -> bool {
     match instr {
         ir::Instr::Call { .. } => false,
@@ -120,6 +123,15 @@ fn removable(instr: &ir::Instr<'_>) -> bool {
             op: ir::UnOp::Assert(_),
             ..
         } => false,
+        ir::Instr::Bin {
+            op: ir::BinOp::IDiv | ir::BinOp::IMod,
+            ..
+        } => false,
+        ir::Instr::BinImm {
+            op: ir::BinOp::IDiv | ir::BinOp::IMod,
+            imm,
+            ..
+        } => *imm != 0,
         ir::Instr::Sys { fun, .. } => fun.pure,
         ir::Instr::Noop => false,
         _ => true,
@@ -173,6 +185,44 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// `%v2 = %v0 op %v1` with an unused quotient: a division may trap and stays, an addition
+    /// goes.
+    #[test]
+    fn keeps_divisions_with_an_unused_value() {
+        use ir::BinOp;
+        for (op, kept) in [(BinOp::IDiv, true), (BinOp::IMod, true), (BinOp::IAdd, false)] {
+            let int = |id| TypeId {
+                id: Id(id),
+                ty: Type::Int,
+            };
+            let mut fun = ir::Func::new("f", Id(1), vec![int(0), int(1)], Some(Type::Int));
+            let params = fun.intern_params(vec![Id(0), Id(1)]);
+            fun.blocks = vec![Block {
+                tombstone: false,
+                id: Id(0),
+                params,
+                instructions: vec![Instr::Bin {
+                    op,
+                    dst: int(2),
+                    lhs: Id(0),
+                    rhs: Id(1),
+                    span: 0,
+                }],
+                term: Some(Terminator::Return {
+                    value: Some(Id(0)),
+                    span: 0,
+                }),
+            }];
+
+            dce(&mut fun, &mut Scratch::default());
+            assert_eq!(
+                matches!(fun.blocks[0].instructions[0], Instr::Bin { .. }),
+                kept,
+                "{op:?}"
+            );
+        }
     }
 
     /// `%v0 = Alloc; Store %v0+0, %v1` then `tail`, returning `%v2`. `%v1` is the param.

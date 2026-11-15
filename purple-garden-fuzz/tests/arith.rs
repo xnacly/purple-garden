@@ -341,3 +341,27 @@ fn clamp_is_total() {
         }
     }
 }
+
+/// A division traps on a zero divisor even when nothing reads its quotient: `x * 0` folds to `0`
+/// and dce used to remove the division it left unused, and with it the trap (`-O1` and up).
+#[test]
+fn unused_divisions_still_trap() {
+    let src = "fn times_zero(a:Int) Int { (a / a) * 0 }\n\
+               fn unused(a:Int) Int {\n    let q = 1 % a\n    5\n}";
+    for backend in BACKENDS {
+        let mut program = compile(src, backend);
+        for (name, ok) in [("times_zero", 0), ("unused", 5)] {
+            let f = program.function::<(i64,), i64>(name).expect("declared");
+            assert_eq!(
+                runtime(program.call(&f, (0,))),
+                Err(DIV_ZERO.into()),
+                "{backend}: {name}(0)"
+            );
+            assert_eq!(
+                runtime(program.call(&f, (3,))),
+                Ok(ok),
+                "{backend}: {name}(3)"
+            );
+        }
+    }
+}
