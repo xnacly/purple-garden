@@ -1,0 +1,69 @@
+# Supply chain policy, checked with `cargo deny check` (https://embarkstudios.github.io/cargo-deny).
+#
+# purple-garden compiles and runs untrusted source, so every dependency is part of the attack
+# surface: known vulnerabilities and unsound or yanked releases fail the check, crates only come
+# from crates.io, and licenses must be permissive and compatible with the MIT license.
+
+[graph]
+# Dev-dependencies (criterion, rand) are checked too: they run on developer and CI machines.
+all-features = true
+
+[advisories]
+version = 2
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Unmaintained crates only warn: they need a replacement, not an emergency.
+unmaintained = "workspace"
+yanked = "deny"
+# Every ignored advisory needs its id and the reason it doesn't apply.
+ignore = []
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.93
+
+[licenses.private]
+# The workspace crates are not published.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+# Registry dependencies must name a version; the workspace's own path dependencies need none
+# since none of its crates is published.
+wildcards = "deny"
+allow-wildcard-paths = true
+[bans.build]
+# Build scripts run arbitrary code at build time: list every crate allowed one.
+allow-build-scripts = [
+    { crate = "anyhow" },
+    { crate = "crossbeam-epoch" },
+    { crate = "crossbeam-utils" },
+    { crate = "crunchy" },
+    { crate = "getrandom" },
+    { crate = "libc" },
+    { crate = "num-traits" },
+    { crate = "proc-macro2" },
+    { crate = "purple-garden-cli" },
+    { crate = "quote" },
+    { crate = "rayon-core" },
+    { crate = "rustversion" },
+    { crate = "serde" },
+    { crate = "serde_core" },
+    { crate = "serde_json" },
+    { crate = "wasm-bindgen" },
+    { crate = "wasm-bindgen-shared" },
+    { crate = "wit-bindgen" },
+    { crate = "zerocopy" },
+    { crate = "zmij" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

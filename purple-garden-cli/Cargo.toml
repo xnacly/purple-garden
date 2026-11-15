@@ -3,6 +3,8 @@ name = "purple-garden-cli"
 version = "0.1.0"
 description = "Command line interface for Purple Garden"
 edition = "2024"
+license.workspace = true
+publish.workspace = true
 default-run = "purple-garden"
 
 [features]

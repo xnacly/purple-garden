@@ -3,6 +3,11 @@ members = ["purple-garden", "purple-garden-cli", "purple-garden-ir", "purple-gar
 default-members = ["purple-garden-cli"]
 resolver = "3"
 
+[workspace.package]
+license = "MIT"
+# None of the crates is published, see deny.toml
+publish = false
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

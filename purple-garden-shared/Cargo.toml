@@ -2,6 +2,8 @@
 name = "purple-garden-shared"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
+publish.workspace = true
 
 [dependencies]
 clap = { version = "4.5.54", features = ["derive"], optional = true }

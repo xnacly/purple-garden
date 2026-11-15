@@ -2,6 +2,8 @@
 name = "embed-fn-dispatch"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
+publish.workspace = true
 
 [features]
 trace = ["purple-garden/trace"]

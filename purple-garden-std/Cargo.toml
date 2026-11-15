@@ -2,6 +2,8 @@
 name = "purple-garden-std"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
+publish.workspace = true
 
 [dependencies]
 purple-garden-ir = { path = "../purple-garden-ir" }
