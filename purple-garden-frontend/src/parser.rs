@@ -8,8 +8,9 @@ use purple_garden_allocators::bump::Arena;
 
 use crate::{
     ast::{Ast, ExternFn, Node, NodeId, TypeExpr, TypeExprId},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Span},
     lex::{Lexer, Token, Type},
+    limits::{self, MAX_NESTING},
 };
 
 /// Parsing the token stream one token at a time into the abstract syntax tree, see
@@ -31,6 +32,9 @@ pub struct Parser<'src, 'ast, 's, A: Arena, S: Allocator> {
     types: Vec<TypeExpr<'src, 'ast>, &'s S>,
     diagnostics: Vec<Diagnostic>,
     pending_docs: Vec<Token<'src>, &'s S>,
+    /// How deep the node being parsed nests, see [`MAX_NESTING`]: one level per
+    /// [`Parser::nested`] call and per operand a left-associative chain wraps.
+    depth: usize,
 }
 
 #[derive(Debug)]
@@ -59,7 +63,39 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
             types: Vec::new_in(scratch),
             diagnostics,
             pending_docs: Vec::new_in(scratch),
+            depth: 0,
         }
+    }
+
+    /// Parse with `parse` one level deeper.
+    fn nested<T>(
+        &mut self,
+        parse: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        self.scoped(|parser| {
+            parser.deeper()?;
+            parse(parser)
+        })
+    }
+
+    /// Parse with `parse`, the levels it adds with [`Parser::deeper`] end with it.
+    fn scoped<T>(
+        &mut self,
+        parse: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        let depth = self.depth;
+        let result = parse(self);
+        self.depth = depth;
+        result
+    }
+
+    /// One level deeper, an error past [`MAX_NESTING`].
+    fn deeper(&mut self) -> Result<(), Diagnostic> {
+        if self.depth == MAX_NESTING {
+            return Err(limits::nested_too_deep(Span::from_token(&self.cur)));
+        }
+        self.depth += 1;
+        Ok(())
     }
 
     fn list<T>(&self) -> Vec<T, &'s S> {
@@ -203,6 +239,10 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
 
     /// prefix = import | let | fn | match | expr
     fn parse_prefix(&mut self) -> Result<NodeId, Diagnostic> {
+        self.nested(Self::prefix)
+    }
+
+    fn prefix(&mut self) -> Result<NodeId, Diagnostic> {
         while matches!(self.cur().t, Type::Doc(_)) {
             self.pending_docs.push(self.cur().clone());
             self.advance()?;
@@ -453,6 +493,10 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
     ///     { ident ":" expr } |
     ///     "[" expr "]"
     fn parse_expr(&mut self, min_bp: u8) -> Result<NodeId, Diagnostic> {
+        self.nested(|parser| parser.expr(min_bp))
+    }
+
+    fn expr(&mut self, min_bp: u8) -> Result<NodeId, Diagnostic> {
         let mut lhs = match self.cur().t {
             Type::CurlyLeft => {
                 let src = self.cur.clone();
@@ -526,10 +570,11 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
             }
         };
 
-        // postfix parsing loop
+        // postfix parsing loop, each postfix op wraps lhs one level deeper
         loop {
             match self.cur().t {
                 Type::Dot => {
+                    self.deeper()?;
                     self.advance()?;
                     if self.cur().t == Type::BraketLeft {
                         let src = self.cur().clone();
@@ -560,11 +605,13 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
                         break;
                     }
 
+                    self.deeper()?;
                     self.advance()?;
                     let mut args = self.list();
 
+                    // the call's level holds its arguments
                     while !self.at_end() && self.cur().t != Type::BraceRight {
-                        args.push(self.parse_prefix()?);
+                        args.push(self.scoped(Self::prefix)?);
                     }
 
                     self.expect(Type::BraceRight)?;
@@ -580,7 +627,7 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
             }
         }
 
-        // infix parsing loop
+        // infix parsing loop, each operator wraps lhs one level deeper
         while let Type::Plus
         | Type::Minus
         | Type::Asteriks
@@ -603,6 +650,7 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
             }
 
             if let Token { t: Type::As, .. } = op {
+                self.deeper()?;
                 self.advance()?;
                 let ty = self.parse_type()?;
                 let id = self.next_id();
@@ -620,9 +668,11 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
                     break;
                 }
 
+                self.deeper()?;
                 self.advance()?;
 
-                let rhs = self.parse_expr(rbp)?;
+                // the operator's level holds its right operand
+                let rhs = self.scoped(|parser| parser.expr(rbp))?;
                 let id = self.next_id();
                 lhs = self.push_node(Node::Bin { id, op, lhs, rhs });
             }
@@ -663,6 +713,10 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
     /// type = atom-type | "Foreign" "<" ident ">" | "Option" "<" type ">" | "Array" "<" type ">" |
     /// "Record" "<" (ident ":" type)* ">"
     fn parse_type(&mut self) -> Result<TypeExprId, Diagnostic> {
+        self.nested(Self::type_expr)
+    }
+
+    fn type_expr(&mut self) -> Result<TypeExprId, Diagnostic> {
         let Token { t, .. } = self.cur();
         Ok(match t {
             Type::Str | Type::Int | Type::Bool | Type::Void | Type::Double => {
