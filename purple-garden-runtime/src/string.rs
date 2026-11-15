@@ -104,6 +104,52 @@ pub unsafe fn write_payload(dst: *mut u8, s: &str, hash: u32) -> Value {
     Value::from_ptr(dst)
 }
 
+/// The words string constants are packed into back to back, see [`padded_size`]. String
+/// [`Value`]s point into them, so they are owned through a raw pointer: a `Box` asserts it is the
+/// only way to its memory each time it moves (and is `noalias` to LLVM), which reading a
+/// constant through its `Value` meanwhile violates. Clones share the words, they neither move
+/// nor change once [`ConstPool::new`] wrote them.
+#[derive(Debug, Clone, Default)]
+pub struct ConstPool {
+    /// Only owned, read through the string values.
+    _words: std::sync::Arc<PoolWords>,
+}
+
+#[derive(Debug)]
+struct PoolWords(std::ptr::NonNull<[u32]>);
+
+// Owned, immutable words, like the Box<[u32]> they were.
+unsafe impl Send for PoolWords {}
+unsafe impl Sync for PoolWords {}
+
+impl Default for PoolWords {
+    fn default() -> Self {
+        Self(std::ptr::NonNull::from(Box::leak(Box::<[u32]>::default())))
+    }
+}
+
+impl Drop for PoolWords {
+    fn drop(&mut self) {
+        // SAFETY: leaked from a Box, the last ConstPool sharing it is gone
+        drop(unsafe { Box::from_raw(self.0.as_ptr()) });
+    }
+}
+
+impl ConstPool {
+    /// `words` zeroed words, filled by `write` through the base pointer it gets, [`ALIGN`]
+    /// aligned and valid for `words * ALIGN` bytes, before anything else can see them.
+    pub fn new(words: usize, write: impl FnOnce(*mut u8)) -> Self {
+        const _: () = assert!(ALIGN == align_of::<u32>());
+        let words = PoolWords(std::ptr::NonNull::from(Box::leak(
+            vec![0u32; words].into_boxed_slice(),
+        )));
+        write(words.0.as_ptr().cast());
+        Self {
+            _words: std::sync::Arc::new(words),
+        }
+    }
+}
+
 /// Equality of two equally long byte strings without a call into libc's
 /// memcmp, which branches on the length to pick a strategy and mispredicts on
 /// mixed lengths. Short strings take two overlapping loads.
@@ -279,6 +325,38 @@ mod tests {
                 assert_ne!(hash(&base), hash(&flipped), "len {len}, byte {i}");
             }
         }
+    }
+
+    /// String values point into the pool while it moves, e.g. into `Cc::finalize(self)`. As a
+    /// `Box<[u32]>` every move asserted unique access, so reading a constant through its value
+    /// while the box was a function argument was UB (`cargo miri test` reports it).
+    #[test]
+    fn const_pool_values_stay_readable_while_the_pool_moves() {
+        let mut values = Vec::new();
+        let words = (padded_size(5) + padded_size(6)) / ALIGN;
+        let pool = ConstPool::new(words, |base| {
+            // SAFETY: both padded payloads fit, base is ALIGN aligned
+            unsafe {
+                values.push(write_payload(base, "hello", hash(b"hello")));
+                values.push(write_payload(base.add(padded_size(5)), "garden", hash(b"garden")));
+            }
+        });
+
+        fn read_while_held(pool: ConstPool, values: &[Value]) -> ConstPool {
+            let mut table = StrTable::default();
+            for &v in values {
+                // SAFETY: fresh strings written into pool
+                unsafe { table.insert(v) };
+            }
+            // SAFETY: strings written into pool
+            assert_eq!(unsafe { values[1].as_str() }, "garden");
+            assert_eq!(table.get("hello", hash(b"hello")), Some(values[0]));
+            pool
+        }
+        let shared = read_while_held(pool, &values).clone();
+        // SAFETY: the clone keeps the words alive
+        assert_eq!(unsafe { values[0].as_str() }, "hello");
+        drop(shared);
     }
 
     #[test]

@@ -92,7 +92,7 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     /// Laid out before lowering so native code can embed the addresses;
     /// `str_values[slot]` is the string in `globals` slot `slot`,
     /// [`Value::UNDEF`] for other constants.
-    const_pool: Box<[u32]>,
+    const_pool: string::ConstPool,
     str_values: Vec<Value>,
     /// `pc_to_span[pc]` is the byte offset into the source of the AST node
     /// that produced the op at `pc`. Threaded into Vm by `Cc::finalize` so
@@ -261,7 +261,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             functions: HashMap::new_in(alloc.clone()),
             native_code: None,
             entry_native_idx: None,
-            const_pool: Box::new([]),
+            const_pool: string::ConstPool::default(),
             str_values: Vec::new(),
             labels: Vec::new_in(scratch.clone()),
             switch_tables: Vec::new(),
@@ -521,25 +521,21 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             }
         }
         let size: usize = strs.iter().map(|(_, s)| string::padded_size(s.len())).sum();
-        const _: () = assert!(string::ALIGN == align_of::<u32>());
-        // len == capacity, so `into_boxed_slice` keeps the allocation and the
-        // pointers written below stay valid.
-        let mut pool = vec![0u32; size / string::ALIGN];
-        let base = pool.as_mut_ptr().cast::<u8>();
-        let mut offset = 0;
-        for (slot, s) in strs {
-            let hash = string::hash(s.as_bytes());
-            // SAFETY: pool fits every padded payload, u32 aligns base to ALIGN
-            let value = unsafe { string::write_payload(base.add(offset), s, hash) };
-            offset += string::padded_size(s.len());
-            let slot = slot as usize;
-            if self.str_values.len() <= slot {
-                self.str_values.resize(slot + 1, Value::UNDEF);
+        let str_values = &mut self.str_values;
+        self.const_pool = string::ConstPool::new(size / string::ALIGN, |base| {
+            let mut offset = 0;
+            for (slot, s) in strs {
+                let hash = string::hash(s.as_bytes());
+                // SAFETY: the pool fits every padded payload, base is ALIGN aligned
+                let value = unsafe { string::write_payload(base.add(offset), s, hash) };
+                offset += string::padded_size(s.len());
+                let slot = slot as usize;
+                if str_values.len() <= slot {
+                    str_values.resize(slot + 1, Value::UNDEF);
+                }
+                str_values[slot] = value;
             }
-            self.str_values[slot] = value;
-        }
-        self.const_pool = pool.into_boxed_slice();
-        debug_assert_eq!(self.const_pool.as_ptr().cast(), base);
+        });
 
         for func in ir.iter().filter(|f| !f.unused) {
             self.cc(func, arena.as_mut());
