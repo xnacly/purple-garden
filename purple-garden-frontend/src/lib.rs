@@ -3,6 +3,7 @@
 pub mod ast;
 pub mod diagnostic;
 pub mod lex;
+pub mod limits;
 pub mod lower;
 pub mod parser;
 pub mod typemap;

@@ -13,6 +13,7 @@ use purple_garden_frontend::{
     ast::{Ast, Node, NodeId},
     diagnostic::{Diagnostic, Span},
     lex::{self, Token},
+    limits::{self, MAX_TYPE_PARTS},
 };
 use purple_garden_ir::ptype::{Field, Type};
 use purple_garden_runtime::Pkg;
@@ -160,6 +161,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             let lex::Type::Ident(fun_name) = fun.name.t else {
                 unreachable!();
             };
+            self.check_arity(&fun.name, fun.args.len());
             let args = self
                 .arena
                 .alloc_slice(fun.args.iter().map(|(arg_name, arg_type)| {
@@ -208,6 +210,16 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             functions: self.functions,
             diagnostics: self.diagnostics,
         }
+    }
+
+    /// [`Typechecker::set_known`] for a type built from the types of other nodes, which can grow
+    /// past [`MAX_TYPE_PARTS`] without its syntax nesting.
+    fn set_built(&mut self, id: usize, t: Type<'t>, src: &lex::Token) -> TcType {
+        if t.parts_exceed(MAX_TYPE_PARTS) {
+            self.report(limits::type_too_large(Span::from_token(src)));
+            return TcType::Poison;
+        }
+        self.set_known(id, t)
     }
 
     fn set_known(&mut self, id: usize, t: Type<'t>) -> TcType {
@@ -503,7 +515,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             }) else {
                 let err =
                     self.specialisation_miss_error(pkg_name, inner_name, name, args, candidates);
-                self.diagnostics.push(err);
+                limits::report(&mut self.diagnostics, err);
                 // `str.from(Str)` is invalid, but every variant returns
                 // `Str`, so callers can still typecheck against that
                 // result.
@@ -606,7 +618,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
         } = sink;
 
         if args.len() != fun.args.len() {
-            diagnostics.push(Diagnostic::at_token(
+            limits::report(diagnostics, Diagnostic::at_token(
                 format!(
                     "`{}` requires {} arguments, got {}",
                     display_name,
@@ -641,7 +653,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
 
             if !fun.with_slots {
                 if expected_arg_type != provided_type {
-                    diagnostics.push(Self::arg_mismatch(
+                    limits::report(diagnostics, Self::arg_mismatch(
                         display_name,
                         expected_arg_name,
                         expected_arg_type,
@@ -655,14 +667,14 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             if let Err(err) =
                 expected_arg_type.bind_slots(provided_type, &mut slot_to_type_bindings)
             {
-                diagnostics.push(Self::slot_bind_error(display_name, err, span));
+                limits::report(diagnostics, Self::slot_bind_error(display_name, err, span));
                 continue;
             }
 
             let expected_arg_type =
                 expected_arg_type.apply_slot_binding(&slot_to_type_bindings, arena);
             if expected_arg_type != *provided_type {
-                diagnostics.push(Self::arg_mismatch(
+                limits::report(diagnostics, Self::arg_mismatch(
                     display_name,
                     expected_arg_name,
                     &expected_arg_type,
@@ -672,12 +684,18 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             }
         }
 
-        let ret = if fun.with_slots {
-            fun.ret.apply_slot_binding(&slot_to_type_bindings, arena)
-        } else {
-            fun.ret
-        };
-
+        if !fun.with_slots {
+            return Self::store_known(map, call_id, fun.ret);
+        }
+        let ret = fun.ret.apply_slot_binding(&slot_to_type_bindings, arena);
+        // a slot only an already diagnosed argument binds stays free, nothing may see it
+        if ret.contains_slot() {
+            return TcType::Poison;
+        }
+        if ret.parts_exceed(MAX_TYPE_PARTS) {
+            limits::report(diagnostics, limits::type_too_large(Span::from_token(tok)));
+            return TcType::Poison;
+        }
         Self::store_known(map, call_id, ret)
     }
 
@@ -743,9 +761,9 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                 }
 
                 let elem = *self.ty(first);
-                self.set_known(*id, Type::Array(self.arena.alloc(elem)))
+                self.set_built(*id, Type::Array(self.arena.alloc(elem)), src)
             }
-            Node::Record { id, fields, .. } => {
+            Node::Record { id, fields, src } => {
                 let mut typed_fields = Vec::with_capacity_in(fields.len(), self.scratch);
 
                 for (key, value) in *fields {
@@ -763,7 +781,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                     });
                 }
 
-                self.set_known(*id, Type::Record(self.arena.alloc_slice(typed_fields)))
+                self.set_built(*id, Type::Record(self.arena.alloc_slice(typed_fields)), src)
             }
             Node::Atom { id, raw } => {
                 let t = purple_garden_frontend::type_from_atom_token_type(&raw.t);
@@ -886,6 +904,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                     ));
                     return TcType::Poison;
                 }
+                self.check_arity(name, args.len());
 
                 let prev_env = std::mem::replace(&mut self.env, Vec::new_in(self.scratch));
                 self.env.push(Map::new_in(self.scratch));
@@ -1501,6 +1520,49 @@ mod tests {
         );
     }
 
+    /// Arguments travel in vm registers, there are [`MAX_ARGS`] of them. Past that register
+    /// numbers bled into the neighbouring operands of the ops moving them, so a Str parameter
+    /// could read an Int argument as its pointer.
+    #[test]
+    fn functions_take_at_most_max_args() {
+        use purple_garden_runtime::MAX_ARGS;
+        let params = |n: usize| {
+            (0..n)
+                .map(|i| format!("a{i}:Int"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        for (source, rejected) in [
+            (format!("fn f({}) Int {{ a0 }}", params(MAX_ARGS)), false),
+            (format!("fn f({}) Int {{ a0 }}", params(MAX_ARGS + 1)), true),
+            (
+                format!("extern \"p\" {{ fn f({}) Int }}", params(MAX_ARGS)),
+                false,
+            ),
+            (
+                format!("extern \"p\" {{ fn f({}) Int }}", params(MAX_ARGS + 1)),
+                true,
+            ),
+        ] {
+            let source = source.leak().as_bytes();
+            let ast = parse(source);
+            let out = checker(&ast).check();
+            let messages: Vec<_> = out.diagnostics.iter().map(|d| d.message.clone()).collect();
+            let expected = rejected.then(|| {
+                format!(
+                    "Function takes {} arguments, at most {MAX_ARGS} are supported",
+                    MAX_ARGS + 1
+                )
+            });
+            assert_eq!(
+                messages,
+                Vec::from_iter(expected),
+                "{}",
+                str::from_utf8(source).unwrap()
+            );
+        }
+    }
+
     #[test]
     fn call_wrong_arg_type_reports_error() {
         let ast = parse(br#"fn add(a:Int b:Int) Int { a + b } add(1 "s")"#);
@@ -1806,6 +1868,7 @@ mod tests {
         assert_eq!(messages(&out), vec!["binding `x` not found"]);
     }
 
+
     #[test]
     fn call_arg_mismatch_points_at_the_argument() {
         let (_, out) = check(b"fn f(a:Int) Int { a }\nf(\"s\")");
@@ -1833,6 +1896,22 @@ mod tests {
             root_type(&ast, &out, 4).map(|t| t.to_string()),
             Some("Record<n: Int m: Str>".to_string())
         );
+    }
+
+    /// The argument binding the slot failed to typecheck, so the slot stays free: the call must
+    /// poison instead of typing as `T`, which the next generic call would take as its argument.
+    #[test]
+    fn generic_call_on_a_diagnosed_argument_poisons() {
+        let (ast, out) = check(b"import \"t\"\nlet a = t.id(missing)\nt.id(a)\nt.id(t.id(missing))");
+        assert_eq!(messages(&out), ["binding `missing` not found"; 2]);
+        assert_eq!(root_type(&ast, &out, 2), None);
+        assert_eq!(root_type(&ast, &out, 3), None);
+
+        // the stdlib's generics, an undefined call as the argument and two arguments diagnosed
+        let (_, out) = check(b"import \"opt\"\nopt.or(opt.some(nope(1)) 2)");
+        assert_eq!(messages(&out), ["Call to undefined function `nope`"]);
+        let (_, out) = check(b"import \"opt\"\nopt.or(opt.or(opt.some(x) y) 2)");
+        assert_eq!(messages(&out), ["binding `x` not found", "binding `y` not found"]);
     }
 
     #[test]

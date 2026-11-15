@@ -130,7 +130,7 @@ pub fn compile_func<'ir, F: Allocator, S: Allocator + Clone, N: Allocator>(
     // that (our caller pushed the return address) and every push flips it, so
     // an even number of pushes leaves it misaligned. Only matters if the body
     // calls helpers.
-    let slots = u32::from(ra.slots());
+    let slots = u32::from(ra.slots().expect("lower bails once the slots run out"));
     let pad = calls && (saved.clone().count() as u32 + slots).is_multiple_of(2);
     let frame = 8 * (slots + u32::from(pad));
     let frameless = frame == 0 && saved.clone().next().is_none();
@@ -352,6 +352,12 @@ fn pow2(imm: i32) -> bool {
     imm > 1 && imm.count_ones() == 1
 }
 
+/// Immediate divisors that take an `idiv`: zero traps, -1 negates (`idiv` faults on
+/// `i64::MIN / -1`), powers of two shift.
+fn idiv_imm(imm: i32) -> bool {
+    imm != 0 && imm != -1 && !pow2(imm)
+}
+
 #[derive(Clone, Copy)]
 enum Divisor {
     Reg(Reg),
@@ -509,7 +515,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.prealloc(GPR_POOL, XMM_POOL);
         // values in slots need temps to be read and written, only a function that spills pays for
         // them, with registers it was short of anyway
-        if !self.unsupported && self.ra.slots() > 0 {
+        if !self.unsupported && self.ra.slots() != Some(0) {
             self.prealloc(GPR_POOL_SPILLING, XMM_POOL_SPILLING);
         }
         if self.unsupported {
@@ -605,6 +611,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             self.pos += 1;
         }
 
+        if self.ra.slots().is_none() {
+            bail!(self, "more values live at once than slots");
+        }
         self.patch_jumps();
         (!self.unsupported).then_some(self.calls)
     }
@@ -633,6 +642,46 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         }
     }
 
+    /// The register class of every value: a param's and a definition's from its type, a block
+    /// param's from the args its edges pass, it has no type of its own. Edges from later blocks
+    /// count too (the optimiser creates them, `switch_fold` and `indirect_jump` for instance), so
+    /// this runs to a fixed point. Taking the class from the forward edges allocation walks over
+    /// left a param only ever reached from a later block a Gpr, also when it carries a Double.
+    fn classify(&mut self) {
+        let func = self.func;
+        self.classes.clear();
+        self.classes.resize(self.liveness.len(), Class::Gpr);
+        for param in &func.params {
+            self.classes[param.id.0 as usize] = Class::from(&param.ty);
+        }
+        let live = || func.blocks.iter().filter(|b| !b.tombstone);
+        for dst in live()
+            .flat_map(|b| &b.instructions)
+            .filter_map(ir::Func::typed_def_of)
+        {
+            self.classes[dst.id.0 as usize] = Class::from(&dst.ty);
+        }
+        // Every edge into a block passes values of the same types, so a param is Fpr if any arg
+        // is. Classes only rise from the Gpr default to Fpr, this terminates.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for term in live().filter_map(|b| b.term.as_ref()) {
+                func.for_each_edge(term, |target, args| {
+                    let params = func.params(func.blocks[target.0 as usize].params);
+                    for (&src, &dst) in func.params(args).iter().zip(params) {
+                        if self.classes[src.0 as usize] == Class::Fpr
+                            && self.classes[dst.0 as usize] != Class::Fpr
+                        {
+                            self.classes[dst.0 as usize] = Class::Fpr;
+                            changed = true;
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     /// Give every value its register before lowering, walking the rows of
     /// [`ir::Func::live_set_into`]. An instruction overwriting registers besides its dst gets
     /// free registers planned for the values living there, see [`Lowering::save_clobbered`].
@@ -647,8 +696,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         self.ra.reset(self.liveness.len(), gprs, fprs);
         self.hints.clear();
         self.hints.resize(self.liveness.len(), None);
-        self.classes.clear();
-        self.classes.resize(self.liveness.len(), Class::Gpr);
+        self.classify();
         self.copies.clear();
         self.copies_at.clear();
 
@@ -660,8 +708,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
             else {
                 continue;
             };
-            let class = Class::from(&param.ty);
-            self.classes[param.id.0 as usize] = class;
+            let class = self.classes[param.id.0 as usize];
             if i >= ARG_GPRS.len() {
                 self.alloc(param.id, class, 0);
                 continue;
@@ -701,7 +748,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 }
                 let dst = func.params(func.blocks[target.0 as usize].params);
                 for (&src, &dst) in func.params(params).iter().zip(dst) {
-                    self.classes[dst.0 as usize] = self.classes[src.0 as usize];
                     if let Some(reg) = self.ra.reg(src) {
                         self.hints[dst.0 as usize] = Some(reg);
                     }
@@ -729,7 +775,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         }
         self.copies_at.push(self.copies.len() as u32);
         purple_garden_shared::trace!(
-            "[jit::x86] prealloc {}: {} slots",
+            "[jit::x86] prealloc {}: {:?} slots",
             func.name,
             self.ra.slots()
         );
@@ -763,7 +809,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 op: BinOp::IDiv | BinOp::IMod,
                 imm,
                 ..
-            } if *imm != 0 && !pow2(*imm) => (Some(IDIV_STAGED), false),
+            } if idiv_imm(*imm) => (Some(IDIV_STAGED), false),
             _ => (None, false),
         };
 
@@ -802,9 +848,6 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     fn hint_uses(&mut self, idx: usize) {
         let func = self.func;
         let block = &func.blocks[idx];
-        for dst in block.instructions.iter().filter_map(ir::Func::typed_def_of) {
-            self.classes[dst.id.0 as usize] = Class::from(&dst.ty);
-        }
         for instr in &block.instructions {
             match instr {
                 ir::Instr::Call { args, .. } => self.hint_args(func.params(*args)),
@@ -1143,7 +1186,7 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 lhs,
                 imm,
                 ..
-            } if *imm != 0 && !pow2(*imm) => {
+            } if idiv_imm(*imm) => {
                 let lhs = self.ensure_register(*lhs);
                 let lhs = self.gpr(lhs);
                 self.div(*op, dst.id, lhs, Divisor::Imm(*imm));
@@ -1191,6 +1234,13 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                     BinOp::IDiv | BinOp::IMod if imm == 0 => {
                         self.trap_div_zero();
+                    }
+                    // x / -1 is -x, wrapping i64::MIN to itself, and x % -1 is 0
+                    BinOp::IDiv if imm == -1 => {
+                        self.emit(Insn::ImulImm { dst, src: lhs, imm });
+                    }
+                    BinOp::IMod if imm == -1 => {
+                        self.emit(Insn::MovImm { dst, imm: 0 });
                     }
                     BinOp::IDiv | BinOp::IMod => {
                         // Shifts round down, division truncates: bias a negative x by imm - 1
@@ -1495,8 +1545,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let first = pairs.iter().map(|&(key, _)| key).min().unwrap();
                 let slot = |key: i64| ((key - first) / step) as usize;
                 let len = pairs.iter().map(|&(key, _)| slot(key)).max().unwrap() + 1;
-                let Ok(len_imm) = i32::try_from(len) else {
-                    bail!(self, "lookup table of {len} slots");
+                let key_slots = entries.iter().map(|(k, _)| string::key_slots(k)).sum();
+                // a table this sparse only bytecode lowers, as compares
+                let (true, Ok(len_imm)) = (ir::dense_table(len, key_slots), i32::try_from(len)) else {
+                    bail!(self, "lookup table of {len} slots for {key_slots} key slots");
                     return;
                 };
 
@@ -1875,8 +1927,10 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                 let first = keys.iter().map(|&(key, ..)| key).min().unwrap();
                 let slot = |key: i64| ((key - first) / step) as usize;
                 let len = keys.iter().map(|&(key, ..)| slot(key)).max().unwrap() + 1;
-                let Ok(len_imm) = i32::try_from(len) else {
-                    bail!(self, "switch table of {len} slots");
+                let key_slots = cases.iter().map(|case| string::key_slots(&case.key)).sum();
+                // a table this sparse only bytecode lowers, as compares
+                let (true, Ok(len_imm)) = (ir::dense_table(len, key_slots), i32::try_from(len)) else {
+                    bail!(self, "switch table of {len} slots for {key_slots} key slots");
                     return;
                 };
 
@@ -2242,14 +2296,17 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
     /// clobbers `rdx`. A divisor without a usable register (an immediate, or
     /// one living in `rdx`) is staged in `rcx`.
     ///
-    /// `i64::MIN % -1` faults in `idiv` (#DE); the bytecode VM panics on the
-    /// same input via Rust's checked `%`, so neither path is lenient here.
+    /// `idiv` faults (#DE) on `i64::MIN / -1`, whose quotient doesn't fit. Like the VM's
+    /// `wrapping_div`/`wrapping_rem` a -1 divisor negates instead, wrapping `i64::MIN` to
+    /// itself, and leaves a remainder of 0. Immediate -1 divisors never get here, see
+    /// [`idiv_imm`].
     fn div(&mut self, op: BinOp, dst: ir::Id, lhs: Reg, divisor: Divisor) {
         let saves = self.save_clobbered();
         let dst = self.def_id(dst);
         let dst = self.gpr(dst);
 
         self.emit(Insn::Mov { dst: RAX, src: lhs });
+        let divisor_kind = divisor;
         let divisor = match divisor {
             Divisor::Reg(r) if r != RDX => r,
             Divisor::Reg(r) => {
@@ -2272,6 +2329,23 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         });
         self.emit(Insn::ShrImm { dst: RDX, imm: 32 });
         let narrow = encode::jump(self.out, Cond::Zero);
+        // a -1 divisor has its high bits set, it only takes the wide path
+        let negated = matches!(divisor_kind, Divisor::Reg(_)).then(|| {
+            self.emit(Insn::CmpImm {
+                reg: divisor,
+                imm: -1,
+            });
+            let wide = encode::jump(self.out, Cond::NotZero);
+            if op == BinOp::IDiv {
+                self.emit(Insn::Neg { reg: RAX });
+            } else {
+                self.emit(Insn::MovImm { dst: RDX, imm: 0 });
+            }
+            let negated = encode::jump(self.out, Cond::Always);
+            let idiv = self.out.len();
+            patch_rel32(self.out, wide, wide + 4, idiv).expect("short forward jump");
+            negated
+        });
         self.emit(Insn::Cqo);
         self.emit(Insn::Idiv { divisor });
         let done = encode::jump(self.out, Cond::Always);
@@ -2279,7 +2353,9 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
         patch_rel32(self.out, narrow, narrow + 4, fast).expect("short forward jump");
         self.emit(Insn::Div32 { divisor });
         let end = self.out.len();
-        patch_rel32(self.out, done, done + 4, end).expect("short forward jump");
+        for skip in std::iter::once(done).chain(negated) {
+            patch_rel32(self.out, skip, skip + 4, end).expect("short forward jump");
+        }
         let src = if op == BinOp::IDiv { RAX } else { RDX };
         self.emit(Insn::Mov { dst, src });
 

@@ -6,10 +6,6 @@ use purple_garden_ir::{self as ir, BinOp, Case, Const, Id, Instr, ParamsId, Term
 // PERF: benchmark this claim
 pub const MIN_CASES: usize = 4;
 
-/// A switch's jump table has a slot for every value between its lowest and
-/// highest key. Integer chains spread wider than this per case would leave it
-/// mostly holes and stay compare chains.
-pub const MAX_SLOTS_PER_CASE: usize = 4;
 
 /// Fold a chain of equality branches on one subject into a single
 /// [`ir::Terminator::Switch`]:
@@ -101,8 +97,9 @@ pub fn switch_fold<F: Allocator, S: Allocator>(
             Const::Int(v) => Some(*v),
             _ => None,
         }));
-        if let (Some(min), Some(max)) = (ints.iter().min(), ints.iter().max())
-            && (max - min) as usize >= MAX_SLOTS_PER_CASE * cases.len()
+        // integer chains whose table would be mostly holes stay compares
+        if let (Some(&min), Some(&max)) = (ints.iter().min(), ints.iter().max())
+            && !ir::dense_table(max.abs_diff(min) as usize + 1, cases.len())
         {
             continue;
         }

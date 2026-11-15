@@ -7,6 +7,7 @@ mod diagnostic;
 mod hover;
 mod server;
 mod source;
+mod text;
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     server::run()

@@ -1,14 +1,14 @@
 use lsp_types::{DiagnosticSeverity, NumberOrString};
 use purple_garden_frontend::diagnostic::Diagnostic as FrontendDiagnostic;
 
-use super::source::range_for_span;
+use super::source::Source;
 
 pub(super) fn diagnostic_for_lsp(
     diagnostic: &FrontendDiagnostic,
-    source: &str,
+    source: &Source,
 ) -> lsp_types::Diagnostic {
     lsp_types::Diagnostic {
-        range: range_for_span(source, diagnostic.primary.span),
+        range: source.range(diagnostic.primary.span),
         severity: Some(DiagnosticSeverity::ERROR),
         code: Some(NumberOrString::String("purple-garden".to_owned())),
         code_description: None,

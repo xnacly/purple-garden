@@ -1,5 +1,7 @@
 //! see https://support.arm.com/documentation/ddi0487/mc/-Part-C-The-AArch64-Instruction-Set?lang=en
 
+use std::alloc::Allocator;
+
 use purple_garden_ir as ir;
 
 #[derive(Debug, Clone)]
@@ -15,7 +17,7 @@ impl<S> Scratch<S> {
     }
 }
 
-pub fn compile_func<F: Allocator, S: std::alloc::Allocator, N: std::alloc::Allocator>(
+pub fn compile_func<F: Allocator, S: Allocator, N: Allocator>(
     _func: &ir::Func<'_, F>,
     _: &mut Vec<u8, S>,
     _: &[(u32, u32)],

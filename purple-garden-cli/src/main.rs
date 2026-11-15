@@ -20,12 +20,10 @@ mod doc;
 mod elf;
 mod frontend;
 mod help;
-mod input;
 mod lsp;
 mod stats;
 
 use cli::{Cli, Command};
-use input::Input;
 use stats::Phases;
 
 pub const BUILD_INFO: &str = concat!(
@@ -103,8 +101,7 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref cmd) = cli.command {
         match &cmd {
             Command::Check { target } => {
-                let input = Input::from_file(target)?;
-                check_frontend(target, &input, stdlib_packages(&cli))?;
+                check_frontend(target, &read_source(target)?, stdlib_packages(&cli))?;
                 std::process::exit(0);
             }
             Command::Intro { topic } => {
@@ -127,26 +124,24 @@ fn entry() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let (input, input_source) = if let Some(ref i) = cli.run {
-        (Input::Str(i.clone()), "stdio")
+    let (source, input_source) = if let Some(ref i) = cli.run {
+        (i.clone().into_bytes(), "stdio")
     } else {
         let Some(file_name) = cli.target.as_deref() else {
             return err!("No file or `-r` specified");
         };
-        (Input::from_file(file_name)?, file_name)
+        (read_source(file_name)?, file_name)
     };
 
-    if input.is_empty() {
+    if source.is_empty() {
         return Ok(());
     }
 
-    let source = input.as_bytes();
-
     if !cli.alloc_stats {
-        return pipeline(&cli, input_source, source, Phases::<PageAlloc>::default());
+        return pipeline(&cli, input_source, &source, Phases::<PageAlloc>::default());
     }
     let phases = Phases::<MetricAlloc<PageAlloc>>::default();
-    pipeline(&cli, input_source, source, phases.each_ref())?;
+    pipeline(&cli, input_source, &source, phases.each_ref())?;
     eprint!("{}", phases.table());
     Ok(())
 }
@@ -241,7 +236,13 @@ fn pipeline<A: Pages + Clone>(
     }
 
     let mut cc = bc::Cc::new_in(&scratch, allocs.cc);
-    let native_pages = cc.compile(conf, &ir, allocs.jit)?;
+    let native_pages = match cc.compile(conf, &ir, allocs.jit) {
+        Ok(native_pages) => native_pages,
+        Err(err) => {
+            eprintln!("{}", Diagnostic::from(err).render(input_source, source));
+            std::process::exit(1);
+        }
+    };
 
     purple_garden_shared::trace!("[main] Lowered IR to bytecode");
 
@@ -366,15 +367,35 @@ fn write_perf_map(native_code: &[(&str, usize, Vec<u8>, Vec<Range<usize>>)]) -> 
     out.flush()
 }
 
+/// The whole source file, read once into memory the process owns. Mapping it instead lets
+/// whoever can write the file change or truncate it while the lexer holds `&str`s into it,
+/// and pipes like `<(…)` report a length of 0. Lowering keeps source offsets as `u32`, so
+/// reading stops past that, which also ends endless inputs like `/dev/zero`.
+fn read_source(file_name: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    const MAX_SOURCE: u64 = u32::MAX as u64;
+    let failed = |e: std::io::Error| format!("Failed to read '{file_name}': {e}");
+    let mut source = Vec::new();
+    std::fs::File::open(file_name)
+        .and_then(|file| file.take(MAX_SOURCE + 1).read_to_end(&mut source))
+        .map_err(failed)?;
+    if source.len() as u64 > MAX_SOURCE {
+        return Err(format!(
+            "Failed to read '{file_name}': larger than {MAX_SOURCE} bytes"
+        ));
+    }
+    Ok(source)
+}
+
 fn check_frontend(
     input_source: &str,
-    input: &Input,
+    source: &[u8],
     stdlib: &'static [purple_garden_runtime::Pkg],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source_path = Path::new(input_source);
     let failed = frontend::analyze_path(
         source_path,
-        input.as_bytes(),
+        source,
         Vec::new(),
         stdlib,
         |analysis| {
@@ -398,10 +419,10 @@ fn stdlib_packages(cli: &Cli) -> &'static [purple_garden_runtime::Pkg] {
         return &[];
     }
 
-    if cli.no_unsafe {
-        purple_garden_std::SAFE_STD
-    } else {
+    if cli.unsafe_std {
         purple_garden_std::STD
+    } else {
+        purple_garden_std::SAFE_STD
     }
 }
 
@@ -436,5 +457,70 @@ fn main() {
     if let Err(e) = entry() {
         eprintln!("{e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, read_source, stdlib_packages};
+    use clap::Parser;
+
+    fn packages(args: &[&str]) -> Vec<&'static str> {
+        let cli = Cli::try_parse_from([&["purple-garden"], args].concat()).unwrap();
+        stdlib_packages(&cli).iter().map(|pkg| pkg.name).collect()
+    }
+
+    /// Source is untrusted unless the user says otherwise, `unsafe/` reaches into the runtime.
+    #[test]
+    fn the_unsafe_namespace_is_opt_in() {
+        assert!(!packages(&["x.garden"]).contains(&"unsafe"));
+        assert!(packages(&["x.garden"]).contains(&"io"));
+        assert!(packages(&["--unsafe", "x.garden"]).contains(&"unsafe"));
+        assert!(packages(&["--unsafe", "--no-std", "x.garden"]).is_empty());
+        assert!(!packages(&["check", "x.garden"]).contains(&"unsafe"));
+    }
+
+    fn scratch_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("pg-read-source-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn reads_a_file_as_it_was_when_read() {
+        let path = scratch_path("file.garden");
+        std::fs::write(&path, b"import \"io\"\n\xff").unwrap();
+        let source = read_source(path.to_str().unwrap()).unwrap();
+        // the bytes are ours: truncating the file afterwards changes nothing
+        std::fs::write(&path, b"").unwrap();
+        assert_eq!(source, b"import \"io\"\n\xff");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// A pipe has no length, mapping it read as an empty program.
+    #[test]
+    fn reads_a_pipe_to_its_end() {
+        let path = scratch_path("fifo");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let writer = {
+            let path = path.clone();
+            std::thread::spawn(move || std::fs::write(path, b"io.println(1)\n").unwrap())
+        };
+        assert_eq!(read_source(path.to_str().unwrap()).unwrap(), b"io.println(1)\n");
+        writer.join().unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn stops_reading_endless_inputs() {
+        let err = read_source("/dev/zero").unwrap_err();
+        assert!(err.ends_with("larger than 4294967295 bytes"), "{err}");
+    }
+
+    #[test]
+    fn reports_directories() {
+        assert!(read_source("/").unwrap_err().starts_with("Failed to read '/'"));
     }
 }

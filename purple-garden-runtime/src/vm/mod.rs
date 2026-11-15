@@ -81,7 +81,7 @@ pub struct Vm<'vm> {
     pub gc: Gc<VmAlloc<'vm>>,
 
     /// Backing storage for string constants emitted by the compiler.
-    pub const_pool: Box<[u32]>,
+    pub const_pool: string::ConstPool,
     /// Every string, constants included, see [`Vm::new_string_from_str`].
     pub strings: string::StrTable,
 
@@ -146,7 +146,7 @@ impl<'vm> Vm<'vm> {
             switch_tables: Box::default(),
             lookup_tables: Box::default(),
             gc: Gc::new_in(VmAlloc(Box::new(alloc))),
-            const_pool: Box::new([]),
+            const_pool: string::ConstPool::default(),
             strings: string::StrTable::default(),
             backtrace: Vec::new(),
             pending_trap: None,

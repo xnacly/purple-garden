@@ -3,12 +3,13 @@ use std::alloc::Allocator;
 use crate::ir::Scratch;
 use purple_garden_ir::{self as ir};
 
-/// Remove dead SSA-producing instructions that have no observable effect, and allocations only
-/// ever stored into, with their stores.
+/// Remove blocks the entry can't reach, dead SSA-producing instructions that have no observable
+/// effect, and allocations only ever stored into, with their stores.
 ///
 /// This runs to a fixed point because removing one dead producer can make
 /// earlier producers dead too.
 pub fn dce<F: Allocator, S: Allocator>(fun: &mut ir::Func<'_, F>, scratch: &mut Scratch<'_, S>) {
+    unreachable_blocks(fun, scratch);
     let mut stores = Vec::new_in(scratch.alloc());
     loop {
         let mut changed = false;
@@ -43,6 +44,42 @@ pub fn dce<F: Allocator, S: Allocator>(fun: &mut ir::Func<'_, F>, scratch: &mut 
 
         if !changed {
             break;
+        }
+    }
+}
+
+/// Tombstones every block the entry, the first live block, can't reach. Passes dropping an edge
+/// leave its target behind, `switch_fold` the arm of a repeated key for instance. Nothing passes
+/// such a block's params, the backends would still allocate and lower it: the x86 JIT takes a
+/// block param's register class from the args passed to it and left a Double param of such a
+/// block in a gpr, then panicked at the call taking it.
+fn unreachable_blocks<F: Allocator, S: Allocator>(
+    fun: &mut ir::Func<'_, F>,
+    scratch: &Scratch<'_, S>,
+) {
+    let Some(entry) = fun.blocks.iter().position(|b| !b.tombstone) else {
+        return;
+    };
+    let mut reached = Vec::new_in(scratch.alloc());
+    reached.resize(fun.blocks.len(), false);
+    let mut todo = Vec::new_in(scratch.alloc());
+    reached[entry] = true;
+    todo.push(entry);
+    while let Some(block) = todo.pop() {
+        if let Some(term) = &fun.blocks[block].term {
+            fun.for_each_edge(term, |target, _| {
+                let target = target.0 as usize;
+                if !reached[target] {
+                    reached[target] = true;
+                    todo.push(target);
+                }
+            });
+        }
+    }
+    for (block, reached) in fun.blocks.iter_mut().zip(reached) {
+        if !reached && !block.tombstone {
+            purple_garden_shared::trace!("[opt::ir::dce] b{} is unreachable", block.id.0);
+            block.tombstone = true;
         }
     }
 }
@@ -113,6 +150,9 @@ fn dead_allocs<F: Allocator, S: Allocator, A: Allocator>(
     changed
 }
 
+/// Whether `instr` only produces its value: no call, no trap. A division traps on a zero divisor
+/// even when nothing reads its quotient, `x * 0` folding to `0` leaves exactly such a division
+/// behind. An immediate divisor is only zero if the program divides by a literal zero.
 fn removable(instr: &ir::Instr<'_>) -> bool {
     match instr {
         ir::Instr::Call { .. } => false,
@@ -120,6 +160,15 @@ fn removable(instr: &ir::Instr<'_>) -> bool {
             op: ir::UnOp::Assert(_),
             ..
         } => false,
+        ir::Instr::Bin {
+            op: ir::BinOp::IDiv | ir::BinOp::IMod,
+            ..
+        } => false,
+        ir::Instr::BinImm {
+            op: ir::BinOp::IDiv | ir::BinOp::IMod,
+            imm,
+            ..
+        } => *imm != 0,
         ir::Instr::Sys { fun, .. } => fun.pure,
         ir::Instr::Noop => false,
         _ => true,
@@ -173,6 +222,82 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// `%v2 = %v0 op %v1` with an unused quotient: a division may trap and stays, an addition
+    /// goes.
+    #[test]
+    fn keeps_divisions_with_an_unused_value() {
+        use ir::BinOp;
+        for (op, kept) in [
+            (BinOp::IDiv, true),
+            (BinOp::IMod, true),
+            (BinOp::IAdd, false),
+        ] {
+            let int = |id| TypeId {
+                id: Id(id),
+                ty: Type::Int,
+            };
+            let mut fun = ir::Func::new("f", Id(1), vec![int(0), int(1)], Some(Type::Int));
+            let params = fun.intern_params(vec![Id(0), Id(1)]);
+            fun.blocks = vec![Block {
+                tombstone: false,
+                id: Id(0),
+                params,
+                instructions: vec![Instr::Bin {
+                    op,
+                    dst: int(2),
+                    lhs: Id(0),
+                    rhs: Id(1),
+                    span: 0,
+                }],
+                term: Some(Terminator::Return {
+                    value: Some(Id(0)),
+                    span: 0,
+                }),
+            }];
+
+            dce(&mut fun, &mut Scratch::default());
+            assert_eq!(
+                matches!(fun.blocks[0].instructions[0], Instr::Bin { .. }),
+                kept,
+                "{op:?}"
+            );
+        }
+    }
+
+    /// b0 returns, b1 jumps to b2 which returns: b1 and b2 have no path from b0.
+    #[test]
+    fn tombstones_unreachable_blocks() {
+        let mut fun = ir::Func::new("f", Id(0), vec![], None);
+        let params = fun.intern_params(vec![]);
+        let block = |id, term| Block {
+            tombstone: false,
+            id: Id(id),
+            params,
+            instructions: vec![],
+            term: Some(term),
+        };
+        let ret = Terminator::Return {
+            value: None,
+            span: 0,
+        };
+        fun.blocks = vec![
+            block(0, ret.clone()),
+            block(
+                1,
+                Terminator::Jump {
+                    id: Id(2),
+                    params,
+                    span: 0,
+                },
+            ),
+            block(2, ret),
+        ];
+
+        dce(&mut fun, &mut Scratch::default());
+        let dead: Vec<bool> = fun.blocks.iter().map(|b| b.tombstone).collect();
+        assert_eq!(dead, [false, true, true]);
     }
 
     /// `%v0 = Alloc; Store %v0+0, %v1` then `tail`, returning `%v2`. `%v1` is the param.

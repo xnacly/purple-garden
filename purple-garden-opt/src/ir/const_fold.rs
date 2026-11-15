@@ -187,7 +187,8 @@ fn try_const_fold<S: Allocator>(
                     if *rhs == 0 {
                         return false;
                     }
-                    (*lhs / *rhs).into()
+                    // i64::MIN / -1 wraps to i64::MIN, like the VM and the JIT
+                    lhs.wrapping_div(*rhs).into()
                 }
                 BinOp::IMod => {
                     let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
@@ -196,7 +197,7 @@ fn try_const_fold<S: Allocator>(
                     if *rhs == 0 {
                         return false;
                     }
-                    (*lhs % *rhs).into()
+                    lhs.wrapping_rem(*rhs).into()
                 }
                 BinOp::IAnd => {
                     let (Const::Int(lhs), Const::Int(rhs)) = (lhs_value, rhs_value) else {
@@ -739,11 +740,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn iadd_wraps_on_overflow() {
-        // i64::MAX + 1 must wrap to i64::MIN; the fold has to match the VM's `wrapping_add`
-        // behaviour bit-for-bit. If the VM ever switches to checked arithmetic, this test must
-        // change too.
+    /// `lhs op rhs` on two constants, folded.
+    fn fold_int(op: BinOp, lhs: i64, rhs: i64) -> i64 {
         let mut fun = ir::Func::new("f", Id(0), vec![], Some(Type::Int));
         let params = fun.intern_params(vec![]);
         fun.blocks = vec![Block {
@@ -753,16 +751,16 @@ mod tests {
             instructions: vec![
                 Instr::LoadConst {
                     dst: int(0),
-                    value: Const::Int(i64::MAX),
+                    value: Const::Int(lhs),
                     span: 0,
                 },
                 Instr::LoadConst {
                     dst: int(1),
-                    value: Const::Int(1),
+                    value: Const::Int(rhs),
                     span: 0,
                 },
                 Instr::Bin {
-                    op: BinOp::IAdd,
+                    op,
                     dst: int(2),
                     lhs: Id(0),
                     rhs: Id(1),
@@ -776,8 +774,24 @@ mod tests {
         }];
 
         const_fold(&mut fun, &mut Scratch::default());
+        loaded_int(&fun.blocks[0].instructions[2])
+    }
 
-        assert_eq!(loaded_int(&fun.blocks[0].instructions[2]), i64::MIN);
+    /// Ints wrap, the fold has to match the VM's and the JIT's arithmetic bit for bit.
+    #[test]
+    fn int_arithmetic_wraps_on_overflow() {
+        assert_eq!(fold_int(BinOp::IAdd, i64::MAX, 1), i64::MIN);
+        assert_eq!(fold_int(BinOp::ISub, i64::MIN, 1), i64::MAX);
+        assert_eq!(fold_int(BinOp::IMul, i64::MIN, -1), i64::MIN);
+    }
+
+    /// The one overflowing division: Rust's `/` and `%` panic on it, which aborted the compiler.
+    #[test]
+    fn min_divided_by_minus_one_wraps() {
+        assert_eq!(fold_int(BinOp::IDiv, i64::MIN, -1), i64::MIN);
+        assert_eq!(fold_int(BinOp::IMod, i64::MIN, -1), 0);
+        assert_eq!(fold_int(BinOp::IDiv, -7, 2), -3);
+        assert_eq!(fold_int(BinOp::IMod, -7, 2), -1);
     }
 
     #[test]

@@ -3,6 +3,16 @@ use std::alloc::Allocator;
 use crate::ir::Scratch;
 use purple_garden_ir::{self as ir, Instr, TypeId, constant::Const};
 
+/// Longest string constant folding takes or makes. Folding saves a call at run time, past this
+/// a constant costs more in the program than the call would, and a chain of folds doubling a
+/// string (`let b = str.concat(a a)`) would build exponentially large constants in the compiler.
+pub const MAX_FOLDED_STR: usize = 4096;
+
+/// Whether `value` is small enough to fold, see [`MAX_FOLDED_STR`].
+fn foldable(value: &Const<'_>) -> bool {
+    !matches!(value, Const::Str(s) if s.len() > MAX_FOLDED_STR)
+}
+
 /// Constant-fold pure syscalls whose arguments are all compile-time constants.
 ///
 /// This pass is intentionally scaffolded around the eligibility analysis first:
@@ -36,7 +46,11 @@ pub fn const_fold_syscalls<F: Allocator, S: Allocator>(
                 continue;
             };
 
-            let Some(value) = (candidate.eval)(&candidate.args) else {
+            // a pure function's result is bounded by its arguments, see `pg_fn(pure)`
+            if !candidate.args.iter().all(foldable) {
+                continue;
+            }
+            let Some(value) = (candidate.eval)(&candidate.args).filter(foldable) else {
                 continue;
             };
 

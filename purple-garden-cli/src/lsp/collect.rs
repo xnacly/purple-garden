@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use lsp_types::CompletionItemKind;
 use purple_garden_allocators::bump::BumpAlloc;
 use purple_garden_frontend::ast::{Ast, Node, NodeId};
-use purple_garden_ir::ptype::Type;
 use purple_garden_typecheck::TypecheckOutput;
 
 use super::{
@@ -12,9 +11,11 @@ use super::{
     definition::DefinitionCollector,
     hover::{
         AnalysisHover, add_decl_hover, call_hover, declaration_hover, doc_hover, fn_detail,
-        garden_block, ident_hover, import_hover, package_target_hover, type_for_node,
+        collect_local_functions, garden_block, ident_hover, import_hover, package_target_hover,
+        type_text,
     },
     source::{node_span, token_span, type_expr_span},
+    text::Text,
 };
 
 pub(super) fn collect_frontend_analysis(
@@ -23,6 +24,7 @@ pub(super) fn collect_frontend_analysis(
 ) {
     if let (Some(ast), Some(typecheck)) = (frontend.ast, frontend.typecheck) {
         collect_package_docs(ast, analysis);
+        collect_local_functions(ast, analysis);
         for &root in ast.roots {
             collect_node(ast, typecheck, root, analysis);
         }
@@ -94,10 +96,9 @@ fn collect_node(
     if !matches!(
         node,
         Node::Fn { .. } | Node::Import { .. } | Node::Extern { .. } | Node::Let { .. }
-    ) && let (Some(span), Some(ty)) = (
-        node_span(ast, node_id),
-        type_for_node(ast, typecheck, node_id),
-    ) {
+    ) && let Some(span) = node_span(ast, node_id)
+        && let Some(ty) = type_text(ast, typecheck, node_id, analysis)
+    {
         analysis.add_garden_hover(span, ty);
     }
 
@@ -112,7 +113,11 @@ fn collect_node(
         } => {
             let detail = fn_detail(ast, name, args, *return_type);
             add_decl_hover(analysis, token_span(name), detail.clone(), docs);
-            analysis.add_completion(name.t.as_str(), CompletionItemKind::FUNCTION, Some(detail));
+            analysis.add_completion(
+                name.t.as_str(),
+                CompletionItemKind::FUNCTION,
+                Some(detail.into()),
+            );
             let types = BumpAlloc::new();
             for (name, ty) in *args {
                 let ty = purple_garden_frontend::type_from_type_expr(ast, *ty, &types);
@@ -121,7 +126,7 @@ fn collect_node(
                 analysis.add_completion(
                     name.t.as_str(),
                     CompletionItemKind::VARIABLE,
-                    Some(detail),
+                    Some(detail.into()),
                 );
                 analysis.add_record_completion(name.t.as_str(), &ty);
             }
@@ -130,12 +135,16 @@ fn collect_node(
         Node::Let {
             docs, name, rhs, ..
         } => {
-            let ty = type_for_node(ast, typecheck, *rhs).unwrap_or_else(|| "unknown".to_owned());
-            let detail = format!("{}: {}", name.t.as_str(), ty);
+            let ty = type_text(ast, typecheck, *rhs, analysis).unwrap_or_else(|| "unknown".into());
+            let detail = Text::around(format!("{}: ", name.t.as_str()), ty, "");
             add_decl_hover(analysis, token_span(name), detail.clone(), docs);
             analysis.add_completion(name.t.as_str(), CompletionItemKind::VARIABLE, Some(detail));
-            if let Some(ty) = ty_for_node(ast, typecheck, *rhs) {
-                analysis.add_record_completion(name.t.as_str(), ty);
+            if let Some(ty) = typecheck.types.ref_of(ast.value_id(*rhs)) {
+                analysis.add_shared_record_completion(
+                    name.t.as_str(),
+                    ty,
+                    typecheck.types.resolve(ty),
+                );
             }
             collect_node(ast, typecheck, *rhs, analysis);
         }
@@ -143,9 +152,9 @@ fn collect_node(
             if let Some((span, detail)) = package_target_hover(ast, *target, analysis) {
                 analysis.add_resolved_markdown_hover(span, detail);
             }
-            if let Some(ty) = type_for_node(ast, typecheck, node_id) {
-                analysis
-                    .add_garden_hover(token_span(name), format!(".{}: {}", name.t.as_str(), ty));
+            if let Some(ty) = type_text(ast, typecheck, node_id, analysis) {
+                let detail = Text::around(format!(".{}: ", name.t.as_str()), ty, "");
+                analysis.add_garden_hover(token_span(name), detail);
             }
             collect_node(ast, typecheck, *target, analysis);
         }
@@ -165,11 +174,9 @@ fn collect_node(
         Node::Array { members, .. } => collect_nodes(ast, typecheck, members, analysis),
         Node::Record { fields, .. } => {
             for (field, value) in *fields {
-                if let Some(ty) = type_for_node(ast, typecheck, *value) {
-                    analysis.add_garden_hover(
-                        token_span(field),
-                        format!("{}: {}", field.t.as_str(), ty),
-                    );
+                if let Some(ty) = type_text(ast, typecheck, *value, analysis) {
+                    let detail = Text::around(format!("{}: ", field.t.as_str()), ty, "");
+                    analysis.add_garden_hover(token_span(field), detail);
                 }
                 collect_node(ast, typecheck, *value, analysis);
             }
@@ -207,7 +214,7 @@ fn collect_node(
                 analysis.add_completion(
                     fun.name.t.as_str(),
                     CompletionItemKind::FUNCTION,
-                    Some(detail),
+                    Some(detail.into()),
                 );
                 for (arg, ty) in fun.args {
                     analysis.add_garden_hover(
@@ -218,7 +225,7 @@ fn collect_node(
             }
         }
         Node::Ident { name, .. } => {
-            if let Some(hover) = ident_hover(ast, typecheck, node_id, name) {
+            if let Some(hover) = ident_hover(ast, typecheck, node_id, name, analysis) {
                 analysis.add_hover(AnalysisHover {
                     span: token_span(name),
                     markup: hover,
@@ -227,14 +234,6 @@ fn collect_node(
         }
         Node::Atom { .. } => {}
     }
-}
-
-fn ty_for_node<'a>(
-    ast: &Ast<'a, '_>,
-    typecheck: &'a TypecheckOutput<'a, &'a BumpAlloc>,
-    node_id: NodeId,
-) -> Option<&'a Type<'a>> {
-    typecheck.types.get(ast.value_id(node_id))
 }
 
 fn collect_nodes(

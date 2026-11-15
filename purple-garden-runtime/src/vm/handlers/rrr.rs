@@ -10,7 +10,7 @@ pub(super) unsafe fn i_add<const B: bool>(
         let (dst, lhs, rhs) = op.rrr();
         let l = r!(vm, lhs).as_int();
         let r = r!(vm, rhs).as_int();
-        r_mut!(vm, dst) = Value::from(l + r);
+        r_mut!(vm, dst) = Value::from(l.wrapping_add(r));
         next!(vm, code, pc.wrapping_add(1))
     }
 }
@@ -25,7 +25,7 @@ pub(super) unsafe fn i_sub<const B: bool>(
         let (dst, lhs, rhs) = op.rrr();
         let l = r!(vm, lhs).as_int();
         let r = r!(vm, rhs).as_int();
-        r_mut!(vm, dst) = Value::from(l - r);
+        r_mut!(vm, dst) = Value::from(l.wrapping_sub(r));
         next!(vm, code, pc.wrapping_add(1))
     }
 }
@@ -40,7 +40,7 @@ pub(super) unsafe fn i_mul<const B: bool>(
         let (dst, lhs, rhs) = op.rrr();
         let l = r!(vm, lhs).as_int();
         let r = r!(vm, rhs).as_int();
-        r_mut!(vm, dst) = Value::from(l * r);
+        r_mut!(vm, dst) = Value::from(l.wrapping_mul(r));
         next!(vm, code, pc.wrapping_add(1))
     }
 }
@@ -56,7 +56,8 @@ pub(super) unsafe fn i_div<const B: bool>(
         let l = r!(vm, lhs).as_int();
         let r = r!(vm, rhs).as_int();
         trap_if!(vm, r == 0, Anomaly::DivisionByZero { pc });
-        r_mut!(vm, dst) = Value::from(l / r);
+        // i64::MIN / -1 overflows to i64::MIN
+        r_mut!(vm, dst) = Value::from(l.wrapping_div(r));
         next!(vm, code, pc.wrapping_add(1))
     }
 }
@@ -72,7 +73,8 @@ pub(super) unsafe fn i_mod<const B: bool>(
         let l = r!(vm, lhs).as_int();
         let r = r!(vm, rhs).as_int();
         trap_if!(vm, r == 0, Anomaly::DivisionByZero { pc });
-        r_mut!(vm, dst) = Value::from(l % r);
+        // i64::MIN % -1 is 0
+        r_mut!(vm, dst) = Value::from(l.wrapping_rem(r));
         next!(vm, code, pc.wrapping_add(1))
     }
 }

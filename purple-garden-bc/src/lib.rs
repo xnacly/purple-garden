@@ -12,7 +12,7 @@ use crate::intern::Interner;
 use purple_garden_allocators::page::Pages;
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
 use purple_garden_runtime::{
-    AllocType, BuiltinFn, DebugInfo, REGISTER_COUNT, Value, Vm, VmConfig,
+    AllocType, BuiltinFn, DebugInfo, MAX_ARGS, REGISTER_COUNT, Value, Vm, VmConfig,
     op::{LookupTable, Op, SwitchKind, SwitchTable},
     string,
 };
@@ -47,6 +47,32 @@ impl<'fun> CcFunc<'fun> {
         match self {
             Self::Bc { pc, .. } => Some(*pc),
             Self::Native { .. } => None,
+        }
+    }
+}
+
+/// Why [`Cc::compile`] failed: the native code pages could not be mapped, or the program exceeds a
+/// limit of the bytecode's encoding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Error {
+    pub message: String,
+    /// Byte offset into the source of the code past a limit.
+    pub span: Option<u32>,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<String> for Error {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            span: None,
         }
     }
 }
@@ -92,7 +118,7 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     /// Laid out before lowering so native code can embed the addresses;
     /// `str_values[slot]` is the string in `globals` slot `slot`,
     /// [`Value::UNDEF`] for other constants.
-    const_pool: Box<[u32]>,
+    const_pool: string::ConstPool,
     str_values: Vec<Value>,
     /// `pc_to_span[pc]` is the byte offset into the source of the AST node
     /// that produced the op at `pc`. Threaded into Vm by `Cc::finalize` so
@@ -101,10 +127,16 @@ pub struct Cc<'cc, S: Allocator + Clone = Global, A: Allocator + Clone = Global>
     pub pc_to_span: Vec<u32>,
     /// `labels[label]` is the absolute pc a jump to `label` lands on, after lowering. Labels below
     /// the function's block count are its block ids, the rest come from [`Cc::label`] for code
-    /// without a block. `u16::MAX` marks blocks that weren't emitted (e.g.,
+    /// without a block. [`UNBOUND`] marks blocks that weren't emitted (e.g.,
     /// tombstoned blocks). Block ids are dense per-function so a Vec
-    /// indexed by id beats a `HashMap` on both alloc cost and lookup speed.
-    labels: Vec<u16, S>,
+    /// indexed by id beats a `HashMap` on both alloc cost and lookup speed. Pcs stay wide until
+    /// the end of [`Cc::cc`] narrows them into the jumps, see [`Cc::fit`].
+    labels: Vec<u32, S>,
+    /// The first encoding limit the program exceeds and the source offset being lowered then, see
+    /// [`Cc::fit`]. [`Cc::compile`] fails with it once the function is done.
+    overflow: Option<Error>,
+    /// Name of the function being compiled, for [`Cc::overflow`].
+    fun_name: &'cc str,
     /// Tables of the emitted [`Op::Switch`]es. Targets are block ids until the
     /// end of [`Cc::cc`] maps them to pcs, like jump targets.
     pub switch_tables: Vec<SwitchTable>,
@@ -147,6 +179,10 @@ const CALLEE_SAVED: u8 = 19;
 const SCRATCH: u8 = REGISTER_COUNT as u8 - 1;
 /// Second ephemeral register
 const TMP: u8 = SCRATCH - 1;
+const _: () = assert!(
+    TMP as usize == MAX_ARGS,
+    "argument registers end where the scratch registers start"
+);
 
 /// Bits of [`Op::LoadI`]'s value in the packed encoding.
 const LOAD_I_BITS: u32 = 21;
@@ -160,13 +196,17 @@ const fn fits_signed(i: i64, bits: u32) -> bool {
     -half <= i && i < half
 }
 
-/// `pc` as a 16 bit jump target, `u16::MAX` is [`Cc::labels`]' unbound marker.
-fn jump_target(pc: usize) -> u16 {
-    u16::try_from(pc)
-        .ok()
-        .filter(|&pc| pc != u16::MAX)
-        .expect("bytecode past the 16 bit jump targets")
-}
+/// [`Cc::labels`]' marker of a label no op was bound to.
+const UNBOUND: u32 = u32::MAX;
+
+/// Exclusive bounds of the encoded fields [`Cc::fit`] narrows into.
+const JUMP_TARGETS: usize = 1 << 16;
+const CALL_TARGETS: usize = 1 << 26;
+const NATIVES: usize = 1 << 16;
+const SWITCH_TABLES: usize = 1 << 16;
+const LOOKUP_TABLES: usize = 1 << 15;
+const GLOBALS: usize = 1 << LOAD_G_BITS;
+const OFFSETS: usize = 1 << 16;
 
 /// Every vm register but [`SCRATCH`] and [`TMP`], r0 last so xralloc2 hands out the lowest free one
 /// first, which also puts the caller-saved registers before the callee-saved ones.
@@ -257,9 +297,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             functions: HashMap::new_in(alloc.clone()),
             native_code: None,
             entry_native_idx: None,
-            const_pool: Box::new([]),
+            const_pool: string::ConstPool::default(),
             str_values: Vec::new(),
             labels: Vec::new_in(scratch.clone()),
+            overflow: None,
+            fun_name: "",
             switch_tables: Vec::new(),
             lookup_tables: Vec::new(),
             native_fns: HashMap::new_in(alloc),
@@ -292,13 +334,125 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         }
     }
 
+    /// `r[dst] = value`.
+    fn load_const(&mut self, dst: u8, value: &'cc Const<'cc>) {
+        match value {
+            Const::Int(i) => self.load_int(dst, *i),
+            Const::True | Const::False => {
+                // fast path for booleans
+                let value = matches!(value, Const::True) as i32;
+                self.emit(Op::LoadI { dst, value });
+            }
+            // a Void value is never read, whatever the register holds will do
+            Const::Undefined => {}
+            _ => {
+                let idx = self.intern(value);
+                self.load_global(dst, idx);
+            }
+        }
+    }
+
+    /// `r[dst] = key`, a switch or lookup key: an Int, or a Str laid out before lowering.
+    fn load_key(&mut self, dst: u8, key: &Const<'_>) {
+        match key {
+            Const::Int(i) => self.load_int(dst, *i),
+            Const::Str(_) => {
+                let idx = self.globals.map[key];
+                self.load_global(dst, idx);
+            }
+            _ => unreachable!("switch_fold only folds Str and Int keys"),
+        }
+    }
+
+    /// Jump to `target` if `r[subject]` equals `r[key]`, which may be overwritten.
+    fn jump_if_equal(&mut self, kind: SwitchKind, subject: u8, key: u8, target: u16) {
+        match kind {
+            SwitchKind::Str => self.emit(Op::JmpSEq {
+                lhs: subject,
+                rhs: key,
+                target,
+            }),
+            SwitchKind::Int => {
+                self.emit(Op::IEq {
+                    dst: key,
+                    lhs: subject,
+                    rhs: key,
+                });
+                self.emit(Op::JmpT { cond: key, target })
+            }
+        };
+    }
+
+    /// [`ir::Instr::Lookup`] as compares in turn, for a table too sparse to build: `dst` is the
+    /// value of the first entry whose key equals `subject`, `default` if none does.
+    fn lookup_chain(
+        &mut self,
+        kind: SwitchKind,
+        dst: Id,
+        subject: Id,
+        entries: &'cc [(Const<'cc>, Const<'cc>)],
+        default: &'cc Const<'cc>,
+    ) {
+        let dst = self.def_register(dst);
+        let subject = self.ensure_register(subject);
+        let key_reg = if subject == TMP { SCRATCH } else { TMP };
+        let done = self.label();
+        for (key, value) in entries {
+            let found = self.label();
+            let next = self.label();
+            self.load_key(key_reg, key);
+            self.jump_if_equal(kind, subject, key_reg, found);
+            self.emit(Op::Jmp { target: next });
+            self.bind(found);
+            self.load_const(dst, value);
+            self.emit(Op::Jmp { target: done });
+            self.bind(next);
+        }
+        self.load_const(dst, default);
+        self.bind(done);
+    }
+
     /// `r[dst] = globals[idx]`.
     fn load_global(&mut self, dst: u8, idx: u32) {
-        assert!(
-            idx < 1 << LOAD_G_BITS,
-            "globals past Op::LoadG's 21 bit index"
-        );
+        let idx = self.fit(idx as usize, GLOBALS, "more than 2097152 distinct constants");
         self.emit(Op::LoadG { dst, idx });
+    }
+
+    /// `value` as the `T` of an encoded field holding less than `bound`. Past it the program is
+    /// rejected with `what` at the code being lowered, and 0 stands in until the function is done,
+    /// so lowering goes on without a case of its own.
+    fn fit<T: TryFrom<usize> + Default>(&mut self, value: usize, bound: usize, what: &str) -> T {
+        if value < bound
+            && let Ok(value) = T::try_from(value)
+        {
+            return value;
+        }
+        if self.overflow.is_none() {
+            self.overflow = Some(Error {
+                message: format!(
+                    "`{}` is too large for the bytecode: {what}",
+                    self.fun_name
+                ),
+                span: Some(self.cur_span),
+            });
+        }
+        T::default()
+    }
+
+    /// The pc a jump to `label` lands on, as the jump encodes it.
+    fn jump_target(&mut self, label: u16) -> u16 {
+        let pc = self.labels[usize::from(label)];
+        debug_assert_ne!(pc, UNBOUND, "jump to an unbound label");
+        self.fit(
+            pc as usize,
+            JUMP_TARGETS,
+            "a jump lands past the first 65536 instructions of the program",
+        )
+    }
+
+    /// `pc` as an [`Op::Call`] or [`Op::Tail`] encodes it.
+    fn call_target(&mut self, pc: usize) -> u32 {
+        self.fit(pc, CALL_TARGETS, "a call lands past the first 2^26 instructions")
     }
 
     fn emit(&mut self, op: Op) -> usize {
@@ -375,6 +529,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             for (i, &param) in fun.params(block.params).iter().enumerate() {
                 // entry params arrive in their registers
                 if idx == 0 {
+                    assert!(
+                        i < MAX_ARGS,
+                        "{} takes more than {MAX_ARGS} arguments, the typechecker rejects that",
+                        fun.name
+                    );
                     let end = self.live_set[param.0 as usize].1;
                     if self
                         .regalloc
@@ -454,7 +613,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         config: &Config,
         ir: &'cc [Func<'cc, F>],
         code: P,
-    ) -> Result<Option<purple_garden_jit::CodeArena<P>>, String> {
+    ) -> Result<Option<purple_garden_jit::CodeArena<P>>, Error> {
         let mut arena = if config.no_jit {
             None
         } else {
@@ -512,28 +671,27 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             }
         }
         let size: usize = strs.iter().map(|(_, s)| string::padded_size(s.len())).sum();
-        const _: () = assert!(string::ALIGN == align_of::<u32>());
-        // len == capacity, so `into_boxed_slice` keeps the allocation and the
-        // pointers written below stay valid.
-        let mut pool = vec![0u32; size / string::ALIGN];
-        let base = pool.as_mut_ptr().cast::<u8>();
-        let mut offset = 0;
-        for (slot, s) in strs {
-            let hash = string::hash(s.as_bytes());
-            // SAFETY: pool fits every padded payload, u32 aligns base to ALIGN
-            let value = unsafe { string::write_payload(base.add(offset), s, hash) };
-            offset += string::padded_size(s.len());
-            let slot = slot as usize;
-            if self.str_values.len() <= slot {
-                self.str_values.resize(slot + 1, Value::UNDEF);
+        let str_values = &mut self.str_values;
+        self.const_pool = string::ConstPool::new(size / string::ALIGN, |base| {
+            let mut offset = 0;
+            for (slot, s) in strs {
+                let hash = string::hash(s.as_bytes());
+                // SAFETY: the pool fits every padded payload, base is ALIGN aligned
+                let value = unsafe { string::write_payload(base.add(offset), s, hash) };
+                offset += string::padded_size(s.len());
+                let slot = slot as usize;
+                if str_values.len() <= slot {
+                    str_values.resize(slot + 1, Value::UNDEF);
+                }
+                str_values[slot] = value;
             }
-            self.str_values[slot] = value;
-        }
-        self.const_pool = pool.into_boxed_slice();
-        debug_assert_eq!(self.const_pool.as_ptr().cast(), base);
+        });
 
         for func in ir.iter().filter(|f| !f.unused) {
             self.cc(func, arena.as_mut());
+            if let Some(overflow) = self.overflow.take() {
+                return Err(overflow);
+            }
         }
 
         if let Some(arena) = &mut arena {
@@ -579,13 +737,19 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             .insert(fun.id, CcFunc::Bc { pc, name: fun.name });
 
         self.cur_span = fun.span;
+        self.fun_name = fun.name;
 
         // labels is indexed by ir block id, and block ids restart at 0 per function; size it to
-        // the current function's block count and fill with the u16::MAX sentinel for
-        // tombstoned/unemitted blocks.
+        // the current function's block count and fill with the UNBOUND sentinel for
+        // tombstoned/unemitted blocks. A jump names its label in its 16 bit target until the end
+        // of this function replaces it with the label's pc.
+        self.fit::<u16>(
+            fun.blocks.len(),
+            JUMP_TARGETS,
+            "more than 65536 blocks in one function",
+        );
         self.labels.clear();
-        self.labels
-            .resize(usize::from(jump_target(fun.blocks.len())), u16::MAX);
+        self.labels.resize(fun.blocks.len(), UNBOUND);
 
         self.pos = 0;
         for (idx, block) in fun.blocks.iter().enumerate() {
@@ -639,51 +803,34 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             .rev()
             .find(|&r| self.regalloc.used(Reg::Gpr(r)))
             .filter(|_| !is_root);
-        let slots = self.regalloc.slots();
+        self.cur_span = fun.span;
+        let slots = self.regalloc.slots().unwrap_or_else(|| {
+            self.fit(usize::MAX, 0, "more than 65535 values live at once")
+        });
         if max_reg.is_some() || slots > 0 {
-            self.cur_span = fun.span;
             self.emit_frame(pc, max_reg, slots);
         }
 
         for i in pc..self.buf.len() {
-            self.buf[i] = match self.buf[i] {
-                Op::JmpT { cond, target } => Op::JmpT {
-                    cond,
-                    target: self.labels[target as usize],
-                },
-                Op::JmpF { cond, target } => Op::JmpF {
-                    cond,
-                    target: self.labels[target as usize],
-                },
-                Op::JmpEqI { lhs, imm, target } => Op::JmpEqI {
-                    lhs,
-                    imm,
-                    target: self.labels[target as usize],
-                },
-                Op::JmpNeI { lhs, imm, target } => Op::JmpNeI {
-                    lhs,
-                    imm,
-                    target: self.labels[target as usize],
-                },
-                Op::JmpSEq { lhs, rhs, target } => Op::JmpSEq {
-                    lhs,
-                    rhs,
-                    target: self.labels[target as usize],
-                },
-                Op::JmpSNe { lhs, rhs, target } => Op::JmpSNe {
-                    lhs,
-                    rhs,
-                    target: self.labels[target as usize],
-                },
-                Op::Jmp { target } => Op::Jmp {
-                    target: self.labels[target as usize],
-                },
-                other => other,
-            };
+            let mut op = self.buf[i];
+            if let Op::Jmp { target }
+            | Op::JmpT { target, .. }
+            | Op::JmpF { target, .. }
+            | Op::JmpEqI { target, .. }
+            | Op::JmpNeI { target, .. }
+            | Op::JmpSEq { target, .. }
+            | Op::JmpSNe { target, .. } = &mut op
+            {
+                self.cur_span = self.pc_to_span[i];
+                *target = self.jump_target(*target);
+            }
+            self.buf[i] = op;
         }
-        for table in &mut self.switch_tables[tables..] {
-            for target in &mut table.targets {
-                *target = self.labels[*target as usize];
+        self.cur_span = fun.span;
+        for table in tables..self.switch_tables.len() {
+            for slot in 0..self.switch_tables[table].targets.len() {
+                let target = self.jump_target(self.switch_tables[table].targets[slot]);
+                self.switch_tables[table].targets[slot] = target;
             }
         }
 
@@ -707,6 +854,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             purple_garden_shared::trace!("[bc::Cc::cc] native skipped function {}", fun.name);
             return false;
         };
+        // Op::Native's index has room for no more, the function stays bytecode
+        if self.std_fns.len() >= NATIVES {
+            return false;
+        }
         let Some(entry) = arena.push(self.jit.code()) else {
             purple_garden_shared::trace!(
                 "[bc::Cc::cc] code arena full, {} stays bytecode",
@@ -725,8 +876,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             ));
         }
         self.native_fns.insert(fun.id, entry);
-        let idx = u16::try_from(self.std_fns.intern(entry))
-            .expect("natives past Op::Native's 16 bit index");
+        let idx = u16::try_from(self.std_fns.intern(entry)).expect("checked above");
         self.functions.insert(
             fun.id,
             CcFunc::Native {
@@ -761,8 +911,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         self.emit_arg_shuffle(args, self.scratch.len() as u16);
 
         let dst = self.def_register(dst);
+        let idx = self.fit(idx as usize, NATIVES, "more than 65536 builtins and natives");
         self.emit(Op::Sys {
-            idx: u16::try_from(idx).expect("syscalls past Op::Sys's 16 bit index"),
+            idx,
             argc: args.len() as u8,
         });
         self.emit(Op::Mov { dst, src: 0 });
@@ -779,11 +930,20 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     /// or tail. `r0` is both the first argument and the return-value slot. `pushed` is how far
     /// the top of the spill stack moved since the frame, slots read here are offset by it.
     fn emit_arg_shuffle(&mut self, args: &[Id], pushed: u16) {
+        assert!(
+            args.len() <= MAX_ARGS,
+            "a call with {} arguments, the typechecker allows at most {MAX_ARGS}",
+            args.len()
+        );
         let mut moves = take(&mut self.scratch_pairs);
         moves.clear();
         for (i, &arg) in args.iter().enumerate() {
             let src = match self.location(arg) {
-                Location::Stack(slot) => Location::Stack(slot + pushed),
+                Location::Stack(slot) => Location::Stack(self.fit(
+                    usize::from(slot) + usize::from(pushed),
+                    1 << 16,
+                    "more than 65535 values live at once",
+                )),
                 reg => reg,
             };
             let dst = Location::Reg(Reg::Gpr(i as u8));
@@ -875,14 +1035,19 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
     /// A new jump target without a block, unbound until [`Cc::bind`].
     fn label(&mut self) -> u16 {
-        let label = jump_target(self.labels.len());
-        self.labels.push(u16::MAX);
+        let label = self.fit(
+            self.labels.len(),
+            JUMP_TARGETS,
+            "more than 65536 jump targets in one function",
+        );
+        self.labels.push(UNBOUND);
         label
     }
 
     /// Land jumps to `label` on the next emitted op.
     fn bind(&mut self, label: u16) {
-        self.labels[label as usize] = jump_target(self.buf.len());
+        // narrowed once the function is done, see Cc::jump_target
+        self.labels[usize::from(label)] = u32::try_from(self.buf.len()).unwrap_or(UNBOUND - 1);
     }
 
     /// The body of the function at `pc` was emitted as if it saved no registers. Lay out its frame
@@ -918,8 +1083,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         self.buf[pc..].rotate_right(len);
         self.pc_to_span[pc..].rotate_right(len);
         for at in &mut self.labels {
-            if *at != u16::MAX {
-                *at = jump_target(usize::from(*at) + len);
+            if *at != UNBOUND {
+                *at = at.saturating_add(len as u32).min(UNBOUND - 1);
             }
         }
     }
@@ -1125,33 +1290,51 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let first = cases.iter().map(key).min().unwrap();
                 let slot = |case: &ir::Case| ((key(case) - first) / step) as usize;
                 let len = cases.iter().map(slot).max().unwrap() + 1;
-
-                let mut slots = Vec::with_capacity(cases.len());
-                slots.extend(cases.iter().map(|case| (slot(case), case.target)));
+                let key_slots = cases.iter().map(|case| string::key_slots(&case.key)).sum();
+                let dense = ir::dense_table(len, key_slots);
+                let slots: Vec<usize> = cases.iter().map(slot).collect();
 
                 // A case whose edge moves gets a pad doing so, laid out after the switch.
-                let mut targets = vec![default; len].into_boxed_slice();
                 let mut pads = Vec::new();
-                for (slot, edge) in slots {
-                    targets[slot] = if self.has_moves(fun, edge) {
+                let mut targets = Vec::with_capacity(cases.len());
+                for (case, slot) in cases.iter().zip(slots) {
+                    let target = if self.has_moves(fun, case.target) {
                         let pad = self.label();
-                        pads.push((pad, edge));
+                        pads.push((pad, case.target));
                         pad
                     } else {
-                        edge.0.0 as u16
+                        case.target.0.0 as u16
                     };
+                    targets.push((slot, target));
                 }
-                let table = u16::try_from(self.switch_tables.len())
-                    .expect("more switch tables than Op::Switch indexes");
-                self.switch_tables.push(SwitchTable {
-                    first: first as u64,
-                    targets,
-                });
-                self.emit(Op::Switch {
-                    kind,
-                    subject,
-                    table,
-                });
+
+                if dense {
+                    let mut table = vec![default; len].into_boxed_slice();
+                    for (slot, target) in targets {
+                        table[slot] = target;
+                    }
+                    let index = self.fit(
+                        self.switch_tables.len(),
+                        SWITCH_TABLES,
+                        "more than 65536 switch tables",
+                    );
+                    self.switch_tables.push(SwitchTable {
+                        first: first as u64,
+                        targets: table,
+                    });
+                    self.emit(Op::Switch {
+                        kind,
+                        subject,
+                        table: index,
+                    });
+                } else {
+                    // a table spanning the string pool between far apart keys: compare in turn
+                    let key_reg = if subject == TMP { SCRATCH } else { TMP };
+                    for (case, (_, target)) in cases.iter().zip(targets) {
+                        self.load_key(key_reg, &case.key);
+                        self.jump_if_equal(kind, subject, key_reg, target);
+                    }
+                }
 
                 // the pads follow, so the default can't fall through once there are any
                 let next_block = next_block.filter(|_| pads.is_empty());
@@ -1175,7 +1358,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
                 if tail_clobbers_callee_saved {
                     match target {
-                        CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
+                        CcCallTarget::Bc { pc } => {
+                            let func = self.call_target(pc);
+                            self.emit(Op::Call { func })
+                        }
                         CcCallTarget::Native {
                             idx,
                             returns_double,
@@ -1188,7 +1374,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 } else {
                     match target {
                         CcCallTarget::Bc { pc } => {
-                            self.emit(Op::Tail { func: pc as u32 });
+                            let func = self.call_target(pc);
+                            self.emit(Op::Tail { func });
                         }
                         CcCallTarget::Native {
                             idx,
@@ -1215,33 +1402,24 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             } => {
                 let src = self.ensure_register(*src);
                 let base = self.ensure_register(*base);
-                self.emit(Op::Store {
-                    base,
-                    offset: u16::try_from(*offset).expect("record offset past Op::Store's"),
-                    src,
-                });
+                let offset = self.fit(*offset as usize, OFFSETS, "a field past 64 KiB");
+                self.emit(Op::Store { base, offset, src });
             }
             ir::Instr::Load {
                 dst, base, offset, ..
             } => {
                 let dst = self.def_register(dst.id);
                 let base = self.ensure_register(*base);
-                self.emit(Op::Load {
-                    dst,
-                    base,
-                    offset: u16::try_from(*offset).expect("record offset past Op::Load's"),
-                });
+                let offset = self.fit(*offset as usize, OFFSETS, "a field past 64 KiB");
+                self.emit(Op::Load { dst, base, offset });
             }
             ir::Instr::AddrOf {
                 dst, base, offset, ..
             } => {
                 let dst = self.def_register(dst.id);
                 let base = self.ensure_register(*base);
-                self.emit(Op::AddrOf {
-                    dst,
-                    base,
-                    offset: u16::try_from(*offset).expect("record offset past Op::AddrOf's"),
-                });
+                let offset = self.fit(*offset as usize, OFFSETS, "a field past 64 KiB");
+                self.emit(Op::AddrOf { dst, base, offset });
             }
             ir::Instr::Alloc {
                 dst: TypeId { id, ty },
@@ -1252,7 +1430,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let Some(kind) = AllocType::from_ty(ty) else {
                     unreachable!("alloc attempts to alloc non heap allocated value?");
                 };
-                let size = u16::try_from(layout.size()).expect("allocation past Op::Alloc's size");
+                let size = self.fit(
+                    layout.size(),
+                    OFFSETS,
+                    "a literal of more than 65535 bytes, an array literal holds at most 8190 words",
+                );
                 let align = layout.align() as u8;
                 self.emit(Op::Alloc {
                     dst,
@@ -1304,6 +1486,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let first = entries.iter().map(|(k, _)| key(k)).min().unwrap();
                 let slot = |k: &Const<'cc>| ((key(k) - first) / step) as usize;
                 let len = entries.iter().map(|(k, _)| slot(k)).max().unwrap() + 1;
+                if !ir::dense_table(len, entries.iter().map(|(k, _)| string::key_slots(k)).sum()) {
+                    self.lookup_chain(kind, dst.id, *subject, entries, default);
+                    return;
+                }
                 let mut values = vec![value(default); len].into_boxed_slice();
                 for (k, v) in entries {
                     values[slot(k)] = value(v);
@@ -1311,10 +1497,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let default = value(default);
                 let dst = self.def_register(dst.id);
                 let subject = self.ensure_register(*subject);
-                let table = u16::try_from(self.lookup_tables.len())
-                    .ok()
-                    .filter(|&table| table < 1 << 15)
-                    .expect("more lookup tables than Op::Lookup's 15 bit index");
+                let table = self.fit(
+                    self.lookup_tables.len(),
+                    LOOKUP_TABLES,
+                    "more than 32768 lookup tables",
+                );
                 self.lookup_tables.push(LookupTable {
                     first: first as u64,
                     values,
@@ -1329,20 +1516,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             }
             ir::Instr::LoadConst { dst, value, .. } => {
                 let dst = self.def_register(dst.id);
-                match value {
-                    Const::Int(i) => self.load_int(dst, *i),
-                    Const::True | Const::False => {
-                        // fast path for booleans
-                        let value = matches!(value, Const::True) as i32;
-                        self.emit(Op::LoadI { dst, value });
-                    }
-                    // a Void value is never read, whatever the register holds will do
-                    Const::Undefined => {}
-                    _ => {
-                        let idx = self.intern(value);
-                        self.load_global(dst, idx);
-                    }
-                }
+                self.load_const(dst, value);
             }
             ir::Instr::Call {
                 dst, func, args, ..
@@ -1372,7 +1546,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
                 let dst = self.def_register(dst.id);
                 match target {
-                    CcCallTarget::Bc { pc } => self.emit(Op::Call { func: pc as u32 }),
+                    CcCallTarget::Bc { pc } => {
+                        let func = self.call_target(pc);
+                        self.emit(Op::Call { func })
+                    }
                     CcCallTarget::Native {
                         idx,
                         returns_double,
@@ -1523,11 +1700,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             return;
         }
 
-        // bc.len() fits in u16 since Jmp.target is u16; halve the remap
-        // table's cache footprint vs Vec<u32>.
+        // Removing ops moves every pc down, so a remapped target fits wherever the old one did.
         let mut old_to_new = Vec::with_capacity_in(bc.len() + 1, self.live_set.allocator().clone());
-        old_to_new.resize(bc.len() + 1, 0u16);
-        let mut new_pc: u16 = 0;
+        old_to_new.resize(bc.len() + 1, 0u32);
+        let mut new_pc: u32 = 0;
         for (i, op) in bc.iter().enumerate() {
             old_to_new[i] = new_pc;
             if !matches!(op, Op::Nop) {
@@ -1548,10 +1724,10 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 | Op::JmpNeI { target, .. }
                 | Op::JmpSEq { target, .. }
                 | Op::JmpSNe { target, .. } => {
-                    *target = old_to_new[*target as usize];
+                    *target = old_to_new[usize::from(*target)] as u16;
                 }
                 Op::Call { func } | Op::Tail { func } => {
-                    *func = old_to_new[*func as usize] as u32;
+                    *func = old_to_new[*func as usize];
                 }
                 _ => {}
             }
@@ -1566,7 +1742,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
         for table in &mut self.switch_tables {
             for target in &mut table.targets {
-                *target = old_to_new[*target as usize];
+                *target = old_to_new[usize::from(*target)] as u16;
             }
         }
 
@@ -1668,6 +1844,7 @@ impl Default for Cc<'_> {
 }
 
 /// The builtin to call for `i`, an ir op the bytecode has no op for.
+
 fn called_instead(i: &ir::Instr<'_>) -> Option<&'static ir::Fn<'static>> {
     let intrinsic = match i {
         ir::Instr::Bin {

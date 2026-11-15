@@ -133,6 +133,9 @@ pub struct Gc<A: Allocator = PageAlloc> {
     pages: Vec<Page>,
     page_size: usize,
     alloc: A,
+    /// The mappings of [`Gc::alloc_fenced`], base and length.
+    #[cfg(feature = "gc_stress")]
+    fenced: Vec<(NonNull<u8>, usize)>,
 }
 
 impl<A: Allocator> std::fmt::Debug for Gc<A> {
@@ -163,6 +166,11 @@ impl<A: Allocator> Drop for Gc<A> {
             // SAFETY: every page was allocated with this layout
             unsafe { self.alloc.deallocate(page.ptr, self.layout(page.cap)) };
         }
+        #[cfg(feature = "gc_stress")]
+        for &(map, len) in &self.fenced {
+            // SAFETY: our mapping, the vm holding pointers into it is gone
+            unsafe { mmap::munmap(map, len) }.expect("unmapping a fenced object");
+        }
     }
 }
 
@@ -172,6 +180,8 @@ impl<A: Allocator> Gc<A> {
             pages: Vec::new(),
             page_size: mmap::page_size(),
             alloc,
+            #[cfg(feature = "gc_stress")]
+            fenced: Vec::new(),
         };
         gc.push_page(gc.page_size).expect("first GC page");
         gc
@@ -242,6 +252,29 @@ impl<A: Allocator> Gc<A> {
             page.cap,
         );
 
+        Some(payload)
+    }
+
+    /// Allocates the object in a mapping of its own, its payload flush against an inaccessible
+    /// guard page: reading or writing past it faults instead of reaching the next object. Up to
+    /// `PAYLOAD_ALIGN - 1` bytes past a size that isn't a multiple of it stay reachable.
+    #[cfg(feature = "gc_stress")]
+    pub fn alloc_fenced(&mut self, alloc_type: AllocType, layout: Layout) -> Option<NonNull<u8>> {
+        debug_assert!(layout.align() <= PAYLOAD_ALIGN);
+        let page = self.page_size;
+        let size = layout.size().next_multiple_of(PAYLOAD_ALIGN);
+        let len = (METADATA_SIZE + size).next_multiple_of(page) + page;
+        let map = mmap::map_anonymous(len).ok()?;
+        self.fenced.push((map, len));
+        // SAFETY: the last page of the mapping
+        let guard = unsafe { map.add(len - page) };
+        // SAFETY: our fresh mapping, nothing points into it yet
+        unsafe { mmap::mprotect(guard, page, mmap::MmapProt::NONE) }.ok()?;
+        // SAFETY: METADATA_SIZE + size bytes lie in front of the guard
+        let payload = unsafe { guard.sub(size) };
+        let metadata = Metadata::new(alloc_type, false, layout.size() as u64);
+        // SAFETY: the header lies in front of the payload, PAYLOAD_ALIGN aligned
+        unsafe { payload.sub(METADATA_SIZE).cast::<Metadata>().write(metadata) };
         Some(payload)
     }
 
@@ -334,6 +367,26 @@ mod tests {
         assert!(alloc_fast(&mut gc, AllocType::String, exact_fit + 1, 8).is_none());
         assert!(alloc_fast(&mut gc, AllocType::String, exact_fit, 8).is_some());
         assert!(alloc_fast(&mut gc, AllocType::String, 1, 8).is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "gc_stress")]
+    fn fenced_objects_end_at_their_guard_page() {
+        let mut gc = Gc::new();
+        for size in [0, 1, 8, 9, 16, 4095, 4096, 3 * gc.page_size + 5] {
+            let payload = gc
+                .alloc_fenced(AllocType::Array, layout(size, 8))
+                .expect("fenced allocation");
+            let end = payload.as_ptr() as usize + size.next_multiple_of(PAYLOAD_ALIGN);
+            assert_eq!(end % gc.page_size, 0, "size={size}");
+            assert_eq!(payload.as_ptr() as usize % PAYLOAD_ALIGN, 0, "size={size}");
+            // SAFETY: alloc_fenced wrote the header below the payload
+            let metadata = unsafe { Metadata::from_payload(payload) };
+            assert_eq!(metadata, Metadata::new(AllocType::Array, false, size as u64));
+            // the payload is writable up to its guard
+            // SAFETY: size bytes of the fresh payload
+            unsafe { payload.as_ptr().write_bytes(0xab, size) };
+        }
     }
 
     #[test]

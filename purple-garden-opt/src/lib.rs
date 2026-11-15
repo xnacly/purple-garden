@@ -12,6 +12,19 @@ mod bc;
 /// whole-program dead function elimination, only for programs run from their entry
 pub use ir::dce_functions;
 
+/// Runs the IR pass `$pass` on `$fun`, then in debug builds checks the IR it left behind, see
+/// [`purple_garden_ir::Func::verify`]: a pass breaking an invariant the backends rely on panics
+/// naming itself, instead of miscompiling.
+macro_rules! pass {
+    ($fun:ident, $pass:expr) => {{
+        $pass;
+        #[cfg(debug_assertions)]
+        if let Err(violation) = $fun.verify() {
+            panic!("{} broke the IR: {violation}", stringify!($pass));
+        }
+    }};
+}
+
 pub fn ir<'f, F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'f, F>], scratch: &S) {
     let mut scratch = ir::Scratch::new_in(scratch);
     // must only be indexed with [ir::Func::id]
@@ -41,57 +54,60 @@ pub fn ir<'f, F: Allocator, S: Allocator>(ir: &mut [purple_garden_ir::Func<'f, F
         // folded calls.
         //
         // Since callees are defined before use, so their entries are already recorded
-        ir::const_fold_const_calls(fun, &function_consts);
+        pass!(fun, ir::const_fold_const_calls(fun, &function_consts));
 
         // Order: after const_fold_const_calls, which already replaced calls to constant functions,
         // and before const_fold, so it folds through the inlined bodies
-        ir::inline(
+        pass!(
             fun,
-            |id| {
-                let i = id.0 as usize;
-                done.get(*index_of.get(i)?).filter(|_| inlinable[i])
-            },
-            &mut scratch,
+            ir::inline(
+                fun,
+                |id| {
+                    let i = id.0 as usize;
+                    done.get(*index_of.get(i)?).filter(|_| inlinable[i])
+                },
+                &mut scratch,
+            )
         );
 
         // Order: before const_fold, so a load of a stored array length or record field folds
         // through, e.g. away the bounds check of a literal array indexed by a constant
-        ir::load_store_fold(fun, &mut scratch);
+        pass!(fun, ir::load_store_fold(fun, &mut scratch));
 
         // Order: we constant fold before imm_folding, otherwise we have fragmented half optimised
         // constant operations, we could have fully merged together at compiletime
-        ir::const_fold(fun, &mut scratch);
-        ir::const_fold_syscalls(fun, &mut scratch);
+        pass!(fun, ir::const_fold(fun, &mut scratch));
+        pass!(fun, ir::const_fold_syscalls(fun, &mut scratch));
 
         // Order: after const_fold, for its constants, and before imm_fold, which would turn `x * 2`
         // into an immediate multiply
-        ir::arith_simplify(fun, &mut scratch);
-        ir::imm_fold(fun, &mut scratch);
-        ir::branch_cmp(fun, &mut scratch);
+        pass!(fun, ir::arith_simplify(fun, &mut scratch));
+        pass!(fun, ir::imm_fold(fun, &mut scratch));
+        pass!(fun, ir::branch_cmp(fun, &mut scratch));
         // Order: after branch_cmp, it folds the BranchCmp/BranchCmpImm chains
         // branch_cmp produces.
-        ir::switch_fold(fun, &mut scratch);
+        pass!(fun, ir::switch_fold(fun, &mut scratch));
 
         // Order: before indirect_jump, which would otherwise thread a jump to a
         // ret-only join into the branch and leave the join alive. Before
         // tailcall, so a Call-then-Jump-to-Ret-join pattern becomes a direct
         // Return that tailcall then picks up as Pattern A.
-        ir::ret_inline(fun, &mut scratch);
+        pass!(fun, ir::ret_inline(fun, &mut scratch));
         // Order: after ret_inline, which turns the arms' jumps to the join into returns.
-        ir::switch_lookup(fun, &mut scratch);
-        ir::indirect_jump(fun);
-        ir::tailcall(fun);
-        ir::addrof_fold(fun, &mut scratch);
+        pass!(fun, ir::switch_lookup(fun, &mut scratch));
+        pass!(fun, ir::indirect_jump(fun));
+        pass!(fun, ir::tailcall(fun));
+        pass!(fun, ir::addrof_fold(fun, &mut scratch));
         // Order: again after arith_simplify and addrof_fold, which turn computed element and field
         // addresses into the base+offset the stores used
-        ir::load_store_fold(fun, &mut scratch);
+        pass!(fun, ir::load_store_fold(fun, &mut scratch));
 
         // Order: dead code elimination always last, for the backends having less work (and the reg
         // allocator)
-        ir::dce(fun, &mut scratch);
+        pass!(fun, ir::dce(fun, &mut scratch));
 
         // Order: after every rewrite, nothing may change the IR once its facts are recorded
-        ir::facts(fun, &mut scratch);
+        pass!(fun, ir::facts(fun, &mut scratch));
 
         // Order: after the whole pipeline of a function, check if the return value of the function
         // it processed is constant
@@ -120,7 +136,6 @@ pub fn bc(bc: &mut [Op]) {
         let window = &mut bc[i..end];
         bc::self_move(window);
         if window.len() == WINDOW_SIZE {
-            bc::mov_merge(window);
             bc::jmp_next(i, window);
         }
     }

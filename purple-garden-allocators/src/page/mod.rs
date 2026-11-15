@@ -5,7 +5,6 @@ pub mod mmap;
 use std::alloc::{AllocError, Allocator, Layout};
 use std::ptr::NonNull;
 
-use mmap::{MmapFlags, MmapProt};
 
 /// Maps every allocation as its own run of whole pages. Fresh pages are
 /// zeroed and only become resident once touched, so a large allocation costs
@@ -30,6 +29,36 @@ fn mapped_len(layout: Layout) -> usize {
     layout.size().next_multiple_of(mmap::page_size())
 }
 
+/// Miri models a mapping as one allocation that has to be unmapped whole, the partial unmaps
+/// over-aligned allocations and [`Allocator::shrink`] do are out of its reach. Under Miri the
+/// same contract, whole zeroed pages aligned to at least a page, comes from the global allocator.
+#[cfg(miri)]
+unsafe impl Allocator for PageAlloc {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        if layout.size() == 0 {
+            return Ok(NonNull::slice_from_raw_parts(layout.dangling_ptr(), 0));
+        }
+        let block = std::alloc::Global.allocate_zeroed(miri_layout(layout).ok_or(AllocError)?)?;
+        Ok(NonNull::slice_from_raw_parts(block.cast(), block.len()))
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        if layout.size() != 0 {
+            let layout = miri_layout(layout).expect("allocate made a layout of it");
+            // SAFETY: forwarded from caller, ptr came from Global with this layout
+            unsafe { std::alloc::Global.deallocate(ptr, layout) };
+        }
+    }
+}
+
+/// Every size up to [`mapped_len`] maps to the same block, as for mappings. None where the whole
+/// pages are too large for any allocation.
+#[cfg(miri)]
+fn miri_layout(layout: Layout) -> Option<Layout> {
+    Layout::from_size_align(mapped_len(layout), layout.align().max(mmap::page_size())).ok()
+}
+
+#[cfg(not(miri))]
 unsafe impl Allocator for PageAlloc {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         if layout.size() == 0 {
@@ -40,15 +69,7 @@ unsafe impl Allocator for PageAlloc {
         // Mappings start on a page; a larger alignment maps the slack in front
         // and returns the unaligned head and the tail behind it.
         let slack = layout.align().saturating_sub(page);
-        let map = mmap::mmap(
-            None,
-            len + slack,
-            MmapProt::READ | MmapProt::WRITE,
-            MmapFlags::PRIVATE | MmapFlags::ANONYMOUS,
-            -1,
-            0,
-        )
-        .map_err(|_| AllocError)?;
+        let map = mmap::map_anonymous(len + slack).map_err(|_| AllocError)?;
         let head = map.as_ptr().align_offset(layout.align());
         // SAFETY: head <= slack, inside the mapping
         let ptr = unsafe { map.add(head) };
@@ -202,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(miri)))]
     fn zeroed_allocations_stay_untouched() {
         let layout = Layout::from_size_align(64 << 20, 8).unwrap();
         let block = PageAlloc {}.allocate_zeroed(layout).unwrap();
@@ -228,12 +249,14 @@ mod tests {
 
     #[test]
     fn grows_and_shrinks_keeping_contents() {
-        let page = mmap::page_size();
+        // Miri interprets every push; a few pages still cross many grows.
+        let pages = if cfg!(miri) { 4 } else { 64 };
+        let len = (pages * mmap::page_size() / size_of::<u64>()) as u64;
         let mut values: Vec<u64, _> = Vec::with_capacity_in(16, PageAlloc {});
-        for i in 0..(64 * page as u64) {
+        for i in 0..len {
             values.push(i);
         }
-        assert!(values.iter().copied().eq(0..(64 * page as u64)));
+        assert!(values.iter().copied().eq(0..len));
         values.truncate(10);
         values.shrink_to_fit();
         assert!(values.iter().copied().eq(0..10));

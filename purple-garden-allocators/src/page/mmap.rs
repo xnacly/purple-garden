@@ -22,9 +22,10 @@ unsafe extern "C" {
     /// Releases a mapping created by `mmap(2)` using the platform C ABI.
     #[link_name = "munmap"]
     fn sys_munmap(addr: *mut c_void, len: usize) -> i32;
-    /// Size of a page in bytes, see `getpagesize(3)`.
-    #[link_name = "getpagesize"]
-    fn sys_getpagesize() -> i32;
+    /// Configuration values like the page size, see `sysconf(3)`. POSIX, unlike the legacy
+    /// `getpagesize(3)`, and shimmed by Miri.
+    #[link_name = "sysconf"]
+    fn sys_sysconf(name: i32) -> std::ffi::c_long;
     /// Advises the kernel how a mapping will be used, see `madvise(2)`.
     #[cfg(target_os = "linux")]
     #[link_name = "madvise"]
@@ -52,6 +53,12 @@ const MAP_PRIVATE: i32 = 0x0002;
 #[cfg(target_os = "linux")]
 const MAP_ANONYMOUS: i32 = 0x0020;
 
+#[cfg(target_os = "linux")]
+const SC_PAGESIZE: i32 = 30;
+
+#[cfg(target_os = "macos")]
+const SC_PAGESIZE: i32 = 29;
+
 #[cfg(target_os = "macos")]
 const MAP_PRIVATE: i32 = 0x0002;
 #[cfg(target_os = "macos")]
@@ -59,7 +66,7 @@ const MAP_ANONYMOUS: i32 = 0x1000;
 
 const MAP_FAILED: *mut c_void = !0usize as *mut c_void;
 
-/// Page permissions passed to [`mmap`] and [`mprotect`].
+/// Page permissions passed to [`mprotect`].
 ///
 /// Not an enum: `READ`, `WRITE`, and `EXEC` can be combined for mappings that
 /// need multiple permissions.
@@ -91,55 +98,18 @@ impl std::ops::BitOr for MmapProt {
     }
 }
 
-/// Mapping flags passed to [`mmap`].
-#[derive(Clone, Copy)]
-pub struct MmapFlags(i32);
-
-impl MmapFlags {
-    /// Changes are private.
-    pub const PRIVATE: Self = Self(MAP_PRIVATE);
-    /// Allocate zero-filled memory not backed by a file.
-    pub const ANONYMOUS: Self = Self(MAP_ANONYMOUS);
-
-    /// Returns the raw platform flag bits.
-    #[must_use]
-    pub fn bits(self) -> i32 {
-        self.0
-    }
-}
-
-impl std::ops::BitOr for MmapFlags {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Self(self.0 | rhs.0)
-    }
-}
-
-#[inline(always)]
-/// Creates a memory mapping and returns its non-null base address.
-///
-/// `ptr` is an optional address hint, `length` is the mapping size in bytes,
-/// `prot` controls page permissions, `flags` controls mapping behavior, and
-/// `fd`/`offset` select the mapped file region. For anonymous mappings, pass
-/// `MmapFlags::ANONYMOUS`, `fd = -1`, and `offset = 0`.
-pub fn mmap(
-    ptr: Option<NonNull<u8>>,
-    length: usize,
-    prot: MmapProt,
-    flags: MmapFlags,
-    fd: i32,
-    offset: i64,
-) -> Result<NonNull<u8>, String> {
-    // SAFETY: no MAP_FIXED, a hint never replaces existing mappings
+/// Maps `length` bytes of fresh, zeroed, private memory, readable and writable, and returns
+/// its page aligned base.
+pub fn map_anonymous(length: usize) -> Result<NonNull<u8>, String> {
+    // SAFETY: no MAP_FIXED, so nothing mapped already is replaced; anonymous, so no file
     let ret = unsafe {
         sys_mmap(
-            ptr.map_or(std::ptr::null_mut(), |ptr| ptr.as_ptr().cast()),
+            std::ptr::null_mut(),
             length,
-            prot.bits(),
-            flags.bits(),
-            fd,
-            offset as OffT,
+            (MmapProt::READ | MmapProt::WRITE).bits(),
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            -1,
+            0,
         )
     };
 
@@ -182,8 +152,12 @@ pub fn no_huge_pages(ptr: NonNull<u8>, length: usize) -> Result<(), String> {
 /// Size of a page in bytes, mappings are made of whole pages.
 #[must_use]
 pub fn page_size() -> usize {
-    // SAFETY: getpagesize has no preconditions
-    unsafe { sys_getpagesize() as usize }
+    // SAFETY: sysconf has no preconditions
+    let size = unsafe { sys_sysconf(SC_PAGESIZE) };
+    usize::try_from(size)
+        .ok()
+        .filter(|size| size.is_power_of_two())
+        .expect("sysconf(_SC_PAGESIZE) is a power of two")
 }
 
 /// Grows or shrinks the mapping at `ptr` to `new_len` bytes, moving it if it can't be resized in
@@ -208,7 +182,7 @@ pub unsafe fn mremap(
 }
 
 #[inline(always)]
-/// Releases a memory mapping created by [`mmap`].
+/// Releases a memory mapping created by [`map_anonymous`].
 ///
 /// # Safety
 ///
@@ -233,20 +207,12 @@ fn os_error(op: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{MmapFlags, MmapProt, mmap, mprotect, munmap};
+    use super::{MmapProt, map_anonymous, mprotect, munmap};
 
     #[test]
     fn anonymous_mapping_is_zeroed_and_writable() {
         let len = 4096;
-        let ptr = mmap(
-            None,
-            len,
-            MmapProt::READ | MmapProt::WRITE,
-            MmapFlags::PRIVATE | MmapFlags::ANONYMOUS,
-            -1,
-            0,
-        )
-        .expect("anonymous mmap");
+        let ptr = map_anonymous(len).expect("anonymous mmap");
 
         // SAFETY: fresh rw mapping of len bytes, zero filled
         let bytes = unsafe { std::slice::from_raw_parts_mut(ptr.as_ptr(), len) };
@@ -262,17 +228,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri has no mprotect")]
     fn mapping_permissions_can_be_changed() {
         let len = 4096;
-        let ptr = mmap(
-            None,
-            len,
-            MmapProt::READ | MmapProt::WRITE,
-            MmapFlags::PRIVATE | MmapFlags::ANONYMOUS,
-            -1,
-            0,
-        )
-        .expect("anonymous mmap");
+        let ptr = map_anonymous(len).expect("anonymous mmap");
 
         // SAFETY: our mapping, unused
         unsafe { mprotect(ptr, len, MmapProt::READ) }.expect("mprotect read-only");

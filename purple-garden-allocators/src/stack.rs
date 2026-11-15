@@ -264,7 +264,7 @@ unsafe impl Allocator for StackAlloc<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::StackAlloc;
+    use super::{StackAlloc, UPROUND};
     use std::alloc::{Allocator, Layout};
     use std::mem::MaybeUninit;
 
@@ -383,7 +383,9 @@ mod tests {
         assert_eq!(unsafe { stack.pop::<u64>() }, 1);
         // SAFETY: only u64s are pushed
         while unsafe { stack.push(0u64) } {}
-        assert_eq!(stack.depth(), 4096);
+        // the buffer is only byte aligned, the stack starts at its first 16 aligned byte
+        assert_eq!(stack.depth(), stack.cap);
+        assert!(stack.cap >= 4096 - UPROUND);
         stack.reset();
         assert_eq!(stack.depth(), 0);
     }

@@ -1,0 +1,29 @@
+# Functions taking the most arguments a call can pass, see MAX_ARGS: they travel in
+# r0..r29, past the caller-saved registers into the callee-saved ones. One more is a type
+# error, a register number past 31 used to bleed into the neighbouring operand of the op.
+import "testing"
+import "str"
+
+#! Takes 30 arguments of every scalar type, reads its last Str argument.
+fn widest(a0:Int a1:Str a2:Double a3:Bool a4:Int a5:Str a6:Double a7:Bool a8:Int a9:Str a10:Double a11:Bool a12:Int a13:Str a14:Double a15:Bool a16:Int a17:Str a18:Double a19:Bool a20:Int a21:Str a22:Double a23:Bool a24:Int a25:Str a26:Double a27:Bool a28:Int a29:Str) Int {
+    let l = str.len(a29)
+    a0 + a4 + a8 + a12 + a16 + a20 + a24 + a28 + l
+}
+testing.assert(widest(1000 "s1" 2.5 true 1004 "s5" 6.5 false 1008 "s9" 10.5 true 1012 "s13" 14.5 false 1016 "s17" 18.5 true 1020 "s21" 22.5 false 1024 "s25" 26.5 true 1028 "s29") == 8115)
+
+#! Calls widest with values live across the call.
+fn widest_with_live(k:Int) Int {
+    let live = k * 3
+    let s = str.concat("x" "y")
+    widest(1000 "s1" 2.5 true 1004 "s5" 6.5 false 1008 "s9" 10.5 true 1012 "s13" 14.5 false 1016 "s17" 18.5 true 1020 "s21" 22.5 false 1024 "s25" 26.5 true 1028 "s29") + live + str.len(s)
+}
+testing.assert(widest_with_live(5) == 8132)
+
+#! Tail calls itself, moving all 30 arguments into place every time.
+fn widest_tail(depth:Int a1:Str a2:Double a3:Bool a4:Int a5:Str a6:Double a7:Bool a8:Int a9:Str a10:Double a11:Bool a12:Int a13:Str a14:Double a15:Bool a16:Int a17:Str a18:Double a19:Bool a20:Int a21:Str a22:Double a23:Bool a24:Int a25:Str a26:Double a27:Bool a28:Int a29:Str) Int {
+    match {
+        depth == 0 { str.len(a29) + a28 }
+        { widest_tail(depth - 1 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20 a21 a22 a23 a24 a25 a26 a27 a28 a29) }
+    }
+}
+testing.assert(widest_tail(100 "s1" 2.5 true 1004 "s5" 6.5 false 1008 "s9" 10.5 true 1012 "s13" 14.5 false 1016 "s17" 18.5 true 1020 "s21" 22.5 false 1024 "s25" 26.5 true 1028 "s29") == 1031)

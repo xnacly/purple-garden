@@ -3,6 +3,8 @@ name = "purple-garden"
 version = "0.1.0"
 description = "Lean scripting language, designed and implemented with a focus on performance and a low memory profile "
 edition = "2024"
+license.workspace = true
+publish.workspace = true
 
 [features]
 trace = [
@@ -17,6 +19,7 @@ trace = [
     "purple-garden-std/trace",
 ]
 trace_gc = ["purple-garden-runtime/trace_gc"]
+gc_stress = ["purple-garden-runtime/gc_stress"]
 
 [dependencies]
 purple-garden-allocators = { path = "../purple-garden-allocators" }

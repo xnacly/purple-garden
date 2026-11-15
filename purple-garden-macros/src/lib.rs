@@ -39,7 +39,10 @@ pub fn pg_pkg(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Supported options:
 ///
 /// - `pure`: marks the function deterministic and side-effect-free so constant
-///   calls can be folded by the optimizer.
+///   calls can be folded by the optimizer, which runs it in the compiler. Its
+///   result must stay small relative to its arguments (no `repeat`-like
+///   functions): the compiler only refuses string arguments and results past
+///   a size, it can't stop a call building a huge one.
 /// - `specialises = "name"`: exports the function as an overload variant of
 ///   `name` instead of under its Rust function name.
 /// - `unsafe`: passes `&mut Vm` as the first Rust argument while exposing only

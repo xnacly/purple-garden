@@ -16,7 +16,6 @@ use lsp_types::{
 };
 
 use super::analysis::DocumentState;
-use super::source::apply_content_changes;
 
 type LspResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -311,11 +310,12 @@ impl OpenDocuments {
         uri: Uri,
         changes: Vec<lsp_types::TextDocumentContentChangeEvent>,
     ) -> Vec<lsp_types::Diagnostic> {
-        let mut text = self
-            .get(&uri)
-            .map_or_else(String::new, |state| state.text().to_owned());
-        apply_content_changes(&mut text, changes);
-        self.update(uri, text)
+        let source = self
+            .states
+            .remove(&document_key(&uri))
+            .map(DocumentState::into_source)
+            .unwrap_or_default();
+        self.update(uri, source.edit(changes).into_text())
     }
 
     fn close(&mut self, uri: &Uri) {

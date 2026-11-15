@@ -8,7 +8,12 @@
 )))]
 compile_error!("purple-garden currently supports only Linux or macOS on x86_64 or aarch64");
 
-use std::{alloc::Allocator, collections::HashMap, marker::PhantomData};
+use std::{
+    alloc::Allocator,
+    collections::HashMap,
+    marker::PhantomData,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use purple_garden_allocators::{
     bump::{Arena, BumpAlloc},
@@ -16,7 +21,7 @@ use purple_garden_allocators::{
 };
 use purple_garden_bc::{self as bc, CcCallTarget};
 use purple_garden_frontend::{
-    diagnostic::{Diagnostic, Span},
+    diagnostic::Diagnostic,
     lex, lower, parser,
 };
 use purple_garden_runtime::{Anomaly, BuiltinFn, Value};
@@ -285,21 +290,32 @@ pub struct Program<'p> {
     syscalls: Vec<BuiltinFn>,
     /// Keeps the native functions referenced by `syscalls` mapped.
     jit: Option<CodeArena>,
-    funcs: HashMap<&'p str, (CcCallTarget, FunctionType<'p>)>,
-    /// Owns the names and types in `funcs`, declared after it so it is dropped last.
+    /// Unique per compiled program, the [`Function`]s it hands out carry it.
+    id: u64,
+    /// Indices into `funcs` by function name.
+    names: HashMap<&'p str, usize>,
+    funcs: Vec<(CcCallTarget, FunctionType<'p>)>,
+    /// Owns the names and types in `names` and `funcs`, declared after them so it is dropped
+    /// last. Their `'p` is a lie only this struct sees: nothing borrowed from here leaves it.
     signatures: BumpAlloc,
 }
+
+/// Source of [`Program::id`].
+static NEXT_PROGRAM_ID: AtomicU64 = AtomicU64::new(0);
 
 /// A typed handle to a purple garden function extracted from [`Program`] via
 /// [`Program::function`].
 ///
 /// `Args` and `Ret` are the Rust types expected when invoking this function.
 /// [`Program::call`] verifies that they match the Garden declaration before
-/// executing it.
+/// executing it. A handle only names a function of the program it came from,
+/// it borrows nothing from it.
 #[derive(Debug)]
-pub struct Function<'f, Args, Ret> {
-    handle: CcCallTarget,
-    signature: FunctionType<'f>,
+pub struct Function<Args, Ret> {
+    /// [`Program::id`] of the program it came from.
+    program: u64,
+    /// Index into [`Program::funcs`].
+    index: usize,
     types: PhantomData<fn(Args) -> Ret>,
 }
 
@@ -320,6 +336,8 @@ pub enum CallError {
         expected: String,
         actual: String,
     },
+    /// The handle came from another [`Program`].
+    ForeignFunction,
     /// Execution trapped in the Garden VM.
     Runtime(Anomaly),
 }
@@ -344,6 +362,7 @@ impl std::fmt::Display for CallError {
                 f,
                 "argument type mismatch at index {index}: expected {expected}, got {actual}"
             ),
+            Self::ForeignFunction => f.write_str("function handle of another program"),
             Self::Runtime(error) => error.fmt(f),
         }
     }
@@ -358,29 +377,29 @@ impl std::error::Error for CallError {
     }
 }
 
-impl<Args, Ret> Function<'_, Args, Ret>
+impl<Args, Ret> Function<Args, Ret>
 where
     Args: CallArgs,
     Ret: PgType,
 {
-    fn verify_signature(&self) -> Result<(), CallError> {
-        if Ret::TYPE != self.signature.ret {
+    fn verify_signature(signature: &FunctionType<'_>) -> Result<(), CallError> {
+        if Ret::TYPE != signature.ret {
             return Err(CallError::ReturnType {
-                expected: self.signature.ret.to_string(),
+                expected: signature.ret.to_string(),
                 actual: Ret::TYPE.to_string(),
             });
         }
 
         let as_types = Args::TYPES;
-        if as_types.len() != self.signature.args.len() {
+        if as_types.len() != signature.args.len() {
             return Err(CallError::ArgumentCount {
-                expected: self.signature.args.len(),
+                expected: signature.args.len(),
                 actual: as_types.len(),
             });
         }
 
         for (i, arg) in as_types.iter().enumerate() {
-            let expected_type = &self.signature.args[i].1;
+            let expected_type = &signature.args[i].1;
             if arg != expected_type {
                 return Err(CallError::ArgumentType {
                     index: i,
@@ -403,9 +422,19 @@ impl<'p> Program<'p> {
             entry_native: None,
             syscalls,
             jit: None,
-            funcs: HashMap::new(),
+            id: NEXT_PROGRAM_ID.fetch_add(1, Ordering::Relaxed),
+            names: HashMap::new(),
+            funcs: Vec::new(),
             signatures: BumpAlloc::new(),
         }
+    }
+
+    /// The target and signature `function` names, None if it came from another program.
+    fn resolve<Args, Ret>(
+        &self,
+        function: &Function<Args, Ret>,
+    ) -> Option<&(CcCallTarget, FunctionType<'p>)> {
+        (function.program == self.id).then(|| &self.funcs[function.index])
     }
 
     fn with_entry_native(mut self, entry_native: Option<BuiltinFn>) -> Self {
@@ -503,15 +532,13 @@ impl<'p> Program<'p> {
     /// }
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn function<Args, Ret>(&self, name: &str) -> Option<Function<'p, Args, Ret>> {
-        self.funcs.get(name).cloned().map(|(handle, signature)| {
-            let f = Function {
-                handle,
-                signature,
-                types: PhantomData,
-            };
-            trace!("extracted `{}` handle: {:?}", name, &f.handle);
-            f
+    pub fn function<Args, Ret>(&self, name: &str) -> Option<Function<Args, Ret>> {
+        let &index = self.names.get(name)?;
+        trace!("extracted `{}` handle: {:?}", name, &self.funcs[index].0);
+        Some(Function {
+            program: self.id,
+            index,
+            types: PhantomData,
         })
     }
 
@@ -566,17 +593,26 @@ impl<'p> Program<'p> {
     /// ```
     pub unsafe fn call_unchecked<Args, Ret>(
         &mut self,
-        function: &Function<'_, Args, Ret>,
+        function: &Function<Args, Ret>,
         args: &[Value],
     ) -> Result<Value, Anomaly> {
+        let &(handle, _) = self
+            .resolve(function)
+            .expect("function handle of another program");
+        assert!(
+            args.len() <= purple_garden_runtime::MAX_ARGS,
+            "{} arguments, a function takes at most {}",
+            args.len(),
+            purple_garden_runtime::MAX_ARGS
+        );
         self.vm.reset();
 
         for (i, a) in args.iter().enumerate() {
-            // SAFETY: caller upholds # Safety, args fit the declared arity
+            // SAFETY: i < MAX_ARGS < REGISTER_COUNT
             *unsafe { self.vm.r_mut(i) } = *a;
         }
 
-        match function.handle {
+        match handle {
             CcCallTarget::Bc { pc } => {
                 self.vm.pc = pc;
                 if self.vm.config.backtrace {
@@ -669,14 +705,15 @@ impl<'p> Program<'p> {
     /// ```
     pub fn call<'vm, Args, Ret>(
         &'vm mut self,
-        function: &Function<'_, Args, Ret>,
+        function: &Function<Args, Ret>,
         args: Args,
     ) -> Result<Ret, CallError>
     where
         Args: CallArgs,
         Ret: PgType + FromVm<'vm>,
     {
-        function.verify_signature()?;
+        let (_, signature) = self.resolve(function).ok_or(CallError::ForeignFunction)?;
+        Function::<Args, Ret>::verify_signature(signature)?;
 
         let args = args.inner(&mut self.vm);
         // SAFETY: verify_signature checked args and return type
@@ -731,16 +768,14 @@ fn compile<'i, A: Allocator + Clone + 'i>(
     }
 
     let mut cc = bc::Cc::new_in(&scratch, alloc.clone());
-    let arena = cc
-        .compile(config, &ir, PageAlloc {})
-        .map_err(|msg| Diagnostic::new(msg, Span::new(0, 0)))?;
+    let arena = cc.compile(config, &ir, PageAlloc {})?;
     if config.opt >= 1 {
         purple_garden_opt::bc(&mut cc.buf);
         cc.compact_nops();
     }
 
     let signatures = BumpAlloc::new();
-    let funcs: HashMap<_, _> =
+    let funcs: Vec<_> =
         cc.functions
             .values()
             .filter_map(|f| {
@@ -760,6 +795,12 @@ fn compile<'i, A: Allocator + Clone + 'i>(
                 Some((entry.0, (CcCallTarget::from(f), entry.1)))
             })
             .collect();
+    let names = funcs
+        .iter()
+        .enumerate()
+        .map(|(index, &(name, _))| (name, index))
+        .collect();
+    let funcs = funcs.into_iter().map(|(_, func)| func).collect();
 
     let (vm, syscalls, _debug, entry_native_idx) = cc.finalize(
         VmConfig {
@@ -771,6 +812,7 @@ fn compile<'i, A: Allocator + Clone + 'i>(
     );
     let entry_native = entry_native_idx.map(|idx| syscalls[idx as usize]);
     let mut program = Program::from_vm(vm, syscalls).with_entry_native(entry_native);
+    program.names = names;
     program.funcs = funcs;
     program.signatures = signatures;
     program.jit = arena;
@@ -812,7 +854,9 @@ mod tests {
 
     #[test]
     fn compile_collects_signatures_for_bytecode_and_native_targets() {
-        for (no_jit, want_native) in [(true, false), (false, true)] {
+        // only the x86-64 backend compiles natively, aarch64 is a scaffold
+        let jits = cfg!(target_arch = "x86_64");
+        for (no_jit, want_native) in [(true, false), (false, jits)] {
             let mut config = config::Config::default();
             config.no_jit = no_jit;
             let program = Pg::new()
@@ -820,7 +864,8 @@ mod tests {
                 .compile(b"fn used(value:Int) Int { value }\nfn unused(a:Str) Str { a }\nused(1)")
                 .expect("program should compile");
 
-            let (target, signature) = program.funcs.get("used").expect("`used` is collected");
+            let used = program.names["used"];
+            let (target, signature) = &program.funcs[used];
             assert_eq!(
                 matches!(target, CcCallTarget::Native { .. }),
                 want_native,
@@ -828,9 +873,51 @@ mod tests {
             );
             assert_eq!(signature.args, vec![("value", embed::Type::Int)]);
             assert_eq!(signature.ret, embed::Type::Int);
-            assert!(program.funcs.contains_key("unused"));
-            assert!(!program.funcs.contains_key("entry"));
+            assert!(program.names.contains_key("unused"));
+            assert!(!program.names.contains_key("entry"));
         }
+    }
+
+    /// A handle used to carry its signature borrowed from the program's arena under the
+    /// source's lifetime, and any program ran it: at the pc it had in its own bytecode, with
+    /// arguments checked against the other program's declaration.
+    #[test]
+    fn handles_only_call_into_their_program() {
+        let mut config = config::Config::default();
+        config.no_jit = true;
+        let source = b"fn f(s: Str) Int { 1 }\nfn g(n: Int) Int { n }";
+        let mut a = Pg::new().config(config.clone()).compile(source).unwrap();
+        let mut b = Pg::new()
+            .config(config.clone())
+            .compile(b"fn g(n: Int) Int { n }\nfn f(n: Int) Str { \"x\" }")
+            .unwrap();
+
+        let g_of_a = a.function::<(i64,), i64>("g").unwrap();
+        assert!(matches!(
+            b.call(&g_of_a, (7i64,)),
+            Err(CallError::ForeignFunction)
+        ));
+        assert_eq!(a.call(&g_of_a, (7i64,)).unwrap(), 7);
+
+        // outlives the program it came from and still names nothing in another one
+        let g_of_dropped = {
+            let c = Pg::new().config(config.clone()).compile(source).unwrap();
+            c.function::<(i64,), i64>("g").unwrap()
+        };
+        assert!(matches!(
+            b.call(&g_of_dropped, (7i64,)),
+            Err(CallError::ForeignFunction)
+        ));
+    }
+
+    #[test]
+    #[should_panic(expected = "function handle of another program")]
+    fn unchecked_calls_refuse_foreign_handles() {
+        let a = Pg::new().compile(b"fn g(n: Int) Int { n }").unwrap();
+        let mut b = Pg::new().compile(b"fn g(n: Int) Int { n }").unwrap();
+        let g_of_a = a.function::<(i64,), i64>("g").unwrap();
+        // SAFETY: refused before anything runs
+        let _ = unsafe { b.call_unchecked(&g_of_a, &[Value::from(1i64)]) };
     }
 
     #[test]

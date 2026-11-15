@@ -34,6 +34,17 @@ impl<T: std::hash::Hash + Eq> Interner<T> {
         }
     }
 
+    /// Distinct values interned so far.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
     pub fn intern(&mut self, v: T) -> u32 {
         if let Some(&id) = self.map.get(&v) {
             id
