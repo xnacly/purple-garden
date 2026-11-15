@@ -276,10 +276,21 @@ impl<'l> Lexer<'l> {
                         },
                     );
                 }
-                c => {
-                    self.pos += 1;
-                    self.diagnostics
-                        .push(self.make_err(format!("Unknown character `{}`", c as char), start));
+                _ => {
+                    // the whole character, or the bytes that don't form one
+                    let rest = &self.input[start..self.input.len().min(start + 4)];
+                    let chunk = rest.utf8_chunks().next().expect("start is in bounds");
+                    let message = match chunk.valid().chars().next() {
+                        Some(c) => {
+                            self.pos += c.len_utf8();
+                            format!("Unknown character `{c}`")
+                        }
+                        None => {
+                            self.pos += chunk.invalid().len();
+                            "Invalid utf8 input".to_owned()
+                        }
+                    };
+                    self.diagnostics.push(self.make_err(message, start));
                     continue;
                 }
             };
@@ -553,6 +564,46 @@ mod tests {
         assert_eq!(
             err.primary.span.start, 2,
             "byte offset of the offending character"
+        );
+    }
+
+    /// One diagnostic per character, covering all of its bytes, or per invalid sequence.
+    #[test]
+    fn unknown_multibyte_characters_are_reported_whole() {
+        let source = "é😀\u{2028}x\u{ff}\u{fe}y".as_bytes();
+        let mut l = Lexer::new(source);
+        assert_eq!(l.one().t, Type::Ident("x"));
+        assert_eq!(l.one().t, Type::Ident("y"));
+        let reported: Vec<_> = l
+            .diagnostics()
+            .iter()
+            .map(|d| (d.message.as_str(), d.primary.span.start, d.primary.span.len))
+            .collect();
+        assert_eq!(
+            reported,
+            [
+                ("Unknown character `é`", 0, 2),
+                ("Unknown character `😀`", 2, 4),
+                ("Unknown character `\u{2028}`", 6, 3),
+                ("Unknown character `ÿ`", 10, 2),
+                ("Unknown character `þ`", 12, 2),
+            ]
+        );
+        let mut l = Lexer::new(b"\xff\xfex \xe2\x82");
+        assert_eq!(l.one().t, Type::Ident("x"));
+        assert_eq!(l.one().t, Type::Eof);
+        let reported: Vec<_> = l
+            .diagnostics()
+            .iter()
+            .map(|d| (d.message.as_str(), d.primary.span.start, d.primary.span.len))
+            .collect();
+        assert_eq!(
+            reported,
+            [
+                ("Invalid utf8 input", 0, 1),
+                ("Invalid utf8 input", 1, 1),
+                ("Invalid utf8 input", 4, 2),
+            ]
         );
     }
 

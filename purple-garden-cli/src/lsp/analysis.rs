@@ -11,12 +11,12 @@ use super::{
     completion::{self, CompletionEntry, RecordCompletion},
     diagnostic::diagnostic_for_lsp,
     hover::{AnalysisHover, HoverMarkup},
-    source::{offset_for_position, range_for_span, span_contains},
+    source::{Source, span_contains},
 };
 
 #[derive(Default)]
 pub(super) struct DocumentState {
-    text: String,
+    source: Source,
     analysis: DocumentAnalysis,
 }
 
@@ -97,20 +97,23 @@ impl DocumentState {
             );
         }
 
-        Self { text, analysis }
+        Self {
+            source: Source::new(text),
+            analysis,
+        }
     }
 
     pub(super) fn diagnostics(&self) -> Vec<lsp_types::Diagnostic> {
         self.analysis
             .diagnostics
             .iter()
-            .filter(|diagnostic| diagnostic.primary.span.start < self.text.len())
-            .map(|diagnostic| diagnostic_for_lsp(diagnostic, &self.text))
+            .filter(|diagnostic| diagnostic.primary.span.start < self.source.text().len())
+            .map(|diagnostic| diagnostic_for_lsp(diagnostic, &self.source))
             .collect()
     }
 
-    pub(super) fn text(&self) -> &str {
-        &self.text
+    pub(super) fn into_source(self) -> Source {
+        self.source
     }
 
     pub(super) fn code_actions(
@@ -118,16 +121,16 @@ impl DocumentState {
         uri: lsp_types::Uri,
         range: lsp_types::Range,
     ) -> lsp_types::CodeActionResponse {
-        super::code_action::actions_for(uri, &self.text, &self.analysis.diagnostics, range)
+        super::code_action::actions_for(uri, &self.source, &self.analysis.diagnostics, range)
     }
 
     pub(super) fn hover_at(&self, position: Position) -> Option<Hover> {
-        let offset = offset_for_position(&self.text, position);
+        let offset = self.source.offset(position);
         let entry = self
             .analysis
             .hovers
             .iter()
-            .filter(|entry| entry.span.start < self.text.len())
+            .filter(|entry| entry.span.start < self.source.text().len())
             .filter(|entry| span_contains(entry.span, offset))
             .min_by_key(|entry| (entry.span.len, entry.priority))?;
 
@@ -136,7 +139,7 @@ impl DocumentState {
                 kind: MarkupKind::Markdown,
                 value: entry.contents.clone(),
             }),
-            range: Some(range_for_span(&self.text, entry.span)),
+            range: Some(self.source.range(entry.span)),
         })
     }
 
@@ -145,29 +148,29 @@ impl DocumentState {
         uri: Uri,
         position: Position,
     ) -> Option<GotoDefinitionResponse> {
-        let offset = offset_for_position(&self.text, position);
+        let offset = self.source.offset(position);
         let entry = self
             .analysis
             .definitions
             .iter()
-            .filter(|entry| entry.reference.start < self.text.len())
+            .filter(|entry| entry.reference.start < self.source.text().len())
             .filter(|entry| span_contains(entry.reference, offset))
             .min_by_key(|entry| entry.reference.len)?;
 
         Some(GotoDefinitionResponse::Scalar(Location::new(
             uri,
-            range_for_span(&self.text, entry.definition),
+            self.source.range(entry.definition),
         )))
     }
 
     pub(super) fn completions_at(&self, position: Position) -> Vec<CompletionItem> {
-        let offset = offset_for_position(&self.text, position);
+        let offset = self.source.offset(position);
         completion::items_at(
             &self.analysis.completions,
             &self.analysis.record_completions,
             &self.analysis.package_docs,
             &self.analysis.imported_packages,
-            &self.text,
+            self.source.text(),
             offset,
         )
     }
@@ -275,6 +278,32 @@ impl DocumentAnalysis {
         }
         for (span, contents) in hovers {
             self.add_resolved_markdown_hover(span, contents);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lsp_types::Position;
+
+    use super::DocumentState;
+
+    /// A character the lexer doesn't know spans all its bytes, so its diagnostic converts to a
+    /// range, and so does every request around it.
+    #[test]
+    fn stray_non_ascii_characters_are_diagnosed() {
+        let state = DocumentState::analyze(None, "let t = é\n😀 x".to_owned());
+        let ranges: Vec<_> = state
+            .diagnostics()
+            .iter()
+            .map(|d| (d.range.start.line, d.range.start.character, d.range.end.character))
+            .collect();
+        assert!(ranges.contains(&(0, 8, 9)), "{ranges:?}");
+        assert!(ranges.contains(&(1, 0, 2)), "{ranges:?}");
+        for character in 0..12 {
+            let position = Position::new(1, character);
+            let _ = state.hover_at(position);
+            let _ = state.completions_at(position);
         }
     }
 }
