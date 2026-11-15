@@ -5,6 +5,11 @@ description = "Generator of well-typed, terminating Purple Garden programs and t
 edition = "2024"
 publish = false
 
+[features]
+# Guard-page every object the programs allocate, see purple-garden-runtime's `gc_stress`: an
+# access past an object faults right there instead of reading its neighbour.
+gc_stress = ["purple-garden/gc_stress"]
+
 [dependencies]
 arbitrary = "1.4"
 purple-garden = { path = "../purple-garden" }

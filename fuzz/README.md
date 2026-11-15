@@ -21,6 +21,11 @@ cargo fuzz run -O compile fuzz/corpus/compile examples -- -dict=fuzz/garden.dict
 cargo fuzz run -O diff --target x86_64-apple-darwin fuzz/corpus/diff -- -timeout=20
 ```
 
+`--features gc_stress` puts every object the programs allocate behind a guard page (see
+purple-garden-runtime's `gc_stress`), so an access past an object faults where it happens. Use
+it for `diff` runs; the seeded test takes it too (`cargo test -p purple-garden-fuzz --features
+gc_stress`).
+
 Long unattended runs: add `-max_total_time=<s> -fork=<jobs> -ignore_crashes=1` and look at
 `fuzz/artifacts/<target>/` afterwards.
 

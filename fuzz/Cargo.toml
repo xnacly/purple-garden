@@ -7,6 +7,10 @@ edition = "2024"
 [package.metadata]
 cargo-fuzz = true
 
+[features]
+# `cargo fuzz run --features gc_stress diff`, see purple-garden-fuzz
+gc_stress = ["purple-garden-fuzz/gc_stress"]
+
 [dependencies]
 arbitrary = "1.4"
 libfuzzer-sys = "0.4"
