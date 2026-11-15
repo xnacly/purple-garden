@@ -1,9 +1,9 @@
-use std::{collections::HashMap, sync::OnceLock};
+use std::{collections::HashMap, rc::Rc, sync::OnceLock};
 
 use lsp_types::{CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind};
 use purple_garden_ir::ptype::Type;
 
-use super::analysis::PackageDoc;
+use super::{analysis::PackageDoc, text::Text};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum CompletionScope {
@@ -15,7 +15,7 @@ pub(super) enum CompletionScope {
 pub(super) struct CompletionEntry {
     label: String,
     kind: CompletionItemKind,
-    detail: Option<String>,
+    detail: Option<Text>,
     documentation: Option<String>,
     scope: CompletionScope,
 }
@@ -27,7 +27,7 @@ pub(super) struct RecordCompletion {
 
 struct CompletionContext<'a> {
     completions: &'a [CompletionEntry],
-    record_completions: &'a HashMap<String, RecordCompletion>,
+    record_completions: &'a HashMap<String, Rc<RecordCompletion>>,
     package_docs: &'a HashMap<String, PackageDoc>,
     imported_packages: &'a [String],
     source: &'a str,
@@ -74,7 +74,7 @@ impl CompletionEntry {
     pub(super) fn local(
         label: impl Into<String>,
         kind: CompletionItemKind,
-        detail: Option<String>,
+        detail: Option<Text>,
     ) -> Self {
         Self {
             label: label.into(),
@@ -93,7 +93,7 @@ pub(super) fn global_completions() -> &'static [CompletionEntry] {
 
 pub(super) fn items_at(
     completions: &[CompletionEntry],
-    record_completions: &HashMap<String, RecordCompletion>,
+    record_completions: &HashMap<String, Rc<RecordCompletion>>,
     package_docs: &HashMap<String, PackageDoc>,
     imported_packages: &[String],
     source: &str,
@@ -161,7 +161,7 @@ fn import_string_items(source: &str, offset: usize) -> Option<Vec<CompletionItem
 
 // foo. completes fields when foo has a known record type.
 fn record_field_items(
-    record_completions: &HashMap<String, RecordCompletion>,
+    record_completions: &HashMap<String, Rc<RecordCompletion>>,
     source: &str,
     offset: usize,
 ) -> Option<Vec<CompletionItem>> {
@@ -175,7 +175,7 @@ fn record_field_items(
             completion_item(&CompletionEntry {
                 label: field.name.clone(),
                 kind: CompletionItemKind::FIELD,
-                detail: Some(format!("{}: {}", field.name, field.ty)),
+                detail: Some(format!("{}: {}", field.name, field.ty).into()),
                 documentation: None,
                 scope: CompletionScope::Local,
             })
@@ -184,12 +184,12 @@ fn record_field_items(
 }
 
 fn record_for_path<'a>(
-    record_completions: &'a HashMap<String, RecordCompletion>,
+    record_completions: &'a HashMap<String, Rc<RecordCompletion>>,
     target_path: &str,
 ) -> Option<&'a RecordCompletion> {
     let mut parts = target_path.split('.');
     let first = parts.next()?;
-    let mut record = record_completions.get(first)?;
+    let mut record: &RecordCompletion = record_completions.get(first)?;
     for part in parts {
         record = record.field(part)?.nested.as_ref()?;
     }
@@ -217,7 +217,7 @@ fn package_member_items(
                 completion_item(&CompletionEntry {
                     label: name.to_owned(),
                     kind: CompletionItemKind::FUNCTION,
-                    detail: Some(completion.detail.clone()),
+                    detail: Some(completion.detail.clone().into()),
                     documentation: completion.documentation.clone(),
                     scope: CompletionScope::Local,
                 })
@@ -234,7 +234,7 @@ fn package_member_items(
             completion_item(&CompletionEntry {
                 label: name.to_owned(),
                 kind: CompletionItemKind::FUNCTION,
-                detail: Some(completion_detail_for_fns(name, &variants)),
+                detail: Some(completion_detail_for_fns(name, &variants).into()),
                 documentation: function_doc(&format!("{pkg_name}.{name}"), &variants),
                 scope: CompletionScope::Local,
             })
@@ -311,7 +311,7 @@ fn build_global_completions() -> Vec<CompletionEntry> {
         completions.push(CompletionEntry {
             label: keyword.to_owned(),
             kind: CompletionItemKind::KEYWORD,
-            detail: Some("keyword".to_owned()),
+            detail: Some("keyword".to_owned().into()),
             documentation: doc,
             scope: CompletionScope::Global,
         });
@@ -323,7 +323,7 @@ fn build_global_completions() -> Vec<CompletionEntry> {
         completions.push(CompletionEntry {
             label: ty.to_owned(),
             kind: CompletionItemKind::TYPE_PARAMETER,
-            detail: Some("type".to_owned()),
+            detail: Some("type".to_owned().into()),
             documentation: doc,
             scope: CompletionScope::Global,
         });
@@ -357,7 +357,7 @@ fn collect_package_entries(
     completions.push(CompletionEntry {
         label: path.clone(),
         kind: CompletionItemKind::MODULE,
-        detail: Some(format!("import \"{}\"", path)),
+        detail: Some(format!("import \"{}\"", path).into()),
         documentation: package_doc(&path, pkg),
         scope: CompletionScope::Global,
     });
@@ -378,7 +378,7 @@ fn collect_pkg_completions(
     completions.push(CompletionEntry {
         label: path.clone(),
         kind: CompletionItemKind::MODULE,
-        detail: Some(format!("import \"{}\"", path)),
+        detail: Some(format!("import \"{}\"", path).into()),
         documentation: package_doc(&path, pkg),
         scope: CompletionScope::Global,
     });
@@ -387,7 +387,7 @@ fn collect_pkg_completions(
         completions.push(CompletionEntry {
             label: format!("{}.{}", path, name),
             kind: CompletionItemKind::FUNCTION,
-            detail: Some(completion_detail_for_fns(name, &variants)),
+            detail: Some(completion_detail_for_fns(name, &variants).into()),
             documentation: function_doc(&format!("{path}.{name}"), &variants),
             scope: CompletionScope::Global,
         });
@@ -475,7 +475,7 @@ fn completion_item(entry: &CompletionEntry) -> CompletionItem {
     CompletionItem {
         label: entry.label.clone(),
         kind: Some(entry.kind),
-        detail: entry.detail.clone(),
+        detail: entry.detail.as_ref().map(ToString::to_string),
         documentation: entry.documentation.as_ref().map(|doc| {
             Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
@@ -514,8 +514,10 @@ mod tests {
         let mut records = HashMap::new();
         records.insert(
             "user".to_owned(),
-            RecordCompletion::from_type(&record(vec![("name", Type::Str), ("age", Type::Int)]))
-                .unwrap(),
+            Rc::new(
+                RecordCompletion::from_type(&record(vec![("name", Type::Str), ("age", Type::Int)]))
+                    .unwrap(),
+            ),
         );
 
         let items = items_at(&[], &records, &HashMap::new(), &[], "user.", 5);
@@ -531,11 +533,13 @@ mod tests {
         let mut records = HashMap::new();
         records.insert(
             "user".to_owned(),
-            RecordCompletion::from_type(&record(vec![(
-                "job",
-                record(vec![("title", Type::Str), ("since", Type::Int)]),
-            )]))
-            .unwrap(),
+            Rc::new(
+                RecordCompletion::from_type(&record(vec![(
+                    "job",
+                    record(vec![("title", Type::Str), ("since", Type::Int)]),
+                )]))
+                .unwrap(),
+            ),
         );
 
         let items = items_at(&[], &records, &HashMap::new(), &[], "user.job.t", 10);

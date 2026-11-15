@@ -10,7 +10,7 @@ use crate::{
     ast::{Ast, ExternFn, Node, NodeId, TypeExpr, TypeExprId},
     diagnostic::{Diagnostic, Span},
     lex::{Lexer, Token, Type},
-    limits::{self, MAX_NESTING, MAX_TYPE_PARTS},
+    limits::{self, MAX_DIAGNOSTICS, MAX_NESTING, MAX_TYPE_PARTS},
 };
 
 /// Parsing the token stream one token at a time into the abstract syntax tree, see
@@ -152,8 +152,9 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
 
     fn advance(&mut self) -> Result<(), Diagnostic> {
         self.cur = self.lex.one();
-        self.diagnostics
-            .extend(std::mem::take(&mut self.lex.diagnostics));
+        for diagnostic in std::mem::take(&mut self.lex.diagnostics) {
+            limits::report(&mut self.diagnostics, diagnostic);
+        }
         Ok(())
     }
 
@@ -211,12 +212,13 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
         Ok(())
     }
 
+    /// Parse roots until the end or until [`MAX_DIAGNOSTICS`] were reported.
     fn parse_roots_collect(&mut self) {
-        while !self.at_end() {
+        while !self.at_end() && self.diagnostics.len() < MAX_DIAGNOSTICS {
             match self.parse_prefix() {
                 Ok(node) => self.roots.push(node),
                 Err(diagnostic) => {
-                    self.diagnostics.push(diagnostic);
+                    limits::report(&mut self.diagnostics, diagnostic);
                     self.synchronize_root();
                 }
             }
@@ -238,7 +240,7 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
 
     fn synchronize_root(&mut self) {
         self.pending_docs.clear();
-        while !Self::is_root_boundary(self.cur.t) {
+        while !Self::is_root_boundary(self.cur.t) && self.diagnostics.len() < MAX_DIAGNOSTICS {
             self.advance().expect("lexing is infallible");
         }
         if self.cur.t == Type::CurlyRight {
@@ -252,7 +254,9 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
     pub fn parse_collect(mut self) -> ParseOutput<'src, 'ast> {
         self.parse_roots_collect();
         let mut diagnostics = std::mem::take(&mut self.diagnostics);
-        diagnostics.append(&mut self.lex.diagnostics);
+        for diagnostic in std::mem::take(&mut self.lex.diagnostics) {
+            limits::report(&mut diagnostics, diagnostic);
+        }
         ParseOutput {
             ast: Some(self.finish()),
             diagnostics,

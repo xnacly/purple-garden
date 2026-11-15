@@ -19,6 +19,23 @@ pub const MAX_NESTING: usize = 256;
 /// Types also grow without nesting syntax, `let b = { x: a y: a }` doubles the parts of `a`.
 pub const MAX_TYPE_PARTS: usize = 256;
 
+/// Diagnostics one stage (lexing and parsing, typechecking) reports. Recovery can report one per
+/// token of a broken file, and every one costs a look at its source line to show it, so past this
+/// many they are dropped and the parser stops.
+pub const MAX_DIAGNOSTICS: usize = 100;
+
+/// Add `diagnostic` to `diagnostics` unless they already hold [`MAX_DIAGNOSTICS`]; the last one
+/// kept says so.
+pub fn report(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
+    match diagnostics.len().cmp(&(MAX_DIAGNOSTICS - 1)) {
+        std::cmp::Ordering::Less => diagnostics.push(diagnostic),
+        std::cmp::Ordering::Equal => diagnostics.push(
+            diagnostic.with_note(format!("stopped after {MAX_DIAGNOSTICS} errors")),
+        ),
+        std::cmp::Ordering::Greater => {}
+    }
+}
+
 #[must_use]
 pub fn nested_too_deep(at: Span) -> Diagnostic {
     Diagnostic::new(format!("Nested deeper than {MAX_NESTING} levels"), at).with_help(Help::new(

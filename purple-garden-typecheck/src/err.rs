@@ -14,7 +14,7 @@ use crate::{FunctionType, Typechecker, typedefs::CallName};
 
 impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
     pub(crate) fn report(&mut self, diagnostic: Diagnostic) {
-        self.diagnostics.push(diagnostic);
+        purple_garden_frontend::limits::report(&mut self.diagnostics, diagnostic);
     }
 
     /// Arguments travel in vm registers, a function can't take more than there are, see

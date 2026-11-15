@@ -515,7 +515,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             }) else {
                 let err =
                     self.specialisation_miss_error(pkg_name, inner_name, name, args, candidates);
-                self.diagnostics.push(err);
+                limits::report(&mut self.diagnostics, err);
                 // `str.from(Str)` is invalid, but every variant returns
                 // `Str`, so callers can still typecheck against that
                 // result.
@@ -618,7 +618,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
         } = sink;
 
         if args.len() != fun.args.len() {
-            diagnostics.push(Diagnostic::at_token(
+            limits::report(diagnostics, Diagnostic::at_token(
                 format!(
                     "`{}` requires {} arguments, got {}",
                     display_name,
@@ -653,7 +653,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
 
             if !fun.with_slots {
                 if expected_arg_type != provided_type {
-                    diagnostics.push(Self::arg_mismatch(
+                    limits::report(diagnostics, Self::arg_mismatch(
                         display_name,
                         expected_arg_name,
                         expected_arg_type,
@@ -667,14 +667,14 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             if let Err(err) =
                 expected_arg_type.bind_slots(provided_type, &mut slot_to_type_bindings)
             {
-                diagnostics.push(Self::slot_bind_error(display_name, err, span));
+                limits::report(diagnostics, Self::slot_bind_error(display_name, err, span));
                 continue;
             }
 
             let expected_arg_type =
                 expected_arg_type.apply_slot_binding(&slot_to_type_bindings, arena);
             if expected_arg_type != *provided_type {
-                diagnostics.push(Self::arg_mismatch(
+                limits::report(diagnostics, Self::arg_mismatch(
                     display_name,
                     expected_arg_name,
                     &expected_arg_type,
@@ -693,7 +693,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             return TcType::Poison;
         }
         if ret.parts_exceed(MAX_TYPE_PARTS) {
-            diagnostics.push(limits::type_too_large(Span::from_token(tok)));
+            limits::report(diagnostics, limits::type_too_large(Span::from_token(tok)));
             return TcType::Poison;
         }
         Self::store_known(map, call_id, ret)

@@ -75,8 +75,10 @@ impl<'l> Lexer<'l> {
         Token { start, t }
     }
 
-    fn make_err(&self, msg: impl Into<String>, start: usize) -> Diagnostic {
-        Diagnostic::new(msg, Span::new(start, self.pos.saturating_sub(start)))
+    /// Report `msg` for the input from `start` to the current position.
+    fn error(&mut self, msg: impl Into<String>, start: usize) {
+        let diagnostic = Diagnostic::new(msg, Span::new(start, self.pos.saturating_sub(start)));
+        crate::limits::report(&mut self.diagnostics, diagnostic);
     }
 
     #[inline]
@@ -147,8 +149,7 @@ impl<'l> Lexer<'l> {
                     let body = &self.input[body_start..end];
                     let body = body.strip_prefix(b" ").unwrap_or(body);
                     let Ok(doc) = str::from_utf8(body) else {
-                        self.diagnostics
-                            .push(self.make_err("Invalid utf8 input", start));
+                        self.error("Invalid utf8 input", start);
                         continue;
                     };
 
@@ -201,16 +202,14 @@ impl<'l> Lexer<'l> {
                         let line_end = find_byte(b'\n', &bytes[body_start..])
                             .map_or(bytes.len(), |i| body_start + i);
                         self.pos = line_end;
-                        self.diagnostics
-                            .push(self.make_err("Unterminated string", start));
+                        self.error("Unterminated string", start);
                         continue;
                     };
 
                     self.pos = end;
 
                     let Ok(inner) = str::from_utf8(&bytes[body_start..end]) else {
-                        self.diagnostics
-                            .push(self.make_err("Invalid utf8 input", start));
+                        self.error("Invalid utf8 input", start);
                         self.pos += 1;
                         continue;
                     };
@@ -251,8 +250,7 @@ impl<'l> Lexer<'l> {
                                 let dot = dot + 1 + rel;
                                 if !ends_number(dot) {
                                     self.pos = p;
-                                    self.diagnostics
-                                        .push(self.make_err("Invalid numeric literal", start));
+                                    self.error("Invalid numeric literal", start);
                                     continue;
                                 }
                                 p = dot;
@@ -290,7 +288,7 @@ impl<'l> Lexer<'l> {
                             "Invalid utf8 input".to_owned()
                         }
                     };
-                    self.diagnostics.push(self.make_err(message, start));
+                    self.error(message, start);
                     continue;
                 }
             };

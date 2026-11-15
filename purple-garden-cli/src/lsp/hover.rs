@@ -6,16 +6,19 @@ use purple_garden_frontend::{
 };
 use purple_garden_typecheck::TypecheckOutput;
 
-use super::{analysis::DocumentAnalysis, source::token_span};
+use std::sync::Arc;
+
+use super::{analysis::DocumentAnalysis, source::token_span, text::Text};
 
 pub(super) struct AnalysisHover {
     pub(super) span: Span,
     pub(super) markup: HoverMarkup,
 }
 
+#[derive(Debug, Clone)]
 pub(super) enum HoverMarkup {
-    Garden(String),
-    Markdown(String),
+    Garden(Text),
+    Markdown(Text),
 }
 
 pub(super) fn collect_lexical_hovers(source: &str, analysis: &mut DocumentAnalysis) {
@@ -113,13 +116,14 @@ pub(super) fn fn_detail(
 pub(super) fn add_decl_hover(
     analysis: &mut DocumentAnalysis,
     span: Span,
-    detail: String,
+    detail: impl Into<Text>,
     docs: &[Token<'_>],
 ) {
+    let detail = detail.into();
     if docs.is_empty() {
         analysis.add_garden_hover(span, detail);
     } else {
-        let contents = doc_hover(&detail, docs);
+        let contents = detail.garden().wrap("", &format!("\n\n{}", doc_text(docs)));
         analysis.add_resolved_markdown_hover(span, contents.clone());
         analysis.add_declaration_doc(span, contents);
     }
@@ -152,10 +156,13 @@ pub(super) fn call_hover(
 ) -> Option<AnalysisHover> {
     match ast.node(target) {
         Node::Ident { name, .. } => {
-            local_function_hover(ast, name.t.as_str()).map(|markup| AnalysisHover {
-                span: token_span(name),
-                markup,
-            })
+            analysis
+                .local_functions
+                .get(name.t.as_str())
+                .map(|markup| AnalysisHover {
+                    span: token_span(name),
+                    markup: markup.clone(),
+                })
         }
         Node::Field { target, name, .. } => {
             let Node::Ident { name: pkg, .. } = ast.node(*target) else {
@@ -165,7 +172,7 @@ pub(super) fn call_hover(
             let fn_name = name.t.as_str();
             function_hover(pkg_name, fn_name, analysis).map(|contents| AnalysisHover {
                 span: token_span(name),
-                markup: HoverMarkup::Markdown(contents),
+                markup: HoverMarkup::Markdown(contents.into()),
             })
         }
         _ => None,
@@ -177,31 +184,46 @@ pub(super) fn ident_hover(
     typecheck: &TypecheckOutput<'_, &BumpAlloc>,
     node_id: NodeId,
     name: &Token<'_>,
+    analysis: &mut DocumentAnalysis,
 ) -> Option<HoverMarkup> {
-    local_function_hover(ast, name.t.as_str()).or_else(|| {
-        type_for_node(ast, typecheck, node_id)
-            .map(|ty| HoverMarkup::Garden(format!("{}: {}", name.t.as_str(), ty)))
-    })
+    if let Some(markup) = analysis.local_functions.get(name.t.as_str()) {
+        return Some(markup.clone());
+    }
+    let ty = type_text(ast, typecheck, node_id, analysis)?;
+    Some(HoverMarkup::Garden(Text::around(
+        format!("{}: ", name.t.as_str()),
+        ty,
+        "",
+    )))
 }
 
-fn local_function_hover(ast: &Ast<'_, '_>, query: &str) -> Option<HoverMarkup> {
-    ast.roots.iter().find_map(|&root| match ast.node(root) {
-        Node::Fn {
+/// Fill [`DocumentAnalysis::local_functions`] with the hover of every function the document
+/// declares at its top level, the first declaration of a name wins.
+pub(super) fn collect_local_functions(ast: &Ast<'_, '_>, analysis: &mut DocumentAnalysis) {
+    for &root in ast.roots {
+        let Node::Fn {
             docs,
             name,
             args,
             return_type,
             ..
-        } if name.t.as_str() == query => {
-            let detail = fn_detail(ast, name, args, *return_type);
-            Some(if docs.is_empty() {
-                HoverMarkup::Garden(detail)
-            } else {
-                HoverMarkup::Markdown(doc_hover(&detail, docs))
-            })
+        } = ast.node(root)
+        else {
+            continue;
+        };
+        if analysis.local_functions.contains_key(name.t.as_str()) {
+            continue;
         }
-        _ => None,
-    })
+        let detail = fn_detail(ast, name, args, *return_type);
+        let markup = if docs.is_empty() {
+            HoverMarkup::Garden(detail.into())
+        } else {
+            HoverMarkup::Markdown(doc_hover(&detail, docs).into())
+        };
+        analysis
+            .local_functions
+            .insert(name.t.as_str().to_owned(), markup);
+    }
 }
 
 fn overload_detail(name: &str, variants: &[&purple_garden_runtime::Fn<'_>]) -> String {
@@ -265,13 +287,18 @@ pub(super) fn garden_block(contents: impl std::fmt::Display) -> String {
     format!("```garden\n{}\n```", contents)
 }
 
-pub(super) fn type_for_node(
+/// The type of `node_id` as shown, formatted once per type map entry: the reads of a binding
+/// share its entry, and so its text.
+pub(super) fn type_text(
     ast: &Ast<'_, '_>,
     typecheck: &TypecheckOutput<'_, &BumpAlloc>,
     node_id: NodeId,
-) -> Option<String> {
-    typecheck
-        .types
-        .get(ast.value_id(node_id))
-        .map(ToString::to_string)
+    analysis: &mut DocumentAnalysis,
+) -> Option<Arc<str>> {
+    let ty = typecheck.types.ref_of(ast.value_id(node_id))?;
+    let text = analysis
+        .type_texts
+        .entry(ty)
+        .or_insert_with(|| typecheck.types.resolve(ty).to_string().into());
+    Some(Arc::clone(text))
 }

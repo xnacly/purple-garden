@@ -18,7 +18,7 @@ use std::fmt::{self, Write};
 ///
 /// Both `start` and `len` are byte counts, not character or grapheme counts.
 /// This matches the lexer and keeps spans cheap to carry through the frontend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     /// Byte offset into the source where the region starts.
     pub start: usize,
@@ -192,7 +192,7 @@ impl Diagnostic {
     /// same fields directly instead of parsing this text.
     #[must_use]
     pub fn render(&self, file: &str, source: &[u8]) -> String {
-        let location = locate(source, self.primary.span.start);
+        let location = locate(source, self.primary.span);
 
         let mut buf = String::new();
         writeln!(
@@ -236,22 +236,40 @@ impl Diagnostic {
     }
 }
 
+/// Bytes of a line shown on either side of the underlined part, which is cut to as many: a
+/// diagnostic in a huge line still renders in a few lines.
+const CONTEXT: usize = 80;
+
 #[derive(Clone, Copy)]
 struct Location<'src> {
     /// 0-based line number.
     line_no: usize,
     /// 0-based byte column.
     col: usize,
-    line_text: &'src str,
+    /// The shown part of the line before, in and after the span, cut where `...` follows or
+    /// precedes them.
+    before: &'src str,
+    marked: &'src str,
+    after: &'src str,
+    cut_before: bool,
+    cut_after: bool,
 }
 
 fn render_primary_label(buf: &mut String, location: Location<'_>, label: &Label) {
-    writeln!(buf, "{}", location.line_text).unwrap();
+    let lead = if location.cut_before { "..." } else { "" };
+    let trail = if location.cut_after { "..." } else { "" };
+    let Location {
+        before,
+        marked,
+        after,
+        ..
+    } = location;
+    writeln!(buf, "{lead}{before}{marked}{after}{trail}").unwrap();
     write!(
         buf,
         "{}{}",
-        " ".repeat(location.col),
-        "~".repeat(label.span.len.max(1))
+        " ".repeat(lead.len() + before.chars().count()),
+        "~".repeat(marked.chars().count().max(1))
     )
     .unwrap();
     if let Some(message) = &label.message {
@@ -260,16 +278,9 @@ fn render_primary_label(buf: &mut String, location: Location<'_>, label: &Label)
     writeln!(buf).unwrap();
 }
 
-fn locate(source: &[u8], offset: usize) -> Location<'_> {
-    // TODO: replace this with a proper SourceMap that prebuilds a sorted
-    // Vec<usize> of newline byte offsets at parse start, then maps a byte
-    // offset to (line, col_bytes) via binary search and slices the line text
-    // out of `source` in O(log n) instead of the O(n) scan below. The scan is
-    // fine for fail-fast CLI errors but not for repeated LSP diagnostics.
-    //
-    // `col` is a byte column, not a grapheme column. Unicode-aware display
-    // columns belong in the same SourceMap.
-    let clamped = offset.min(source.len());
+fn locate(source: &[u8], span: Span) -> Location<'_> {
+    // `col` is a byte column, not a grapheme column.
+    let clamped = span.start.min(source.len());
     let prefix = &source[..clamped];
     let line_no = prefix.iter().filter(|&&b| b == b'\n').count();
     let line_start = prefix
@@ -281,10 +292,19 @@ fn locate(source: &[u8], offset: usize) -> Location<'_> {
         .iter()
         .position(|&b| b == b'\n')
         .map_or(source.len(), |i| line_start + i);
-    let line_text = std::str::from_utf8(&source[line_start..line_end]).unwrap_or("<invalid utf-8>");
+    let line = std::str::from_utf8(&source[line_start..line_end]).unwrap_or("<invalid utf-8>");
+
+    let start = line.floor_char_boundary(col);
+    let end = line.floor_char_boundary(start.saturating_add(span.len).min(start + CONTEXT));
+    let from = line.floor_char_boundary(start.saturating_sub(CONTEXT));
+    let to = line.floor_char_boundary(end + CONTEXT);
     Location {
         line_no,
         col,
-        line_text,
+        before: &line[from..start],
+        marked: &line[start..end],
+        after: &line[end..to],
+        cut_before: from > 0,
+        cut_after: to < line.len(),
     }
 }
