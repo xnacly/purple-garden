@@ -186,7 +186,8 @@ impl<'t> Type<'t> {
         }
     }
 
-    fn contains_slot(&self) -> bool {
+    #[must_use]
+    pub fn contains_slot(&self) -> bool {
         match self {
             Self::Slot(_) => true,
             Self::Option(inner) | Self::Array(inner) => inner.contains_slot(),

@@ -673,12 +673,14 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             }
         }
 
-        let ret = if fun.with_slots {
-            fun.ret.apply_slot_binding(&slot_to_type_bindings, arena)
-        } else {
-            fun.ret
-        };
-
+        if !fun.with_slots {
+            return Self::store_known(map, call_id, fun.ret);
+        }
+        let ret = fun.ret.apply_slot_binding(&slot_to_type_bindings, arena);
+        // a slot only an already diagnosed argument binds stays free, nothing may see it
+        if ret.contains_slot() {
+            return TcType::Poison;
+        }
         Self::store_known(map, call_id, ret)
     }
 
@@ -1878,6 +1880,16 @@ mod tests {
             root_type(&ast, &out, 4).map(|t| t.to_string()),
             Some("Record<n: Int m: Str>".to_string())
         );
+    }
+
+    /// The argument binding the slot failed to typecheck, so the slot stays free: the call must
+    /// poison instead of typing as `T`, which the next generic call would take as its argument.
+    #[test]
+    fn generic_call_on_a_diagnosed_argument_poisons() {
+        let (ast, out) = check(b"import \"t\"\nlet a = t.id(missing)\nt.id(a)\nt.id(t.id(missing))");
+        assert_eq!(messages(&out), ["binding `missing` not found"; 2]);
+        assert_eq!(root_type(&ast, &out, 2), None);
+        assert_eq!(root_type(&ast, &out, 3), None);
     }
 
     #[test]
