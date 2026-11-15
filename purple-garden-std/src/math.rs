@@ -5,7 +5,8 @@ pub use self::math::PACKAGE;
 // This module is the public `math` package namespace; its file name matches it.
 #[allow(clippy::module_inception)]
 pub mod math {
-    /// Returns the absolute value of `n`.
+    /// Returns the absolute value of `n`. Like `-n`, `math.abs` of the smallest `Int` wraps
+    /// to itself.
     ///
     /// ## Examples
     ///
@@ -16,7 +17,7 @@ pub mod math {
     /// ```
     #[pg_fn(pure, specialises = "abs")]
     pub fn abs_i64(n: i64) -> i64 {
-        n.abs()
+        n.wrapping_abs()
     }
 
     /// Returns the absolute value of `n`.
@@ -89,7 +90,8 @@ pub mod math {
         a.max(b)
     }
 
-    /// Restricts `n` to the inclusive range `lo` to `hi`.
+    /// Restricts `n` to the inclusive range `lo` to `hi`: `lo` if `n` is below it, then `hi`
+    /// if that is above `hi`. So `hi` wins when `lo > hi`.
     ///
     /// ## Examples
     ///
@@ -100,10 +102,14 @@ pub mod math {
     /// ```
     #[pg_fn(pure, specialises = "clamp")]
     pub fn clamp_i64(n: i64, lo: i64, hi: i64) -> i64 {
-        n.clamp(lo, hi)
+        // not i64::clamp, it panics on lo > hi
+        let n = if n < lo { lo } else { n };
+        if n > hi { hi } else { n }
     }
 
-    /// Restricts `n` to the inclusive range `lo` to `hi`.
+    /// Restricts `n` to the inclusive range `lo` to `hi`: `lo` if `n` is below it, then `hi`
+    /// if that is above `hi`. So `hi` wins when `lo > hi`, a NaN `n` stays NaN and a NaN bound
+    /// is no bound.
     ///
     /// ## Examples
     ///
@@ -114,7 +120,9 @@ pub mod math {
     /// ```
     #[pg_fn(pure, specialises = "clamp")]
     pub fn clamp_double(n: f64, lo: f64, hi: f64) -> f64 {
-        n.clamp(lo, hi)
+        // not f64::clamp, it panics on lo > hi and NaN bounds
+        let n = if n < lo { lo } else { n };
+        if n > hi { hi } else { n }
     }
 
     /// Returns `n` unchanged.
