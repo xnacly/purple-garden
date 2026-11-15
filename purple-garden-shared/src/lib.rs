@@ -1,4 +1,5 @@
 //! utilities used by multiple purple-garden crates.
+#![feature(allocator_ext)]
 
 use std::ffi::c_void;
 

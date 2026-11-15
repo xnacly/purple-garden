@@ -13,6 +13,8 @@
 //! registers hold doubles.
 use std::{
     alloc::{Allocator, Global},
+    cmp::Reverse,
+    collections::BinaryHeap,
     fmt,
 };
 
@@ -85,8 +87,12 @@ impl fmt::Display for Reg {
 #[derive(Debug, Clone)]
 pub struct Xralloc2<S: Allocator = Global> {
     map: Vec<Option<Location>, S>,
-    /// `(last_use, location)` of every value currently holding a register or slot.
-    active: Vec<(u32, Location), S>,
+    /// `(last_use, register)` of every value currently holding a register, at most one per
+    /// register, so walking them stays cheap however many values live in slots.
+    active_regs: Vec<(u32, Reg), S>,
+    /// `(last_use, slot)` of every value currently holding a slot, the earliest end first: an
+    /// allocation expires them without walking the ones still live.
+    active_slots: BinaryHeap<Reverse<(u32, u16)>, S>,
     /// Allocation order per [`Class`], the most preferred register last.
     pool: [Vec<u8, S>; 2],
     /// Bitmask per [`Class`] of the registers currently free.
@@ -109,7 +115,8 @@ impl<S: Allocator + Clone> Xralloc2<S> {
     pub fn new_in(scratch: S) -> Self {
         Self {
             map: Vec::new_in(scratch.clone()),
-            active: Vec::new_in(scratch.clone()),
+            active_regs: Vec::new_in(scratch.clone()),
+            active_slots: BinaryHeap::new_in(scratch.clone()),
             pool: [Vec::new_in(scratch.clone()), Vec::new_in(scratch.clone())],
             free: [0; 2],
             used: [0; 2],
@@ -121,7 +128,8 @@ impl<S: Allocator + Clone> Xralloc2<S> {
     pub fn reset(&mut self, ids: usize, gprs: &[u8], fprs: &[u8]) {
         self.map.clear();
         self.map.resize(ids, None);
-        self.active.clear();
+        self.active_regs.clear();
+        self.active_slots.clear();
         for (class, regs) in [gprs, fprs].into_iter().enumerate() {
             self.pool[class].clear();
             self.pool[class].extend_from_slice(regs);
@@ -205,9 +213,14 @@ impl<S: Allocator + Clone> Xralloc2<S> {
             Some(num) => {
                 let reg = Reg::new(class, num);
                 self.mark_used(reg);
+                self.active_regs.push((last_use, reg));
                 Location::Reg(reg)
             }
-            None => Location::Stack(self.take_slot()),
+            None => {
+                let slot = self.take_slot();
+                self.active_slots.push(Reverse((last_use, slot)));
+                Location::Stack(slot)
+            }
         };
         crate::trace!(
             "[xralloc2] %v{id} [{at}, {last_use}] -> {location}{}",
@@ -217,7 +230,6 @@ impl<S: Allocator + Clone> Xralloc2<S> {
                 None => String::new(),
             }
         );
-        self.active.push((last_use, location));
         self.map[id] = Some(location);
         location
     }
@@ -226,7 +238,7 @@ impl<S: Allocator + Clone> Xralloc2<S> {
     pub fn try_alloc_at(&mut self, id: impl Into<usize>, reg: Reg, last_use: u32) -> Option<Reg> {
         self.try_take(reg)?;
         crate::trace!("[xralloc2] param -> {reg}, last use {last_use}");
-        self.active.push((last_use, Location::Reg(reg)));
+        self.active_regs.push((last_use, reg));
         self.map[id.into()] = Some(Location::Reg(reg));
         Some(reg)
     }
@@ -234,31 +246,28 @@ impl<S: Allocator + Clone> Xralloc2<S> {
     /// Free the registers and slots of values whose last use is at or before `at`.
     pub fn expire(&mut self, at: u32) {
         let Self {
-            active,
-            free,
-            free_slots,
-            ..
+            active_regs, free, ..
         } = self;
-        active.retain(|&(end, location)| {
+        active_regs.retain(|&(end, reg)| {
             if end <= at {
-                match location {
-                    Location::Reg(reg) => free[reg.class() as usize] |= 1u64 << reg.num(),
-                    Location::Stack(slot) => free_slots.push(slot),
-                }
+                free[reg.class() as usize] |= 1u64 << reg.num();
             }
             end > at
         });
+        while let Some(&Reverse((end, slot))) = self.active_slots.peek()
+            && end <= at
+        {
+            self.active_slots.pop();
+            self.free_slots.push(slot);
+        }
     }
 
     /// Registers holding values still needed after pos
     pub fn live_after(&self, pos: u32) -> impl Iterator<Item = Reg> + '_ {
-        self.active
+        self.active_regs
             .iter()
             .filter(move |&&(end, _)| end > pos)
-            .filter_map(|&(_, location)| match location {
-                Location::Reg(reg) => Some(reg),
-                Location::Stack(_) => None,
-            })
+            .map(|&(_, reg)| reg)
     }
 
     /// Take `reg` off the free list until [`Xralloc2::give_back`]. `None` if it isn't free.
@@ -370,5 +379,32 @@ mod tests {
         assert_eq!(ra.reg(3usize), None);
         assert_eq!(ra.slots(), 2);
         assert_eq!(ra.live_after(4).collect::<Vec<_>>(), [Reg::Gpr(0)]);
+    }
+
+    /// Slots are reused in the order their values die, however many are live: freeing them
+    /// doesn't walk the live ones, so this runs in n log n.
+    #[test]
+    fn slots_free_in_the_order_their_values_die() {
+        let n = 50_000;
+        let mut ra = Xralloc2::default();
+        ra.reset(2 * n, &[], &[]);
+        // value i lives from i to 2n - i, so the last one defined dies first
+        for i in 0..n {
+            let at = i as u32;
+            assert_eq!(
+                ra.alloc(i, Class::Gpr, at, 2 * n as u32 - at),
+                Location::Stack(i as u16)
+            );
+        }
+        for i in 0..n {
+            let at = (n + 1 + i) as u32;
+            assert_eq!(
+                ra.alloc(n + i, Class::Gpr, at, 3 * n as u32),
+                Location::Stack((n - 1 - i) as u16),
+                "value {} died at {at}",
+                n - 1 - i
+            );
+        }
+        assert_eq!(ra.slots(), n as u16);
     }
 }
