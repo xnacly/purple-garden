@@ -18,6 +18,7 @@ trace = [
     "purple-garden-std/trace",
 ]
 trace_gc = ["purple-garden-runtime/trace_gc"]
+gc_stress = ["purple-garden-runtime/gc_stress"]
 
 [[bin]]
 name = "purple-garden"
