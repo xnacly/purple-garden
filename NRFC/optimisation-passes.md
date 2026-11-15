@@ -229,6 +229,9 @@ any function
 become `Nop` so jump targets stay valid, `Cc::compact_nops` removes them after:
 
 - `self_move`: removes `mov rX, rX`
-- `mov_merge`: `mov r8, r0; mov r2, r8` to `mov r2, r0`, a fallback for moves
-  the copy propagation misses between blocks
 - `jmp_next`: removes a `jmp` to the next instruction
+
+A window of instructions knows nothing about liveness or jump targets, so a peephole may
+only drop instructions that do nothing (`mov rX, rX`, a `jmp` to the next instruction).
+Merging `mov r8, r0; mov r2, r8` into `mov r2, r0` drops the write to `r8`, which a later
+instruction may still read: that pass miscompiled the bytecode and is gone.
