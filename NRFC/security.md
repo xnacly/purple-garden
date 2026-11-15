@@ -67,7 +67,7 @@ boundary:
 
 | tool                            | command                                                           |
 | ------------------------------- | ----------------------------------------------------------------- |
-| Miri                            | `cargo miri test -p <crate>`; not the JIT, inline asm or CLI tests  |
+| Miri                            | `cargo miri test -p <crate>`; not the JIT, inline asm or CLI tests. Example programs run end to end only partly (each takes minutes). The GC turns integers into pointers (`gc.rs`), so Miri may miss bugs through GC pointers; `gc_stress` covers those |
 | AddressSanitizer                | `RUSTFLAGS=-Zsanitizer=address cargo test --target <host>`        |
 | GC stress (collect before every allocation, every object fenced by a guard page) | `cargo test --workspace --features purple-garden-runtime/gc_stress` |
 | limits and DoS regressions      | `cargo test -p purple-garden --test limits --release`             |
