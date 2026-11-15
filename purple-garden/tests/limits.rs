@@ -309,3 +309,47 @@ fn bytecode_limits_are_diagnosed() {
     assert_eq!(program.run_take::<i64>().unwrap(), 8189);
     assert_bytecode_rejects(&array(8191), "an array literal holds at most 8190 words", "[id(0)");
 }
+
+/// Constant folding runs pure builtins in the compiler: a chain doubling a string stops folding
+/// once the constant is no longer small, instead of building 2^40 bytes at compile time.
+#[test]
+fn folding_doesnt_build_large_constants() {
+    let lets = (0..40)
+        .map(|i| format!("let s{} = str.concat(s{i} s{i})\n", i + 1))
+        .collect::<String>();
+    let source = format!("import \"str\"\nlet s0 = \"ab\"\n{lets}str.len(s40)");
+    for opt in 1..=3 {
+        let mut config = Config::default();
+        config.opt = opt;
+        let started = std::time::Instant::now();
+        Pg::new()
+            .with_stdlib()
+            .config(config)
+            .compile(source.as_bytes())
+            .unwrap_or_else(|err| panic!("O{opt}: {err}"));
+        assert!(started.elapsed().as_secs() < 5, "O{opt} took {:?}", started.elapsed());
+    }
+}
+
+/// `str.repeat` repeats nothing for a count up to 0 and traps once its result can't be a string,
+/// rather than aborting on a capacity overflow or allocating terabytes.
+#[test]
+fn repeat_counts_are_bounded() {
+    let prelude = "import \"str\"\nfn id(x:Int) Int { x }\n";
+    assert_runs(&format!("{prelude}str.len(str.repeat(\"ab\" id(3)))"), 6);
+    assert_runs(&format!("{prelude}str.len(str.repeat(\"ab\" -1))"), 0);
+    assert_runs(&format!("{prelude}str.len(str.repeat(\"ab\" id(-4)))"), 0);
+    for count in ["id(1099511627776)", "4611686018427387904"] {
+        for config in configs() {
+            let label = format!("{count} O{} no_jit={}", config.opt, config.no_jit);
+            let source = format!("{prelude}str.len(str.repeat(\"ab\" {count}))");
+            let pg = Pg::new().with_stdlib().config(config);
+            let mut program = pg.compile(source.as_bytes()).unwrap_or_else(|err| panic!("{label}: {err}"));
+            let err = program.run_take::<i64>().expect_err(&label);
+            assert!(
+                matches!(err, purple_garden::embed::Anomaly::AllocationFailed { .. }),
+                "{label}: {err}"
+            );
+        }
+    }
+}

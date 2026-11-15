@@ -6,7 +6,7 @@ pub use self::str::PACKAGE;
 #[allow(clippy::module_inception)]
 pub mod str {
     use core::fmt::NumBuffer;
-    use purple_garden_runtime::Str;
+    use purple_garden_runtime::{Anomaly, Str, string::MAX_LEN};
 
     /// Reports whether `needle` appears in `hay`.
     ///
@@ -22,7 +22,10 @@ pub mod str {
         hay.contains(needle)
     }
 
-    /// Repeats `s` `n` times.
+    /// Repeats `s` `n` times, the empty string for `n` up to 0. A result longer than a string can
+    /// be traps with `Allocation failed`.
+    ///
+    /// Not `pure`: its result isn't bounded by its arguments, so the compiler doesn't evaluate it.
     ///
     /// ## Examples
     ///
@@ -31,9 +34,15 @@ pub mod str {
     ///
     /// str.repeat("ha" 3)
     /// ```
-    #[purple_garden_macros::pg_fn(pure)]
-    pub fn repeat(s: &str, n: i64) -> String {
-        s.repeat(n as usize)
+    #[purple_garden_macros::pg_fn(unsafe)]
+    pub fn repeat(vm: &mut purple_garden_runtime::Vm, s: Str, n: i64) -> Str {
+        let s = s.as_str();
+        let n = usize::try_from(n).unwrap_or(0);
+        if s.len().checked_mul(n).is_none_or(|len| len > MAX_LEN) {
+            vm.trap(Anomaly::AllocationFailed { pc: vm.pc });
+            return Str::new(vm, "");
+        }
+        Str::new(vm, &s.repeat(n))
     }
 
     /// Concatenates `a` and `b`.

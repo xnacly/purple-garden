@@ -9,6 +9,8 @@ pub struct StrHeader {
 
 pub const HEADER_SIZE: usize = std::mem::size_of::<StrHeader>();
 pub const ALIGN: usize = std::mem::align_of::<StrHeader>();
+/// Longest string in bytes, its header holds the length in a `u32`.
+pub const MAX_LEN: usize = u32::MAX as usize;
 
 #[inline]
 pub const fn payload_size(len: usize) -> usize {
@@ -95,7 +97,7 @@ pub fn header_word(len: u32, hash: u32) -> u64 {
 #[inline]
 pub unsafe fn write_payload(dst: *mut u8, s: &str, hash: u32) -> Value {
     let bytes = s.as_bytes();
-    let len: u32 = bytes.len().try_into().expect("string length exceeds 4 GiB");
+    let len: u32 = bytes.len().try_into().expect("string length exceeds MAX_LEN");
     // SAFETY: caller upholds # Safety
     unsafe {
         (dst as *mut StrHeader).write(StrHeader { len, hash });
