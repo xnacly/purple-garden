@@ -4,6 +4,7 @@ use purple_garden_frontend::{
     lex,
 };
 use purple_garden_ir::ptype::{BindError, Type};
+use purple_garden_runtime::MAX_ARGS;
 
 use std::alloc::Allocator;
 
@@ -14,6 +15,21 @@ use crate::{FunctionType, Typechecker, typedefs::CallName};
 impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
     pub(crate) fn report(&mut self, diagnostic: Diagnostic) {
         self.diagnostics.push(diagnostic);
+    }
+
+    /// Arguments travel in vm registers, a function can't take more than there are, see
+    /// [`MAX_ARGS`].
+    pub(crate) fn check_arity(&mut self, name: &lex::Token, args: usize) {
+        if args <= MAX_ARGS {
+            return;
+        }
+        self.report(
+            Diagnostic::at_token(
+                format!("Function takes {args} arguments, at most {MAX_ARGS} are supported"),
+                name,
+            )
+            .with_help(Help::new("pass related arguments together as a record")),
+        );
     }
 
     pub(crate) fn redundant_conversion_note(

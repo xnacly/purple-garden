@@ -12,7 +12,7 @@ use crate::intern::Interner;
 use purple_garden_allocators::page::Pages;
 use purple_garden_ir::{self as ir, Func, Id, TypeId, constant::Const, ptype};
 use purple_garden_runtime::{
-    AllocType, BuiltinFn, DebugInfo, REGISTER_COUNT, Value, Vm, VmConfig,
+    AllocType, BuiltinFn, DebugInfo, MAX_ARGS, REGISTER_COUNT, Value, Vm, VmConfig,
     op::{LookupTable, Op, SwitchKind, SwitchTable},
     string,
 };
@@ -147,6 +147,10 @@ const CALLEE_SAVED: u8 = 19;
 const SCRATCH: u8 = REGISTER_COUNT as u8 - 1;
 /// Second ephemeral register
 const TMP: u8 = SCRATCH - 1;
+const _: () = assert!(
+    TMP as usize == MAX_ARGS,
+    "argument registers end where the scratch registers start"
+);
 
 /// Bits of [`Op::LoadI`]'s value in the packed encoding.
 const LOAD_I_BITS: u32 = 21;
@@ -375,6 +379,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
             for (i, &param) in fun.params(block.params).iter().enumerate() {
                 // entry params arrive in their registers
                 if idx == 0 {
+                    assert!(
+                        i < MAX_ARGS,
+                        "{} takes more than {MAX_ARGS} arguments, the typechecker rejects that",
+                        fun.name
+                    );
                     let end = self.live_set[param.0 as usize].1;
                     if self
                         .regalloc
@@ -779,6 +788,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
     /// or tail. `r0` is both the first argument and the return-value slot. `pushed` is how far
     /// the top of the spill stack moved since the frame, slots read here are offset by it.
     fn emit_arg_shuffle(&mut self, args: &[Id], pushed: u16) {
+        assert!(
+            args.len() <= MAX_ARGS,
+            "a call with {} arguments, the typechecker allows at most {MAX_ARGS}",
+            args.len()
+        );
         let mut moves = take(&mut self.scratch_pairs);
         moves.clear();
         for (i, &arg) in args.iter().enumerate() {

@@ -160,6 +160,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             let lex::Type::Ident(fun_name) = fun.name.t else {
                 unreachable!();
             };
+            self.check_arity(&fun.name, fun.args.len());
             let args = self
                 .arena
                 .alloc_slice(fun.args.iter().map(|(arg_name, arg_type)| {
@@ -886,6 +887,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                     ));
                     return TcType::Poison;
                 }
+                self.check_arity(name, args.len());
 
                 let prev_env = std::mem::replace(&mut self.env, Vec::new_in(self.scratch));
                 self.env.push(Map::new_in(self.scratch));
@@ -1499,6 +1501,49 @@ mod tests {
             out.diagnostics[0].message,
             "`add` requires 2 arguments, got 1"
         );
+    }
+
+    /// Arguments travel in vm registers, there are [`MAX_ARGS`] of them. Past that register
+    /// numbers bled into the neighbouring operands of the ops moving them, so a Str parameter
+    /// could read an Int argument as its pointer.
+    #[test]
+    fn functions_take_at_most_max_args() {
+        use purple_garden_runtime::MAX_ARGS;
+        let params = |n: usize| {
+            (0..n)
+                .map(|i| format!("a{i}:Int"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        for (source, rejected) in [
+            (format!("fn f({}) Int {{ a0 }}", params(MAX_ARGS)), false),
+            (format!("fn f({}) Int {{ a0 }}", params(MAX_ARGS + 1)), true),
+            (
+                format!("extern \"p\" {{ fn f({}) Int }}", params(MAX_ARGS)),
+                false,
+            ),
+            (
+                format!("extern \"p\" {{ fn f({}) Int }}", params(MAX_ARGS + 1)),
+                true,
+            ),
+        ] {
+            let source = source.leak().as_bytes();
+            let ast = parse(source);
+            let out = checker(&ast).check();
+            let messages: Vec<_> = out.diagnostics.iter().map(|d| d.message.clone()).collect();
+            let expected = rejected.then(|| {
+                format!(
+                    "Function takes {} arguments, at most {MAX_ARGS} are supported",
+                    MAX_ARGS + 1
+                )
+            });
+            assert_eq!(
+                messages,
+                Vec::from_iter(expected),
+                "{}",
+                str::from_utf8(source).unwrap()
+            );
+        }
     }
 
     #[test]

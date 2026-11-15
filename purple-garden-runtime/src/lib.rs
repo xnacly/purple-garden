@@ -24,6 +24,11 @@ pub mod vm;
 
 pub const REGISTER_COUNT: usize = 32;
 
+/// Most arguments a function takes: they travel in `r0..r{MAX_ARGS - 1}`, see [`op::Op::Call`],
+/// the bytecode compiler keeps the registers above them as scratch for its moves. A register
+/// number is 5 bits in [`op::packed::Packed`], so there is no room for more.
+pub const MAX_ARGS: usize = REGISTER_COUNT - 2;
+
 pub use crate::anomaly::Anomaly;
 pub use crate::gc::{AllocType, Gc, Metadata};
 #[cfg(target_arch = "x86_64")]
