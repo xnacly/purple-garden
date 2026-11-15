@@ -1868,6 +1868,7 @@ mod tests {
         assert_eq!(messages(&out), vec!["binding `x` not found"]);
     }
 
+
     #[test]
     fn call_arg_mismatch_points_at_the_argument() {
         let (_, out) = check(b"fn f(a:Int) Int { a }\nf(\"s\")");
@@ -1905,6 +1906,12 @@ mod tests {
         assert_eq!(messages(&out), ["binding `missing` not found"; 2]);
         assert_eq!(root_type(&ast, &out, 2), None);
         assert_eq!(root_type(&ast, &out, 3), None);
+
+        // the stdlib's generics, an undefined call as the argument and two arguments diagnosed
+        let (_, out) = check(b"import \"opt\"\nopt.or(opt.some(nope(1)) 2)");
+        assert_eq!(messages(&out), ["Call to undefined function `nope`"]);
+        let (_, out) = check(b"import \"opt\"\nopt.or(opt.or(opt.some(x) y) 2)");
+        assert_eq!(messages(&out), ["binding `x` not found", "binding `y` not found"]);
     }
 
     #[test]
