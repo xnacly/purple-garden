@@ -11,3 +11,5 @@ purple-garden-shared = { path = "../purple-garden-shared" }
 [features]
 trace = []
 trace_gc = ["purple-garden-shared/trace"]
+# Collect before every allocation and fence every object, see `Gc::alloc_fenced`.
+gc_stress = []

@@ -70,6 +70,7 @@ impl Vm<'_> {
 
     pub(super) fn collect_noop(&mut self) {}
 
+    #[cfg(not(feature = "gc_stress"))]
     pub fn try_alloc(
         &mut self,
         alloc_type: AllocType,
@@ -82,7 +83,20 @@ impl Vm<'_> {
         self.alloc_slow(alloc_type, layout)
     }
 
+    /// Every allocation is a point a collection may run at, stress mode runs one at each and
+    /// fences the object, so any access past it faults, see [`crate::Gc::alloc_fenced`].
+    #[cfg(feature = "gc_stress")]
+    pub fn try_alloc(
+        &mut self,
+        alloc_type: AllocType,
+        layout: Layout,
+    ) -> Option<std::ptr::NonNull<u8>> {
+        (self.collect_fn)(self);
+        self.gc.alloc_fenced(alloc_type, layout)
+    }
+
     #[cold]
+    #[cfg(not(feature = "gc_stress"))]
     fn alloc_slow(
         &mut self,
         alloc_type: AllocType,
