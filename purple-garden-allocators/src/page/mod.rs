@@ -259,12 +259,14 @@ mod tests {
 
     #[test]
     fn grows_and_shrinks_keeping_contents() {
-        let page = mmap::page_size();
+        // Miri interprets every push; a few pages still cross many grows.
+        let pages = if cfg!(miri) { 4 } else { 64 };
+        let len = (pages * mmap::page_size() / size_of::<u64>()) as u64;
         let mut values: Vec<u64, _> = Vec::with_capacity_in(16, PageAlloc {});
-        for i in 0..(64 * page as u64) {
+        for i in 0..len {
             values.push(i);
         }
-        assert!(values.iter().copied().eq(0..(64 * page as u64)));
+        assert!(values.iter().copied().eq(0..len));
         values.truncate(10);
         values.shrink_to_fit();
         assert!(values.iter().copied().eq(0..10));
