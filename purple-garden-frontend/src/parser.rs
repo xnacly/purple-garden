@@ -10,7 +10,7 @@ use crate::{
     ast::{Ast, ExternFn, Node, NodeId, TypeExpr, TypeExprId},
     diagnostic::{Diagnostic, Span},
     lex::{Lexer, Token, Type},
-    limits::{self, MAX_NESTING},
+    limits::{self, MAX_NESTING, MAX_TYPE_PARTS},
 };
 
 /// Parsing the token stream one token at a time into the abstract syntax tree, see
@@ -30,6 +30,8 @@ pub struct Parser<'src, 'ast, 's, A: Arena, S: Allocator> {
     /// Built in place in the arena, so [`Parser::finish`] hands it over without a copy.
     nodes: Vec<Node<'src, 'ast>, &'ast A>,
     types: Vec<TypeExpr<'src, 'ast>, &'s S>,
+    /// `type_parts[id]` is the number of parts of `types[id]`, see [`MAX_TYPE_PARTS`].
+    type_parts: Vec<usize, &'s S>,
     diagnostics: Vec<Diagnostic>,
     pending_docs: Vec<Token<'src>, &'s S>,
     /// How deep the node being parsed nests, see [`MAX_NESTING`]: one level per
@@ -61,6 +63,7 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
             roots: Vec::new_in(scratch),
             nodes,
             types: Vec::new_in(scratch),
+            type_parts: Vec::new_in(scratch),
             diagnostics,
             pending_docs: Vec::new_in(scratch),
             depth: 0,
@@ -161,9 +164,28 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
     }
 
     fn push_type(&mut self, ty: TypeExpr<'src, 'ast>) -> TypeExprId {
+        let parts = 1 + match ty {
+            TypeExpr::Atom(_) | TypeExpr::Foreign(_) => 0,
+            TypeExpr::Option(inner) | TypeExpr::Array(inner) => self.type_parts[inner.0],
+            TypeExpr::Record { fields, .. } => fields.iter().map(|(_, ty)| self.type_parts[ty.0]).sum(),
+        };
         let id = TypeExprId(self.types.len());
         self.types.push(ty);
+        self.type_parts.push(parts);
         id
+    }
+
+    /// [`Parser::push_type`] for a type holding others, an error past [`MAX_TYPE_PARTS`].
+    fn push_compound_type(
+        &mut self,
+        ty: TypeExpr<'src, 'ast>,
+        src: &Token<'src>,
+    ) -> Result<TypeExprId, Diagnostic> {
+        let id = self.push_type(ty);
+        if self.type_parts[id.0] > MAX_TYPE_PARTS {
+            return Err(limits::type_too_large(Span::from_token(src)));
+        }
+        Ok(id)
     }
 
     fn finish(self) -> Ast<'src, 'ast> {
@@ -739,6 +761,7 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
             }
             // Optionals: Option<type>
             Type::Option => {
+                let src = self.cur().clone();
                 self.advance()?;
                 self.expect(Type::LessThan)?;
                 if self.cur().t == Type::GreaterThan {
@@ -749,9 +772,10 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
                 }
                 let inner = self.parse_type()?;
                 self.expect(Type::GreaterThan)?;
-                self.push_type(TypeExpr::Option(inner))
+                self.push_compound_type(TypeExpr::Option(inner), &src)?
             }
             Type::Array => {
+                let src = self.cur().clone();
                 self.advance()?;
                 self.expect(Type::LessThan)?;
                 if self.cur().t == Type::GreaterThan {
@@ -762,7 +786,7 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
                 }
                 let inner = self.parse_type()?;
                 self.expect(Type::GreaterThan)?;
-                self.push_type(TypeExpr::Array(inner))
+                self.push_compound_type(TypeExpr::Array(inner), &src)?
             }
             Type::Record => {
                 let src = self.cur().clone();
@@ -777,7 +801,7 @@ impl<'src, 'ast, 's, A: Arena, S: Allocator> Parser<'src, 'ast, 's, A, S> {
                 }
                 self.expect(Type::GreaterThan)?;
                 let fields = self.arena.alloc_slice(fields);
-                self.push_type(TypeExpr::Record { src, fields })
+                self.push_compound_type(TypeExpr::Record { src: src.clone(), fields }, &src)?
             }
             _ => {
                 return Err(Diagnostic::at_token(

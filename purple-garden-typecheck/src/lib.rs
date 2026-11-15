@@ -13,6 +13,7 @@ use purple_garden_frontend::{
     ast::{Ast, Node, NodeId},
     diagnostic::{Diagnostic, Span},
     lex::{self, Token},
+    limits::{self, MAX_TYPE_PARTS},
 };
 use purple_garden_ir::ptype::{Field, Type};
 use purple_garden_runtime::Pkg;
@@ -209,6 +210,16 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
             functions: self.functions,
             diagnostics: self.diagnostics,
         }
+    }
+
+    /// [`Typechecker::set_known`] for a type built from the types of other nodes, which can grow
+    /// past [`MAX_TYPE_PARTS`] without its syntax nesting.
+    fn set_built(&mut self, id: usize, t: Type<'t>, src: &lex::Token) -> TcType {
+        if t.parts_exceed(MAX_TYPE_PARTS) {
+            self.report(limits::type_too_large(Span::from_token(src)));
+            return TcType::Poison;
+        }
+        self.set_known(id, t)
     }
 
     fn set_known(&mut self, id: usize, t: Type<'t>) -> TcType {
@@ -681,6 +692,10 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
         if ret.contains_slot() {
             return TcType::Poison;
         }
+        if ret.parts_exceed(MAX_TYPE_PARTS) {
+            diagnostics.push(limits::type_too_large(Span::from_token(tok)));
+            return TcType::Poison;
+        }
         Self::store_known(map, call_id, ret)
     }
 
@@ -746,9 +761,9 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                 }
 
                 let elem = *self.ty(first);
-                self.set_known(*id, Type::Array(self.arena.alloc(elem)))
+                self.set_built(*id, Type::Array(self.arena.alloc(elem)), src)
             }
-            Node::Record { id, fields, .. } => {
+            Node::Record { id, fields, src } => {
                 let mut typed_fields = Vec::with_capacity_in(fields.len(), self.scratch);
 
                 for (key, value) in *fields {
@@ -766,7 +781,7 @@ impl<'a, 't, B: Arena, S: Allocator> Typechecker<'a, 't, B, S> {
                     });
                 }
 
-                self.set_known(*id, Type::Record(self.arena.alloc_slice(typed_fields)))
+                self.set_built(*id, Type::Record(self.arena.alloc_slice(typed_fields)), src)
             }
             Node::Atom { id, raw } => {
                 let t = purple_garden_frontend::type_from_atom_token_type(&raw.t);

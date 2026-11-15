@@ -3,7 +3,7 @@
 //! with a diagnostic instead of crashing or miscompiling.
 
 use purple_garden::Pg;
-use purple_garden_frontend::limits::MAX_NESTING;
+use purple_garden_frontend::limits::{MAX_NESTING, MAX_TYPE_PARTS};
 use purple_garden_shared::config::Config;
 
 fn configs() -> impl Iterator<Item = Config> {
@@ -15,6 +15,40 @@ fn configs() -> impl Iterator<Item = Config> {
             config
         })
     })
+}
+
+/// Compile and run `source` in every configuration, expecting `expected`.
+fn assert_runs(source: &str, expected: i64) {
+    for config in configs() {
+        let label = format!("O{} no_jit={}", config.opt, config.no_jit);
+        let mut program = Pg::new()
+            .with_stdlib()
+            .config(config)
+            .compile(source.as_bytes())
+            .unwrap_or_else(|err| panic!("{label}: {err}"));
+        let result = program
+            .run_take::<i64>()
+            .unwrap_or_else(|err| panic!("{label}: {err}"));
+        assert_eq!(result, expected, "{label}");
+    }
+}
+
+/// Compiling `source` fails with a diagnostic starting with `message`.
+fn assert_rejected(source: &str, message: &str) {
+    let err = Pg::new()
+        .with_stdlib()
+        .compile(source.as_bytes())
+        .err()
+        .unwrap_or_else(|| panic!("compiled although past a limit"));
+    assert!(
+        err.message.starts_with(message),
+        "expected `{message}`, got `{}`",
+        err.message
+    );
+}
+
+fn list(n: usize, item: impl Fn(usize) -> String) -> String {
+    (0..n).map(item).collect::<Vec<_>>().join(" ")
 }
 
 /// Each shape nests `n` levels of one construct, as a program evaluating to an Int.
@@ -134,4 +168,63 @@ fn nesting_far_past_the_limit_is_rejected() {
             assert!(started.elapsed().as_secs() < 5, "{shape} took {:?}", started.elapsed());
         }
     });
+}
+
+/// A record of `n` Int fields `f0..`, read back by summing every field.
+fn wide_record(n: usize) -> String {
+    format!(
+        "fn id(x:Int) Int {{ x }}
+let r = {{ {} }}
+let copy = {{ inner: r }}
+copy.inner.f0 + copy.inner.f{} * 1000 + copy.inner.f{} * 1000000",
+        list(n, |i| format!("f{i}: id({i})")),
+        n / 2,
+        n - 1,
+    )
+}
+
+/// The widest record has [`MAX_TYPE_PARTS`] parts with the one around it, copying it inline
+/// works, one field more is rejected wherever the type comes from.
+#[test]
+fn types_up_to_the_limit_compile_and_run() {
+    let n = MAX_TYPE_PARTS - 2;
+    let expected = (n / 2) as i64 * 1000 + (n - 1) as i64 * 1_000_000;
+    on_small_stack(move || assert_runs(&wide_record(n), expected));
+    assert_rejected(&wide_record(n + 1), "Type has more than");
+    let fields = list(MAX_TYPE_PARTS, |i| format!("f{i}: Int"));
+    assert_rejected(
+        &format!("fn f(r: Record<{fields}>) Int {{ 1 }}"),
+        "Type has more than",
+    );
+    assert_rejected(
+        &format!("extern \"pkg\" {{ fn f() Array<Record<{fields}>> }}"),
+        "Type has more than",
+    );
+}
+
+/// Types built from bindings grow without their syntax nesting: deeper by one per `let`, or twice
+/// as large. Each is rejected once past the limit, without walking the shared parts again.
+#[test]
+fn types_growing_through_bindings_are_rejected() {
+    let chain = |n: usize, wrap: &dyn Fn(&str) -> String| {
+        let lets = (0..n)
+            .map(|i| format!("let v{} = {}\n", i + 1, wrap(&format!("v{i}"))))
+            .collect::<String>();
+        format!("import \"opt\"\nlet v0 = 1\n{lets}1")
+    };
+    for (shape, wrap) in [
+        ("arrays", &(|v: &str| format!("[{v}]")) as &dyn Fn(&str) -> String),
+        ("records", &|v| format!("{{ a: {v} }}")),
+        ("options", &|v| format!("opt.some({v})")),
+        ("doubling records", &|v| format!("{{ a: {v} b: {v} }}")),
+    ] {
+        let started = std::time::Instant::now();
+        let fits = chain(if shape == "doubling records" { 6 } else { MAX_TYPE_PARTS - 1 }, wrap);
+        Pg::new()
+            .with_stdlib()
+            .compile(fits.as_bytes())
+            .unwrap_or_else(|err| panic!("{shape}: {err}"));
+        assert_rejected(&chain(10_000, wrap), "Type has more than");
+        assert!(started.elapsed().as_secs() < 5, "{shape} took {:?}", started.elapsed());
+    }
 }

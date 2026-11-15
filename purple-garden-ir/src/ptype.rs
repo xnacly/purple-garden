@@ -256,6 +256,25 @@ impl<'t> Type<'t> {
         }
     }
 
+    /// Whether this type has more than `limit` parts: one for itself plus the parts of every type
+    /// it holds, its fields' or its element's. Types share the types they hold, so a type with few
+    /// distinct parts can have exponentially many: counting stops right past `limit`.
+    #[must_use]
+    pub fn parts_exceed(&self, limit: usize) -> bool {
+        fn count(ty: &Type<'_>, left: &mut usize) -> bool {
+            let Some(rest) = left.checked_sub(1) else {
+                return true;
+            };
+            *left = rest;
+            match ty {
+                Type::Option(inner) | Type::Array(inner) => count(inner, left),
+                Type::Record(fields) => fields.iter().any(|field| count(&field.ty, left)),
+                _ => false,
+            }
+        }
+        count(self, &mut { limit })
+    }
+
     /// Runtime payload layout for a value of this type, see [Type] for heap layouts
     pub fn layout(&self) -> Layout {
         Layout::from_size_align(self.size(), self.align()).expect("type layout")
