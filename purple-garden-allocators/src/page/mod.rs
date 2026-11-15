@@ -5,8 +5,6 @@ pub mod mmap;
 use std::alloc::{AllocError, Allocator, Layout};
 use std::ptr::NonNull;
 
-#[cfg(not(miri))]
-use mmap::{MmapFlags, MmapProt};
 
 /// Maps every allocation as its own run of whole pages. Fresh pages are
 /// zeroed and only become resident once touched, so a large allocation costs
@@ -71,15 +69,7 @@ unsafe impl Allocator for PageAlloc {
         // Mappings start on a page; a larger alignment maps the slack in front
         // and returns the unaligned head and the tail behind it.
         let slack = layout.align().saturating_sub(page);
-        let map = mmap::mmap(
-            None,
-            len + slack,
-            MmapProt::READ | MmapProt::WRITE,
-            MmapFlags::PRIVATE | MmapFlags::ANONYMOUS,
-            -1,
-            0,
-        )
-        .map_err(|_| AllocError)?;
+        let map = mmap::map_anonymous(len + slack).map_err(|_| AllocError)?;
         let head = map.as_ptr().align_offset(layout.align());
         // SAFETY: head <= slack, inside the mapping
         let ptr = unsafe { map.add(head) };

@@ -66,7 +66,7 @@ const MAP_ANONYMOUS: i32 = 0x1000;
 
 const MAP_FAILED: *mut c_void = !0usize as *mut c_void;
 
-/// Page permissions passed to [`mmap`] and [`mprotect`].
+/// Page permissions passed to [`mprotect`].
 ///
 /// Not an enum: `READ`, `WRITE`, and `EXEC` can be combined for mappings that
 /// need multiple permissions.
@@ -98,55 +98,18 @@ impl std::ops::BitOr for MmapProt {
     }
 }
 
-/// Mapping flags passed to [`mmap`].
-#[derive(Clone, Copy)]
-pub struct MmapFlags(i32);
-
-impl MmapFlags {
-    /// Changes are private.
-    pub const PRIVATE: Self = Self(MAP_PRIVATE);
-    /// Allocate zero-filled memory not backed by a file.
-    pub const ANONYMOUS: Self = Self(MAP_ANONYMOUS);
-
-    /// Returns the raw platform flag bits.
-    #[must_use]
-    pub fn bits(self) -> i32 {
-        self.0
-    }
-}
-
-impl std::ops::BitOr for MmapFlags {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Self(self.0 | rhs.0)
-    }
-}
-
-#[inline(always)]
-/// Creates a memory mapping and returns its non-null base address.
-///
-/// `ptr` is an optional address hint, `length` is the mapping size in bytes,
-/// `prot` controls page permissions, `flags` controls mapping behavior, and
-/// `fd`/`offset` select the mapped file region. For anonymous mappings, pass
-/// `MmapFlags::ANONYMOUS`, `fd = -1`, and `offset = 0`.
-pub fn mmap(
-    ptr: Option<NonNull<u8>>,
-    length: usize,
-    prot: MmapProt,
-    flags: MmapFlags,
-    fd: i32,
-    offset: i64,
-) -> Result<NonNull<u8>, String> {
-    // SAFETY: no MAP_FIXED, a hint never replaces existing mappings
+/// Maps `length` bytes of fresh, zeroed, private memory, readable and writable, and returns
+/// its page aligned base.
+pub fn map_anonymous(length: usize) -> Result<NonNull<u8>, String> {
+    // SAFETY: no MAP_FIXED, so nothing mapped already is replaced; anonymous, so no file
     let ret = unsafe {
         sys_mmap(
-            ptr.map_or(std::ptr::null_mut(), |ptr| ptr.as_ptr().cast()),
+            std::ptr::null_mut(),
             length,
-            prot.bits(),
-            flags.bits(),
-            fd,
-            offset as OffT,
+            (MmapProt::READ | MmapProt::WRITE).bits(),
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            -1,
+            0,
         )
     };
 
@@ -219,7 +182,7 @@ pub unsafe fn mremap(
 }
 
 #[inline(always)]
-/// Releases a memory mapping created by [`mmap`].
+/// Releases a memory mapping created by [`map_anonymous`].
 ///
 /// # Safety
 ///
@@ -244,20 +207,12 @@ fn os_error(op: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{MmapFlags, MmapProt, mmap, mprotect, munmap};
+    use super::{MmapProt, map_anonymous, mprotect, munmap};
 
     #[test]
     fn anonymous_mapping_is_zeroed_and_writable() {
         let len = 4096;
-        let ptr = mmap(
-            None,
-            len,
-            MmapProt::READ | MmapProt::WRITE,
-            MmapFlags::PRIVATE | MmapFlags::ANONYMOUS,
-            -1,
-            0,
-        )
-        .expect("anonymous mmap");
+        let ptr = map_anonymous(len).expect("anonymous mmap");
 
         // SAFETY: fresh rw mapping of len bytes, zero filled
         let bytes = unsafe { std::slice::from_raw_parts_mut(ptr.as_ptr(), len) };
@@ -276,15 +231,7 @@ mod tests {
     #[cfg_attr(miri, ignore = "Miri has no mprotect")]
     fn mapping_permissions_can_be_changed() {
         let len = 4096;
-        let ptr = mmap(
-            None,
-            len,
-            MmapProt::READ | MmapProt::WRITE,
-            MmapFlags::PRIVATE | MmapFlags::ANONYMOUS,
-            -1,
-            0,
-        )
-        .expect("anonymous mmap");
+        let ptr = map_anonymous(len).expect("anonymous mmap");
 
         // SAFETY: our mapping, unused
         unsafe { mprotect(ptr, len, MmapProt::READ) }.expect("mprotect read-only");
