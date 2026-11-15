@@ -5,6 +5,7 @@ pub mod mmap;
 use std::alloc::{AllocError, Allocator, Layout};
 use std::ptr::NonNull;
 
+#[cfg(not(miri))]
 use mmap::{MmapFlags, MmapProt};
 
 /// Maps every allocation as its own run of whole pages. Fresh pages are
@@ -30,6 +31,36 @@ fn mapped_len(layout: Layout) -> usize {
     layout.size().next_multiple_of(mmap::page_size())
 }
 
+/// Miri models a mapping as one allocation that has to be unmapped whole, the partial unmaps
+/// over-aligned allocations and [`Allocator::shrink`] do are out of its reach. Under Miri the
+/// same contract, whole zeroed pages aligned to at least a page, comes from the global allocator.
+#[cfg(miri)]
+unsafe impl Allocator for PageAlloc {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        if layout.size() == 0 {
+            return Ok(NonNull::slice_from_raw_parts(layout.dangling_ptr(), 0));
+        }
+        let block = std::alloc::Global.allocate_zeroed(miri_layout(layout).ok_or(AllocError)?)?;
+        Ok(NonNull::slice_from_raw_parts(block.cast(), block.len()))
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        if layout.size() != 0 {
+            let layout = miri_layout(layout).expect("allocate made a layout of it");
+            // SAFETY: forwarded from caller, ptr came from Global with this layout
+            unsafe { std::alloc::Global.deallocate(ptr, layout) };
+        }
+    }
+}
+
+/// Every size up to [`mapped_len`] maps to the same block, as for mappings. None where the whole
+/// pages are too large for any allocation.
+#[cfg(miri)]
+fn miri_layout(layout: Layout) -> Option<Layout> {
+    Layout::from_size_align(mapped_len(layout), layout.align().max(mmap::page_size())).ok()
+}
+
+#[cfg(not(miri))]
 unsafe impl Allocator for PageAlloc {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         if layout.size() == 0 {
@@ -202,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(miri)))]
     fn zeroed_allocations_stay_untouched() {
         let layout = Layout::from_size_align(64 << 20, 8).unwrap();
         let block = PageAlloc {}.allocate_zeroed(layout).unwrap();

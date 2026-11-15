@@ -22,9 +22,10 @@ unsafe extern "C" {
     /// Releases a mapping created by `mmap(2)` using the platform C ABI.
     #[link_name = "munmap"]
     fn sys_munmap(addr: *mut c_void, len: usize) -> i32;
-    /// Size of a page in bytes, see `getpagesize(3)`.
-    #[link_name = "getpagesize"]
-    fn sys_getpagesize() -> i32;
+    /// Configuration values like the page size, see `sysconf(3)`. POSIX, unlike the legacy
+    /// `getpagesize(3)`, and shimmed by Miri.
+    #[link_name = "sysconf"]
+    fn sys_sysconf(name: i32) -> std::ffi::c_long;
     /// Advises the kernel how a mapping will be used, see `madvise(2)`.
     #[cfg(target_os = "linux")]
     #[link_name = "madvise"]
@@ -51,6 +52,12 @@ const MADV_NOHUGEPAGE: i32 = 15;
 const MAP_PRIVATE: i32 = 0x0002;
 #[cfg(target_os = "linux")]
 const MAP_ANONYMOUS: i32 = 0x0020;
+
+#[cfg(target_os = "linux")]
+const SC_PAGESIZE: i32 = 30;
+
+#[cfg(target_os = "macos")]
+const SC_PAGESIZE: i32 = 29;
 
 #[cfg(target_os = "macos")]
 const MAP_PRIVATE: i32 = 0x0002;
@@ -182,8 +189,12 @@ pub fn no_huge_pages(ptr: NonNull<u8>, length: usize) -> Result<(), String> {
 /// Size of a page in bytes, mappings are made of whole pages.
 #[must_use]
 pub fn page_size() -> usize {
-    // SAFETY: getpagesize has no preconditions
-    unsafe { sys_getpagesize() as usize }
+    // SAFETY: sysconf has no preconditions
+    let size = unsafe { sys_sysconf(SC_PAGESIZE) };
+    usize::try_from(size)
+        .ok()
+        .filter(|size| size.is_power_of_two())
+        .expect("sysconf(_SC_PAGESIZE) is a power of two")
 }
 
 /// Grows or shrinks the mapping at `ptr` to `new_len` bytes, moving it if it can't be resized in
@@ -262,6 +273,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri has no mprotect")]
     fn mapping_permissions_can_be_changed() {
         let len = 4096;
         let ptr = mmap(
