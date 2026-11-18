@@ -25,7 +25,7 @@ use encode::{
     Cond, Insn, R8, R9, R10, R11, R12, R13, R14, R15, RAX, RBP, RBX, RCX, RDI, RDX, RSI, RSP, Reg,
     patch_rel32,
 };
-use purple_garden_ir::{self as ir, BinOp, UnOp};
+use purple_garden_ir::{self as ir, BinOp, Check, UnOp, ptype};
 use purple_garden_runtime::{BuiltinFn, Value, string};
 
 /// Bail out of [`compile_func`] (returning `None`) and, under the `trace`
@@ -1683,6 +1683,59 @@ impl<'a, 'ir, F: Allocator, S: Allocator + Clone, N: Allocator> Lowering<'a, 'ir
                     }
                 };
                 self.emit(insn);
+            }
+            ir::Instr::Index { dst, base, idx, .. } => {
+                let ptype::Type::Ptr(element) = dst.ty else {
+                    unreachable!("Index yields a Ptr to the element, got {}", dst.ty);
+                };
+                let spacing_between_elements = element.layout().pad_to_align().size();
+                let base = self.ensure_register(*base);
+                let base = self.gpr(base);
+                let idx = self.ensure_register(*idx);
+                let idx = self.gpr(idx);
+
+                // idx-len
+                self.emit(Insn::CmpMem {
+                    reg: idx,
+                    base,
+                    offset: 0,
+                });
+                // idx < u(len)
+                let fine = encode::jump(self.out, Cond::Below);
+                self.call(
+                    purple_garden_runtime::jit_trap_assert as *const () as u64,
+                    &[AbiArg::Reg(VM), AbiArg::Imm(Check::InBounds as u64)],
+                    None,
+                );
+                let resume = self.out.len();
+                patch_rel32(self.out, fine, fine + 4, resume).expect("short forward jmp");
+
+                let dst = self.def(dst);
+                let dst = self.gpr(dst);
+                if spacing_between_elements.is_power_of_two() && spacing_between_elements <= 8 {
+                    // lea dst, [base + idx*spacing_between_elements + 8]
+                    self.emit(Insn::LeaScaled {
+                        dst,
+                        base,
+                        index: idx,
+                        scale: spacing_between_elements.trailing_zeros() as u8,
+                        disp: 8,
+                    });
+                } else {
+                    // imul rax, idx, stride ; lea dst, [base + rax + 8]
+                    self.emit(Insn::ImulImm {
+                        dst: GPR_SCRATCH,
+                        src: idx,
+                        imm: spacing_between_elements as i32,
+                    });
+                    self.emit(Insn::LeaScaled {
+                        dst,
+                        base,
+                        index: GPR_SCRATCH,
+                        scale: 0,
+                        disp: 8,
+                    });
+                }
             }
             _ => bail!(self, "unsupported instruction {i:?}"),
         }
