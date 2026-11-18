@@ -82,6 +82,7 @@ impl<const B: bool> Handlers<B> {
             Tag::Store => rru16::store::<B>,
             Tag::Load => rru16::load::<B>,
             Tag::AddrOf => rru16::addr_of::<B>,
+            Tag::Idx => rrri11::idx::<B>,
             Tag::Ret => ret::<B>,
             Tag::Assert => ru21::assert::<B>,
             Tag::Halt => halt::<B>,
@@ -137,6 +138,7 @@ mod rr;
 mod rri16;
 mod rrk1u15;
 mod rrr;
+mod rrri11;
 mod rrt16;
 mod rru16;
 mod rt16;

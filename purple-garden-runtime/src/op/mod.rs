@@ -393,6 +393,16 @@ ops! {
         base: u8,
         offset: u16,
     },
+    /// `r[dst] = r[target] + 8 + r[idx] * stride`, the address of element idx. Traps with
+    /// [`crate::Anomaly::IndexOutOfBounds`] unless `0 <= r[idx] < len`, len being the array's first
+    /// word.
+    Idx {
+        dst: u8,
+        target: u8,
+        idx: u8,
+        /// distance between elements of array, so addr = arr + 8 + idx * stride
+        stride: u16,
+    },
     Ret,
     /// Trap with [`crate::Anomaly::AssertionFailed`] when `cond` is false.
     Assert {

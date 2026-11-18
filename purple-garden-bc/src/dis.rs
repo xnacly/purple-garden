@@ -360,6 +360,12 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                 Op::AddrOf { dst, base, offset } => {
                     format!("addrof r{dst}, r{base}, #{offset}")
                 }
+                Op::Idx {
+                    dst,
+                    target,
+                    idx,
+                    stride,
+                } => format!("idx r{dst}, r{target}, r{idx}, #{stride}"),
                 Op::Ret => "ret".into(),
                 Op::Halt => "halt".into(),
                 Op::CastToBool { dst, src } => {

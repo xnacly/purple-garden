@@ -74,6 +74,7 @@ Each class has a `Packed` method returning its fields and a module in
 | `r`        | `r[10:6]`                                | `Push`, `Pop`, `Assert`                    |
 | `rr`       | `r[10:6] r[15:11]`                       | `Mov`, `Push2`, `Pop2`, `CastTo*`          |
 | `rrr`      | `r[10:6] r[15:11] r[20:16]`              | int, double and eq binops, `Push3`, `Pop3` |
+| `rrri11`   | `r[10:6] r[15:11] r[20:16] u11[31:21]`   | `Idx`, u11 is the element stride           |
 | `rri16`    | `r[10:6] r[15:11] i16[31:16]`            | int binops with imm                        |
 | `ri21`     | `r[10:6] i21[31:11]`                     | `LoadI`                                    |
 | `ru21`     | `r[10:6] u21[31:11]`                     | `LoadG`, `LoadSlot`, `StoreSlot`           |
@@ -151,11 +152,12 @@ Each class has a `Packed` method returning its fields and a module in
 |        `0x37` | `Store`        | `rru16`    | `src, base, offset16u`                                                                             |
 |        `0x38` | `Load`         | `rru16`    | `rd, base, offset16u`                                                                              |
 |        `0x39` | `AddrOf`       | `rru16`    | `rd, base, offset16u`                                                                              |
-|        `0x3a` | `Ret`          | -          |                                                                                                    |
-|        `0x3b` | `Assert`       | `r`        | `cond`                                                                                             |
-|        `0x3c` | `Halt`         | -          | `bc::Cc::finalize` appends it, the vm stops on it                                                  |
-|        `0x3d` | `Nop`          | -          |                                                                                                    |
-| `0x3e`-`0x3f` | -              |            | reserved                                                                                           |
+|        `0x3a` | `Idx`          | `rrri11`   | `rd, target, idx, stride11u`, `rd = target + 8 + idx*stride`, traps unless `0 <= idx < len`        |
+|        `0x3b` | `Ret`          | -          |                                                                                                    |
+|        `0x3c` | `Assert`       | `r`        | `cond`                                                                                             |
+|        `0x3d` | `Halt`         | -          | `bc::Cc::finalize` appends it, the vm stops on it                                                  |
+|        `0x3e` | `Nop`          | -          |                                                                                                    |
+|        `0x3f` | -              |            | reserved                                                                                           |
 
 ### Decoding
 

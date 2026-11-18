@@ -42,6 +42,12 @@ impl Packed {
     }
 
     #[inline(always)]
+    pub fn rrri11(self) -> (u8, u8, u8, u16) {
+        let (r1, r2, r3) = self.rrr();
+        (r1, r2, r3, (self.0 >> 21) as u16)
+    }
+
+    #[inline(always)]
     pub fn rri16(self) -> (u8, u8, i16) {
         let (r1, r2) = self.rr();
         (r1, r2, (self.0 as i32 >> 16) as i16)
@@ -131,6 +137,7 @@ impl Packed {
 /// r        := r5
 /// rr       := r5 r5
 /// rrr      := r5 r5 r5
+/// rrri11   := r5 r5 r5 imm11
 /// rri16    := dst5 lhs5 imm16
 /// ri21     := dst5 imm21
 /// ru21     := r5 idx21
@@ -161,6 +168,9 @@ macro_rules! encode_packed {
     };
     (rrr,$r1:expr,$r2:expr,$r3:expr) => {
         ($r1 as u32) << 6 | ($r2 as u32) << 11 | ($r3 as u32) << 16
+    };
+    (rrri11,$r1:expr,$r2:expr,$r3:expr,$imm:expr) => {
+        encode_packed!(rrr, $r1, $r2, $r3) | ($imm as u32) << 21
     };
     (rri16,$r1:expr,$r2:expr,$imm:expr) => {
         ($r1 as u32) << 6 | ($r2 as u32) << 11 | ($imm as u32) << 16
@@ -369,6 +379,14 @@ impl super::Op {
                         idx,
                         returns_double,
                     } => encode_packed!(u16k1, idx, returns_double),
+
+                    // rrri11
+                    crate::op::Op::Idx {
+                        dst,
+                        target,
+                        idx,
+                        stride,
+                    } => encode_packed!(rrri11, dst, target, idx, stride),
                 },
         )
     }
@@ -384,6 +402,16 @@ mod tests {
     #[test]
     fn decodes_every_class() {
         let enc = Op::encode;
+        assert_eq!(
+            enc(Op::Idx {
+                dst: 1,
+                target: 2,
+                idx: 31,
+                stride: 2047
+            })
+            .rrri11(),
+            (1, 2, 31, 2047)
+        );
         assert_eq!(enc(Op::Push { src: 31 }).r(), 31);
         assert_eq!(enc(Op::Mov { dst: 1, src: 2 }).rr(), (1, 2));
         assert_eq!(
