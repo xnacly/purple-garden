@@ -1,0 +1,30 @@
+# Sums an array literal in a tight recursive loop. Every xs.[i] carries a bounds
+# check, so this shows what indexing costs on both backends.
+import "testing"
+
+#! acc plus xs.[j] for j in [i, 32).
+fn sweep(xs:Array<Int> i:Int acc:Int) Int {
+    match {
+        i == 32 { acc }
+        { sweep(xs i + 1 acc + xs.[i]) }
+    }
+}
+
+#! Sum of k sweeps.
+fn rounds(xs:Array<Int> k:Int acc:Int) Int {
+    match {
+        k == 0 { acc }
+        { rounds(xs k - 1 acc + sweep(xs 0 0)) }
+    }
+}
+
+#! b blocks of 2000 rounds, nested so the recursion stays shallow without tail calls (O0).
+fn blocks(xs:Array<Int> b:Int acc:Int) Int {
+    match {
+        b == 0 { acc }
+        { blocks(xs b - 1 acc + rounds(xs 2000 0)) }
+    }
+}
+
+let xs = [11 48 85 21 58 95 31 68 4 41 78 14 51 88 24 61 98 34 71 7 44 81 17 54 91 27 64 0 37 74 10 47]
+testing.assert(blocks(xs 100 0) == 306800000)
