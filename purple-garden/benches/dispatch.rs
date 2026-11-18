@@ -1,5 +1,5 @@
 use criterion::{BatchSize, Criterion};
-use purple_garden_runtime::{DEFAULT_STACK_SIZE, Vm, VmConfig, op::Op};
+use purple_garden_runtime::{Check, DEFAULT_STACK_SIZE, Vm, VmConfig, gc::AllocType, op::Op};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 mod common;
@@ -31,38 +31,59 @@ pub fn bench_uniform_dispatch(c: &mut Criterion) {
     });
 }
 
-/// benchmark virtual machine dispatch with random ops
+/// benchmark virtual machine dispatch with random non control flow ops
 pub fn bench_random_dispatch(c: &mut Criterion) {
+    // r0 = 1, r1 = 2, r2 = scratch, r3 = two word array, r4 = true, r5 = 1.0, r6 = 2.0, one
+    // spilled slot
+    const SETUP: &[Op] = &[
+        Op::LoadI { dst: 0, value: 1 },
+        Op::LoadI { dst: 1, value: 2 },
+        Op::Alloc {
+            dst: 3,
+            kind: AllocType::Array,
+            size: 16,
+            align: 8,
+        },
+        Op::Store {
+            base: 3,
+            offset: 0,
+            src: 0,
+        },
+        Op::LoadI { dst: 4, value: 1 },
+        Op::CastToDouble { dst: 5, src: 0 },
+        Op::CastToDouble { dst: 6, src: 1 },
+        Op::Push { src: 0 },
+    ];
     const RANDOM_OPS: &[Op] = &[
         Op::IAdd {
             dst: 2,
             lhs: 0,
-            rhs: 0,
+            rhs: 1,
         },
         Op::ISub {
             dst: 2,
             lhs: 0,
-            rhs: 0,
+            rhs: 1,
         },
         Op::IMul {
             dst: 2,
             lhs: 0,
-            rhs: 0,
+            rhs: 1,
         },
-        Op::DAdd {
+        Op::IDiv {
             dst: 2,
             lhs: 0,
-            rhs: 0,
+            rhs: 1,
         },
-        Op::DSub {
+        Op::IMod {
             dst: 2,
             lhs: 0,
-            rhs: 0,
+            rhs: 1,
         },
-        Op::DMul {
+        Op::IAnd {
             dst: 2,
             lhs: 0,
-            rhs: 0,
+            rhs: 1,
         },
         Op::ILt {
             dst: 2,
@@ -72,28 +93,124 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
         Op::IGt {
             dst: 2,
             lhs: 0,
-            rhs: 0,
-        },
-        Op::DLt {
-            dst: 2,
-            lhs: 0,
-            rhs: 0,
-        },
-        Op::DGt {
-            dst: 2,
-            lhs: 0,
-            rhs: 0,
+            rhs: 1,
         },
         Op::IEq {
             dst: 2,
             lhs: 0,
-            rhs: 0,
+            rhs: 1,
+        },
+        Op::IAddI {
+            dst: 2,
+            lhs: 0,
+            imm: 1,
+        },
+        Op::ISubI {
+            dst: 2,
+            lhs: 0,
+            imm: 1,
+        },
+        Op::IMulI {
+            dst: 2,
+            lhs: 0,
+            imm: 8,
+        },
+        Op::IDivI {
+            dst: 2,
+            lhs: 0,
+            imm: 2,
+        },
+        Op::IModI {
+            dst: 2,
+            lhs: 0,
+            imm: 3,
+        },
+        Op::IAndI {
+            dst: 2,
+            lhs: 0,
+            imm: 1,
+        },
+        Op::IEqI {
+            dst: 2,
+            lhs: 0,
+            imm: 1,
+        },
+        Op::IGtI {
+            dst: 2,
+            lhs: 0,
+            imm: -1,
+        },
+        Op::ILtI {
+            dst: 2,
+            lhs: 0,
+            imm: 32,
+        },
+        Op::DAdd {
+            dst: 2,
+            lhs: 5,
+            rhs: 6,
+        },
+        Op::DSub {
+            dst: 2,
+            lhs: 5,
+            rhs: 6,
+        },
+        Op::DMul {
+            dst: 2,
+            lhs: 5,
+            rhs: 6,
+        },
+        Op::DDiv {
+            dst: 2,
+            lhs: 5,
+            rhs: 6,
+        },
+        Op::DLt {
+            dst: 2,
+            lhs: 5,
+            rhs: 6,
+        },
+        Op::DGt {
+            dst: 2,
+            lhs: 5,
+            rhs: 6,
+        },
+        Op::DLe {
+            dst: 2,
+            lhs: 5,
+            rhs: 6,
+        },
+        Op::DGe {
+            dst: 2,
+            lhs: 5,
+            rhs: 6,
         },
         Op::Mov { dst: 2, src: 0 },
         Op::LoadI { dst: 2, value: 0 },
-        Op::CastToInt { dst: 2, src: 0 },
+        Op::CastToInt { dst: 2, src: 5 },
         Op::CastToDouble { dst: 2, src: 0 },
         Op::CastToBool { dst: 2, src: 0 },
+        Op::Load {
+            dst: 2,
+            base: 3,
+            offset: 8,
+        },
+        Op::Store {
+            base: 3,
+            offset: 8,
+            src: 0,
+        },
+        Op::AddrOf {
+            dst: 2,
+            base: 3,
+            offset: 8,
+        },
+        Op::Assert {
+            cond: 4,
+            check: Check::InBounds,
+        },
+        Op::LoadSlot { dst: 2, slot: 0 },
+        Op::StoreSlot { slot: 0, src: 0 },
         Op::Nop,
     ];
 
@@ -101,10 +218,9 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let mut bc = Vec::with_capacity(OP_CODE_SIZE + 1);
-                bc.push(Op::LoadI { dst: 0, value: 1 });
-                bc.push(Op::LoadI { dst: 1, value: 2 });
+                bc.extend_from_slice(SETUP);
                 let mut rng = StdRng::seed_from_u64(0);
-                for _ in 2..OP_CODE_SIZE {
+                for _ in SETUP.len()..OP_CODE_SIZE {
                     let idx = rng.random_range(0..RANDOM_OPS.len());
                     bc.push(RANDOM_OPS[idx]);
                 }
@@ -113,7 +229,7 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
                 vm.bytecode = bc.into_iter().map(Op::encode).collect();
                 vm
             },
-            |mut vm| vm.run::<false>(&[]),
+            |mut vm| vm.run::<false>(&[]).unwrap(),
             BatchSize::LargeInput,
         );
     });
