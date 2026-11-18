@@ -1243,6 +1243,29 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                     offset: u16::try_from(*offset).expect("record offset past Op::AddrOf's"),
                 });
             }
+            ir::Instr::Index {
+                dst: TypeId { id, ty },
+                base,
+                idx,
+                ..
+            } => {
+                let ptype::Type::Ptr(element) = ty else {
+                    unreachable!("Index yields a Ptr to the element, got {ty}");
+                };
+                let dst = self.def_register(*id);
+                let target = self.ensure_register(*base);
+                let idx = self.ensure_register(*idx);
+                let stride = u16::try_from(element.layout().pad_to_align().size())
+                    .ok()
+                    .filter(|&stride| stride < 1 << 11)
+                    .expect("array element past Op::Idx's 11 bit stride");
+                self.emit(Op::Idx {
+                    dst,
+                    target,
+                    idx,
+                    stride,
+                });
+            }
             ir::Instr::Alloc {
                 dst: TypeId { id, ty },
                 layout,

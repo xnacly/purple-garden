@@ -61,6 +61,9 @@ impl Display for Instr<'_> {
             Instr::AddrOf {
                 dst, base, offset, ..
             } => write!(f, "%v{dst} = AddrOf %v{}+{}", base, offset)?,
+            Instr::Index { dst, base, idx, .. } => {
+                write!(f, "%v{dst} = Index %v{}, %v{}", base, idx)?
+            }
             Instr::Alloc { dst, layout, .. } => write!(
                 f,
                 "%v{} = Alloc {}(size={},align={})",

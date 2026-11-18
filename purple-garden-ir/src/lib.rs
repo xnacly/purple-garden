@@ -261,6 +261,15 @@ pub enum Instr<'i> {
         offset: u32,
         span: u32,
     },
+    /// `dst = &base.[idx]`, traps with [`Check::InBounds`] unless `0 <= idx < len`, len being the
+    /// array's first word. `dst` is a `Ptr<T>` to `base + 8 + idx * stride`, the stride is the
+    /// padded size of T. Reading the element is a [`Instr::Load`] or [`Instr::AddrOf`] on `dst`.
+    Index {
+        dst: TypeId<'i>,
+        base: Id,
+        idx: Id,
+        span: u32,
+    },
     /// `dst` is the value of the entry whose key equals `subject`, else
     /// `default`: a switch whose arms only return constants.
     Lookup {
@@ -304,6 +313,11 @@ impl Instr<'_> {
                 f(&mut dst.id);
                 f(base);
             }
+            Instr::Index { dst, base, idx, .. } => {
+                f(&mut dst.id);
+                f(base);
+                f(idx);
+            }
             Instr::Store { src, base, .. } => {
                 f(src);
                 f(base);
@@ -324,6 +338,7 @@ impl Instr<'_> {
             Instr::Store { span, .. }
             | Instr::Load { span, .. }
             | Instr::AddrOf { span, .. }
+            | Instr::Index { span, .. }
             | Instr::Bin { span, .. }
             | Instr::Alloc { span, .. }
             | Instr::BinImm { span, .. }
@@ -620,6 +635,7 @@ impl Func<'_> {
             Instr::Alloc { dst, .. }
             | Instr::Load { dst, .. }
             | Instr::AddrOf { dst, .. }
+            | Instr::Index { dst, .. }
             | Instr::Bin { dst, .. }
             | Instr::BinImm { dst, .. }
             | Instr::Un { dst, .. }
@@ -676,6 +692,10 @@ impl<A: Allocator> Func<'_, A> {
                 f(*base);
             }
             Instr::Load { base, .. } | Instr::AddrOf { base, .. } => f(*base),
+            Instr::Index { base, idx, .. } => {
+                f(*base);
+                f(*idx);
+            }
             Instr::LoadConst { .. } | Instr::Noop | Instr::Alloc { .. } => {}
         }
     }
@@ -782,6 +802,10 @@ impl<A: Allocator> Func<'_, A> {
                         replace(base);
                     }
                     Instr::Load { base, .. } | Instr::AddrOf { base, .. } => replace(base),
+                    Instr::Index { base, idx, .. } => {
+                        replace(base);
+                        replace(idx);
+                    }
                     Instr::Call { .. }
                     | Instr::Sys { .. }
                     | Instr::LoadConst { .. }
@@ -1022,6 +1046,12 @@ mod tests {
                 offset: 0,
                 span: 0,
             },
+            Instr::Index {
+                dst: id(22),
+                base: Id(23),
+                idx: Id(24),
+                span: 0,
+            },
             Instr::Lookup {
                 dst: id(20),
                 subject: Id(21),
@@ -1114,6 +1144,12 @@ mod tests {
                 dst: type_id(206),
                 base: v(),
                 offset: 0,
+                span: 0,
+            },
+            Instr::Index {
+                dst: type_id(207),
+                base: v(),
+                idx: v(),
                 span: 0,
             },
         ];

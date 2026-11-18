@@ -85,9 +85,9 @@ pub enum Type<'t> {
     /// Foreign<player> in the typesystem, meaning functions defined on the former can not be
     /// called on the latter, resulting in a type error
     Foreign(&'t str),
-    /// An address inside a heap object, such as an array element's. Only the lowering produces
-    /// it, garden code can't name it.
-    Ptr,
+    /// The address of a T inside a heap object, such as an array element's. Only the lowering
+    /// produces it, garden code can't name it.
+    Ptr(&'t Type<'t>),
     /// Slot is part of the generic implementation for purple garden, at type checking time this is
     /// just an identifier denoting the slot to be replaced with a concrete type, for instance an
     /// optional over a generic is represented as Option(Slot("T"))
@@ -245,6 +245,7 @@ impl<'t> Type<'t> {
         match *self {
             Self::Option(inner) => Type::Option(arena.alloc(inner.copy_in(arena))),
             Self::Array(inner) => Type::Array(arena.alloc(inner.copy_in(arena))),
+            Self::Ptr(inner) => Type::Ptr(arena.alloc(inner.copy_in(arena))),
             Self::Record(fields) => {
                 Type::Record(arena.alloc_slice(fields.iter().map(|field| Field {
                     name: field.name,
@@ -275,7 +276,7 @@ impl<'t> Type<'t> {
             | Type::Option(_)
             | Type::Array(_)
             | Type::Foreign(_)
-            | Type::Ptr => WORD_SIZE,
+            | Type::Ptr(_) => WORD_SIZE,
         }
     }
 
@@ -335,7 +336,7 @@ impl Display for Type<'_> {
             Type::Double => write!(f, "Double"),
             Type::Str => write!(f, "Str"),
             Type::Foreign(id) => write!(f, "Foreign<{id}>"),
-            Type::Ptr => write!(f, "Ptr"),
+            Type::Ptr(inner) => write!(f, "Ptr<{inner}>"),
             Type::Option(inner) => write!(f, "Option<{inner}>"),
             Type::Array(inner) => write!(f, "Array<{inner}>"),
             Type::Record(fields) => {

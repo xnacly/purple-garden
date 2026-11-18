@@ -18,8 +18,7 @@ use crate::{
     lex::{self, Token, Type},
 };
 use purple_garden_ir::{
-    BinOp, Block, Check, Const, EMPTY_PARAMS, Func, Id, Instr, ParamsId, Terminator, TypeId, UnOp,
-    ptype,
+    BinOp, Block, Const, EMPTY_PARAMS, Func, Id, Instr, ParamsId, Terminator, TypeId, ptype,
 };
 use purple_garden_runtime::Pkg;
 use purple_garden_std as pstd;
@@ -469,69 +468,24 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
                 Some(self.field(ty, base, offset, name.start as u32))
             }
             Node::Index {
-                id,
-                src,
-                target,
-                index,
+                src, target, index, ..
             } => {
-                use ptype::Type::{Bool, Int, Void};
                 let span = src.start as u32;
+                let ptype::Type::Array(element) =
+                    self.types.get(ast.value_id(*target)).cloned().unwrap()
+                else {
+                    unreachable!("the typechecker only lets arrays be indexed");
+                };
                 let base = self.lower_node(ast, *target)?.unwrap();
                 let idx = self.lower_node(ast, *index)?.unwrap();
-                let ty = self.types.get(*id).cloned().unwrap();
-
-                // the length is the array's first word, see the Array lowering
-                let len = self.value(Int, |dst| Instr::Load {
+                // the element is read through its address, like a record field
+                let ptr = self.value(ptype::Type::Ptr(element), |dst| Instr::Index {
                     dst,
                     base,
-                    offset: 0,
+                    idx,
                     span,
                 });
-                let minus_one = self.value(Int, |dst| Instr::LoadConst {
-                    dst,
-                    value: Const::Int(-1),
-                    span,
-                });
-                for (op, rhs) in [(BinOp::IGt, minus_one), (BinOp::ILt, len)] {
-                    let holds = self.value(Bool, |dst| Instr::Bin {
-                        op,
-                        dst,
-                        lhs: idx,
-                        rhs,
-                        span,
-                    });
-                    self.value(Void, |dst| Instr::Un {
-                        op: UnOp::Assert(Check::InBounds),
-                        dst,
-                        src: holds,
-                        span,
-                    });
-                }
-
-                // the element is a field at a computed offset, laid out like the Array lowering
-                let word_size = std::mem::size_of::<purple_garden_runtime::Value>();
-                let header = align_up(word_size, ty.align()) as u32;
-                let stride = align_up(ty.size(), ty.align()) as i64;
-                let stride = self.value(Int, |dst| Instr::LoadConst {
-                    dst,
-                    value: Const::Int(stride),
-                    span,
-                });
-                let offset = self.value(Int, |dst| Instr::Bin {
-                    op: BinOp::IMul,
-                    dst,
-                    lhs: idx,
-                    rhs: stride,
-                    span,
-                });
-                let element = self.value(ptype::Type::Ptr, |dst| Instr::Bin {
-                    op: BinOp::IAdd,
-                    dst,
-                    lhs: base,
-                    rhs: offset,
-                    span,
-                });
-                Some(self.field(ty, element, header, span))
+                Some(self.field(*element, ptr, 0, span))
             }
             Node::Bin { op, lhs, rhs, id } => {
                 use BinOp::{
