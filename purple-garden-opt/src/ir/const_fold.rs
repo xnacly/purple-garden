@@ -374,6 +374,65 @@ fn try_const_fold<S: Allocator>(
             };
             true
         }
+        // a constant index below the stored length needs no bounds check, the element is a field
+        // at a known offset, addrof_fold and load_store_fold take it from there
+        Instr::Index {
+            dst,
+            base,
+            idx,
+            span,
+        } => {
+            let Some(Const::Int(idx)) = scratch
+                .const_def(*idx)
+                .and_then(|def| const_value(previous, def))
+            else {
+                return false;
+            };
+            // the length is the array's first word, stored once by its initialisation
+            let Some(Const::Int(len)) = previous
+                .iter()
+                .find_map(|instr| match instr {
+                    Instr::Store {
+                        src,
+                        base: stored,
+                        offset: 0,
+                        ..
+                    } if stored == base => Some(*src),
+                    _ => None,
+                })
+                .and_then(|src| scratch.const_def(src))
+                .and_then(|def| const_value(previous, def))
+            else {
+                return false;
+            };
+            // out of bounds stays an Index, trapping at runtime
+            if !(0..*len).contains(idx) {
+                return false;
+            }
+            let Type::Ptr(element) = dst.ty else {
+                unreachable!("Index yields a Ptr to the element, got {}", dst.ty);
+            };
+            let stride = element.layout().pad_to_align().size() as i64;
+            let Some(offset) = idx
+                .checked_mul(stride)
+                .and_then(|offset| u32::try_from(offset + 8).ok())
+            else {
+                return false;
+            };
+
+            purple_garden_shared::trace!(
+                "[opt::ir::const_fold] folded Index %v{} into %v{}+{offset}",
+                dst.id.0,
+                base.0
+            );
+            *instr = Instr::AddrOf {
+                dst: dst.clone(),
+                base: *base,
+                offset,
+                span: *span,
+            };
+            true
+        }
         // we specifically dont care about BinImm, since imm_fold produces them and runs AFTER this
         // pass
         _ => false,
@@ -500,6 +559,102 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// `%v0 = Alloc; %v1 = len; Store %v0+0, %v1; %v2 = idx; %v3 = Index %v0, %v2`, the Index
+    /// after const_fold. Without `len` nothing is stored, the length is unknown.
+    fn folded_index(len: Option<i64>, idx: i64, element: Type<'static>) -> Instr<'static> {
+        let element: &'static Type<'static> = Box::leak(Box::new(element));
+        let mut fun = ir::Func::new("f", Id(0), vec![], Some(Type::Ptr(element)));
+        let params = fun.intern_params(vec![]);
+        let mut instructions = vec![Instr::Alloc {
+            dst: TypeId {
+                id: Id(0),
+                ty: Type::Array(element),
+            },
+            layout: std::alloc::Layout::from_size_align(64, 8).unwrap(),
+            span: 0,
+        }];
+        if let Some(len) = len {
+            instructions.push(Instr::LoadConst {
+                dst: int(1),
+                value: Const::Int(len),
+                span: 0,
+            });
+            instructions.push(Instr::Store {
+                src: Id(1),
+                base: Id(0),
+                offset: 0,
+                span: 0,
+            });
+        }
+        instructions.push(Instr::LoadConst {
+            dst: int(2),
+            value: Const::Int(idx),
+            span: 0,
+        });
+        instructions.push(Instr::Index {
+            dst: TypeId {
+                id: Id(3),
+                ty: Type::Ptr(element),
+            },
+            base: Id(0),
+            idx: Id(2),
+            span: 0,
+        });
+        fun.blocks = vec![Block {
+            tombstone: false,
+            id: Id(0),
+            params,
+            instructions,
+            term: Some(Terminator::Return {
+                value: Some(Id(3)),
+                span: 0,
+            }),
+        }];
+        const_fold(&mut fun, &mut Scratch::default());
+        fun.blocks[0].instructions.last().unwrap().clone()
+    }
+
+    #[test]
+    fn folds_a_constant_index_in_bounds_into_addrof() {
+        assert!(matches!(
+            folded_index(Some(3), 2, Type::Int),
+            Instr::AddrOf {
+                base: Id(0),
+                offset: 24,
+                ..
+            }
+        ));
+        // the stride is the padded record size
+        let record = Type::Record(Box::leak(Box::new([
+            ir::ptype::Field {
+                name: "x",
+                ty: Type::Int,
+            },
+            ir::ptype::Field {
+                name: "y",
+                ty: Type::Double,
+            },
+        ])));
+        assert!(matches!(
+            folded_index(Some(3), 1, record),
+            Instr::AddrOf {
+                base: Id(0),
+                offset: 24,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn keeps_an_index_out_of_bounds_or_of_unknown_length() {
+        for (len, idx) in [(Some(3), 3), (Some(3), -1), (None, 0)] {
+            assert!(
+                matches!(folded_index(len, idx, Type::Int), Instr::Index { .. }),
+                "len {len:?} idx {idx}"
+            );
+        }
     }
 
     #[test]
