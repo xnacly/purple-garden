@@ -128,6 +128,15 @@ pub enum Insn {
         base: Reg,
         offset: u32,
     },
+    /// `lea r{dst}, [r{base} + r{index}*(1 << scale) + disp]`; the address of an array element.
+    /// `index` can't be rsp, its SIB encoding means no index.
+    LeaScaled {
+        dst: Reg,
+        base: Reg,
+        index: Reg,
+        scale: u8,
+        disp: u8,
+    },
     /// `mov r{dst}, r{src}`
     Mov {
         dst: Reg,
@@ -587,6 +596,14 @@ impl Insn {
             }
             // REX.W 0x8b /r = `mov r64, r/m64`, same SIB form with scale=11 (*8).
             Insn::LoadScaled8 { dst, base, index } => scaled(code, 0x8b, 0b11, dst, base, index),
+            // REX.W 0x8d /r = `lea r64, m`, see [`scaled_disp8`].
+            Insn::LeaScaled {
+                dst,
+                base,
+                index,
+                scale,
+                disp,
+            } => scaled_disp8(code, 0x8d, scale, dst, base, index, disp),
             // 0xff /4 = `jmp r/m64`, the indirect sibling of `call r/m64`.
             Insn::JmpReg { reg } => {
                 if reg.0 >= 8 {
@@ -827,6 +844,24 @@ fn scaled<A: Allocator>(
     if mode == 0x40 {
         code.push(0);
     }
+}
+
+/// `opcode r64, [base + index*(1 << scale) + disp]`, the [`scaled`] SIB form with mod=01 and a
+/// disp8, which also covers rbp/r13 bases.
+fn scaled_disp8<A: Allocator>(
+    code: &mut Vec<u8, A>,
+    opcode: u8,
+    scale: u8,
+    dst: Reg,
+    base: Reg,
+    index: Reg,
+    disp: u8,
+) {
+    debug_assert!(scale < 4, "a SIB scale is 1, 2, 4 or 8, got 1 << {scale}");
+    debug_assert_ne!(index.0, RSP.0, "a SIB index of rsp means no index");
+    let rex = rex(dst.0, base.0) | (u8::from(index.0 >= 8) << 1);
+    let sib = (scale << 6) | ((index.0 & 7) << 3) | (base.0 & 7);
+    code.extend_from_slice(&[rex, opcode, 0x40 | ((dst.0 & 7) << 3) | 0b100, sib, disp]);
 }
 
 fn setcc<A: Allocator>(code: &mut Vec<u8, A>, opcode: u8, dst: Reg) {
@@ -1154,7 +1189,7 @@ mod tests {
     #[test]
     /// The jump table forms of a switch, bytes checked against objdump.
     fn switch_encodings() {
-        use super::{Cond, R9, R11, R12, R13, RAX, RBX, RCX, RSI, jump};
+        use super::{Cond, R9, R11, R12, R13, RAX, RBX, RCX, RDX, RSI, jump};
 
         assert_eq!(
             enc(Insn::ShrImm { dst: RAX, imm: 3 }),
@@ -1234,6 +1269,36 @@ mod tests {
             }),
             [0x49, 0x8b, 0x74, 0xc5, 0x00]
         ); // mov rsi,[r13+rax*8+0]
+        assert_eq!(
+            enc(Insn::LeaScaled {
+                dst: RAX,
+                base: RCX,
+                index: RDX,
+                scale: 3,
+                disp: 8
+            }),
+            [0x48, 0x8d, 0x44, 0xd1, 0x08]
+        ); // lea rax,[rcx+rdx*8+8]
+        assert_eq!(
+            enc(Insn::LeaScaled {
+                dst: R9,
+                base: R13,
+                index: R12,
+                scale: 0,
+                disp: 8
+            }),
+            [0x4f, 0x8d, 0x4c, 0x25, 0x08]
+        ); // lea r9,[r13+r12*1+8]
+        assert_eq!(
+            enc(Insn::LeaScaled {
+                dst: RSI,
+                base: R12,
+                index: RAX,
+                scale: 2,
+                disp: 8
+            }),
+            [0x49, 0x8d, 0x74, 0x84, 0x08]
+        ); // lea rsi,[r12+rax*4+8]
         assert_eq!(enc(Insn::JmpReg { reg: RAX }), [0xff, 0xe0]); // jmp rax
         assert_eq!(enc(Insn::JmpReg { reg: R11 }), [0x41, 0xff, 0xe3]); // jmp r11
 
