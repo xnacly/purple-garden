@@ -897,17 +897,18 @@ mod ops {
     }
 
     #[test]
-    fn beq() {
+    /// bools are compared with IEq, there is no op of their own
+    fn bool_eq() {
         let vm = run(vec![
             Op::LoadI { dst: 0, value: 1 },
             Op::LoadI { dst: 1, value: 1 },
             Op::LoadI { dst: 2, value: 0 },
-            Op::BEq {
+            Op::IEq {
                 dst: 3,
                 lhs: 0,
                 rhs: 1,
             },
-            Op::BEq {
+            Op::IEq {
                 dst: 4,
                 lhs: 0,
                 rhs: 2,

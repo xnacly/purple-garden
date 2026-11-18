@@ -89,11 +89,6 @@ pub fn bench_random_dispatch(c: &mut Criterion) {
             lhs: 0,
             rhs: 0,
         },
-        Op::BEq {
-            dst: 2,
-            lhs: 0,
-            rhs: 0,
-        },
         Op::Mov { dst: 2, src: 0 },
         Op::LoadI { dst: 2, value: 0 },
         Op::CastToInt { dst: 2, src: 0 },

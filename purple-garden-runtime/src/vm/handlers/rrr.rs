@@ -257,21 +257,6 @@ pub(super) unsafe fn d_ge<const B: bool>(
     }
 }
 
-pub(super) unsafe fn b_eq<const B: bool>(
-    vm: V,
-    code: *const Packed,
-    pc: usize,
-    op: Packed,
-) -> usize {
-    unsafe {
-        let (dst, lhs, rhs) = op.rrr();
-        let l = r!(vm, lhs).as_bool();
-        let r = r!(vm, rhs).as_bool();
-        r_mut!(vm, dst) = Value::from(l == r);
-        next!(vm, code, pc.wrapping_add(1))
-    }
-}
-
 pub(super) unsafe fn s_eq<const B: bool>(
     vm: V,
     code: *const Packed,

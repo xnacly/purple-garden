@@ -1441,6 +1441,11 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 let dst = self.def_register(dst.id);
                 let lhs = self.ensure_register(*lhs);
                 let rhs = self.ensure_register(*rhs);
+                // bools are the words 0 and 1, so comparing them as ints is the same
+                let op = match op {
+                    ir::BinOp::BEq => &ir::BinOp::IEq,
+                    op => op,
+                };
 
                 macro_rules! emit_bins {
                     ($($name:ident),*) => {
@@ -1462,7 +1467,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                 self.emit(emit_bins! {
                     IAdd, ISub, IMul, IDiv, IMod, IAnd, ILt, IGt, IEq,
                     DAdd, DSub, DMul, DDiv, DLt, DGt, DLe, DGe,
-                    BEq, SEq
+                    SEq
                 });
             }
             ir::Instr::BinImm {

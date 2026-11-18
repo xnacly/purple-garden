@@ -107,7 +107,7 @@ Each class has a `Packed` method returning its fields and a module in
 |        `0x0b` | `IAndI`        | `rri16`    | `rd, lhs, imm16i`                                                                                  |
 |        `0x0c` | `ILt`          | `rrr`      | `rd, lhs, rhs`                                                                                     |
 |        `0x0d` | `IGt`          | `rrr`      | `rd, lhs, rhs`                                                                                     |
-|        `0x0e` | `IEq`          | `rrr`      | `rd, lhs, rhs`                                                                                     |
+|        `0x0e` | `IEq`          | `rrr`      | `rd, lhs, rhs`, also compares bools, they are the words 0 and 1                                    |
 |        `0x0f` | `IEqI`         | `rri16`    | `rd, lhs, imm16i`                                                                                  |
 |        `0x10` | `IGtI`         | `rri16`    | `rd, lhs, imm16i`                                                                                  |
 |        `0x11` | `ILtI`         | `rri16`    | `rd, lhs, imm16i`                                                                                  |
@@ -117,44 +117,45 @@ Each class has a `Packed` method returning its fields and a module in
 |        `0x15` | `DDiv`         | `rrr`      | `rd, lhs, rhs`                                                                                     |
 |        `0x16` | `DLt`          | `rrr`      | `rd, lhs, rhs`                                                                                     |
 |        `0x17` | `DGt`          | `rrr`      | `rd, lhs, rhs`                                                                                     |
-|        `0x18` | `BEq`          | `rrr`      | `rd, lhs, rhs`                                                                                     |
-|        `0x19` | `SEq`          | `rrr`      | `rd, lhs, rhs`, strings are interned so this compares payload addresses                            |
-|        `0x1a` | `Mov`          | `rr`       | `rd, src`                                                                                          |
-|        `0x1b` | `LoadI`        | `ri21`     | `rd, imm21i`, previous imm32i, wider ints come from the globals via `LoadG`                        |
-|        `0x1c` | `LoadG`        | `ru21`     | `rd, global_index21u`                                                                              |
-|        `0x1d` | `Jmp`          | `t16`      | `target16u`, the proposal had target26u, 16 bits like every other jump                             |
-|        `0x1e` | `JmpT`         | `rt16`     | `cond, target16u`                                                                                  |
-|        `0x1f` | `JmpF`         | `rt16`     | `cond, target16u`                                                                                  |
-|        `0x20` | `JmpEqI`       | `ri5t16`   | `lhs, imm5i, target16u`, rhs stayed an immediate, wider ones compare into a temp via `IEqI` + jump |
-|        `0x21` | `JmpNeI`       | `ri5t16`   | `lhs, imm5i, target16u`, see above                                                                 |
-|        `0x22` | `JmpSEq`       | `rrt16`    | `lhs, rhs, target16u`                                                                              |
-|        `0x23` | `JmpSNe`       | `rrt16`    | `lhs, rhs, target16u`                                                                              |
-|        `0x24` | `Switch`       | `rk1u20`   | `subject, kind1, table20u`, indexes `Vm::switch_tables`, misses fall through to the next op        |
-|        `0x25` | `Lookup`       | `rrk1u15`  | `rd, subject, kind1, table15u`, indexes `Vm::lookup_tables`                                        |
-|        `0x26` | `Tail`         | `u26`      | `func26u`                                                                                          |
-|        `0x27` | `Call`         | `u26`      | `func26u`                                                                                          |
-|        `0x28` | `Sys`          | `u5u16`    | `argc5u, syscall16u`, argc only feeds a debug check that builtins don't clobber past their args    |
-|        `0x29` | `Native`       | `u16k1`    | `syscall16u, returns_double1`                                                                      |
-|        `0x2a` | `Push`         | `r`        | `src`                                                                                              |
-|        `0x2b` | `Push2`        | `rr`       | `a, b`                                                                                             |
-|        `0x2c` | `Push3`        | `rrr`      | `a, b, c`                                                                                          |
-|        `0x2d` | `Pop`          | `r`        | `dst`                                                                                              |
-|        `0x2e` | `Pop2`         | `rr`       | `a, b`                                                                                             |
-|        `0x2f` | `Pop3`         | `rrr`      | `a, b, c`                                                                                          |
-|        `0x30` | `StoreSlot`    | `ru21`     | `src, slot21u`                                                                                     |
-|        `0x31` | `LoadSlot`     | `ru21`     | `rd, slot21u`                                                                                      |
-|        `0x32` | `CastToInt`    | `rr`       | `rd, src`                                                                                          |
-|        `0x33` | `CastToDouble` | `rr`       | `rd, src`                                                                                          |
-|        `0x34` | `CastToBool`   | `rr`       | `rd, src`                                                                                          |
-|        `0x35` | `Alloc`        | `rk2u3u16` | `rd, kind2, log2_align3u, size16u`, previous size18u, align is a power of two up to 128            |
-|        `0x36` | `Store`        | `rru16`    | `src, base, offset16u`                                                                             |
-|        `0x37` | `Load`         | `rru16`    | `rd, base, offset16u`                                                                              |
-|        `0x38` | `AddrOf`       | `rru16`    | `rd, base, offset16u`                                                                              |
-|        `0x39` | `Ret`          | -          |                                                                                                    |
-|        `0x3a` | `Assert`       | `r`        | `cond`                                                                                             |
-|        `0x3b` | `Halt`         | -          | `bc::Cc::finalize` appends it, the vm stops on it                                                  |
-|        `0x3c` | `Nop`          | -          |                                                                                                    |
-| `0x3d`-`0x3f` | -              |            | reserved                                                                                           |
+|        `0x18` | `DLe`          | `rrr`      | `rd, lhs, rhs`                                                                                     |
+|        `0x19` | `DGe`          | `rrr`      | `rd, lhs, rhs`                                                                                     |
+|        `0x1a` | `SEq`          | `rrr`      | `rd, lhs, rhs`, strings are interned so this compares payload addresses                            |
+|        `0x1b` | `Mov`          | `rr`       | `rd, src`                                                                                          |
+|        `0x1c` | `LoadI`        | `ri21`     | `rd, imm21i`, previous imm32i, wider ints come from the globals via `LoadG`                        |
+|        `0x1d` | `LoadG`        | `ru21`     | `rd, global_index21u`                                                                              |
+|        `0x1e` | `Jmp`          | `t16`      | `target16u`, the proposal had target26u, 16 bits like every other jump                             |
+|        `0x1f` | `JmpT`         | `rt16`     | `cond, target16u`                                                                                  |
+|        `0x20` | `JmpF`         | `rt16`     | `cond, target16u`                                                                                  |
+|        `0x21` | `JmpEqI`       | `ri5t16`   | `lhs, imm5i, target16u`, rhs stayed an immediate, wider ones compare into a temp via `IEqI` + jump |
+|        `0x22` | `JmpNeI`       | `ri5t16`   | `lhs, imm5i, target16u`, see above                                                                 |
+|        `0x23` | `JmpSEq`       | `rrt16`    | `lhs, rhs, target16u`                                                                              |
+|        `0x24` | `JmpSNe`       | `rrt16`    | `lhs, rhs, target16u`                                                                              |
+|        `0x25` | `Switch`       | `rk1u20`   | `subject, kind1, table20u`, indexes `Vm::switch_tables`, misses fall through to the next op        |
+|        `0x26` | `Lookup`       | `rrk1u15`  | `rd, subject, kind1, table15u`, indexes `Vm::lookup_tables`                                        |
+|        `0x27` | `Tail`         | `u26`      | `func26u`                                                                                          |
+|        `0x28` | `Call`         | `u26`      | `func26u`                                                                                          |
+|        `0x29` | `Sys`          | `u5u16`    | `argc5u, syscall16u`, argc only feeds a debug check that builtins don't clobber past their args    |
+|        `0x2a` | `Native`       | `u16k1`    | `syscall16u, returns_double1`                                                                      |
+|        `0x2b` | `Push`         | `r`        | `src`                                                                                              |
+|        `0x2c` | `Push2`        | `rr`       | `a, b`                                                                                             |
+|        `0x2d` | `Push3`        | `rrr`      | `a, b, c`                                                                                          |
+|        `0x2e` | `Pop`          | `r`        | `dst`                                                                                              |
+|        `0x2f` | `Pop2`         | `rr`       | `a, b`                                                                                             |
+|        `0x30` | `Pop3`         | `rrr`      | `a, b, c`                                                                                          |
+|        `0x31` | `StoreSlot`    | `ru21`     | `src, slot21u`                                                                                     |
+|        `0x32` | `LoadSlot`     | `ru21`     | `rd, slot21u`                                                                                      |
+|        `0x33` | `CastToInt`    | `rr`       | `rd, src`                                                                                          |
+|        `0x34` | `CastToDouble` | `rr`       | `rd, src`                                                                                          |
+|        `0x35` | `CastToBool`   | `rr`       | `rd, src`                                                                                          |
+|        `0x36` | `Alloc`        | `rk2u3u16` | `rd, kind2, log2_align3u, size16u`, previous size18u, align is a power of two up to 128            |
+|        `0x37` | `Store`        | `rru16`    | `src, base, offset16u`                                                                             |
+|        `0x38` | `Load`         | `rru16`    | `rd, base, offset16u`                                                                              |
+|        `0x39` | `AddrOf`       | `rru16`    | `rd, base, offset16u`                                                                              |
+|        `0x3a` | `Ret`          | -          |                                                                                                    |
+|        `0x3b` | `Assert`       | `r`        | `cond`                                                                                             |
+|        `0x3c` | `Halt`         | -          | `bc::Cc::finalize` appends it, the vm stops on it                                                  |
+|        `0x3d` | `Nop`          | -          |                                                                                                    |
+| `0x3e`-`0x3f` | -              |            | reserved                                                                                           |
 
 ### Decoding
 

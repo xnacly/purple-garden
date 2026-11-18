@@ -198,11 +198,6 @@ ops! {
         lhs: u8,
         rhs: u8,
     },
-    BEq {
-        dst: u8,
-        lhs: u8,
-        rhs: u8,
-    },
     /// `r[dst] = r[lhs] == r[rhs]` by string content, see [`Value::str_eq`](crate::Value::str_eq).
     SEq {
         dst: u8,

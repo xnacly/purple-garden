@@ -258,7 +258,6 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                 Op::DLe { dst, lhs, rhs } => format!("dle r{dst}, r{lhs}, r{rhs}"),
                 Op::DGe { dst, lhs, rhs } => format!("dge r{dst}, r{lhs}, r{rhs}"),
                 Op::DGt { dst, lhs, rhs } => format!("dgt r{dst}, r{lhs}, r{rhs}"),
-                Op::BEq { dst, lhs, rhs } => format!("beq r{dst}, r{lhs}, r{rhs}"),
                 Op::SEq { dst, lhs, rhs } => format!("seq r{dst}, r{lhs}, r{rhs}"),
                 Op::Mov { dst, src } => format!("mov r{dst}, r{src}"),
                 Op::LoadI { dst, value } => format!("load_imm r{dst}, #{value}"),
