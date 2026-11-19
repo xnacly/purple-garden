@@ -1153,8 +1153,6 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
             self.root_nodes = prev.map_or(node.0 + 1, |prev: NodeId| node.0 - prev.0);
             prev = Some(node);
             last = self.lower_node(ast, node)?;
-            // reset to the main entry point block to keep emitting nodes into the correct conext
-            self.switch_to_block(entry);
         }
 
         if last.is_some() {
