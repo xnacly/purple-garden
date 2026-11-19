@@ -31,7 +31,7 @@ module.exports = grammar({
       $.expression,
     ),
 
-    comment: _ => token(seq('#', /[^!\n].*/)),
+    comment: _ => token(seq('#', optional(/[^!\n].*/))),
 
     doc_comment: _ => token(seq('#!', /.*/)),
 
