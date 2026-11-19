@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(unsafe { stack.pop::<u64>() }, 1);
         // SAFETY: only u64s are pushed
         while unsafe { stack.push(0u64) } {}
-        assert_eq!(stack.depth(), 4096);
+        assert_eq!(stack.depth(), stack.cap);
         stack.reset();
         assert_eq!(stack.depth(), 0);
     }
