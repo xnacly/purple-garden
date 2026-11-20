@@ -396,3 +396,33 @@ fn forward_walk(j:Int ans:Int) Int {
     }
 }
 testing.assert(forward_walk(0 0) == 103)
+
+#! A record that isn't a literal is a pointer to its fields: put into an array
+#! or another record, its fields have to be copied inline, storing the pointer
+#! makes every field read return the address instead.
+fn copied_point(x:Int) Record<x:Int d:Double p:Record<a:Int b:Int>> {
+    {x: x d: 0.5 p: {a: x + 1 b: x + 2}}
+}
+let copied_p = copied_point(1)
+let copied_ps = [copied_point(10) copied_p]
+testing.assert(copied_ps.[0].x == 10)
+testing.assert((copied_ps.[0].d * 2.0) as Int == 1)
+testing.assert(copied_ps.[0].p.b == 12)
+testing.assert(copied_ps.[1].p.a == 2)
+let copied_wrapper = {inner: copied_p}
+testing.assert(copied_wrapper.inner.x == 1)
+testing.assert(copied_wrapper.inner.p.b == 3)
+
+#! Top-level control flow: lowering switched back to the entry block after
+#! every root, so statements after a top-level `&`, `|` or match landed in b0
+#! instead of the join block, and the final Return overwrote b0's branch.
+#! toplevel_n then reads the never written join block param.
+let toplevel_n = 7
+let toplevel_and = true & false
+let toplevel_match = match {
+    toplevel_n == 7 { 1 }
+    { 2 }
+}
+testing.assert(toplevel_n == 7)
+testing.assert(toplevel_and == false)
+testing.assert(toplevel_match == 1)

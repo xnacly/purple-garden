@@ -388,14 +388,34 @@ impl<'lower, A: Allocator, S: Allocator + Clone, I: Allocator + Clone> Lower<'lo
             unreachable!("node lowered into memory must produce a value");
         };
 
-        self.emit(Instr::Store {
-            src,
-            base,
-            offset,
-            span,
-        });
+        self.store_into(ty, src, base, offset, span);
 
         Ok(())
+    }
+
+    /// Store `src` at `base + offset`. A record is inline in memory, so its fields are read through
+    /// `src` and copied word by word.
+    fn store_into(&mut self, ty: &ptype::Type<'lower>, src: Id, base: Id, offset: u32, span: u32) {
+        let ptype::Type::Record(fields) = ty else {
+            debug_assert!(
+                !matches!(ty, ptype::Type::Record(_) | ptype::Type::Ptr(_)),
+                "something is inline in memory but was atempted to be stored to"
+            );
+            self.emit(Instr::Store {
+                src,
+                base,
+                offset,
+                span,
+            });
+            return;
+        };
+        for field in *fields {
+            let at = ty
+                .field_offset(field.name)
+                .expect("field of its own record") as u32;
+            let value = self.field(field.ty, src, at, span);
+            self.store_into(&field.ty, value, base, offset + at, span);
+        }
     }
 
     fn lower_node(
