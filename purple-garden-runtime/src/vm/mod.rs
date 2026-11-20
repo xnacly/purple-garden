@@ -14,7 +14,6 @@ mod alloc;
 mod config;
 mod handlers;
 
-pub use alloc::VmAlloc;
 pub use config::{VmConfig, frames_in};
 
 type CollectFn<'vm> = fn(&mut Vm<'vm>);
@@ -78,7 +77,7 @@ pub struct Vm<'vm> {
     pub switch_tables: Box<[SwitchTable]>,
     /// The tables [`Op::Lookup`](crate::op::Op::Lookup) indexes.
     pub lookup_tables: Box<[LookupTable]>,
-    pub gc: Gc<VmAlloc<'vm>>,
+    pub gc: Gc<Box<dyn Allocator + 'vm>>,
 
     /// Backing storage for string constants emitted by the compiler.
     pub const_pool: Box<[u32]>,
@@ -145,7 +144,7 @@ impl<'vm> Vm<'vm> {
             globals: Box::default(),
             switch_tables: Box::default(),
             lookup_tables: Box::default(),
-            gc: Gc::new_in(VmAlloc(Box::new(alloc))),
+            gc: Gc::new_in(Box::new(alloc)),
             const_pool: Box::new([]),
             strings: string::StrTable::default(),
             backtrace: Vec::new(),

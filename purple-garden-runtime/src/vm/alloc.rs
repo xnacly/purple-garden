@@ -1,67 +1,8 @@
-use std::{
-    alloc::{AllocError, Allocator, Layout},
-    ptr::NonNull,
-};
+use std::alloc::Layout;
 
 use crate::{IntoVm, Value, gc::AllocType, string};
 
 use super::Vm;
-
-/// The allocator a [`Vm`] was built with. Builtins and native code receive the
-/// VM as a pointer and cast it to one `Vm` type, so its allocator can't be a
-/// type parameter and is erased here instead
-pub struct VmAlloc<'vm>(pub(super) Box<dyn Allocator + 'vm>);
-
-impl std::fmt::Debug for VmAlloc<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("VmAlloc")
-    }
-}
-
-unsafe impl Allocator for VmAlloc<'_> {
-    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        self.0.allocate(layout)
-    }
-
-    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        self.0.allocate_zeroed(layout)
-    }
-
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        // SAFETY: caller upholds the Allocator contract
-        unsafe { self.0.deallocate(ptr, layout) }
-    }
-
-    unsafe fn grow(
-        &self,
-        ptr: NonNull<u8>,
-        old: Layout,
-        new: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        // SAFETY: caller upholds the Allocator contract
-        unsafe { self.0.grow(ptr, old, new) }
-    }
-
-    unsafe fn grow_zeroed(
-        &self,
-        ptr: NonNull<u8>,
-        old: Layout,
-        new: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        // SAFETY: caller upholds the Allocator contract
-        unsafe { self.0.grow_zeroed(ptr, old, new) }
-    }
-
-    unsafe fn shrink(
-        &self,
-        ptr: NonNull<u8>,
-        old: Layout,
-        new: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        // SAFETY: caller upholds the Allocator contract
-        unsafe { self.0.shrink(ptr, old, new) }
-    }
-}
 
 impl Vm<'_> {
     pub(super) fn collect(&mut self) {
@@ -88,6 +29,9 @@ impl Vm<'_> {
         alloc_type: AllocType,
         layout: Layout,
     ) -> Option<std::ptr::NonNull<u8>> {
+        // TODO: should we collect here? Maybe? Id rather we do stop the world at some other point
+        // than when allocating? Maybe even out of thread if --concurrect-gc=default true is
+        // enabled? Off by default for embedding api?
         (self.collect_fn)(self);
 
         if let Some(ptr) = self.gc.alloc_fast(alloc_type, layout) {
