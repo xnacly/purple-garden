@@ -366,7 +366,7 @@ impl<'dis, S: std::alloc::Allocator + Clone, A: std::alloc::Allocator + Clone>
                     idx,
                     stride,
                 } => format!("idx r{dst}, r{target}, r{idx}, #{stride}"),
-                Op::Ret => "ret".into(),
+                Op::Ret { src } => format!("ret r{src}"),
                 Op::Halt => "halt".into(),
                 Op::CastToBool { dst, src } => {
                     format!("cast_to_bool r{dst}, r{src}")

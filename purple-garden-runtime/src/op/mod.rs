@@ -403,7 +403,10 @@ ops! {
         /// distance between elements of array, so addr = arr + 8 + idx * stride
         stride: u16,
     },
-    Ret,
+    /// Return `src` to the caller in `r0`.
+    Ret {
+        src: u8,
+    },
     /// Trap with [`crate::Anomaly::AssertionFailed`] when `cond` is false.
     Assert {
         cond: u8,

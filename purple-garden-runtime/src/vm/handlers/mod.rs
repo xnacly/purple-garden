@@ -160,8 +160,12 @@ pub(super) unsafe fn enter<const B: bool>(
     }
 }
 
-unsafe fn ret<const B: bool>(vm: V, code: *const Packed, _pc: usize, _op: Packed) -> usize {
+unsafe fn ret<const B: bool>(vm: V, code: *const Packed, _pc: usize, op: Packed) -> usize {
     unsafe {
+        let src = op.r();
+        if src != 0 {
+            r_mut!(vm, 0) = *r!(vm, src);
+        }
         let vm = &mut *vm;
         if B {
             vm.backtrace.pop();

@@ -23,9 +23,9 @@ mod tests {
 
     #[test]
     fn removes_self_move() {
-        let mut bc = vec![Op::Mov { src: 64, dst: 64 }, Op::Ret];
+        let mut bc = vec![Op::Mov { src: 64, dst: 64 }, Op::Ret { src: 0 }];
         self_move(&mut bc);
-        assert_eq!(bc, vec![Op::Nop, Op::Ret]);
+        assert_eq!(bc, vec![Op::Nop, Op::Ret { src: 0 }]);
     }
 
     #[test]

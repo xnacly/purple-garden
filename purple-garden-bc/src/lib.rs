@@ -629,9 +629,9 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         // root frame in Vm::new gives this Ret a frame to pop.
         if is_root
             && self.entry_native_idx.is_none()
-            && !matches!(self.buf.last(), Some(Op::Ret | Op::Tail { .. }))
+            && !matches!(self.buf.last(), Some(Op::Ret { .. } | Op::Tail { .. }))
         {
-            self.emit(Op::Ret);
+            self.emit(Op::Ret { src: 0 });
         }
 
         // The root has no caller to restore registers for
@@ -894,13 +894,23 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
         let epilogue = self.label();
         self.bind(epilogue);
         self.emit_epilogue(max_reg, slots);
-        self.emit(Op::Ret);
+        self.emit(Op::Ret { src: 0 });
 
         for i in pc..body_end {
             match self.buf[i] {
                 // Falls through into the epilogue
-                Op::Ret if i + 1 == body_end => self.buf[i] = Op::Nop,
-                Op::Ret => self.buf[i] = Op::Jmp { target: epilogue },
+                Op::Ret { src: 0 } if i + 1 == body_end => self.buf[i] = Op::Nop,
+                Op::Ret { src } if i + 1 == body_end => self.buf[i] = Op::Mov { dst: 0, src },
+                Op::Ret { src: 0 } => self.buf[i] = Op::Jmp { target: epilogue },
+                // The epilogue may pop into src, move it to r0 first
+                Op::Ret { src } => {
+                    let stub = self.label();
+                    self.bind(stub);
+                    self.emit(Op::Mov { dst: 0, src });
+                    self.emit_epilogue(max_reg, slots);
+                    self.emit(Op::Ret { src: 0 });
+                    self.buf[i] = Op::Jmp { target: stub };
+                }
                 Op::Tail { func } => {
                     let stub = self.label();
                     self.bind(stub);
@@ -1023,11 +1033,8 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
 
         match term {
             ir::Terminator::Return { value: id, .. } => {
-                if let Some(src_id) = id {
-                    let src = self.ensure_register(*src_id);
-                    self.emit(Op::Mov { dst: 0, src });
-                }
-                self.emit(Op::Ret);
+                let src = id.map_or(0, |id| self.ensure_register(id));
+                self.emit(Op::Ret { src });
             }
             ir::Terminator::Jump { id, params, .. } => {
                 self.edge(fun, (*id, *params), next_block);
@@ -1184,7 +1191,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                             returns_double,
                         }),
                     };
-                    self.emit(Op::Ret);
+                    self.emit(Op::Ret { src: 0 });
                 } else {
                     match target {
                         CcCallTarget::Bc { pc } => {
@@ -1198,7 +1205,7 @@ impl<'cc, S: Allocator + Clone, A: Allocator + Clone> Cc<'cc, S, A> {
                                 idx,
                                 returns_double,
                             });
-                            self.emit(Op::Ret);
+                            self.emit(Op::Ret { src: 0 });
                         }
                     }
                 };
@@ -1728,15 +1735,38 @@ mod tests {
     #[test]
     fn compact_nops_remaps_switch_targets() {
         let mut cc = Cc::new();
-        cc.buf = vec![Op::Nop, Op::Halt, Op::Nop, Op::Ret];
+        cc.buf = vec![Op::Nop, Op::Halt, Op::Nop, Op::Ret { src: 0 }];
         cc.pc_to_span = vec![0; cc.buf.len()];
         cc.switch_tables.push(SwitchTable {
             first: 0,
             targets: Box::new([1, 3]),
         });
         cc.compact_nops();
-        assert_eq!(cc.buf, [Op::Halt, Op::Ret]);
+        assert_eq!(cc.buf, [Op::Halt, Op::Ret { src: 0 }]);
         assert_eq!(&*cc.switch_tables[0].targets, [0, 1]);
+    }
+
+    #[test]
+    fn emit_frame_moves_ret_src_before_epilogue() {
+        let mut cc = Cc::new();
+        cc.buf = vec![Op::Ret { src: 19 }, Op::Ret { src: 0 }, Op::Ret { src: 3 }];
+        cc.pc_to_span = vec![0; cc.buf.len()];
+        cc.emit_frame(0, Some(19), 0);
+        assert_eq!(
+            cc.buf,
+            [
+                Op::Push { src: 19 },
+                Op::Jmp { target: 1 },
+                Op::Jmp { target: 0 },
+                Op::Mov { dst: 0, src: 3 },
+                Op::Pop { dst: 19 },
+                Op::Ret { src: 0 },
+                Op::Mov { dst: 0, src: 19 },
+                Op::Pop { dst: 19 },
+                Op::Ret { src: 0 },
+            ]
+        );
+        assert_eq!(cc.labels, [4, 6]);
     }
 
     fn type_id(id: u32, ty: Type<'static>) -> TypeId<'static> {

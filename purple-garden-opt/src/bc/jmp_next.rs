@@ -26,40 +26,40 @@ mod tests {
 
     #[test]
     fn jmp_next_removes_adjacent_forward_jump() {
-        let mut bc = vec![Op::Jmp { target: 1 }, Op::Ret];
+        let mut bc = vec![Op::Jmp { target: 1 }, Op::Ret { src: 0 }];
         jmp_next(0, &mut bc);
-        assert_eq!(bc, vec![Op::Nop, Op::Ret]);
+        assert_eq!(bc, vec![Op::Nop, Op::Ret { src: 0 }]);
     }
 
     #[test]
     fn jmp_next_removes_adjacent_forward_jump_at_nonzero_pos() {
-        let mut window = vec![Op::Jmp { target: 6 }, Op::Ret];
+        let mut window = vec![Op::Jmp { target: 6 }, Op::Ret { src: 0 }];
         jmp_next(5, &mut window);
-        assert_eq!(window, vec![Op::Nop, Op::Ret]);
+        assert_eq!(window, vec![Op::Nop, Op::Ret { src: 0 }]);
     }
 
     #[test]
     fn jmp_next_leaves_far_forward_jump() {
-        let mut bc = vec![Op::Jmp { target: 5 }, Op::Ret];
+        let mut bc = vec![Op::Jmp { target: 5 }, Op::Ret { src: 0 }];
         jmp_next(0, &mut bc);
-        assert_eq!(bc, vec![Op::Jmp { target: 5 }, Op::Ret]);
+        assert_eq!(bc, vec![Op::Jmp { target: 5 }, Op::Ret { src: 0 }]);
     }
 
     #[test]
     fn jmp_next_leaves_backward_jump() {
-        let mut bc = vec![Op::Jmp { target: 0 }, Op::Ret];
+        let mut bc = vec![Op::Jmp { target: 0 }, Op::Ret { src: 0 }];
         // pos=5 means the jump goes back 5 target is not pos+1.
         jmp_next(5, &mut bc);
-        assert_eq!(bc, vec![Op::Jmp { target: 0 }, Op::Ret]);
+        assert_eq!(bc, vec![Op::Jmp { target: 0 }, Op::Ret { src: 0 }]);
     }
 
     #[test]
     fn jmp_next_leaves_self_jump() {
         // Infinite loop (Jmp to self) is target == pos, not pos+1; must
         // not be Nop'd or we silently break the program's semantics.
-        let mut bc = vec![Op::Jmp { target: 3 }, Op::Ret];
+        let mut bc = vec![Op::Jmp { target: 3 }, Op::Ret { src: 0 }];
         jmp_next(3, &mut bc);
-        assert_eq!(bc, vec![Op::Jmp { target: 3 }, Op::Ret]);
+        assert_eq!(bc, vec![Op::Jmp { target: 3 }, Op::Ret { src: 0 }]);
     }
 
     #[test]
@@ -68,15 +68,18 @@ mod tests {
         // taken/fallthrough paths land at pos+1), but jmp_next only
         // matches unconditional Jmp. If extended later, flip this test
         // to assert Nop.
-        let mut bc = vec![Op::JmpT { cond: 1, target: 1 }, Op::Ret];
+        let mut bc = vec![Op::JmpT { cond: 1, target: 1 }, Op::Ret { src: 0 }];
         jmp_next(0, &mut bc);
-        assert_eq!(bc, vec![Op::JmpT { cond: 1, target: 1 }, Op::Ret]);
+        assert_eq!(
+            bc,
+            vec![Op::JmpT { cond: 1, target: 1 }, Op::Ret { src: 0 }]
+        );
     }
 
     #[test]
     fn jmp_next_leaves_non_jmp_at_window_head() {
-        let mut bc = vec![Op::Mov { dst: 0, src: 1 }, Op::Ret];
+        let mut bc = vec![Op::Mov { dst: 0, src: 1 }, Op::Ret { src: 0 }];
         jmp_next(0, &mut bc);
-        assert_eq!(bc, vec![Op::Mov { dst: 0, src: 1 }, Op::Ret]);
+        assert_eq!(bc, vec![Op::Mov { dst: 0, src: 1 }, Op::Ret { src: 0 }]);
     }
 }
