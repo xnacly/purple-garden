@@ -26,6 +26,10 @@ pub struct CallFrame {
     /// unbalanced across a call.
     #[cfg(debug_assertions)]
     pub spilled_depth: usize,
+    /// Base of register file, when a function is called in the virtual machine, this base is equiv
+    /// to r0, meaning the arguments to the call start at the base, this replaces the previously
+    /// used stack, meaning values which would be clobbered are now simply before self's base.
+    pub base: u32,
 }
 
 /// Source-location side table for a compiled program.
@@ -170,6 +174,7 @@ impl<'vm> Vm<'vm> {
             return_to: usize::MAX,
             #[cfg(debug_assertions)]
             spilled_depth: 0,
+            base: 0,
         }
     }
 
