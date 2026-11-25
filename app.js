@@ -15,13 +15,11 @@ const RUNTIMES = [
   "bun-nojit",
   "luajit",
   "luajit-nojit",
-  "python3",
 ];
 const COLORS = {
   garden: "#a78bfa",
   bun: "#fb923c",
   luajit: "#38bdf8",
-  python3: "#facc15",
 };
 // `<rt>-nojit` shares its runtime's colour, drawn translucent and dashed.
 const nojit = (rt) => rt.endsWith("-nojit");
