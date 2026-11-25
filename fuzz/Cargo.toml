@@ -1,0 +1,33 @@
+[package]
+name = "purple-garden-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = "1.4"
+libfuzzer-sys = "0.4"
+purple-garden = { path = "../purple-garden" }
+
+# a workspace of its own: `cargo build --workspace` at the root needs no libFuzzer
+[workspace]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "compile"
+path = "fuzz_targets/compile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "diff"
+path = "fuzz_targets/diff.rs"
+test = false
+doc = false
+bench = false
