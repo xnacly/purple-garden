@@ -1,4 +1,4 @@
-// fib(30) doubly-recursive + fibt(50) accumulator form. Same two checks as
+// fib(35) doubly-recursive + fibt(50) accumulator form. Same two checks as
 // main.garden. fibt is a loop here: V8/JSC have no TCO, and garden's tailcall
 // pass turns its recursion into one anyway.
 function fib(n) {
@@ -15,5 +15,5 @@ function fibt(n, a, b) {
   }
   return n === 0 ? a : b;
 }
-if (fib(30) !== 832040) process.exit(1);
+if (fib(35) !== 9227465) process.exit(1);
 if (fibt(50, 0, 1) !== 12586269025) process.exit(1);

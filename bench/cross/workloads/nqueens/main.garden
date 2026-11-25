@@ -1,10 +1,10 @@
-# N-queens: count every placement of 12 queens on a 12x12 board.
+# N-queens: count every placement of 11 queens on an 11x11 board.
 # Garden has no arrays and no bit operators, so the queens placed so far are
 # packed into one Int as base-16 digits (column + 1, newest in the lowest
 # digit) and the safety check peels them off with / and %. Every runtime uses
 # the same encoding, so the work is identical: deep backtracking recursion
 # with a short integer-arithmetic inner recursion per candidate square.
-# 12 digits of 4 bits stay below 2^53, so the doubles in JS and Lua are exact.
+# 11 digits of 4 bits stay below 2^53, so the doubles in JS and Lua are exact.
 import "testing"
 
 #! True when a queen in column col, dist rows below the newest queen packed
@@ -36,5 +36,5 @@ fn solve(n:Int row:Int col:Int placed:Int) Int {
     }
 }
 
-# 12 queens have 14200 solutions (OEIS A000170).
-testing.assert(solve(12 0 0 0) == 14200)
+# 11 queens have 2680 solutions (OEIS A000170).
+testing.assert(solve(11 0 0 0) == 2680)

@@ -1,5 +1,5 @@
-//! Cross-language benchmark runner: purple-garden against CPython,
-//! JavaScriptCore (bun) and LuaJIT, measured with hyperfine.
+//! Cross-language benchmark runner: purple-garden against JavaScriptCore (bun)
+//! and LuaJIT, measured with hyperfine.
 //!
 //! `run` benchmarks every workload under `bench/cross/workloads` on every
 //! available runtime and writes a JSON report plus a markdown table; `index`
@@ -26,7 +26,7 @@ use crate::{
 
 #[derive(Parser)]
 #[command(
-    about = "Benchmark purple-garden against CPython, JavaScriptCore (bun) and LuaJIT with hyperfine"
+    about = "Benchmark purple-garden against JavaScriptCore (bun) and LuaJIT with hyperfine"
 )]
 struct Cli {
     #[command(subcommand)]

@@ -16,8 +16,7 @@ pub struct Spec {
     version_args: &'static [&'static str],
 }
 
-/// Every JIT runtime also runs as `<name>-nojit` with its JIT disabled. python3 is
-/// interpreter-only unless built with `--enable-experimental-jit`, which is off by default.
+/// Every runtime also runs as `<name>-nojit` with its JIT disabled.
 pub const SPECS: &[Spec] = &[
     Spec {
         name: "garden",
@@ -66,14 +65,6 @@ pub const SPECS: &[Spec] = &[
         args: &["-joff"],
         env: &[],
         version_args: &["-v"],
-    },
-    Spec {
-        name: "python3",
-        bin: Some("python3"),
-        source: "main.py",
-        args: &[],
-        env: &[],
-        version_args: &["--version"],
     },
 ];
 

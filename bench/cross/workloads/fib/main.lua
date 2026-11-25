@@ -1,4 +1,4 @@
--- fib(30) doubly-recursive + fibt(50) accumulator form; same two checks as
+-- fib(35) doubly-recursive + fibt(50) accumulator form; same two checks as
 -- main.garden. fib stays recursive (the recursion is the workload). fibt is a
 -- loop: LuaJIT's trace compiler handles loops well and recursion poorly even
 -- through proper tail calls, so a tail-recursive fibt would measure the JIT's
@@ -16,5 +16,5 @@ local function fibt(n, a, b)
   if n == 0 then return a end
   return b
 end
-if fib(30) ~= 832040 then os.exit(1) end
+if fib(35) ~= 9227465 then os.exit(1) end
 if fibt(50, 0, 1) ~= 12586269025 then os.exit(1) end

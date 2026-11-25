@@ -1,5 +1,5 @@
-// 6000 samples on the real axis [-1.5, 1.5), 500 max iters; sum of the escape
-// counts = 1761213, asserted exactly: every runtime performs the identical
+// 72000 samples on the real axis [-1.5, 1.5), 500 max iters; sum of the escape
+// counts = 21130815, asserted exactly: every runtime performs the identical
 // IEEE op sequence. Loop form; check order matches main.garden exactly: test
 // escape with the current z, then advance.
 function mandelIter(cr, ci, max) {
@@ -14,7 +14,7 @@ function mandelIter(cr, ci, max) {
   return max;
 }
 let acc = 0;
-for (let i = 0; i < 6000; i++) {
-  acc += mandelIter(i / 2000.0 - 1.5, 0.0, 500);
+for (let i = 0; i < 72000; i++) {
+  acc += mandelIter(i / 24000.0 - 1.5, 0.0, 500);
 }
-if (acc !== 1761213) process.exit(1);
+if (acc !== 21130815) process.exit(1);

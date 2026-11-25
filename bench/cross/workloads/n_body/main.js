@@ -1,7 +1,7 @@
-// Simplified 2-body n-body (Sun + Jupiter), 200000 semi-implicit Euler steps
+// Simplified 2-body n-body (Sun + Jupiter), 5000000 semi-implicit Euler steps
 // in the exact op order of main.garden (velocities first, then positions, so
-// the integrator is symplectic and long runs stay bounded). Independent
-// reference (Python, IEEE f64): -1.968360027403725. Loop form: V8/JSC have no
+// the integrator is symplectic and long runs stay bounded). Reference
+// (IEEE f64): 154.140184322402376. Loop form: V8/JSC have no
 // TCO.
 function advance(x1, y1, z1, vx1, vy1, vz1, x2, y2, z2, vx2, vy2, vz2, n) {
   const m1 = 39.478417604357434;
@@ -31,6 +31,6 @@ const r = advance(
   0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
   4.84143144246472090, -1.16032004402742839, -0.103622044471123109,
   0.606326392995832020, 2.81198684491626016, -0.0252183616598876821,
-  200000,
+  5000000,
 );
-if (!(r > -1.968361 && r < -1.968359)) process.exit(1);
+if (!(r > 154.140183 && r < 154.140185)) process.exit(1);

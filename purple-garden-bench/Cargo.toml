@@ -1,7 +1,7 @@
 [package]
 name = "purple-garden-bench"
 version = "0.1.0"
-description = "Cross-language benchmark runner: purple-garden vs CPython, JavaScriptCore (bun) and LuaJIT, measured with hyperfine"
+description = "Cross-language benchmark runner: purple-garden vs JavaScriptCore (bun) and LuaJIT, measured with hyperfine"
 edition = "2024"
 
 [dependencies]

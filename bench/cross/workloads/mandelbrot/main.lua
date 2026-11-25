@@ -1,5 +1,5 @@
--- 6000 samples on the real axis [-1.5, 1.5), 500 max iters; sum of the escape
--- counts = 1761213, asserted exactly: every runtime performs the identical
+-- 72000 samples on the real axis [-1.5, 1.5), 500 max iters; sum of the escape
+-- counts = 21130815, asserted exactly: every runtime performs the identical
 -- IEEE op sequence. Loop form (LuaJIT traces loops far better than recursion,
 -- even tail calls). Check order matches main.garden exactly: escape test on
 -- the current z, then advance.
@@ -12,7 +12,7 @@ local function mandel_iter(cr, ci, max)
   return max
 end
 local acc = 0
-for i = 0, 5999 do
-  acc = acc + mandel_iter(i / 2000.0 - 1.5, 0.0, 500)
+for i = 0, 71999 do
+  acc = acc + mandel_iter(i / 24000.0 - 1.5, 0.0, 500)
 end
-if acc ~= 1761213 then os.exit(1) end
+if acc ~= 21130815 then os.exit(1) end

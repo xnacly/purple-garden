@@ -17,7 +17,7 @@ env:
 
 jobs:
   cross-language:
-    name: garden vs cpython / jsc / luajit
+    name: garden vs jsc / luajit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,10 +35,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y hyperfine luajit
 
       - uses: oven-sh/setup-bun@v2
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
 
       - name: Build purple-garden
         run: cargo build --release -p purple-garden-cli --locked

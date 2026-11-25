@@ -60,8 +60,7 @@ pub fn discover(dir: &Path, only: Option<&str>) -> Result<Vec<Workload>, String>
 
 /// Run every program once so a wrong result fails with a readable message
 /// rather than hyperfine's generic non-zero-exit abort. A missing port is
-/// noted and skipped: some workloads are left out for a runtime on purpose,
-/// e.g. where CPython would take minutes.
+/// noted and skipped: some workloads are left out for a runtime on purpose.
 pub fn preflight(workloads: &[Workload], runtimes: &[Runtime]) -> Result<(), String> {
     let mut failures = Vec::new();
     for w in workloads {
