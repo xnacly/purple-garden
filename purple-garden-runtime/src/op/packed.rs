@@ -223,10 +223,12 @@ impl super::Op {
             self.tag() as u32
                 | match self {
                     // none
-                    crate::op::Op::Ret | crate::op::Op::Halt | crate::op::Op::Nop => 0,
+                    crate::op::Op::Halt | crate::op::Op::Nop => 0,
 
                     // r
-                    crate::op::Op::Push { src: a } | crate::op::Op::Pop { dst: a } => {
+                    crate::op::Op::Push { src: a }
+                    | crate::op::Op::Pop { dst: a }
+                    | crate::op::Op::Ret { src: a } => {
                         encode_packed!(r, a)
                     }
 
@@ -551,7 +553,7 @@ mod tests {
     fn encodes_every_class() {
         #[rustfmt::skip]
         let cases = [
-            (Op::Ret, Tag::Ret, 0),
+            (Op::Ret { src: 31 }, Tag::Ret, 0x0000_07C0),
             (Op::Push { src: 31 }, Tag::Push, 0x0000_07C0),
             (Op::Mov { dst: 1, src: 2 }, Tag::Mov, 0x0000_1040),
             (Op::IAdd { dst: 1, lhs: 2, rhs: 3 }, Tag::IAdd, 0x0003_1040),

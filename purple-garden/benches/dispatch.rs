@@ -245,7 +245,7 @@ pub fn bench_call_dispatch(c: &mut Criterion) {
                 for _ in 0..OP_CODE_SIZE {
                     bc.push(Op::Call { func: leaf });
                 }
-                bc.push(Op::Ret);
+                bc.push(Op::Ret { src: 0 });
                 bc.push(Op::Halt);
                 let mut vm = Vm::new(CONFIG);
                 vm.bytecode = bc.into_iter().map(Op::encode).collect();

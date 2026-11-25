@@ -26,6 +26,10 @@ pub struct CallFrame {
     /// unbalanced across a call.
     #[cfg(debug_assertions)]
     pub spilled_depth: usize,
+    /// Base of register file, when a function is called in the virtual machine, this base is equiv
+    /// to r0, meaning the arguments to the call start at the base, this replaces the previously
+    /// used stack, meaning values which would be clobbered are now simply before self's base.
+    pub base: u32,
 }
 
 /// Source-location side table for a compiled program.
@@ -170,6 +174,7 @@ impl<'vm> Vm<'vm> {
             return_to: usize::MAX,
             #[cfg(debug_assertions)]
             spilled_depth: 0,
+            base: 0,
         }
     }
 
@@ -298,7 +303,11 @@ mod ops {
     #[test]
     fn prepare_run_reinstalls_root_frame_after_return() {
         let mut vm = Vm::new(VmConfig::default());
-        vm.bytecode = packed([Op::LoadI { dst: 0, value: 42 }, Op::Ret, Op::Halt]);
+        vm.bytecode = packed([
+            Op::LoadI { dst: 0, value: 42 },
+            Op::Ret { src: 0 },
+            Op::Halt,
+        ]);
 
         vm.reset();
         vm.pc = 0;
@@ -324,7 +333,7 @@ mod ops {
                 lhs: 0,
                 rhs: 1,
             },
-            Op::Ret,
+            Op::Ret { src: 0 },
             Op::Halt,
         ]);
 
@@ -888,7 +897,7 @@ mod ops {
             Op::Jmp { target: 6 }, // skip over callee
             Op::Nop,               // padding so pc=4 is the callee
             Op::LoadI { dst: 1, value: 7 },
-            Op::Ret,
+            Op::Ret { src: 0 },
             Op::Nop, // jump landing
         ]);
         assert_eq!(vm.r[1].as_int(), 7);

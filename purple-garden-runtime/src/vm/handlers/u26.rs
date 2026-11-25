@@ -39,6 +39,7 @@ pub(super) unsafe fn call<const B: bool>(
             return_to: pc,
             #[cfg(debug_assertions)]
             spilled_depth: (*vm.spilled).depth(),
+            base: 0,
         };
         vm.frame_depth = depth + 1;
 
